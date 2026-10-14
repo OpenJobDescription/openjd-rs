@@ -8,6 +8,30 @@ The canonical specification lives in [openjd-specifications](https://github.com/
 
 See [README.md](README.md) for user-facing documentation and [DEVELOPMENT.md](DEVELOPMENT.md) for general developer setup.
 
+## Required: Every Change Uses the `implement-change` Skill
+
+**Every change to this repository MUST be made by following the
+[`implement-change`](skills/implement-change/SKILL.md) skill.** This covers
+code, specs, tests, docs, CI, and dependency bumps, whatever their size.
+
+The skill is an implement → gate → independent audit → fix loop. The audit
+judges the change against [`docs/dev/quality-criteria.md`](docs/dev/quality-criteria.md),
+which is the single source of truth for this repo's quality bar. The
+[`eval-crate`](skills/eval-crate/SKILL.md) skill applies the same criteria to
+whole crates. Each stage of the loop is committed on a topic branch as the
+skill describes. A change is not done, and must not be pushed or proposed for
+merge, until an audit round comes back clean (as the skill defines it) or the
+user accepts the outstanding findings.
+
+The only exemptions are committing a verbatim `eval-crate` baseline report and
+bot-generated PRs (release-plz, dependabot), as the skill describes.
+
+`docs/dev/quality-criteria.md` is authoritative. Add or change a criterion there,
+not in a skill, in this file, or in a workflow prompt. Other documents, such as
+"Coding Style" below, may summarize criteria for convenience. Where a summary
+and `quality-criteria.md` disagree, `quality-criteria.md` wins and the summary
+should be fixed.
+
 ## Quick Reference
 
 ```bash
@@ -148,7 +172,7 @@ Many tasks originate from quality evaluation reports in `reports/`. Each report 
 **Workflow for report-driven changes:**
 
 1. Read the relevant report in `reports/` to understand the recommendation.
-2. Implement the change.
+2. Implement the change by following the `implement-change` skill.
 3. In the **same commit**, update the report to mark the item as resolved by striking it through with `~~` and appending `**Resolved.**` or `**Resolved** — <brief note>.`
 
 Example — before:
@@ -233,6 +257,7 @@ PRs run these checks (all must pass):
 | Job | What it does |
 |-----|-------------|
 | **Rustfmt** | `cargo fmt --all -- --check` (nightly) — includes the helper sub-crate |
+| **cargo-deny** | Licenses, bans, sources, and advisories — workspace and helper sub-crate |
 | **Clippy** | `cargo clippy` on Linux, Windows, macOS — includes the helper binary |
 | **Build** | Release build on all three platforms |
 | **Test** | `cargo test --workspace` + helper tests on all three platforms |
@@ -249,8 +274,10 @@ If a dependency update bumps `wasm-bindgen`, also bump the matching
 `.github/workflows/ci.yml` — the CLI and the linked Wasm schema version must
 match exactly.
 
-Before recommending the user can push, at minimum run:
+Before recommending the user can push, the `implement-change` loop must be
+complete. Its gate step includes at minimum:
 ```bash
+cargo +nightly fmt --all -- --check
 cargo clippy --all-features --all-targets --workspace -- -D warnings
 cargo test --workspace
 ```
