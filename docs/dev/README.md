@@ -10,6 +10,9 @@ process) see [AGENTS.md](../../AGENTS.md).
 
 ## Topics
 
+- [Quality criteria](quality-criteria.md) — the single source of truth for the
+  repo's quality bar, evidence rules, finding labels, and severity, shared by
+  the `eval-crate` and `implement-change` skills.
 - [Regenerating quality reports](regenerating-quality-reports.md) — when and
   how to produce a fresh `reports/<crate>-quality-evaluation-report.md` with
   the `eval-crate` skill, and how to land it as a baseline PR.
