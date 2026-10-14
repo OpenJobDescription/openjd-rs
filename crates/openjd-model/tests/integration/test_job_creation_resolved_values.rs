@@ -672,6 +672,57 @@ fn listcomp_with_task_param_filter_over_bound_param_passes_create_job() {
         .expect("an unresolved comprehension filter must not fail job creation");
 }
 
+/// A list literal or comprehension mixing a concrete `Param.*`-derived
+/// element with an unresolved `Task.*` one joins element types exactly as
+/// the concrete list does: an empty concrete list (`list[nulltype]`, here
+/// a comprehension over `range(Param.N)` that filters to nothing) yields
+/// to the unresolved `list[int]` sibling. Regression test
+/// (resolved-value-limits item 24): `openjd check` passed this template
+/// while `create_job` rejected both args with "List literal contains
+/// incompatible types: list[nulltype], list[int]" (and `list[int],
+/// list[nulltype]`), though every session evaluates them cleanly.
+#[test]
+fn list_join_empty_concrete_list_beside_task_param_list_passes_create_job() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "ListJoin",
+        "parameterDefinitions": [
+            {"name": "X", "type": "STRING"},
+            {"name": "N", "type": "INT"}
+        ],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "Frame", "type": "INT", "range": "1-2"}
+                ]
+            },
+            "script": {"actions": {"onRun": {
+                "command": "echo",
+                "args": [
+                    "{{ repr_json([[x for x in range(Param.N) if x > 100], [Task.Param.Frame]]) }}",
+                    "{{ repr_json([[] if x > 1 else [Task.Param.Frame] for x in range(Param.N)]) }}"
+                ]
+            }}}
+        }]
+    }"#;
+    let job = create_default(template, &[("X", "x"), ("N", "3")])
+        .expect("a concrete empty list beside an unresolved list must not fail job creation");
+    assert_eq!(job.steps.len(), 1);
+    // The task-scope args are carried forward unresolved, for the worker
+    // to evaluate per task.
+    let args = job.steps[0].script.actions.on_run.args.as_ref().unwrap();
+    let raws: Vec<&str> = args.iter().map(|a| a.raw()).collect();
+    assert_eq!(
+        raws,
+        [
+            "{{ repr_json([[x for x in range(Param.N) if x > 100], [Task.Param.Frame]]) }}",
+            "{{ repr_json([[] if x > 1 else [Task.Param.Frame] for x in range(Param.N)]) }}",
+        ]
+    );
+}
+
 // ══════════════════════════════════════════════════════════════
 // Step-script and environment `let` bindings share one check path
 // ══════════════════════════════════════════════════════════════

@@ -241,3 +241,46 @@ fn make_list_incompatible_types_error() {
     let result = ExprValue::make_list(vec![ExprValue::Null, ExprValue::Int(1)], ExprType::NULLTYPE);
     assert!(result.is_err(), "incompatible types must error");
 }
+
+// === make_list uses the shared list-element join ===
+
+#[test]
+fn make_list_rejects_list_int_beside_list_string() {
+    // Previously built a ListList typed by its first element.
+    let ints = ExprValue::make_list(vec![ExprValue::Int(1)], ExprType::INT).unwrap();
+    let strs = ExprValue::make_list(vec![ExprValue::String("a".into())], ExprType::STRING).unwrap();
+    let err = ExprValue::make_list(vec![ints, strs], ExprType::NULLTYPE)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "make_list expected list[int] element, got list[string]"
+    );
+}
+
+#[test]
+fn make_list_rejects_int_float_string_without_panic() {
+    use openjd_expr::value::Float64;
+    let err = ExprValue::make_list(
+        vec![
+            ExprValue::Int(1),
+            ExprValue::Float(Float64::new(2.0).unwrap()),
+            ExprValue::String("a".into()),
+        ],
+        ExprType::NULLTYPE,
+    )
+    .unwrap_err()
+    .to_string();
+    assert_eq!(err, "make_list expected float element, got string");
+}
+
+#[test]
+fn make_list_list_of_lists_carries_joined_element_type() {
+    // An untyped empty list first, an empty `list[int]` second: no
+    // non-empty sibling to convert the empty list to, but the result is
+    // typed by the join (`list[int]`), not by the first element.
+    let empty = ExprValue::make_list(vec![], ExprType::NULLTYPE).unwrap();
+    let empty_ints = ExprValue::ListInt(vec![]);
+    let list = ExprValue::make_list(vec![empty, empty_ints], ExprType::NULLTYPE).unwrap();
+    assert_eq!(list.expr_type().to_string(), "list[list[int]]");
+}

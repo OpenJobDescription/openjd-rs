@@ -451,11 +451,14 @@ impl ExprValue {
             v.len() * std::mem::size_of::<String>() + v.iter().map(|s| s.len()).sum::<usize>();
         Self::ListPath(v, fmt, heap)
     }
-    fn make_list_list(v: Vec<ExprValue>, elem_hint: ExprType) -> Self {
+    /// Build a `ListList` whose element type is `elem_type` — for a
+    /// non-empty list, the join of the element types computed by
+    /// [`make_list`](Self::make_list) (`[[], [1]]` holds `list[int]`
+    /// elements whichever comes first).
+    fn make_list_list(v: Vec<ExprValue>, elem_type: ExprType) -> Self {
         // Vec buffer holds ExprValues inline; only count their additional heap allocations
         let heap = v.len() * std::mem::size_of::<ExprValue>()
             + v.iter().map(|e| e.heap_size()).sum::<usize>();
-        let elem_type = v.first().map(|e| e.expr_type()).unwrap_or(elem_hint);
         Self::ListList(v, elem_type, heap)
     }
 
@@ -509,6 +512,20 @@ impl ExprValue {
     /// Uses `hint_type` for empty lists to determine the element type.
     /// Returns an error if any element is a `ListList`, which would create 3+ nesting levels.
     ///
+    /// The element types must be mutually compatible under the
+    /// list-literal join (RFC 0005 §"List Literal Type Inference"): identical
+    /// types, the int/float and path/string pairs, and lists whose element
+    /// types join the same way, with `list[nulltype]` (the empty list)
+    /// compatible with every list type. An incompatible element — including
+    /// a list beside a list of a different, non-promotable element type,
+    /// such as `list[int]` beside `list[string]` — is an error
+    /// (`make_list expected list[int] element, got list[string]`). A
+    /// list-of-lists result carries the joined element type, so `[[], [1]]`
+    /// is `list[list[int]]`.
+    ///
+    /// A `Null` element is rejected (`Cannot create list from null
+    /// elements`): a list cannot hold `null`.
+    ///
     /// An `Unresolved` element is rejected with an error: `make_list`
     /// constructs concrete lists, so no constructed value nests an
     /// `Unresolved` inside a list and
@@ -549,6 +566,27 @@ impl ExprValue {
                 "make_list expected concrete elements, got unresolved",
             ));
         }
+        // A list cannot hold `null` (the join below treats a `nulltype`
+        // element as contributing nothing); report it as such.
+        if elements.iter().any(|e| matches!(e, Self::Null)) {
+            return Err(crate::error::ExpressionError::type_error(
+                "Cannot create list from null elements",
+            ));
+        }
+        // Element homogeneity, by the same join the evaluator's
+        // validation-time hoisting uses (`types::join_list_element`), so a
+        // combination accepted here is accepted there and vice versa. This
+        // also guards the promotion branches below: they assume every
+        // element is one side of the promoted pair.
+        let joined =
+            match crate::types::join_list_element_types(elements.iter().map(Self::expr_type)) {
+                Ok(joined) => joined,
+                Err((expected, got)) => {
+                    return Err(crate::error::ExpressionError::type_error(format!(
+                        "make_list expected {expected} element, got {got}"
+                    )))
+                }
+            };
         // Convert empty ListList([], NULLTYPE) elements to match typed list siblings.
         // e.g. in [[], [1]], the empty [] should become ListInt([]) not ListList([], NULLTYPE).
         let has_empty_listlist = elements.iter().any(
@@ -603,6 +641,8 @@ impl ExprValue {
                 _ => Self::ListList(Vec::new(), ExprType::NULLTYPE, 0),
             });
         }
+        // Non-empty, so the fold above produced a type.
+        let joined = joined.unwrap_or(ExprType::NULLTYPE);
         let has_int = elements.iter().any(|e| matches!(e, Self::Int(_)));
         let has_float = elements.iter().any(|e| matches!(e, Self::Float(_)));
         if has_int && has_float {
@@ -637,7 +677,7 @@ impl ExprValue {
                     );
                 }
             }
-            return Ok(Self::make_list_list(elements, ExprType::NULLTYPE));
+            return Ok(Self::make_list_list(elements, joined));
         }
         // Nested list path/string promotion: list[path] + list[string] → list[string]
         let has_list_path = elements
@@ -652,7 +692,7 @@ impl ExprValue {
                     *e = Self::make_list_string(std::mem::take(paths));
                 }
             }
-            return Ok(Self::make_list_list(elements, ExprType::NULLTYPE));
+            return Ok(Self::make_list_list(elements, joined));
         }
         // Path/string promotion: mix of path and string → string
         let has_path = elements.iter().any(|e| matches!(e, Self::Path { .. }));
@@ -734,7 +774,7 @@ impl ExprValue {
                     fmt,
                 )
             }
-            _ if elements[0].is_list() => Self::make_list_list(elements, ExprType::NULLTYPE),
+            _ if elements[0].is_list() => Self::make_list_list(elements, joined),
             Self::RangeExpr(_) => Self::make_list_list(elements, ExprType::RANGE_EXPR),
             _ => {
                 return Err(crate::error::ExpressionError::type_error(format!(

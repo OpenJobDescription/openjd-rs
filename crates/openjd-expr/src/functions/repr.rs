@@ -673,7 +673,11 @@ mod tests {
         )
         .unwrap();
         let value = ExprValue::make_list(
-            vec![inner, ExprValue::String("!%^\"".into())],
+            vec![
+                inner,
+                ExprValue::make_list(vec![ExprValue::String("!%^\"".into())], ExprType::STRING)
+                    .unwrap(),
+            ],
             ExprType::list(ExprType::STRING),
         )
         .unwrap();

@@ -115,12 +115,78 @@ T)` accepts `1 in [1.0, 2.0]` and `path(['/a']) in ['/a']` while refusing
 `'a' in [1, 2]` and `null in [1, 2]`. No other built-in signature currently
 repeats a variable across parameters.
 
+### List element join
+
+The element type of a list built from several values — a list literal, a
+list comprehension's results, any `make_list` call — is the fold of one
+pairwise join, `types::join_list_element` (crate-internal), over the
+elements' types. It implements RFC 0005 §"List Literal Type Inference" at the
+type level, and it is shared by every stage: `ExprValue::make_list`,
+`eval_list`'s homogeneity check, and the hoisting of a list literal or
+comprehension with an `Unresolved` element to `unresolved[list[T]]`. Sharing
+it is what keeps template validation (every symbol unresolved), job creation
+(`Param.*` concrete, `Task.*`/`Session.*` unresolved) and run time (everything
+concrete) accepting the same combinations.
+
+| Element types | Join |
+|---|---|
+| identical types | that type |
+| `int` and `float` | `float` |
+| `path` and `string` | `string` |
+| `list[A]` and `list[B]` | `list[join(A, B)]`, where inside a list a `nulltype` element (the empty list `[]`) yields to the other |
+| a union and a type | the union of the joins of the members that join; a conflict if none does |
+| `unresolved[T]` and a type | as `T` |
+| `any` and a type | the other type |
+| anything else | conflict |
+
+Before joining, each element type — including a lone element's — is reduced
+to what it contributes to a built list (`types::list_element_contribution`,
+crate-internal): `unresolved[T]` contributes `T`; a top-level `nulltype`
+contributes nothing (a `null` element always fails), so a union drops its
+`nulltype` member (`int?` contributes `int`) and a bare `nulltype` element is
+a conflict. A union's `list[nulltype]` member is kept for the join — the
+empty list still joins with any list, so `[([] if H else [1]), ['a']]`
+(which builds `[[], ['a']]` when `H` holds) joins to `list[string]` even
+though `list[int]` and `list[string]` conflict. The **joined result** is then
+simplified (`types::simplify_joined_list_element`, crate-internal): a union
+holding a typed list drops its `list[nulltype]` member
+(`list[int] | list[nulltype]` becomes `list[int]`, as `[[], [1]]` is
+`list[list[int]]`). So `[Task.Param.I if H else None]` is
+`unresolved[list[int]]`, and `int?` against `string?` is the `int` / `string`
+conflict — every value of that literal fails at run time — rather than a
+member-wise join to `nulltype`. Concrete `make_list` reports a `null` element
+as "Cannot create list from null elements" before the join. The unresolved
+hoisting (`unresolved_list_from_elements`) does the same for an element that is
+null on every run — a concrete `null`, or an unresolved element that contributes
+nothing (`unresolved[nulltype]`, e.g. `None if H else None`) — reporting the
+construct's run-time error: "null is not allowed in list literals" for a list
+literal, "Cannot create list from null elements" for a comprehension.
+
+Conflicts include `bool` against `int`, a scalar against a list,
+`range_expr` against `list[int]` (unlike `unify_binding`), `list[int]` against
+`list[string]`, a top-level `nulltype` (a list literal cannot hold `null`), and
+an unbound type variable against anything but itself. The fold is pairwise, so
+`[1, 2.0, 'a', path('b')]` is a conflict: the int/float and path/string pairs
+do not make all four types compatible.
+
+A union element joins through its compatible members only. A value of an
+incompatible member fails when the list is built, so it never describes a list
+that exists; e.g. `[U, 1]` with `U: unresolved[int | string]` is
+`unresolved[list[int]]`. When the members that join give different results the
+element type stays a union — `[x if x > 2 else (Task.Param.I if
+Session.HasPathMappingRules else Param.F) for x in Param.L]` at job creation is
+`unresolved[list[float | int]]`, since the values decide whether the run-time
+list is `list[int]` or `list[float]`.
+
 Crate-internal helpers (`pub(crate)`, not part of the public API):
 
 | Method | Purpose |
 |--------|---------|
 | `denotes_runtime_values() -> bool` | Does this type denote a set of runtime values? Gates satisfaction and coercion targets |
 | `erase_type_vars() -> ExprType` | Replace every type variable with `any` — the wildcard reading of unbound variables in coercion sources |
+| `types::list_element_contribution(&ExprType) -> Option<ExprType>` | The type an element contributes to a built list: unwraps `unresolved[T]`; drops a top-level `nulltype` (union member or bare; `None` if nothing is left); keeps `list[nulltype]` members |
+| `types::join_list_element(&ExprType, &ExprType) -> Option<ExprType>` | The list-element join above; `None` on a conflict |
+| `types::simplify_joined_list_element(ExprType) -> ExprType` | On a joined element type, drops `list[nulltype]` from a union that also holds a typed list |
 
 ## Union Normalization
 

@@ -455,6 +455,36 @@ Evaluates list literals. Validates max 2 nesting levels. Coerces elements when m
 types are present (int→float, path→string). Empty lists use the target type context
 to determine element type.
 
+Without a `list[T]` target, the element types must join under the shared
+list-element join (see [type-system.md § List element
+join](type-system.md#list-element-join)); otherwise the literal fails with
+"List literal contains incompatible types: …", listing each distinct element
+type once in first-seen order (`int and string`, `int, float, string, and
+path`). The same join decides the concrete list's element type in
+`make_list` and the hoisted element type below, so the three evaluation
+stages — template validation (all symbols unresolved), job creation
+(`Param.*` concrete, `Task.*`/`Session.*` unresolved), and run time (all
+concrete) — accept and reject the same combinations.
+
+A literal with any `Unresolved` element hoists to a top-level
+`unresolved(list[T])` (`unresolved_list_from_elements`), never a list
+nesting an `Unresolved`. `T` is the join of the element types, an unresolved
+element contributing its constraint: a concrete empty list `list[nulltype]`
+yields to an unresolved `list[int]` sibling (`[[], [Task.Param.I]]` →
+`unresolved[list[list[int]]]`), nested lists promote (`[[Param.N],
+[Task.Param.F]]` → `unresolved[list[list[float]]]`), and a union element
+joins through its compatible members (`[Task.Param.I ** 2, Param.N]` →
+`unresolved[list[float | int]]`; `[([] if H else [1]), [Task.Param.S]]` →
+`unresolved[list[list[string]]]` through the union's empty-list member). An optional element contributes its
+non-null member (`[Task.Param.I if H else None]` → `unresolved[list[int]]`),
+so `[I if H else None, S if H else None]` fails as the `int and string`
+conflict and its nested form as `list[int] and list[string]` — every value of
+either fails at run time. Incompatible elements are the same error as for a
+concrete literal, naming each element by the type it contributes. A
+concrete `null` element (only a comprehension body can produce one — a
+literal rejects `None` first) fails as "Cannot create list from null
+elements", the message `make_list` gives the same list at run time.
+
 Memory accounting: each element is tracked as it is evaluated, then released as the
 elements are consumed into the list, which is charged as one value (or as a
 type-only `Unresolved` placeholder when any element is unresolved). A literal's
@@ -482,6 +512,27 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   a hard error here would reject templates that both validate and run.
   A filter whose *type* can never be a boolean is still an error on
   both paths.
+- Over a concrete iterable, the results build through `make_list`, which
+  applies the shared list-element join; an incompatible pair fails with
+  "make_list expected `T` element, got `U`" (`T` the join of the elements
+  before it). When any result is `Unresolved` (the body references an
+  unresolved symbol on some iterations), the comprehension hoists exactly
+  as a list literal does, with the joined element type:
+  `[[] if x > 2 else [Task.Param.I] for x in Param.L]` at job creation is
+  `unresolved[list[list[int]]]`, and `[[x] if x > 2 else [Task.Param.F] for
+  x in Param.L]` is `unresolved[list[list[float]]]` — the types run time
+  builds. `[[x] if x > 2 else [Task.Param.S] for x in Param.L]` fails at
+  job creation as it does at run time (`list[int]` beside `list[string]`),
+  though template validation, typing the body once as a union, accepts it.
+- Over an unresolved iterable (or an unresolved filter), the result is
+  `unresolved(list[T])` with `T` the body type's list-element contribution
+  (see [type-system.md § List element join](type-system.md#list-element-join)):
+  a `null` member is dropped (`int?` gives `list[int]`) and the result is
+  simplified as a join result, so `list[nulltype]` yields to a typed list
+  member and `[[] if x > 2 else [Task.Param.S] for x
+  in Param.L]` is `unresolved[list[list[string]]]` at template validation as
+  at job creation. A body that can only be `null` keeps its type (the
+  comprehension still succeeds over an empty iterable).
 - Operation count: +1 per iteration
 - Each iteration's child evaluator hands its *spend* — memory
   high-water mark and operation count — back to the parent on **every**
