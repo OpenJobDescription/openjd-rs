@@ -195,16 +195,25 @@ round do not need another audit.
 
 If the round was not clean, return to step 5 with a new auditor.
 
-An `ENVIRONMENT FAILURE` verdict is never clean, and it does not count as one
-of the three rounds. Stop the loop and report the auditor's diagnosis to the
+An `ENVIRONMENT FAILURE` verdict is never clean, and it does not count toward
+the round limits below. Stop the loop and report the auditor's diagnosis to the
 user: what failed and what the environment needs, such as an installed Rust
 toolchain or a tool allowlist that permits `cargo` and file writes. Changing
 the environment is the user's decision. Resume at step 5 once it is fixed.
 
-Stop after **three** audit rounds even if none was clean. Report the
-outstanding findings to the user instead of continuing. A change that does
-not converge in three rounds usually has a scoping or design problem, and
-more rounds will not solve that.
+The round limits depend on the most severe `CONFIRMED` finding that the
+latest round's audit returned:
+
+| Latest round found | Action |
+|--------------------|--------|
+| Nothing high or medium | The round was clean. Stop. |
+| Medium, but no high | Fix, and audit again, up to round **5**. |
+| High | Fix, and audit again, up to round **10**. |
+
+So a round 6 happens only if round 5 found a high. When a limit stops the
+loop, fix what you can, then report the outstanding findings to the user
+instead of continuing. A change that does not converge within these limits
+usually has a scoping or design problem, and more rounds will not solve it.
 
 ### 8. Report
 
