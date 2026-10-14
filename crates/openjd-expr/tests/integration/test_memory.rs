@@ -890,8 +890,8 @@ fn memory_limit_exceeded_after_unresolved_boolop_operand_propagates() {
         })
         .expect_err("the second operand's budget exceedance must propagate");
     // 10000136 = the 10 MB string plus per-value overhead. The
-    // unresolved first operand is released once the result is known to
-    // be a fresh `Unresolved(BOOL)`, so it is not in the figure.
+    // unresolved first operand is released (the result carries only
+    // types), so it is not in the figure.
     assert!(
         err.message()
             .contains("Expression memory usage (10000136 bytes) exceeded limit (1048576 bytes)"),
