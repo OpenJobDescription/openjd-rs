@@ -4,6 +4,160 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.12.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.11.0...openjd-model-v0.12.0) - 2026-10-07
+
+### Bug fixes
+
+- [**breaking**] Update ruff parser to 0.16.10, pin exact version, raise MSRV to 1.97 ([#429](https://github.com/OpenJobDescription/openjd-rs/pull/429)) ([#429](https://github.com/OpenJobDescription/openjd-rs/pull/429))
+
+- Treat single-letter URI schemes as filesystem paths ([#424](https://github.com/OpenJobDescription/openjd-rs/pull/424)) ([#424](https://github.com/OpenJobDescription/openjd-rs/pull/424))
+
+
+### Features
+
+- [**breaking**] Report all job-creation errors at once, with paths ([#428](https://github.com/OpenJobDescription/openjd-rs/pull/428)) ([#428](https://github.com/OpenJobDescription/openjd-rs/pull/428))
+
+
+## [0.11.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.10.1...openjd-model-v0.11.0) - 2026-10-02
+
+### Bug fixes
+
+- [**breaking**] Apply PATH default rules to LIST[PATH] elements ([#421](https://github.com/OpenJobDescription/openjd-rs/pull/421))
+
+
+### Features
+
+- [**breaking**] Validate SimpleAction steps with authored error paths ([#419](https://github.com/OpenJobDescription/openjd-rs/pull/419))
+
+
+## [0.10.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.10.0...openjd-model-v0.10.1) - 2026-09-30
+
+### Bug fixes
+
+- Close the resolved-value follow-ups from the #404 and #407 reviews ([#410](https://github.com/OpenJobDescription/openjd-rs/pull/410))
+
+
+## [0.10.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.9.0...openjd-model-v0.10.0) - 2026-09-28
+
+### Features
+
+- [**breaking**] Allow format strings in host requirement capability names ([#409](https://github.com/OpenJobDescription/openjd-rs/pull/409))
+
+- [**breaking**] Require create_job's context to cover the template's extensions ([#407](https://github.com/OpenJobDescription/openjd-rs/pull/407))
+
+
+## [0.9.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.8.0...openjd-model-v0.9.0) - 2026-09-18
+
+### Features
+
+- Enforce resolved-value checks on carried-forward fields in create_job ([#404](https://github.com/OpenJobDescription/openjd-rs/pull/404))
+
+- [**breaking**] Opt-in resolved-value caps and evaluation-budget plumbing ([#399](https://github.com/OpenJobDescription/openjd-rs/pull/399))
+
+
+### Miscellaneous
+
+- [**breaking**] Raise MSRV to 1.96.0; dep sweep (ruff 0.16, rusqlite 0.40) ([#403](https://github.com/OpenJobDescription/openjd-rs/pull/403))
+
+
+## [0.8.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.7.1...openjd-model-v0.8.0) - 2026-09-15
+
+### Bug fixes
+
+- Render NONCONTIGUOUS chunks identically to the Python reference  ([#398](https://github.com/OpenJobDescription/openjd-rs/pull/398))
+
+- [**breaking**] Type-check a membership item against the list's element type ([#396](https://github.com/OpenJobDescription/openjd-rs/pull/396))
+
+- Implement PR #383 review follow-ups for resolved-value checks ([#397](https://github.com/OpenJobDescription/openjd-rs/pull/397))
+
+- Accept an empty LIST[PATH] that preprocess itself produced ([#384](https://github.com/OpenJobDescription/openjd-rs/pull/384))
+
+- Reject embedded filenames that aren't a safe single path component ([#359](https://github.com/OpenJobDescription/openjd-rs/pull/359))
+
+
+### Features
+
+- [**breaking**] Enforce resolved-value constraints at template validation ([#383](https://github.com/OpenJobDescription/openjd-rs/pull/383))
+
+
+## [0.7.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.7.0...openjd-model-v0.7.1) - 2026-09-11
+
+### Bug fixes
+
+- Scope stepEnvironment name uniqueness to its step ([#381](https://github.com/OpenJobDescription/openjd-rs/pull/381))
+
+
+## [0.7.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.6.1...openjd-model-v0.7.0) - 2026-09-10
+
+### Features
+
+- [**breaking**] Return StaticResolution from FormatString::validate_expressions ([#373](https://github.com/OpenJobDescription/openjd-rs/pull/373))
+
+
+## [0.6.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.6.0...openjd-model-v0.6.1) - 2026-09-09
+
+### Bug fixes
+
+- Gate parameter type-name case on the EXPR extension ([#364](https://github.com/OpenJobDescription/openjd-rs/pull/364))
+
+- Reject NUL bytes in environment variable values ([#360](https://github.com/OpenJobDescription/openjd-rs/pull/360))
+
+
+## [0.6.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.5.4...openjd-model-v0.6.0) - 2026-09-03
+
+### Bug fixes
+
+- Enforce the 512-character cap on a let binding identifier ([#358](https://github.com/OpenJobDescription/openjd-rs/pull/358))
+
+- [**breaking**] Keep the decimal places of a floatstring range element ([#354](https://github.com/OpenJobDescription/openjd-rs/pull/354))
+
+- Close two chunking parity gaps with the Python reference ([#355](https://github.com/OpenJobDescription/openjd-rs/pull/355))
+
+
+## [0.5.4](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.5.3...openjd-model-v0.5.4) - 2026-09-01
+
+### Bug fixes
+
+- Resume deferred validation after format-string resolution ([#349](https://github.com/OpenJobDescription/openjd-rs/pull/349))
+
+
+## [0.5.3](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.5.2...openjd-model-v0.5.3) - 2026-08-25
+
+## [0.5.2](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.5.1...openjd-model-v0.5.2) - 2026-08-21
+
+### Bug fixes
+
+- Coerce list parameter elements to their declared element type ([#335](https://github.com/OpenJobDescription/openjd-rs/pull/335))
+
+- Accept the `let` wire key when deserializing job-side step scripts ([#334](https://github.com/OpenJobDescription/openjd-rs/pull/334))
+
+- Coerce parameter values to their declared types when seeding the symbol table ([#330](https://github.com/OpenJobDescription/openjd-rs/pull/330))
+
+
+## [0.5.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.5.0...openjd-model-v0.5.1) - 2026-08-14
+
+### Bug fixes
+
+- Do not cap <IntRangeExpr> expansion at the list-form limit
+
+
+## [0.5.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.4.0...openjd-model-v0.5.0) - 2026-08-13
+
+### Bug fixes
+
+- Accept Task.File property access in format strings ([#292](https://github.com/OpenJobDescription/openjd-rs/pull/292))
+
+
+### Features
+
+- [**breaking**] Bounded range values, budgeted range equality, exact int/float comparison  ([#276](https://github.com/OpenJobDescription/openjd-rs/pull/276))
+
+
+### Miscellaneous
+
+- Update serde-saphyr to 1.0.1 ([#304](https://github.com/OpenJobDescription/openjd-rs/pull/304))
+
+
 ## [0.4.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.3.1...openjd-model-v0.4.0) - 2026-07-22
 
 ### Bug fixes

@@ -1122,3 +1122,149 @@ fn script_let_allows_apply_path_mapping() {
     }"#,
     );
 }
+
+// === Identifier length (§3.6.1: <UserIdentifier> max 512 characters) ===
+//
+// Effective extensions are the intersection of the template's `extensions` list
+// with the caller allowlist, so the FB1 cases need it declared in the body: the
+// other helpers here emit `["EXPR"]` only.
+
+fn job_with_step_let_fb1(let_bindings: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "steps": [{{
+            "name": "S",
+            "let": [{let_bindings}],
+            "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}
+        }}]
+    }}"#
+    )
+}
+
+// FB1 off: the cap is 512, not the 64 that `max_identifier_len` would give.
+#[test]
+fn test_let_name_512_chars_succeeds() {
+    let name = "a".repeat(512);
+    decode_ok(&job_with_step_let(&format!(r#""{name} = 1""#)));
+}
+
+#[test]
+fn test_let_name_513_chars_fails() {
+    let name = "a".repeat(513);
+    check_err(
+        &job_with_step_let(&format!(r#""{name} = 1""#)),
+        &[&format!(
+            "steps[0] -> let[0]:\n\tname '{name}' exceeds 512 characters."
+        )],
+    );
+}
+
+// FB1 on: still 512, so the extension does not raise this cap either.
+#[test]
+fn test_let_name_512_chars_succeeds_with_fb1() {
+    let name = "a".repeat(512);
+    decode_ok(&job_with_step_let_fb1(&format!(r#""{name} = 1""#)));
+}
+
+#[test]
+fn test_let_name_513_chars_fails_with_fb1() {
+    let name = "a".repeat(513);
+    check_err(
+        &job_with_step_let_fb1(&format!(r#""{name} = 1""#)),
+        &[&format!(
+            "steps[0] -> let[0]:\n\tname '{name}' exceeds 512 characters."
+        )],
+    );
+}
+
+#[test]
+fn test_let_name_512_chars_succeeds_script() {
+    let name = "a".repeat(512);
+    decode_ok(&job_with_script_let(&format!(r#""{name} = 1""#)));
+}
+
+#[test]
+fn test_let_name_513_chars_fails_script() {
+    let name = "a".repeat(513);
+    check_err(
+        &job_with_script_let(&format!(r#""{name} = 1""#)),
+        &[&format!(
+            "steps[0] -> script -> let[0]:\n\tname '{name}' exceeds 512 characters."
+        )],
+    );
+}
+
+// Characters, not bytes: 200 multi-byte characters are 600 bytes but well under
+// the cap, so only the charset error should fire.
+#[test]
+fn test_let_name_multibyte_under_cap_reports_only_charset() {
+    let name = "の".repeat(200);
+    let v = yaml_val(&job_with_step_let(&format!(r#""{name} = 1""#)));
+    let err = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default())
+        .expect_err("Expected error");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("contains invalid characters."),
+        "expected the charset error, got:\n{msg}"
+    );
+    assert!(
+        !msg.contains("exceeds 512 characters."),
+        "600 bytes is only 200 characters; the length error must not fire:\n{msg}"
+    );
+}
+
+#[test]
+fn failed_let_binding_does_not_cascade_into_membership() {
+    // A failed binding is rebound as unresolved(ANY) so later bindings do not
+    // cascade. Membership against it must therefore report only the first
+    // error, not a second `Cannot use 'in' operator with list[int] and any`.
+    let err = decode_job_template(
+        yaml_val(&job_with_step_let(
+            r#""Foo = 1 + 'x'", "Bar = Foo in [1, 2]""#,
+        )),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("the first binding is invalid");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Cannot use '+' operator with int and string"),
+        "{msg}"
+    );
+    assert!(
+        !msg.contains("Cannot use 'in' operator"),
+        "membership against a failed binding cascaded:\n{msg}"
+    );
+}
+
+/// Range-scope analogue of the job-creation path-format test
+/// (`path_valued_let_binding_in_arg_passes_job_creation_checks`):
+/// step-level `let` bindings are evaluated into the range symbol table
+/// under `PathFormat::Posix`, and the range format strings that read
+/// them must evaluate under the same format. Template validation used
+/// to evaluate them under the host format, so a path-valued binding
+/// referenced from a `parameterSpace` range drew "Path format
+/// mismatch" on Windows (the formats coincide on Linux/macOS, where
+/// this test is a no-op — the Windows CI lane is what exercises it).
+#[test]
+fn path_valued_step_let_in_range_passes_validation() {
+    let s = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "let": ["out = path('/tmp/render/output.exr')"],
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "F", "type": "STRING", "range": ["{{ out.name }}", "b"]}
+                ]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    decode_ok(s);
+}

@@ -4,6 +4,113 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.11.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.10.1...openjd-expr-v0.11.0) - 2026-10-07
+
+### Bug fixes
+
+- [**breaking**] Update ruff parser to 0.16.10, pin exact version, raise MSRV to 1.97 ([#429](https://github.com/OpenJobDescription/openjd-rs/pull/429)) ([#429](https://github.com/OpenJobDescription/openjd-rs/pull/429))
+
+- Treat single-letter URI schemes as filesystem paths ([#424](https://github.com/OpenJobDescription/openjd-rs/pull/424)) ([#424](https://github.com/OpenJobDescription/openjd-rs/pull/424))
+
+
+## [0.10.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.10.0...openjd-expr-v0.10.1) - 2026-09-30
+
+### Bug fixes
+
+- Fix memory accounting gaps in coercion, attributes, and slices ([#418](https://github.com/OpenJobDescription/openjd-rs/pull/418))
+
+- Keep the live memory footprint accurate when errors are absorbed ([#417](https://github.com/OpenJobDescription/openjd-rs/pull/417))
+
+- Close the resolved-value follow-ups from the #404 and #407 reviews ([#410](https://github.com/OpenJobDescription/openjd-rs/pull/410))
+
+
+## [0.10.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.9.0...openjd-expr-v0.10.0) - 2026-09-28
+
+### Features
+
+- [**breaking**] Require create_job's context to cover the template's extensions ([#407](https://github.com/OpenJobDescription/openjd-rs/pull/407))
+
+
+## [0.9.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.8.0...openjd-expr-v0.9.0) - 2026-09-18
+
+### Features
+
+- [**breaking**] Opt-in resolved-value caps and evaluation-budget plumbing ([#399](https://github.com/OpenJobDescription/openjd-rs/pull/399))
+
+
+### Miscellaneous
+
+- [**breaking**] Raise MSRV to 1.96.0; dep sweep (ruff 0.16, rusqlite 0.40) ([#403](https://github.com/OpenJobDescription/openjd-rs/pull/403))
+
+
+## [0.8.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.7.0...openjd-expr-v0.8.0) - 2026-09-15
+
+### Bug fixes
+
+- [**breaking**] Type-check a membership item against the list's element type ([#396](https://github.com/OpenJobDescription/openjd-rs/pull/396))
+
+- Implement PR #383 review follow-ups for resolved-value checks ([#397](https://github.com/OpenJobDescription/openjd-rs/pull/397))
+
+
+## [0.7.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.6.0...openjd-expr-v0.7.0) - 2026-09-10
+
+### Bug fixes
+
+- Escape control characters in repr_py and repr_python ([#374](https://github.com/OpenJobDescription/openjd-rs/pull/374))
+
+
+### Features
+
+- [**breaking**] Return StaticResolution from FormatString::validate_expressions ([#373](https://github.com/OpenJobDescription/openjd-rs/pull/373))
+
+
+## [0.6.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.5.0...openjd-expr-v0.6.0) - 2026-09-03
+
+### Bug fixes
+
+- [**breaking**] Keep the decimal places of a floatstring range element ([#354](https://github.com/OpenJobDescription/openjd-rs/pull/354))
+
+
+## [0.5.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.4.0...openjd-expr-v0.5.0) - 2026-08-25
+
+### Bug fixes
+
+- [**breaking**] Match Python semantics in character classification functions ([#341](https://github.com/OpenJobDescription/openjd-rs/pull/341))
+
+- [**breaking**] Reject regex constructs outside the Python/Rust intersection ([#337](https://github.com/OpenJobDescription/openjd-rs/pull/337))
+
+
+## [0.4.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.3.0...openjd-expr-v0.4.0) - 2026-08-21
+
+### Bug fixes
+
+- Escape list elements when converting a list to a string ([#336](https://github.com/OpenJobDescription/openjd-rs/pull/336))
+
+- [**breaking**] Split coercion into satisfaction and conversion ([#329](https://github.com/OpenJobDescription/openjd-rs/pull/329))
+
+- Seven overflow, panic, and silent-wrong-value bugs from the quality report ([#321](https://github.com/OpenJobDescription/openjd-rs/pull/321))
+
+
+## [0.3.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.2.1...openjd-expr-v0.3.0) - 2026-08-13
+
+### Bug fixes
+
+- Use NULLTYPE for empty flatten result instead of INT ([#316](https://github.com/OpenJobDescription/openjd-rs/pull/316))
+
+- Match spec behavior for identified float, string, and path differences ([#305](https://github.com/OpenJobDescription/openjd-rs/pull/305))
+
+- Preserve compatible unresolved targets ([#300](https://github.com/OpenJobDescription/openjd-rs/pull/300))
+
+- Stop target_type leaking into operand evaluation; accept 'any' target ([#297](https://github.com/OpenJobDescription/openjd-rs/pull/297))
+
+- [**breaking**] Enforce memory and operation limits before building large string outputs ([#284](https://github.com/OpenJobDescription/openjd-rs/pull/284))
+
+
+### Features
+
+- [**breaking**] Bounded range values, budgeted range equality, exact int/float comparison  ([#276](https://github.com/OpenJobDescription/openjd-rs/pull/276))
+
+
 ## [0.2.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.2.0...openjd-expr-v0.2.1) - 2026-07-22
 
 ### Bug fixes

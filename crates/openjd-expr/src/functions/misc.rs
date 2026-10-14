@@ -161,7 +161,7 @@ pub fn path_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                 .collect();
             if parts.is_empty() {
                 String::new()
-            } else if parts[0].contains("://") {
+            } else if crate::uri_path::is_uri(&parts[0]) {
                 // URI: join with "/" preserving empty components (no normalization)
                 if parts.len() == 1 {
                     parts[0].clone()

@@ -44,7 +44,19 @@ pub fn validate_structure(
     if jt.name.raw().is_empty() {
         errors.add(&path_field(&root, "name"), "must not be empty.");
     }
-    if jt.name.raw().chars().any(|c| c.is_control()) {
+    // §1.1.1: no Cc characters in the job name. Checked on the literal
+    // segments only: literal text appears verbatim in every possible
+    // resolution, so a control character there is a certain violation —
+    // even for an otherwise-interpolated name. Expression *source* text
+    // is exempt (a multi-line expression is legal); what an expression
+    // *resolves to* is checked on the resolved value instead — statically
+    // in the format-string pass when the name is fully static, and at job
+    // creation otherwise.
+    if jt
+        .name
+        .literal_segments()
+        .any(|s| s.chars().any(|c| c.is_control()))
+    {
         errors.add(&path_field(&root, "name"), "contains control characters.");
     }
 
@@ -90,15 +102,22 @@ pub fn validate_structure(
         }
     }
 
-    // Environment name uniqueness across all environments
-    let mut env_names = HashSet::new();
+    // Environment name uniqueness (spec 2023-09 §1, §3):
+    //   - unique within jobEnvironments
+    //   - unique within each step's stepEnvironments
+    //   - a stepEnvironment must not share a name with a jobEnvironment
+    // Different steps may reuse a stepEnvironment name; only one step's environments
+    // are ever active in a session at a time. Matches openjd-model-for-python.
+    let mut job_env_names = HashSet::new();
+    let mut env_count: usize = 0;
     if let Some(envs) = &jt.job_environments {
         let envs_path = path_field(&root, "jobEnvironments");
         if envs.is_empty() {
             errors.add(&envs_path, "must not be empty.");
         }
         for (i, env) in envs.iter().enumerate() {
-            if !env_names.insert(env.name.clone()) {
+            env_count += 1;
+            if !job_env_names.insert(env.name.clone()) {
                 errors.add(
                     &path_index(&envs_path, i),
                     format!("duplicate environment name: '{}'", env.name),
@@ -115,8 +134,10 @@ pub fn validate_structure(
             if envs.is_empty() {
                 errors.add(&envs_path, "must not be empty.");
             }
+            let mut step_env_names = HashSet::new();
             for (j, env) in envs.iter().enumerate() {
-                if !env_names.insert(env.name.clone()) {
+                env_count += 1;
+                if job_env_names.contains(&env.name) || !step_env_names.insert(env.name.clone()) {
                     errors.add(
                         &path_index(&envs_path, j),
                         format!("duplicate environment name: '{}'", env.name),
@@ -126,15 +147,14 @@ pub fn validate_structure(
         }
     }
 
-    // Caller-imposed total environment count limit
+    // Caller-imposed total environment count limit (job + all step environments combined)
     if let Some(max) = ctx.caller_limits.max_env_count {
-        if env_names.len() > max {
+        if env_count > max {
             errors.add(
                 &root,
                 format!(
                     "total environments ({}) exceeds caller limit of {}.",
-                    env_names.len(),
-                    max
+                    env_count, max
                 ),
             );
         }
@@ -142,6 +162,9 @@ pub fn validate_structure(
 
     // Step validation
     let all_step_names: HashSet<String> = jt.steps.iter().map(|s| s.name.clone()).collect();
+    let fb1_active = ctx
+        .profile
+        .has_extension(crate::types::ModelExtension::FeatureBundle1);
     let mut step_names = HashSet::new();
     for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
@@ -273,51 +296,47 @@ pub fn validate_structure(
 
         // Script actions
         if let Some(script) = &step.script {
-            let script_path = path_field(&step_path, "script");
-            let action_path = path_field(&path_field(&script_path, "actions"), "onRun");
-            validate_action(&script.actions.on_run, &action_path, limits, rules, errors);
+            validate_step_script(
+                script,
+                &path_field(&step_path, "script"),
+                limits,
+                rules,
+                errors,
+            );
+        }
 
-            // Task.File.* references
-            let file_names: HashSet<String> = script
-                .embedded_files
-                .as_ref()
-                .map(|files| files.iter().map(|f| f.name.clone()).collect())
-                .unwrap_or_default();
-            let all_fs: Vec<&openjd_expr::FormatString> = {
-                let mut v = vec![&script.actions.on_run.command];
-                if let Some(args) = &script.actions.on_run.args {
-                    v.extend(args.iter());
+        // SimpleAction fields (§8): validate the desugared script with the
+        // same code, then re-root every error onto the authored field so no
+        // diagnostic names a synthesized node. Skipped when the extension
+        // is off (pass 7 rejects the field outright) and when the step also
+        // has `script` (pass 7 rejects the combination; validating the sugar
+        // against a step whose `Task.File.*` come from the authored script
+        // would only add noise about the generated file).
+        if fb1_active && step.script.is_none() {
+            for (kind, sa) in step.simple_actions() {
+                let sa_path = path_field(&step_path, kind.field_name());
+                // The desugared `args` always holds the generated file
+                // reference, so the shared check cannot see an authored
+                // empty list (Python's `ArgListType` requires ≥ 1).
+                if sa.args.as_ref().is_some_and(Vec::is_empty) {
+                    errors.add(
+                        &path_field(&sa_path, "args"),
+                        "if provided, must not be empty.",
+                    );
                 }
-                v
-            };
-            for fs in &all_fs {
-                for name in fs.expression_names() {
-                    if let Some(tail) = name.strip_prefix("Task.File.") {
-                        // Only the first dotted segment is the embedded-file
-                        // key. `Task.File.<name>` is `path` typed, so any
-                        // further segments are property access on that value —
-                        // RFC 0005 uses `{{Task.File.Run.name}}` directly.
-                        // Embedded file names are identifiers (no dots, see
-                        // the name validation below), so the first segment is
-                        // unambiguous.
-                        let file_name = tail.split_once('.').map_or(tail, |(key, _)| key);
-                        if !file_names.contains(file_name) {
-                            errors.add(
-                                &script_path,
-                                format!("references undefined embedded file '{file_name}'."),
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Embedded files
-            if let Some(files) = &script.embedded_files {
-                let files_path = path_field(&script_path, "embeddedFiles");
-                if files.is_empty() {
-                    errors.add(&files_path, "must not be empty.");
-                }
-                validate_embedded_files(files, &files_path, errors);
+                let mut scratch = ValidationErrors::default();
+                validate_step_script(
+                    &kind.desugar(&step.name, sa),
+                    &[],
+                    limits,
+                    rules,
+                    &mut scratch,
+                );
+                errors.extend_remapped(scratch, |rel| {
+                    let mut p = sa_path.clone();
+                    p.extend(kind.remap_desugared_path(rel));
+                    p
+                });
             }
         }
     }
@@ -359,7 +378,7 @@ pub fn validate_single_environment(
     if env.name.is_empty() {
         errors.add(&name_path, "must not be empty.");
     }
-    if env.name.len() > limits.max_env_name_len {
+    if env.name.chars().count() > limits.max_env_name_len {
         errors.add(
             &name_path,
             format!("exceeds {} characters.", limits.max_env_name_len),
@@ -377,10 +396,16 @@ pub fn validate_single_environment(
         for (name, value) in vars {
             let var_path = path_field(&vars_path, name);
             validate_env_var_name(name, &var_path, errors);
-            if value.raw().chars().count() > limits.max_description_len {
+            if value.raw().contains('\0') {
                 errors.add(
                     &var_path,
-                    format!("value exceeds {} characters.", limits.max_description_len),
+                    "value contains a NUL byte, which cannot be represented in a process environment.",
+                );
+            }
+            if value.raw().chars().count() > limits.max_env_var_value_len {
+                errors.add(
+                    &var_path,
+                    format!("value exceeds {} characters.", limits.max_env_var_value_len),
                 );
             }
         }
@@ -389,29 +414,22 @@ pub fn validate_single_environment(
     if let Some(script) = &env.script {
         let script_path = path_field(path, "script");
         let actions_path = path_field(&script_path, "actions");
-        // Base 2023-09 requires `onEnter` whenever a `script` is present.
-        // RFC 0008 relaxes this: when `WRAP_ACTIONS` is enabled, an env may
-        // define only wrap hooks (or any single action) without a standalone
-        // `onEnter`. Concretely, require at least one of the five known
-        // actions to be present so we don't accept an empty `actions: {}`.
-        if rules.wrap_actions_enabled {
-            // RFC 0008: an env may define only wrap hooks (or any single
-            // action) without a standalone `onEnter`. Require at least one of
-            // the five known actions so an empty `actions: {}` is still
-            // rejected. The all-or-nothing wrap-hook rule (defining any wrap
-            // hook requires all three) is enforced separately in
-            // `wrap_actions.rs`, not here.
-            if !script.actions.has_any_action() {
-                errors.add(
-                    &actions_path,
-                    "must define at least one of onEnter or onExit, or the complete set of wrap hooks (onWrapEnvEnter, onWrapTaskRun, and onWrapEnvExit together).",
-                );
-            }
-        } else if script.actions.on_enter.is_none() {
-            // Preserve the original wording when the extension is not enabled
-            // so pre-RFC error messages don't change. `on_enter.is_none()`
-            // also covers the empty-`actions` case.
-            errors.add(&actions_path, "onEnter is required.");
+        // An environment script must define at least one action. Either
+        // `onEnter` or `onExit` alone satisfies this, so an environment whose
+        // only work is cleanup is valid. With `WRAP_ACTIONS` a complete set of
+        // wrap hooks also satisfies it. Requiring at least one of the five
+        // known actions is what rejects an empty `actions: {}`. The
+        // all-or-nothing wrap-hook rule (defining any wrap hook requires all
+        // three) is enforced separately in `wrap_actions.rs`, not here.
+        if !script.actions.has_any_action() {
+            errors.add(
+                &actions_path,
+                if rules.wrap_actions_enabled {
+                    "must define at least one of onEnter or onExit, or the complete set of wrap hooks (onWrapEnvEnter, onWrapTaskRun, and onWrapEnvExit together)."
+                } else {
+                    "must define at least one of onEnter or onExit."
+                },
+            );
         }
         for (name, action) in script.actions.iter_named() {
             validate_action(
@@ -432,6 +450,64 @@ pub fn validate_single_environment(
     }
 }
 
+/// Structural checks for a step script (§3.5) rooted at `script_path`: the
+/// `onRun` action, `Task.File.*` references against the embedded file names,
+/// and the embedded files themselves. Shared by the authored `script` field
+/// and the desugared SimpleAction forms.
+fn validate_step_script(
+    script: &StepScript,
+    script_path: &[PathElement],
+    limits: &super::EffectiveLimits,
+    rules: &EffectiveRules,
+    errors: &mut ValidationErrors,
+) {
+    let action_path = path_field(&path_field(script_path, "actions"), "onRun");
+    validate_action(&script.actions.on_run, &action_path, limits, rules, errors);
+
+    // Task.File.* references
+    let file_names: HashSet<String> = script
+        .embedded_files
+        .as_ref()
+        .map(|files| files.iter().map(|f| f.name.clone()).collect())
+        .unwrap_or_default();
+    let all_fs: Vec<&openjd_expr::FormatString> = {
+        let mut v = vec![&script.actions.on_run.command];
+        if let Some(args) = &script.actions.on_run.args {
+            v.extend(args.iter());
+        }
+        v
+    };
+    for fs in &all_fs {
+        for name in fs.expression_names() {
+            if let Some(tail) = name.strip_prefix("Task.File.") {
+                // Only the first dotted segment is the embedded-file
+                // key. `Task.File.<name>` is `path` typed, so any
+                // further segments are property access on that value —
+                // RFC 0005 uses `{{Task.File.Run.name}}` directly.
+                // Embedded file names are identifiers (no dots, see
+                // the name validation below), so the first segment is
+                // unambiguous.
+                let file_name = tail.split_once('.').map_or(tail, |(key, _)| key);
+                if !file_names.contains(file_name) {
+                    errors.add(
+                        script_path,
+                        format!("references undefined embedded file '{file_name}'."),
+                    );
+                }
+            }
+        }
+    }
+
+    // Embedded files
+    if let Some(files) = &script.embedded_files {
+        let files_path = path_field(script_path, "embeddedFiles");
+        if files.is_empty() {
+            errors.add(&files_path, "must not be empty.");
+        }
+        validate_embedded_files(files, &files_path, errors);
+    }
+}
+
 fn validate_action(
     action: &Action,
     path: &[PathElement],
@@ -443,7 +519,7 @@ fn validate_action(
     if cmd.is_empty() {
         errors.add(&path_field(path, "command"), "must not be empty.");
     }
-    if cmd.len() > limits.max_command_len {
+    if cmd.chars().count() > limits.max_command_len {
         errors.add(
             &path_field(path, "command"),
             format!("exceeds {} characters.", limits.max_command_len),
@@ -546,25 +622,24 @@ fn validate_host_requirements(
         let mut names = HashSet::new();
         for (i, amt) in amounts.iter().enumerate() {
             let amt_path = path_index(&amounts_path, i);
-            if !names.insert(amt.name.to_lowercase()) {
-                errors.add(&amt_path, format!("duplicate amount name '{}'.", amt.name));
-            }
-            if amt.name.len() > 100 {
-                errors.add(
+            // `name` is `@fmtstring` (§3.3.1), and its §3.3.1.1
+            // constraints apply to the resolved name. A literal is its own
+            // resolved name, so it is checked here. Pass 8 checks a name
+            // that is fully static, and job creation checks the resolved
+            // name, including uniqueness.
+            if amt.name.is_literal() {
+                let name = amt.name.raw();
+                if !names.insert(name.to_lowercase()) {
+                    errors.add(&amt_path, format!("duplicate amount name '{name}'."));
+                }
+                check_capability_name(
+                    name,
+                    CapabilityKind::Amount,
+                    standard_amounts,
                     &amt_path,
-                    format!("name '{}' exceeds 100 characters.", amt.name),
+                    errors,
                 );
             }
-            if !AMOUNT_CAP_RE.is_match(&amt.name) {
-                errors.add(
-                    &amt_path,
-                    format!(
-                        "name '{}' does not match capability name pattern.",
-                        amt.name
-                    ),
-                );
-            }
-            check_capability_reserved_scope(&amt.name, standard_amounts, &amt_path, errors);
             if amt.min.is_none() && amt.max.is_none() {
                 errors.add(&amt_path, "must have at least one of min or max.");
             }
@@ -580,14 +655,24 @@ fn validate_host_requirements(
                     }
                 }
             }
-            let min_val = amt
-                .min
-                .as_ref()
-                .and_then(|fs| fs.raw().trim().parse::<f64>().ok());
-            let max_val = amt
-                .max
-                .as_ref()
-                .and_then(|fs| fs.raw().trim().parse::<f64>().ok());
+            let mut parse_literal_amount =
+                |field: &str, value: &Option<openjd_expr::FormatString>| -> Option<f64> {
+                    let fs = value.as_ref()?;
+                    if !fs.is_literal() {
+                        return None;
+                    }
+                    let Ok(value) = fs.raw().trim().parse::<f64>() else {
+                        errors.add(&path_field(&amt_path, field), "must be a number.");
+                        return None;
+                    };
+                    if !value.is_finite() {
+                        errors.add(&path_field(&amt_path, field), "must be a finite number.");
+                        return None;
+                    }
+                    Some(value)
+                };
+            let min_val = parse_literal_amount("min", &amt.min);
+            let max_val = parse_literal_amount("max", &amt.max);
             if let Some(min) = min_val {
                 if min < 0.0 {
                     errors.add(&path_field(&amt_path, "min"), "must be non-negative.");
@@ -611,28 +696,24 @@ fn validate_host_requirements(
         let mut names = HashSet::new();
         for (i, attr) in attrs.iter().enumerate() {
             let attr_path = path_index(&attrs_path, i);
-            if !names.insert(attr.name.to_lowercase()) {
-                errors.add(
+            // `name` is `@fmtstring` (§3.3.2), and its §3.3.2.1
+            // constraints apply to the resolved name. A literal is its own
+            // resolved name, so it is checked here. Pass 8 checks a name
+            // that is fully static, and job creation checks the resolved
+            // name, including uniqueness.
+            if attr.name.is_literal() {
+                let name = attr.name.raw();
+                if !names.insert(name.to_lowercase()) {
+                    errors.add(&attr_path, format!("duplicate attribute name '{name}'."));
+                }
+                check_capability_name(
+                    name,
+                    CapabilityKind::Attribute,
+                    standard_attrs,
                     &attr_path,
-                    format!("duplicate attribute name '{}'.", attr.name),
+                    errors,
                 );
             }
-            if attr.name.len() > 100 {
-                errors.add(
-                    &attr_path,
-                    format!("name '{}' exceeds 100 characters.", attr.name),
-                );
-            }
-            if !ATTR_CAP_RE.is_match(&attr.name) {
-                errors.add(
-                    &attr_path,
-                    format!(
-                        "name '{}' does not match capability name pattern.",
-                        attr.name
-                    ),
-                );
-            }
-            check_capability_reserved_scope(&attr.name, standard_attrs, &attr_path, errors);
             if attr.any_of.is_none() && attr.all_of.is_none() {
                 errors.add(&attr_path, "must have at least one of anyOf or allOf.");
             }
@@ -648,11 +729,22 @@ fn validate_host_requirements(
                     for (j, v) in vals.iter().enumerate() {
                         let v_path = path_index(&field_path, j);
                         let s = v.raw();
-                        if s.is_empty() {
-                            errors.add(&v_path, "must not be empty.");
-                        }
-                        if s.len() > 100 {
-                            errors.add(&v_path, "exceeds 100 characters.");
+                        // Gated on is_literal for the same reason as the pattern
+                        // check below: for a format string these measure the raw
+                        // template text, not the value the constraint applies to.
+                        // A 176-character format string resolving to a legal
+                        // 14-character value was rejected here, where the
+                        // reference implementation accepts it -- its
+                        // `_validate_attribute_list` skips any FormatString
+                        // carrying expressions. Both are re-checked on the
+                        // resolved value at job creation, so nothing is lost.
+                        if v.is_literal() {
+                            if s.is_empty() {
+                                errors.add(&v_path, "must not be empty.");
+                            }
+                            if s.chars().count() > 100 {
+                                errors.add(&v_path, "exceeds 100 characters.");
+                            }
                         }
                         if !s.is_empty() && !ATTR_VALUE_RE.is_match(s) && v.is_literal() {
                             errors.add(
@@ -663,20 +755,18 @@ fn validate_host_requirements(
                     }
                 }
             }
-            // Standard capability value checks
-            let attr_lower = attr.name.to_lowercase();
-            let is_single_valued =
-                attr_lower == "attr.worker.os.family" || attr_lower == "attr.worker.cpu.arch";
-            if is_single_valued {
-                if let Some(vals) = &attr.all_of {
-                    if vals.len() > 1 {
-                        errors.add(
-                            &path_field(&attr_path, "allOf"),
-                            "single-valued attribute cannot have more than 1 element.",
-                        );
-                    }
-                }
-            }
+            // Standard capability value checks, for a literal name. Pass 8
+            // applies them for a name that is fully static, and job creation
+            // for the resolved name.
+            let attr_lower = if attr.name.is_literal() {
+                attr.name.raw().to_lowercase()
+            } else {
+                String::new()
+            };
+            // The generic 50-element cap above is not relaxed — it applies
+            // to the template element count regardless of expressions, so a
+            // deferred single-valued list is still bounded here.
+            check_single_valued_all_of(&attr_lower, attr.all_of.as_deref(), &attr_path, errors);
             if attr_lower == "attr.worker.os.family" {
                 let valid = ["linux", "windows", "macos"];
                 for (field, vals) in [("anyOf", &attr.any_of), ("allOf", &attr.all_of)] {
@@ -783,7 +873,7 @@ fn validate_combination_expr(
             return;
         }
     }
-    if expr.len() > 1280 {
+    if expr.chars().count() > 1280 {
         errors.add(path, "exceeds 1280 characters.");
     }
     let mut depth = 0i32;
@@ -965,6 +1055,18 @@ fn validate_embedded_files(
                     "must not contain path separators.",
                 );
             }
+            if fname.contains('\0') {
+                errors.add(
+                    &path_field(&f_path, "filename"),
+                    "must not contain null characters.",
+                );
+            }
+            if fname == "." || fname == ".." {
+                errors.add(
+                    &path_field(&f_path, "filename"),
+                    format!("must not be '{fname}'."),
+                );
+            }
         }
     }
 }
@@ -1043,18 +1145,15 @@ fn validate_task_param_range(
                 }
             }
             IntRange::Expression(expr) => {
+                // Grammar only. `max_task_param_range_len` deliberately does not
+                // apply to an expression's expansion — see its doc comment.
                 let raw = expr.raw();
                 if !raw.contains("{{") {
-                    match raw.parse::<openjd_expr::RangeExpr>() {
-                        Ok(range) => {
-                            if range.len() > limits.max_task_param_range_len {
-                                errors.add(path, format!("INT parameter '{}' range expression expands to {} elements (max {}).", tp.name, range.len(), limits.max_task_param_range_len));
-                            }
-                        }
-                        Err(e) => errors.add(
+                    if let Err(e) = raw.parse::<openjd_expr::RangeExpr>() {
+                        errors.add(
                             path,
                             format!("INT parameter '{}' range expression error: {e}", tp.name),
-                        ),
+                        );
                     }
                 }
             }

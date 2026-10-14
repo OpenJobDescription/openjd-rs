@@ -25,9 +25,19 @@ project republishes it under this name. Users seeing `rustpython-ruff_python_par
 - rustpython-parser has had no substantive code changes since early 2025
 
 ```toml
-ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "0.15.8" }
-ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "0.15.8" }
+ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "=0.16.10" }
+ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "=0.16.10" }
+ruff_text_size = { package = "rustpython-ruff_text_size", version = "=0.16.10" }
 ```
+
+**Exact version pin.** The ruff crates are pinned with `=` because they make
+breaking AST changes in 0.x patch releases. For example, 0.16.10 replaced
+`ExprCompare`'s `left` and `comparators` fields with a single `operands` list.
+With the earlier `^0.16.5` requirement, anything that resolved dependencies
+without our `Cargo.lock` failed to compile `openjd-expr`. That included
+downstream users and the cargo-semver-checks step in the release-plz workflow.
+Upgrade all three crates together and review the upstream AST changes as part
+of each bump.
 
 ## Parsing Pipeline
 
@@ -63,14 +73,32 @@ accessible as `Param.def` or `Param.is`.
 The solution:
 
 1. Attempt to parse the expression
-2. If parsing fails, scan for Python keywords used as attribute names (after `.`)
-3. Replace each keyword with a same-length placeholder identifier to preserve column offsets
-4. Re-parse with the placeholders
+2. If parsing fails, look at the offset the parser reported the error at. The parser
+   rejects a contextual keyword with "Expected an identifier, but found a keyword",
+   and its error range begins exactly at the keyword token
+3. If the token at that offset is directly preceded by `.` and is exactly a Python
+   keyword, replace it with a same-length placeholder identifier, which preserves
+   every other offset in the source
+4. Re-parse with the placeholder, repeating from step 1 — one keyword is renamed per
+   parse attempt, so an expression with several of them converges in several passes
 5. Record the renames in `keyword_renames: HashMap<String, String>` so the evaluator
    can map placeholder names back to the original attribute names
 
 This matches the Python implementation's `ast_parse_keyword_context()` approach, which
 renames keywords before parsing and restores them after.
+
+> **The rename is located, not searched for.** Only the one position the parser
+> objected to is considered. This is what keeps the fixup out of string literals:
+> a keyword inside a literal is valid Python, so it is never the parser's error
+> location. Searching the source text for the first `.keyword` instead — the
+> original implementation — rewrote literals, so `'a.class' + X.class` evaluated
+> to `"a.alassc1"` instead of `"a.classc1"`, silently and with no error raised.
+>
+> The keyword token is delimited by scanning to the first non-identifier
+> character rather than by assuming a keyword's length, so `.assert` is not read
+> as `.as` followed by junk. All offsets involved are byte offsets; mixing a byte
+> offset into a `chars()` index was a latent defect in the original boundary
+> check on sources containing multi-byte characters.
 
 ### Reverse mapping at evaluation
 
@@ -132,8 +160,9 @@ Three independent mechanisms work together:
    carries a `depth` counter and bumps it on every recursive descent into
    a child node. If the counter exceeds `MAX_EXPRESSION_DEPTH`, validation
    fails with `ExpressionErrorKind::ExpressionTooDeep`. Chained comparisons
-   (`a < b < c < ...`) are also checked against the limit via their
-   comparators vector length.
+   (`a < b < c < ...`) are also checked against the limit via the number of
+   comparison operators (`ExprCompare::ops.len()`, one less than the number
+   of operands).
 
 The evaluator applies a parallel check: `Evaluator::evaluate` — the single
 entry point through which every sub-node evaluation flows — carries a

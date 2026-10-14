@@ -33,10 +33,14 @@ mod test_feature_bundle_1;
 mod test_host_requirements;
 #[path = "integration/test_job_cancelation_serde.rs"]
 mod test_job_cancelation_serde;
+#[path = "integration/test_job_creation_resolved_values.rs"]
+mod test_job_creation_resolved_values;
 #[path = "integration/test_job_eq_hash.rs"]
 mod test_job_eq_hash;
 #[path = "integration/test_job_parameters.rs"]
 mod test_job_parameters;
+#[path = "integration/test_job_step_serde.rs"]
+mod test_job_step_serde;
 #[path = "integration/test_job_template.rs"]
 mod test_job_template;
 #[path = "integration/test_let_bindings.rs"]
@@ -47,6 +51,8 @@ mod test_merge_job_parameters;
 mod test_misc_v2023_09;
 #[path = "integration/test_model_profile.rs"]
 mod test_model_profile;
+#[path = "integration/test_param_type_name_case.rs"]
+mod test_param_type_name_case;
 #[path = "integration/test_parameter_space.rs"]
 mod test_parameter_space;
 #[path = "integration/test_parse.rs"]
@@ -59,10 +65,14 @@ mod test_range_expr;
 mod test_redacted_env_vars;
 #[path = "integration/test_resolved_bindings.rs"]
 mod test_resolved_bindings;
+#[path = "integration/test_resolved_value_constraints.rs"]
+mod test_resolved_value_constraints;
 #[path = "integration/test_scope_library_split.rs"]
 mod test_scope_library_split;
 #[path = "integration/test_simple_action_let.rs"]
 mod test_simple_action_let;
+#[path = "integration/test_simple_action_validation.rs"]
+mod test_simple_action_validation;
 #[path = "integration/test_step_dependency_graph.rs"]
 mod test_step_dependency_graph;
 #[path = "integration/test_step_param_space_iter.rs"]

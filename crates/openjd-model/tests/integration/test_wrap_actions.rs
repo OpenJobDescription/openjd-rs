@@ -47,8 +47,12 @@ fn expect_job_err(template: &str, allowed_exts: &[&str], expected_substrings: &[
 }
 
 fn expect_env_err(template: &str, allowed_exts: &[&str], expected_substrings: &[&str]) {
-    let err = decode_environment_template(yaml_val(template), Some(allowed_exts))
-        .expect_err("Expected validation error");
+    let err = decode_environment_template(
+        yaml_val(template),
+        Some(allowed_exts),
+        &CallerLimits::default(),
+    )
+    .expect_err("Expected validation error");
     let msg = err.to_string();
     for line in expected_substrings {
         assert!(
@@ -68,8 +72,12 @@ fn expect_job_ok(template: &str, allowed_exts: &[&str]) {
 }
 
 fn expect_env_ok(template: &str, allowed_exts: &[&str]) {
-    decode_environment_template(yaml_val(template), Some(allowed_exts))
-        .expect("expected successful decode");
+    decode_environment_template(
+        yaml_val(template),
+        Some(allowed_exts),
+        &CallerLimits::default(),
+    )
+    .expect("expected successful decode");
 }
 
 // ════════════════════════════════════════════════════════════════════
@@ -714,6 +722,31 @@ fn defining_zero_wrap_hooks_accepted() {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// At-least-one-action rule, WRAP_ACTIONS wording
+//
+// An environment script must define at least one action. With
+// WRAP_ACTIONS enabled the error names the wrap hooks as a third
+// acceptable choice alongside onEnter and onExit. The wording without
+// the extension is covered in test_environment_template.rs.
+// ════════════════════════════════════════════════════════════════════
+
+#[test]
+fn empty_env_actions_rejected_with_wrap_hooks_named() {
+    expect_env_err(
+        r#"{
+            "specificationVersion": "environment-2023-09",
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
+            "environment": {
+                "name": "Empty",
+                "script": {"actions": {}}
+            }
+        }"#,
+        WRAP_EXTS,
+        &["environment -> script -> actions:\n\tmust define at least one of onEnter or onExit, or the complete set of wrap hooks (onWrapEnvEnter, onWrapTaskRun, and onWrapEnvExit together)."],
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════
 // EXPR prerequisite (RFC 0008)
 //
 // A template that lists WRAP_ACTIONS must also list EXPR.
@@ -987,6 +1020,7 @@ environment:
 "#,
         ),
         Some(&["EXPR", "WRAP_ACTIONS", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
     )
     .expect("env template should decode");
 
@@ -1077,6 +1111,7 @@ environment:
 "#,
         ),
         Some(&["EXPR", "WRAP_ACTIONS", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
     )
     .expect("env template should decode");
 

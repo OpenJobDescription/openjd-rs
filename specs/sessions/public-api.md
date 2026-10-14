@@ -39,6 +39,7 @@ openjd_sessions                 — crate root (most public items re-exported he
 ├── error                       — SessionError
 ├── let_bindings                — re-exports openjd_model::evaluate_let_bindings
 ├── logging                     — LogContent, session_log!, banner helpers
+├── limits                      — SessionLimits (caps + evaluation budgets)
 ├── path_mapping                — re-exported from openjd_expr
 ├── runner                      — CancelMethod, ScriptRunnerState, runner modules
 │   ├── env_script              — EnvironmentScriptRunner
@@ -114,7 +115,11 @@ impl Session {
     ///
     /// `resolved_symtab` is the filtered symbol table produced by
     /// `openjd_model::convert_environment_with_symtab`; it carries
-    /// only the symbols this environment references.
+    /// only the symbols this environment references. Passing it here is
+    /// equivalent to setting `Environment::resolved_symtab` — the
+    /// argument is folded onto the stored environment, so later readers
+    /// (such as the RFC 0008 wrap hooks) see it either way. If both are
+    /// supplied, the argument wins.
     ///
     /// `os_env_vars` supplements the session-level env var map for
     /// this action only.
@@ -267,6 +272,7 @@ pipeline). Production callers should use `with_config`.
 impl Session {
     pub fn new_for_test(working_directory: PathBuf) -> Self;
     pub fn set_state_for_test(&mut self, state: SessionState);
+    pub fn set_job_parameter_values_for_test(&mut self, values: JobParameterValues);
     pub fn set_cancel_writer_for_test(&mut self, writer: std::fs::File);
     pub fn set_helper_auth_token_for_test(&mut self, token: String);
     pub fn clone_cancel_writer(&self) -> Option<std::fs::File>;
@@ -363,8 +369,54 @@ pub struct SessionConfig {
     /// `false` does not improve security — it just removes the
     /// directive lines from operator-facing output.
     pub echo_openjd_directives: bool,
+
+    /// Caller-policy caps and evaluation budgets enforced during
+    /// action resolution. Task execution is the enforcement boundary
+    /// for resolved-value limits — a worker can run a job that never
+    /// passed through this client's template validation or job
+    /// creation. Mirrors the corresponding
+    /// `openjd_model::CallerLimits` fields a submitting service would
+    /// set. Default: no limits beyond the spec.
+    pub limits: SessionLimits,
 }
 ```
+
+#### `SessionLimits`
+
+```rust
+/// From the `limits` module; re-exported at the crate root.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SessionLimits {
+    /// Cap on the resolved action `command` (§5.1) and on each final
+    /// argv entry an `args` element produces (§5.2, after null-skip
+    /// and list-flatten). The spec sets no maximum but notes the OS
+    /// imposes one; this surfaces that failure legibly instead of an
+    /// opaque spawn error.
+    pub max_resolved_arg_len: Option<usize>,
+    /// Cap on each resolved embedded-file `data` value (§6.1.2 sets
+    /// no spec limit).
+    pub max_resolved_data_len: Option<usize>,
+    /// Memory budget in bytes for each format-string expression
+    /// evaluation. `None` = `openjd_expr::DEFAULT_MEMORY_LIMIT`
+    /// (100 MB, the Expression Language spec default).
+    pub max_eval_memory_bytes: Option<usize>,
+    /// Operation budget per expression evaluation. `None` =
+    /// `openjd_expr::DEFAULT_OPERATION_LIMIT` (10 million).
+    pub max_eval_operations: Option<usize>,
+}
+
+/// Mirror the run-time-relevant fields of a submitting service's
+/// `openjd_model::CallerLimits` (the four fields above); fields with
+/// no run-time counterpart are ignored. Lets one policy value drive
+/// both the model-side stages and the session runtime without drift.
+impl From<&openjd_model::CallerLimits> for SessionLimits;
+```
+
+Violations surface as `SessionError::FormatString` with reason
+`resolved value is {n} characters, exceeding the maximum of {max}.`
+(caps) or the evaluator's budget-exceeded message (budgets). The
+runners and `EmbeddedFiles` receive the value via their `with_limits`
+builders; `Session::with_config` threads it everywhere automatically.
 
 #### `SessionCallbackType`
 

@@ -296,7 +296,7 @@ fn test_env_actions_empty() {
     }"#;
     check_err(
         s,
-        &["jobEnvironments[0] -> script -> actions:\n\tonEnter is required."],
+        &["jobEnvironments[0] -> script -> actions:\n\tmust define at least one of onEnter or onExit."],
     );
 }
 
@@ -599,10 +599,9 @@ fn test_env_action_on_exit() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}],
         "jobEnvironments": [{"name": "E", "script": {"actions": {"onExit": {"command": "foo"}}}}]
     }"#;
-    check_err(
-        s,
-        &["jobEnvironments[0] -> script -> actions:\n\tonEnter is required."],
-    );
+    // Either ordinary action alone is sufficient, so a cleanup-only
+    // environment is valid.
+    decode_ok(s);
 }
 
 #[test]
@@ -691,4 +690,19 @@ fn test_step_name_allows_plain_string() {
     decode_ok(&job_with_step(
         r#"{"name": "My Step", "script": {"actions": {"onRun": {"command": "foo"}}}}"#,
     ));
+}
+
+#[test]
+fn command_length_counts_characters_not_bytes() {
+    // The 1024 limit is stated in characters: 600 two-byte characters is
+    // 1,200 bytes and must be accepted; a byte-based check would falsely
+    // reject it.
+    let cmd = "é".repeat(600);
+    decode_ok(&job_with_action(&format!(r#"{{"command": "{cmd}"}}"#)));
+    // One character over the limit fails regardless of encoding width.
+    let cmd = "é".repeat(1025);
+    check_err(
+        &job_with_action(&format!(r#"{{"command": "{cmd}"}}"#)),
+        &["steps[0] -> script -> actions -> onRun -> command:\n\texceeds 1024 characters."],
+    );
 }

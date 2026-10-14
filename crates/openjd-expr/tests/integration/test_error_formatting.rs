@@ -74,6 +74,50 @@ fn type_error_at_end() {
 }
 
 #[test]
+fn superscript_digit_to_int_error() {
+    // U+00B2 SUPERSCRIPT TWO: isdigit('²') is true, but it has
+    // Numeric_Type=Digit, not Decimal — CPython's int('²') raises too.
+    assert_err(
+        "int('\u{00b2}')",
+        &[
+            "Cannot convert '\u{00b2}' to int\n",
+            "  int('\u{00b2}')\n",
+            "  ^~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn vulgar_fraction_to_float_error() {
+    // U+00BD VULGAR FRACTION ONE HALF (Numeric_Type=Numeric): rejected by
+    // CPython's float() as well.
+    assert_err(
+        "float('\u{00bd}')",
+        &[
+            "Cannot convert '\u{00bd}' to float\n",
+            "  float('\u{00bd}')\n",
+            "  ^~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn information_separator_to_int_error() {
+    // CPython's int() trims Unicode White_Space but NOT the information
+    // separators U+001C..U+001F: int('\x1c5') raises even though
+    // isspace('\x1c') is true. Rust's str::trim matches White_Space
+    // exactly, so the conversion functions are CPython-exact as-is.
+    assert_err(
+        "int('\\x1c5')",
+        &[
+            "Cannot convert '\u{001c}5' to int\n",
+            "  int('\\x1c5')\n",
+            "  ^~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
 fn operator_error_friendly_name() {
     assert_err(
         "'hello' + 5",
@@ -579,6 +623,27 @@ fn power_error_caret() {
 }
 
 #[test]
+fn single_line_two_char_operator_caret_points_at_first_char() {
+    // Baseline for the multi-line defect below: on one line, the caret sits on
+    // the first character of a two-character operator.
+    assert_err("1 ** 'a'", &["  1 ** 'a'\n", "  ~~^~~~~~"]);
+    assert_err("1 // 'a'", &["  1 // 'a'\n", "  ~~^~~~~~"]);
+}
+
+#[test]
+#[ignore = "known defect: compute_caret_offset (error.rs) does not undo the \
+            multi-line paren-wrap offset shift, so its backwards operator scan \
+            reads bytes one position to the right and the caret for a \
+            multi-line ** or // lands on the operator's second character \
+            (renders \"~~~^\" where \"~~^\" is correct). Diagnostic-only; see \
+            the NOTE in eval/parse.rs::parse_inner for the centralization that \
+            fixes it. Un-ignore then."]
+fn multiline_two_char_operator_caret_points_at_first_char() {
+    assert_err("1 **\n'a'", &["  1 **\n", "  ~~^"]);
+    assert_err("1 //\n'a'", &["  1 //\n", "  ~~^"]);
+}
+
+#[test]
 fn fail_function_caret() {
     assert_err(
         "fail('boom')",
@@ -593,10 +658,7 @@ fn leading_whitespace_preserved() {
 
 #[test]
 fn syntax_error_has_message() {
-    assert_err(
-        "1 +",
-        &["Syntax error: Expected an expression\n", "  1 +\n", "  ^"],
-    );
+    assert_err("1 +", &["Syntax error: invalid syntax\n", "  1 +\n", "  ^"]);
 }
 
 // === TestSyntaxErrorCarets ===
@@ -605,11 +667,7 @@ fn syntax_error_has_message() {
 fn unclosed_paren() {
     assert_err(
         "(1 + 2",
-        &[
-            "Syntax error: unexpected EOF while parsing\n",
-            "  (1 + 2\n",
-            "  ^",
-        ],
+        &["Syntax error: '(' was never closed\n", "  (1 + 2\n", "  ^"],
     );
 }
 
@@ -617,11 +675,7 @@ fn unclosed_paren() {
 fn unclosed_bracket() {
     assert_err(
         "[1, 2",
-        &[
-            "Syntax error: unexpected EOF while parsing\n",
-            "  [1, 2\n",
-            "  ^",
-        ],
+        &["Syntax error: '[' was never closed\n", "  [1, 2\n", "  ^"],
     );
 }
 
@@ -630,7 +684,7 @@ fn unclosed_string() {
     assert_err(
         "'hello",
         &[
-            "Syntax error: missing closing quote in string literal\n",
+            "Syntax error: unterminated string literal (detected at line 1)\n",
             "  'hello\n",
             "  ^",
         ],
@@ -1119,7 +1173,7 @@ fn format_string_parse_error_carries_caret() {
     // the raw format-string source and a caret over the failing {{...}}.
     let err = FormatString::new("hello {{ 1 + }} world").unwrap_err();
     let expected = "\
-Failed to parse interpolation expression at [6, 15]. Reason: Syntax error: Expected an expression
+Failed to parse interpolation expression at [6, 15]. Reason: Syntax error: invalid syntax
   hello {{ 1 + }} world
         ^~~~~~~~~";
     assert_eq!(err.to_string(), expected);
@@ -1257,7 +1311,9 @@ fn format_string_validation_carries_expression_error_with_sub_errors() {
     st.set("Y", ExprValue::unresolved(ExprType::PATH)).unwrap();
     let fs = FormatString::new("{{X + 'a' if cond else Y * 'b'}}").unwrap();
     let lib = FunctionLibrary::default();
-    let err = fs.validate_expressions(&st, &lib).unwrap_err();
+    let err = fs
+        .validate_expressions(&st, &FormatStringOptions::new().with_library(&lib))
+        .unwrap_err();
     assert_eq!(err.start, 0);
     assert_eq!(err.end, 32);
     let expr_err = err
@@ -1281,4 +1337,30 @@ fn simple_error_has_no_sub_errors() {
         .and_then(|p| p.evaluate(&st))
         .unwrap_err();
     assert!(err.sub_errors().is_empty());
+}
+
+// === Membership type mismatch points at the whole comparison ===
+
+#[test]
+fn membership_type_mismatch_caret_spans_comparison() {
+    assert_err(
+        "'a' in [1, 2]",
+        &[
+            "Cannot use 'in' operator: item of type string is not compatible with the element type int of list[int]\n",
+            "  'a' in [1, 2]\n",
+            "  ^~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn membership_type_mismatch_caret_inside_larger_expression() {
+    assert_err(
+        "1 + int('a' in [1, 2])",
+        &[
+            "Cannot use 'in' operator: item of type string is not compatible with the element type int of list[int]\n",
+            "  1 + int('a' in [1, 2])\n",
+            "          ^~~~~~~~~~~~~",
+        ],
+    );
 }

@@ -45,9 +45,29 @@ slashes are preserved. Output separators use the host-native format — use
 `apply_with_format` for explicit control.
 
 Format-appropriate comparison means:
-- **Posix**: exact byte comparison
-- **Windows**: case-insensitive, normalizes backslashes to forward slashes
+- **Posix**: exact byte comparison; `/` is the only separator
+- **Windows**: case-insensitive, treats `\` and `/` interchangeably as separators
 - **URI**: scheme and authority compared case-insensitively, path compared exactly
+
+Filesystem matching (Posix and Windows) compares the path component by
+component, and mirrors Python's `PurePosixPath`/`PureWindowsPath`
+`is_relative_to` on two points that component comparison alone would miss:
+
+> **Rootedness must agree.** A relative path never matches an absolute rule and
+> an absolute path never matches a relative rule, even when every component
+> lines up. Python gets this from the root entry in `.parts`; component
+> splitting discards it, so it is compared separately. A path is rooted if it
+> starts with `/`, or — under Windows only — with `\`. Drive-anchored Windows
+> paths need no special case: `C:` is kept as the first component, so a drive
+> mismatch already fails component comparison.
+>
+> **Only the format's own separators split components.** Under Windows, `\` and
+> `/` are interchangeable, so the rule `C:/Users/bob` matches the input
+> `C:\Users\bob\f.txt`. Under Posix, `\` is an ordinary filename character, so
+> `home\user` is a single component: the rule `/home/user` does **not** match
+> the input `/home\user/f`, and the rule `/home\user` matches `/home\user/f`
+> but not `/home/user/f`. This follows `PurePosixPath("/home\\user/f").parts`
+> == `('/', 'home\\user', 'f')`.
 
 ### apply_with_format
 
@@ -78,7 +98,7 @@ because the module already provides that namespace.
 
 | Function | Purpose |
 |----------|---------|
-| `is_uri(s)` | Check if string has a `scheme://` prefix |
+| `is_uri(s)` | Check if string has a `scheme://` prefix matching `^[a-zA-Z][a-zA-Z0-9+.-]+://` (scheme ≥ 2 chars) |
 | `parse(s) -> Option<UriParts>` | Parse into `{ authority, path_parts }` or `None` |
 | `name(s)` | Last component (like `Path.name`) |
 | `parent(s)` | Parent URI (like `Path.parent`) |
@@ -88,6 +108,17 @@ because the module already provides that namespace.
 | `parts(s)` | Split into components: `[authority, seg1, seg2, ...]` |
 | `join(s, child)` | Append a child component to a URI path |
 | `from_parts(parts)` | Reconstruct URI from `parts(...)` output |
+
+### Scheme must be at least two characters
+
+`is_uri` and `parse` require the scheme to match `^[a-zA-Z][a-zA-Z0-9+.-]+://`.
+RFC 3986 permits a one-letter scheme, but `C://scenes/a.ma` is also a valid Windows
+absolute path (a drive letter with a doubled separator), and users produce that
+spelling by hand-editing or pasting from tools that emit forward slashes. Treating it
+as a URI with scheme `c` would silently bypass path mapping and relative-path
+resolution for a real local file. Single-letter schemes are essentially unused in
+practice, so such values are handled as filesystem paths. This matches the
+Expression Language spec §1.2.1 and RFC 0006.
 
 ### Why URI paths are opaque
 
@@ -220,6 +251,18 @@ Path-related operations in the expression language:
 | `/` | `(path, string) -> path` | Join path components |
 | `/` | `(path, path) -> path` | Join paths |
 | `+` | `(path, string) -> path` | Append to last component |
+
+On Windows filesystem paths, a root-relative right operand (for example,
+`\renders`) replaces the left path below its root. A drive or UNC root from the
+left operand is retained; if the left operand has no drive or UNC root, the right
+operand replaces it entirely. The same absolute-right rule applies to URI left
+operands, so `/renders` replaces the URI entirely under POSIX and URI formats.
+Under Windows, a single leading `/` or `\` is root-relative rather than absolute;
+for a URI left operand it replaces only the path below the authority. For example,
+`path("s3://bucket/prefix") / "/renders"` produces `s3://bucket/renders` under
+Windows and `/renders` under POSIX. A Windows drive-relative right operand replaces
+a URI left operand entirely, so `path("s3://bucket/prefix") / "C:render.exr"`
+produces `C:render.exr`.
 
 ### apply_path_mapping
 

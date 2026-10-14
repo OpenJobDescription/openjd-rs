@@ -166,6 +166,31 @@ fn range_expr_sum() {
     assert_eq!(eval("sum(range_expr('1-5'))").to_display_string(), "15");
 }
 
+#[test]
+fn range_expr_sum_negative_overflow_is_error() {
+    // Opposite-sign branch of the checked accumulation: summing large
+    // negative values must underflow to a clean error, not a panic.
+    assert_err(
+        "sum(range_expr('-4611686018427387900--4611686018427387000'))",
+        &["Integer overflow: result is outside the 64-bit signed range"],
+    );
+}
+
+#[test]
+fn range_expr_sum_overflow_is_error() {
+    // Regression: the RangeExpr branch of sum() used an unchecked
+    // `r.iter().sum::<i64>()` (debug panic "attempt to add with overflow").
+    // 901 values near 2^62 sum far past i64::MAX; must be a clean error.
+    assert_err(
+        "sum(range_expr('4611686018427387000-4611686018427387900'))",
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  sum(range_expr('4611686018427387000-4611686018427387900'))\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
 // === Additional range_expr tests ===
 #[test]
 fn range_expr_from_list_v2() {
@@ -568,9 +593,15 @@ fn float_in_range_matches_python() {
         eval("1.5 in range_expr('1-3')").to_display_string(),
         "false"
     );
-    assert_eq!(
-        eval("'a' in range_expr('1-3')").to_display_string(),
-        "false"
+    // `__contains__(range_expr, int | float)`: a string item has no
+    // signature and is refused rather than reported as a non-member.
+    let e = ParsedExpression::new("'a' in range_expr('1-3')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err()
+        .message();
+    assert!(
+        e.contains("Cannot use 'in' operator: item of type string is not compatible with a range_expr container"),
+        "got {e}"
     );
     assert_eq!(
         eval("4.0 not in range_expr('1-3')").to_display_string(),

@@ -165,13 +165,19 @@ fn redacted_env_vars_env_template_supported() {
     let result = decode_environment_template(
         redacted_env_vars_env_template(),
         Some(&["REDACTED_ENV_VARS"]),
+        &CallerLimits::default(),
     );
     assert!(result.is_ok(), "expected success, got: {:?}", result.err());
 }
 
 #[test]
 fn redacted_env_vars_env_template_not_supported() {
-    let err = decode_environment_template(redacted_env_vars_env_template(), None).unwrap_err();
+    let err = decode_environment_template(
+        redacted_env_vars_env_template(),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap_err();
     let msg = err.to_string();
     assert!(
         msg.contains("extensions:\n\tUnsupported extension names: REDACTED_ENV_VARS"),
@@ -184,6 +190,7 @@ fn redacted_env_vars_env_template_wrong_list() {
     let err = decode_environment_template(
         redacted_env_vars_env_template(),
         Some(&["FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
     )
     .unwrap_err();
     let msg = err.to_string();

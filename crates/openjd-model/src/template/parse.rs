@@ -8,13 +8,13 @@
 
 use std::str::FromStr;
 
-use crate::error::{path_field, ModelError, ValidationErrors};
+use crate::error::{path_field, path_index, ModelError, PathElement, ValidationErrors};
 use crate::template::constrained_strings::ExtensionName;
 use crate::template::validation as validate;
 use crate::template::{EnvironmentTemplate, JobTemplate};
 use crate::types::{
-    CallerLimits, Extensions, ModelExtension, SpecificationRevision, TemplateSpecificationVersion,
-    ValidationContext,
+    CallerLimits, Extensions, JobParameterType, ModelExtension, SpecificationRevision,
+    TaskParameterType, TemplateSpecificationVersion, ValidationContext,
 };
 
 /// Document format.
@@ -63,6 +63,8 @@ pub fn document_string_to_object(
         DocumentType::Yaml => {
             let options = serde_saphyr::options! {
                 strict_booleans: true,
+                // Keep non-finite scalars as strings for field-specific model validation.
+                reject_non_finite_typeless_float: false,
                 budget: serde_saphyr::budget! {
                     max_depth: MAX_DOCUMENT_DEPTH,
                 },
@@ -181,6 +183,115 @@ fn validate_extensions_list(
     result
 }
 
+/// A parameter type name as the template author spelled it, with the error path
+/// it should be reported at.
+type WrittenTypeName = (Vec<PathElement>, String);
+
+/// Collect the `type` string of every parameter definition, as written, from the
+/// raw document.
+///
+/// The two kinds are collected separately so each can be checked against its own
+/// type table. Deserialization matches the tag case-blind (§2 makes type names
+/// case-insensitive under EXPR), so the author's spelling does not survive it, and
+/// the effective extension set does not exist until after it. This runs before the
+/// document is moved into `serde_json::from_value`, and
+/// `check_type_name_canonical_case` consumes the result once the extensions are
+/// known.
+///
+/// Anything that is not an object, or whose `type` is absent or not a string, is
+/// skipped and left for deserialization to report. This function never errors.
+fn collect_written_type_names(
+    template: &serde_json::Value,
+    job_names: &mut Vec<WrittenTypeName>,
+    task_names: &mut Vec<WrittenTypeName>,
+) {
+    fn collect_from(
+        defs: Option<&serde_json::Value>,
+        path: &[PathElement],
+        out: &mut Vec<WrittenTypeName>,
+    ) {
+        let Some(items) = defs.and_then(|v| v.as_array()) else {
+            return;
+        };
+        for (i, item) in items.iter().enumerate() {
+            if let Some(written) = item.get("type").and_then(|v| v.as_str()) {
+                out.push((path_index(path, i), written.to_string()));
+            }
+        }
+    }
+
+    let root: Vec<PathElement> = vec![];
+    collect_from(
+        template.get("parameterDefinitions"),
+        &path_field(&root, "parameterDefinitions"),
+        job_names,
+    );
+
+    let Some(steps) = template.get("steps").and_then(|v| v.as_array()) else {
+        return;
+    };
+    for (i, step) in steps.iter().enumerate() {
+        let space_path = path_field(
+            &path_index(&path_field(&root, "steps"), i),
+            "parameterSpace",
+        );
+        collect_from(
+            step.get("parameterSpace")
+                .and_then(|s| s.get("taskParameterDefinitions")),
+            &path_field(&space_path, "taskParameterDefinitions"),
+            task_names,
+        );
+    }
+}
+
+/// Reject a parameter type name that names a real type but is not spelled the way
+/// the specification spells it, unless the EXPR extension is in effect.
+///
+/// §2: "When the `EXPR` extension is enabled, job parameter and task parameter type
+/// names become case-insensitive." Without it they are case-sensitive, so
+/// `string` is not a spelling of `STRING`.
+///
+/// A spelling that names no type at all is left alone: deserialization already
+/// reported it as an unknown type, and it would be reported twice otherwise.
+fn check_type_name_canonical_case(
+    job_names: &[WrittenTypeName],
+    task_names: &[WrittenTypeName],
+    extensions: &Extensions,
+    errors: &mut ValidationErrors,
+) {
+    if extensions.contains(&ModelExtension::Expr) {
+        return;
+    }
+    for (path, written) in job_names {
+        if let Some(canonical) = JobParameterType::from_spec_str(written).map(|t| t.as_spec_str()) {
+            if canonical != written {
+                errors.add(
+                    path,
+                    canonical_case_message("parameter", written, canonical),
+                );
+            }
+        }
+    }
+    for (path, written) in task_names {
+        if let Some(canonical) = TaskParameterType::from_spec_str(written).map(|t| t.as_spec_str())
+        {
+            if canonical != written {
+                errors.add(
+                    path,
+                    canonical_case_message("task parameter", written, canonical),
+                );
+            }
+        }
+    }
+}
+
+fn canonical_case_message(kind: &str, written: &str, canonical: &str) -> String {
+    format!(
+        "{kind} type '{written}' is not recognized. Type names are case-sensitive \
+         without the EXPR extension; expected '{canonical}'."
+    )
+}
+
 /// Decode and validate a job template from a YAML value.
 pub fn decode_job_template(
     template: serde_json::Value,
@@ -215,6 +326,11 @@ pub fn decode_job_template(
         )));
     }
 
+    // Collect the type names as written, before `template` is moved below.
+    let mut job_type_names = Vec::new();
+    let mut task_type_names = Vec::new();
+    collect_written_type_names(&template, &mut job_type_names, &mut task_type_names);
+
     let jt: JobTemplate = match version.revision() {
         // Future revisions may decode into a different struct layout.
         // Making the match explicit now localizes the dispatch point.
@@ -229,6 +345,7 @@ pub fn decode_job_template(
     let mut errors = ValidationErrors::default();
     let extensions =
         validate_extensions_list(jt.extensions.as_deref(), supported_extensions, &mut errors);
+    check_type_name_canonical_case(&job_type_names, &task_type_names, &extensions, &mut errors);
     errors.into_result("JobTemplate")?;
 
     // Route to the revision-specific validation pipeline via the
@@ -245,6 +362,7 @@ pub fn decode_job_template(
 pub fn decode_environment_template(
     template: serde_json::Value,
     supported_extensions: Option<&[&str]>,
+    caller_limits: &CallerLimits,
 ) -> Result<EnvironmentTemplate, ModelError> {
     let version_str = template
         .get("specificationVersion")
@@ -272,6 +390,14 @@ pub fn decode_environment_template(
         )));
     }
 
+    // An environment template's `parameterDefinitions` is the same
+    // `JobParameterDefinition` union a job template's is, so §2's casing rule
+    // applies here too. Collected before `template` is moved below. There are no
+    // steps on this document, so no task parameter names.
+    let mut job_type_names = Vec::new();
+    let mut task_type_names = Vec::new();
+    collect_written_type_names(&template, &mut job_type_names, &mut task_type_names);
+
     let et: EnvironmentTemplate = match version.revision() {
         // Future revisions may decode into a different struct layout.
         // Making the match explicit now localizes the dispatch point,
@@ -286,9 +412,11 @@ pub fn decode_environment_template(
     let mut errors = ValidationErrors::default();
     let extensions =
         validate_extensions_list(et.extensions.as_deref(), supported_extensions, &mut errors);
+    check_type_name_canonical_case(&job_type_names, &task_type_names, &extensions, &mut errors);
     errors.into_result("EnvironmentTemplate")?;
 
-    let ctx = ValidationContext::with_extensions(version.revision(), extensions);
+    let mut ctx = ValidationContext::with_extensions(version.revision(), extensions);
+    ctx.caller_limits = caller_limits.clone();
     validate::validate_environment_template(&et, &ctx)?;
 
     Ok(et)
@@ -329,7 +457,7 @@ pub fn decode_template(
     if version.is_job_template() {
         decode_job_template(template, supported_extensions, caller_limits).map(DecodedTemplate::Job)
     } else {
-        decode_environment_template(template, supported_extensions)
+        decode_environment_template(template, supported_extensions, caller_limits)
             .map(DecodedTemplate::Environment)
     }
 }
@@ -435,19 +563,19 @@ mod tests {
     #[test]
     fn test_decode_env_template_missing_spec_version() {
         let v = yaml_val(r#"{"notspecversion": "badvalue"}"#);
-        assert!(decode_environment_template(v, None).is_err());
+        assert!(decode_environment_template(v, None, &CallerLimits::default()).is_err());
     }
 
     #[test]
     fn test_decode_env_template_unknown_version() {
         let v = yaml_val(r#"{"specificationVersion": "badvalue"}"#);
-        assert!(decode_environment_template(v, None).is_err());
+        assert!(decode_environment_template(v, None, &CallerLimits::default()).is_err());
     }
 
     #[test]
     fn test_decode_env_template_not_env_version() {
         let v = yaml_val(r#"{"specificationVersion": "jobtemplate-2023-09"}"#);
-        assert!(decode_environment_template(v, None).is_err());
+        assert!(decode_environment_template(v, None, &CallerLimits::default()).is_err());
     }
 
     #[test]
@@ -462,7 +590,7 @@ mod tests {
             }
         }"#,
         );
-        let et = decode_environment_template(v, None).unwrap();
+        let et = decode_environment_template(v, None, &CallerLimits::default()).unwrap();
         assert_eq!(et.specification_version, "environment-2023-09");
     }
 

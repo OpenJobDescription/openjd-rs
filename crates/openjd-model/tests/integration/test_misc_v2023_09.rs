@@ -316,3 +316,35 @@ fn test_dependency_graph_diamond_misc() {
     }"#,
     );
 }
+
+// === NUL byte in environment variable value ===
+
+#[test]
+fn test_env_var_value_nul_byte_rejected() {
+    // A YAML `"\0"` escape produces a NUL in the decoded string. The model
+    // validation layer must reject it so `openjd check` catches it before
+    // the session tries to spawn with a poisoned env map.
+    //
+    // Note: a raw NUL in the YAML stream is rejected by the deserializer
+    // itself, so only YAML escapes reach the model layer. We use YAML
+    // double-quoted scalar syntax here.
+    check_err(
+        "specificationVersion: jobtemplate-2023-09\nname: Test\nsteps:\n- name: S\n  script:\n    actions:\n      onRun:\n        command: foo\njobEnvironments:\n- name: E\n  variables:\n    POISON: \"A\\0B\"\n",
+        &[
+            "jobEnvironments[0] -> variables -> POISON:\n\tvalue contains a NUL byte, which cannot be represented in a process environment.",
+        ],
+    );
+}
+
+#[test]
+fn test_env_var_value_without_nul_accepted() {
+    // Negative control: a value with no NUL must continue to be accepted.
+    decode_ok(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}],
+        "jobEnvironments": [{"name": "E", "variables": {"FINE": "a=b c"}}]
+    }"#,
+    );
+}

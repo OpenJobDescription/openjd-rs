@@ -24,7 +24,7 @@ pub fn execute(args: CheckArgs) -> Result<(), Box<dyn std::error::Error>> {
     let template_value = parse::document_string_to_object(
         &content,
         crate::common::document_type(path),
-        &openjd_model::CallerLimits::default(),
+        &crate::common::caller_limits(),
     )?;
 
     let version_str = template_value
@@ -41,11 +41,15 @@ pub fn execute(args: CheckArgs) -> Result<(), Box<dyn std::error::Error>> {
             parse::decode_job_template(
                 template_value.clone(),
                 Some(&supported),
-                &openjd_model::CallerLimits::default(),
+                &crate::common::caller_limits(),
             )?;
         }
         Ok(v) if v.is_environment_template() => {
-            parse::decode_environment_template(template_value.clone(), Some(&supported))?;
+            parse::decode_environment_template(
+                template_value.clone(),
+                Some(&supported),
+                &crate::common::caller_limits(),
+            )?;
         }
         Ok(_) | Err(_) => {
             return Err(format!("Unknown template 'specificationVersion' ({version_str}).").into());

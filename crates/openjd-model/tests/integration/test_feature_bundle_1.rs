@@ -984,7 +984,9 @@ fn env_template_51_params_without_extension_fails() {
         params.join(",")
     );
     let v = yaml_val(&s);
-    assert!(openjd_model::decode_environment_template(v, Some(&[])).is_err());
+    assert!(
+        openjd_model::decode_environment_template(v, Some(&[]), &CallerLimits::default()).is_err()
+    );
 }
 
 #[test]
@@ -1001,7 +1003,8 @@ fn env_template_50_params_without_extension_succeeds() {
         params.join(",")
     );
     let v = yaml_val(&s);
-    openjd_model::decode_environment_template(v, Some(&[])).expect("Expected success");
+    openjd_model::decode_environment_template(v, Some(&[]), &CallerLimits::default())
+        .expect("Expected success");
 }
 
 // ══════════════════════════════════════════════════════════════

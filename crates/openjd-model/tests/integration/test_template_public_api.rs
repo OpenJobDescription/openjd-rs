@@ -51,7 +51,8 @@ fn decode_jt_with_extensions(s: &str, exts: &[&str]) -> JobTemplate {
 }
 
 fn decode_et(s: &str) -> EnvironmentTemplate {
-    decode_environment_template(yaml(s), None).unwrap_or_else(|e| panic!("decode failure: {e}"))
+    decode_environment_template(yaml(s), None, &CallerLimits::default())
+        .unwrap_or_else(|e| panic!("decode failure: {e}"))
 }
 
 #[test]
@@ -199,10 +200,10 @@ fn step_template_full_surface() {
 
     let hr: &HostRequirements = s.host_requirements.as_ref().unwrap();
     let amount: &AmountRequirement = &hr.amounts.as_ref().unwrap()[0];
-    assert_eq!(amount.name, "amount.worker.vcpu");
+    assert_eq!(amount.name.raw(), "amount.worker.vcpu");
     assert_eq!(amount.min.as_ref().unwrap().raw(), "4");
     let attr: &AttributeRequirement = &hr.attributes.as_ref().unwrap()[0];
-    assert_eq!(attr.name, "attr.worker.os.family");
+    assert_eq!(attr.name.raw(), "attr.worker.os.family");
     assert_eq!(attr.any_of.as_ref().unwrap()[0].raw(), "linux");
 
     let script: &StepScript = s.script.as_ref().unwrap();
@@ -245,7 +246,7 @@ fn simple_action_sugar_field_access() {
     let s = &jt.steps[0];
     assert!(s.script.is_none());
     let bash: &SimpleAction = s.bash.as_ref().unwrap();
-    assert_eq!(bash.script, "echo hi");
+    assert_eq!(bash.script.raw(), "echo hi");
     assert!(s.python.is_none());
 }
 

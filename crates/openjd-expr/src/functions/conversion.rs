@@ -11,7 +11,14 @@ use crate::value::{ExprValue, Float64};
 type R = Result<ExprValue, ExpressionError>;
 type Ctx<'a> = &'a mut dyn EvalContext;
 
-pub fn string_fn(_: Ctx, a: &[ExprValue]) -> R {
+pub fn string_fn(ctx: Ctx, a: &[ExprValue]) -> R {
+    // A list renders as a JSON array whose element strings are escaped, so the
+    // output can grow several times larger than the input. Charge the same
+    // budget `repr_json` does before building it. Scalars render as themselves.
+    if a[0].is_list() {
+        let budget = super::repr::preflight_display_list(ctx, &a[0])?;
+        return Ok(budget.finish(a[0].to_display_string()));
+    }
     Ok(ExprValue::String(a[0].to_display_string()))
 }
 
@@ -46,11 +53,31 @@ pub fn int_from_bool(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+/// Replace every Unicode decimal digit (Numeric_Type=Decimal, category Nd)
+/// with its ASCII equivalent, matching CPython's transformation of `int()`
+/// and `float()` string arguments. All other characters pass through
+/// unchanged and are left for the numeric parser to accept or reject —
+/// notably `Numeric_Type=Digit` characters like `'²'`, which `isdigit()`
+/// accepts but CPython's `int()` rejects.
+fn normalize_decimal_digits(s: &str) -> std::borrow::Cow<'_, str> {
+    use super::unicode_tables::decimal_digit_value;
+    if s.is_ascii() {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    std::borrow::Cow::Owned(
+        s.chars()
+            .map(|c| match decimal_digit_value(c) {
+                Some(d) => char::from(b'0' + d as u8),
+                None => c,
+            })
+            .collect(),
+    )
+}
+
 pub fn int_from_string(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::String(s) => {
-            let v: i64 = s
-                .trim()
+            let v: i64 = normalize_decimal_digits(s.trim())
                 .parse()
                 .map_err(|_| ExpressionError::new(format!("Cannot convert '{s}' to int")))?;
             Ok(ExprValue::Int(v))
@@ -85,8 +112,7 @@ pub fn float_from_string(_: Ctx, a: &[ExprValue]) -> R {
             if lower == "nan" {
                 return Err(ExpressionError::float_error("Cannot convert to float: NaN"));
             }
-            let v: f64 = s
-                .trim()
+            let v: f64 = normalize_decimal_digits(s.trim())
                 .parse()
                 .map_err(|_| ExpressionError::new(format!("Cannot convert '{s}' to float")))?;
             Ok(ExprValue::Float(Float64::new(v)?))

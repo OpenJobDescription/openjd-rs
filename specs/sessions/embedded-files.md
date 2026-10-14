@@ -19,6 +19,14 @@ pub struct EmbeddedFiles {
 impl EmbeddedFiles {
     pub fn new(scope: EmbeddedFilesScope, session_files_directory: PathBuf, session_id: &str) -> Self;
     pub fn with_user(self, user: Option<Arc<dyn SessionUser>>) -> Self;
+    /// Session limits: the evaluation budgets bound `data` expression
+    /// evaluation, and `max_resolved_data_len` (opt-in — §6.1.2 sets no
+    /// spec limit) caps each resolved `data` value at write time — the
+    /// run-time enforcement boundary. A violation is
+    /// `SessionError::FormatString` with context
+    /// `embedded file '{name}' data` and reason
+    /// `resolved value is {n} characters, exceeding the maximum of {max}.`.
+    pub fn with_limits(self, limits: SessionLimits) -> Self;
 
     pub fn allocate_file_paths(
         &mut self,
@@ -100,10 +108,62 @@ must be a single safe path component:
 | contains `/` or `\` | path separators |
 | contains `\0` | null byte |
 | exactly `.` or `..` | current/parent dir component |
+| contains `:` — **Windows only** | NTFS alternate data stream (`script.sh:evil`) or drive-relative anchor (`C:evil`, `C:`) |
+| not a single "normal" path component (e.g. `D:relative`, `C:`) | platform prefix/root |
+| consists only of dots and spaces (e.g. `".. "`, `"..."`) — **Windows only** | collapses to `.`/`..` at the OS layer |
 
 Rejection surfaces as `SessionError::EmbeddedFilePath { name, filename, reason }`.
 Backslash is rejected on all platforms — embedded file filenames are single
 path components by spec, so `\` has no legitimate use even on POSIX.
+
+The last rule uses `std::path::Path::components`, which parses for the host
+platform. It catches strings that contain no `/` or `\` yet are not plain
+basenames — most importantly Windows drive-relative anchors such as
+`D:relative` or a bare `C:`. `Path::join` treats these as a drive prefix and
+would otherwise write outside the target directory. On POSIX the same strings
+are ordinary filenames and are accepted.
+
+Windows also strips trailing dots and spaces from the final path component, so
+a filename consisting entirely of dots and spaces (`".. "`, `"..."`, `". "`)
+collapses to `.` or `..` at the OS layer and would resolve to the current or
+parent directory. Rust's `Path` only special-cases the exact strings `.`/`..`,
+so these otherwise parse as ordinary components and also pass the lexical
+containment check below. They are rejected explicitly on Windows. Any filename
+containing a separator is already rejected, so only a standalone
+all-dots-and-spaces name can reach this rule; on POSIX these are legitimate,
+distinct filenames and are accepted.
+
+On Windows a colon (`:`) is also rejected. A colon is never valid in a basename
+and, like the drive-relative case, contains no path separator so it slips past
+the separator check. It introduces two escapes: NTFS **alternate data streams**
+(`script.sh:evil` opens the `evil` stream *of the `script.sh` file object*, so
+one embedded file's declared filename can attach data to another embedded
+file's stream) and drive-relative anchors (`C:evil`, `C:`). On POSIX `:` is an
+ordinary filename character and is accepted.
+
+**Out of scope — Windows reserved device names.** Names such as `NUL`, `CON`,
+`PRN`, `AUX`, `COM1`–`COM9`, and `LPT1`–`LPT9` parse as ordinary `Normal`
+components and are *not* rejected. Writing to `<files_dir>\NUL` silently
+discards the file's contents rather than escaping the directory, so this is a
+correctness footgun (an embedded file ending up empty with no error) rather
+than a containment escape. Robust detection is fiddly — the reservation is
+case-insensitive, applies to the name before the first `.` (so `NUL.txt` is
+also reserved), and a naive list risks false positives on legitimate
+filenames — so it is deliberately left out of this containment-focused check.
+
+After the filename is joined to the target directory, the sessions layer makes
+a final containment check: the resulting path is lexically normalized (`.`/`..`
+collapsed, no filesystem access or symlink resolution) and must still lie
+within the session files directory, otherwise the same
+`SessionError::EmbeddedFilePath` is raised with reason "resolves to a path
+outside the session files directory". This backs up the per-component
+validation so a bug there cannot lead to a write outside the session
+directory. The check requires both paths to be rooted; this holds because
+`Session::with_config` absolutizes the configured session root (and
+`EmbeddedFiles::new` documents that its directory must be absolute), so the
+guard is unreachable in practice and acts as a fail-closed backstop rather than
+a silently-assumed precondition. Lexical `..` handling is only sound for rooted
+paths, so a relative path is rejected outright.
 
 This check is not required for correctness when the model layer is
 functioning. It provides protection against:
@@ -163,3 +223,57 @@ This is what makes `Env.File.*` / `Task.File.*` available to `let` bindings
 while letting file `data` reference let-bound values. It is only possible
 because `filename` is a plain string (2023-09 schema, not `@fmtstring`), so
 path allocation never depends on `let` values.
+
+## Wrap Environment File Path Caching
+
+Wrap hooks (`onWrapEnvEnter`, `onWrapTaskRun`, `onWrapEnvExit`) may reference
+the wrap environment's `Env.File.*` symbols. Unlike normal environment/step
+scripts where each action invocation has a fresh `EmbeddedFiles` instance, wrap
+hooks fire repeatedly (once per inner environment enter/exit, once per task) and
+must present stable file paths across invocations.
+
+### Design
+
+The `Session` maintains a per-wrap-environment cache
+(`wrap_env_file_records: HashMap<EnvironmentIdentifier, EmbeddedFiles>`):
+
+- **First invocation (cache miss):** `allocate_file_paths()` allocates paths
+  and writes empty files (unnamed) or validates filenames (named). The
+  `EmbeddedFiles` instance is stored in the cache.
+- **Subsequent invocations (cache hit):** `register_file_paths()` re-registers
+  the previously allocated paths into the current action's symbol table without
+  allocating new paths or creating files on disk.
+- **Every invocation:** `write_file_contents()` is called AFTER
+  `seed_wrapped_action_symbols()` so file `data` resolves against the post-lets
+  symbol table. This means each invocation starts from the authored content,
+  which may reference values that change between invocations.
+
+### Ordering
+
+The ordering at each wrap-hook dispatch site is:
+
+```
+register/allocate file paths → seed_wrapped_action_symbols (evaluates lets) → write file contents
+```
+
+This matches the standard two-phase flow (`allocate → lets → write`) and
+ensures the wrap env's `let` bindings can reference `{{Env.File.*}}`.
+
+### Eviction
+
+The cache entry is removed unconditionally alongside other environment teardown
+(the `environments.remove` and `environments_entered.pop` calls) in
+`exit_environment`, before the exit script runs. This ensures the cache is
+cleared even when the exit script fails, so a re-entered environment always gets
+fresh allocations. The on-disk files are NOT deleted — they reside in the
+session's files directory and are cleaned up with it at session end.
+
+### `register_file_paths`
+
+```rust
+pub(crate) fn register_file_paths(&self, symtab: &mut SymbolTable) -> Result<(), SessionError>;
+```
+
+Iterates the previously allocated `FileRecord`s and sets each record's symbol
+to its filename path in the symbol table. Does not allocate paths, create files,
+or mutate `self.records`. Logs a "Reusing embedded file paths" message.

@@ -381,6 +381,62 @@ mod path_traversal {
         assert_rejects("C:\\Windows\\evil.exe", "must not contain path separators");
     }
 
+    // Windows drive-relative anchors and NTFS alternate-data-stream names
+    // contain a colon but no `/` or `\`, so they slip past the separator check.
+    // The colon check rejects them explicitly. This is platform-specific: on
+    // POSIX `:` is an ordinary filename character, so the tests only run on
+    // Windows.
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_drive_relative() {
+        assert_rejects("D:relative", "must not contain ':'");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_drive_relative_with_name() {
+        assert_rejects("C:evil.exe", "must not contain ':'");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_bare_drive() {
+        assert_rejects("C:", "must not contain ':'");
+    }
+
+    // NTFS alternate data stream: `script.sh:evil` opens the `evil` stream of
+    // the `script.sh` file object rather than a file of that literal name.
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_ads_stream() {
+        assert_rejects("script.sh:evil", "must not contain ':'");
+    }
+
+    // A colon is a legitimate filename character on POSIX and must be accepted
+    // there — the rejection is Windows-only.
+    #[cfg(unix)]
+    #[test]
+    fn accepts_colon_on_posix() {
+        allocate_with_tainted("a:b").expect("colon filename should be accepted on POSIX");
+    }
+
+    // Windows strips trailing dots and spaces from the final path component, so
+    // a name made only of dots and spaces collapses to `.`/`..` at the OS layer
+    // and escapes the target directory. Any name with a separator is already
+    // caught above, so only these standalone forms reach the dedicated check.
+    // On POSIX they are ordinary filenames, so the tests only run on Windows.
+    #[cfg(windows)]
+    #[test]
+    fn rejects_dotdot_trailing_space() {
+        assert_rejects(".. ", "must not consist only of dots and spaces");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_triple_dot() {
+        assert_rejects("...", "must not consist only of dots and spaces");
+    }
+
     #[test]
     fn rejects_nested_subdirectory() {
         assert_rejects("sub/evil.sh", "must not contain path separators");
@@ -417,4 +473,86 @@ mod path_traversal {
         // Dots in the middle of a filename are not path components.
         allocate_with_tainted("my.file.sh").expect("dotted filename should be accepted");
     }
+}
+
+// === SessionLimits: resolved-data cap and evaluation budgets (run time) ===
+
+/// Helper for the SessionLimits tests: a Step-scope materializer over a
+/// fresh temp dir with the given limits, holding one TEXT file whose
+/// `data` is the given format string.
+fn materialize_with_limits(
+    data: &str,
+    limits: openjd_sessions::SessionLimits,
+) -> Result<(), openjd_sessions::SessionError> {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::EmbeddedFile;
+    use openjd_model::symbol_table::SymbolTable;
+    use openjd_model::types::FileType;
+
+    let tmp = TempDir::new().unwrap();
+    let mut ef = EmbeddedFiles::new(
+        EmbeddedFilesScope::Step,
+        tmp.path().to_path_buf(),
+        "test-session",
+    )
+    .with_limits(limits);
+    let file = EmbeddedFile {
+        name: "F".to_string(),
+        file_type: FileType::Text,
+        filename: Some("f.txt".to_string()),
+        data: Some(FormatString::new(data).unwrap()),
+        runnable: None,
+        end_of_line: None,
+    };
+    let mut st = SymbolTable::new();
+    ef.allocate_file_paths(&[file], &mut st)?;
+    ef.write_file_contents(&st, None)
+}
+
+#[test]
+fn data_over_resolved_cap_rejected() {
+    // §6.1.2 sets no spec limit; the cap is the caller's opt-in
+    // (SessionLimits::max_resolved_data_len), enforced here at task
+    // execution — the enforcement boundary — on the final resolved value.
+    let limits = openjd_sessions::SessionLimits {
+        max_resolved_data_len: Some(100),
+        ..Default::default()
+    };
+    let err = materialize_with_limits("{{ 'A' * 200 }}", limits).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Failed to resolve embedded file 'F' data: resolved value is 200 characters, exceeding the maximum of 100."
+    );
+}
+
+#[test]
+fn data_at_resolved_cap_accepted() {
+    let limits = openjd_sessions::SessionLimits {
+        max_resolved_data_len: Some(100),
+        ..Default::default()
+    };
+    materialize_with_limits("{{ 'A' * 100 }}", limits).expect("at-cap data must be accepted");
+}
+
+#[test]
+fn data_over_cap_accepted_without_opt_in() {
+    materialize_with_limits("{{ 'A' * 200 }}", Default::default())
+        .expect("no cap by default (§6.1.2 sets no limit)");
+}
+
+#[test]
+fn data_evaluation_respects_memory_budget() {
+    // The evaluation memory budget bounds `data` expression evaluation
+    // exactly as it bounds every other format-string evaluation.
+    let limits = openjd_sessions::SessionLimits {
+        max_eval_memory_bytes: Some(1000),
+        ..Default::default()
+    };
+    let err = materialize_with_limits("{{ 'A' * 100000 }}", limits).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.starts_with("Failed to resolve embedded file 'F' data:")
+            && msg.contains("exceeded limit (1000 bytes)"),
+        "got: {msg}"
+    );
 }

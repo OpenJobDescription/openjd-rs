@@ -21,6 +21,44 @@ use openjd_model::template::parse::DocumentType;
 /// document and small enough to prevent runaway allocation.
 pub const MAX_FILE_INPUT_SIZE: u64 = 10 * 1024 * 1024;
 
+/// The CLI's default cap on the character length of a single resolved
+/// process argument: 32K characters, on every platform.
+///
+/// This is an opinionated *reasonable default*, not a promise about any
+/// particular operating system's limit. Template Schemas §5.1/§5.2 set
+/// no maximum on `command`/`args` but note that "the specific operating
+/// system that the command is run on will impose its own maximum
+/// length"; those OS limits are measured in different units than this
+/// cap (Linux `MAX_ARG_STRLEN` is 131072 **bytes**; the Windows command
+/// line is 32767 **UTF-16 code units**), so no character count maps
+/// exactly onto all of them. 32K characters is:
+///
+/// - far beyond any reasonable single argument, while catching
+///   template-generated blowups at `check` instead of as an opaque
+///   spawn failure on a worker;
+/// - conservative for Linux/macOS byte limits (a `char` is at most 4
+///   UTF-8 bytes, so 32K characters is at most 128 KiB — within
+///   `MAX_ARG_STRLEN`);
+/// - approximately the Windows command-line capacity (exceedable in
+///   UTF-16 units only by astral-plane characters, which cost two
+///   units each).
+///
+/// The worker's own run-time enforcement and the OS itself remain the
+/// authoritative limits.
+pub const DEFAULT_MAX_ARG_LEN: usize = 32 * 1024;
+
+/// The CLI's opinionated caller limits: library defaults plus
+/// `max_resolved_arg_len` set to [`DEFAULT_MAX_ARG_LEN`]. Library
+/// callers of `openjd-model` default to no cap (spec-conforming
+/// permissiveness); the CLI applies the default cap at every stage it
+/// drives so a hopeless argument fails early with a field-path error.
+pub fn caller_limits() -> openjd_model::CallerLimits {
+    openjd_model::CallerLimits {
+        max_resolved_arg_len: Some(DEFAULT_MAX_ARG_LEN),
+        ..Default::default()
+    }
+}
+
 /// Infer the template document format from its filename extension.
 pub fn document_type(path: &Path) -> DocumentType {
     if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
@@ -189,5 +227,28 @@ pub fn parse_extensions(arg: &Option<String>) -> Result<Vec<String>, String> {
             Ok(exts)
         }
         None => Ok(supported.iter().map(|s| s.to_string()).collect()),
+    }
+}
+
+#[cfg(test)]
+mod limits_tests {
+    use super::*;
+
+    #[test]
+    fn default_max_arg_len_is_32k_on_every_platform() {
+        // A uniform, opinionated default — not an exact encoding of any
+        // OS's limit (those are measured in bytes / UTF-16 units).
+        assert_eq!(DEFAULT_MAX_ARG_LEN, 32768);
+    }
+
+    #[test]
+    fn cli_caller_limits_cap_resolved_args_only() {
+        // CLI policy: an opinionated resolved-argument cap; everything
+        // else stays at the library default (None).
+        let limits = caller_limits();
+        assert_eq!(limits.max_resolved_arg_len, Some(DEFAULT_MAX_ARG_LEN));
+        assert_eq!(limits.max_resolved_data_len, None);
+        assert_eq!(limits.max_eval_memory_bytes, None);
+        assert_eq!(limits.max_eval_operations, None);
     }
 }

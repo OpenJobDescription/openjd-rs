@@ -316,6 +316,7 @@ mod tests {
             sticky_bit_policy: Default::default(),
             debug_collect_stdout: false,
             echo_openjd_directives: true,
+            limits: Default::default(),
         })
         .unwrap();
         let interrupted = Arc::new(AtomicBool::new(false));

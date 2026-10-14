@@ -60,11 +60,31 @@ execute(args)
   ├── Parse specificationVersion into TemplateSpecificationVersion
   │
   ├── Dispatch on template type
-  │   ├── Job template → parse::decode_job_template(value, extensions)
-  │   └── Environment template → parse::decode_environment_template(value, extensions)
+  │   ├── Job template → parse::decode_job_template(value, extensions, caller_limits)
+  │   └── Environment template → parse::decode_environment_template(value, extensions, caller_limits)
   │
   └── Print "Template at '<path>' passes validation checks."
 ```
+
+## Caller-Limits Policy
+
+Every decode call passes `common::caller_limits()` — the library defaults
+plus `max_resolved_arg_len` set to `common::DEFAULT_MAX_ARG_LEN` (32K
+characters, uniform across platforms). Template Schemas §5.1/§5.2 set no
+maximum of their own but note the OS imposes one; the CLI surfaces
+hopeless values at `check` time whenever an action `command`/`args` value
+is *guaranteed* to exceed the cap (the lower bound of every possible
+resolution is over it). 32K is an opinionated *reasonable default*, not
+an encoding of any particular OS limit — the real OS limits are measured
+in different units (Linux `MAX_ARG_STRLEN` is bytes; the Windows command
+line is UTF-16 code units), so no character count maps exactly onto
+them. 32K characters is at most 128 KiB of UTF-8 (within Linux's
+per-string limit) and approximately the Windows command-line capacity;
+the OS itself and the worker's run-time enforcement remain
+authoritative. The cap bounds each single argument — nothing bounds the
+argv element count or the argv total (`ARG_MAX`-style budgets are
+possible future work). Library users of `openjd-model` get no cap by
+default — this is CLI policy.
 
 ## Template Type Detection
 

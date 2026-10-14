@@ -99,7 +99,10 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
 - Type-specific validation via `validate_definition(limits)`
 
 **Environment uniqueness:**
-- Names unique across ALL environments (job + all step environments)
+- Names unique within `jobEnvironments`
+- Names unique within each step's `stepEnvironments`
+- A `stepEnvironments` name must not match any `jobEnvironments` name
+- Different steps may reuse a `stepEnvironments` name (only one step's environments are active in a session at a time)
 
 **Step validation:**
 - No duplicate step names
@@ -108,13 +111,60 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
 - Dependencies: no self-dependency, target must exist, no duplicates
 - Host requirements: amounts/attributes validation, capability name patterns,
   reserved scope checks (reserved scopes: `worker`, `job`, `step`, `task`),
-  standard capability value validation
+  standard capability value validation. Expression-free amount `min`/`max` values must
+  parse as finite numbers; validation of values containing expressions is deferred until
+  job creation.
+
+  A capability `name` is `@fmtstring` (§3.3.1 / §3.3.2), and its §3.3.1.1 / §3.3.2.1
+  constraints — at most 100 characters, the capability name pattern, and the reserved
+  scopes — apply to the resolved name. `helpers::check_capability_name` applies them in
+  three places, so the wording matches: here for a literal name, in pass 8 for a name
+  that is fully static (see the resolved-value table below), and at job creation for
+  the resolved name. Uniqueness within `amounts` and within `attributes` is checked
+  here between literal names, in pass 8 for any pair that includes a fully static name,
+  and at job creation between the resolved names. The standard-capability value checks
+  and the single-valued rule below key off the name, so they run for a literal name
+  here, for a fully static name in pass 8, and for every other name at job creation.
+
+  Two deferrals behave differently, so they are worth stating separately. An
+  `attributes[].anyOf` / `.allOf` element that is a format string skips the
+  `<AttributeCapabilityValue>` pattern, length and standard-value checks here, and job
+  creation resumes all three (see [job-creation.md](job-creation.md)). The single-valued
+  standard-attribute rule (`attr.worker.os.family` / `attr.worker.cpu.arch` `allOf` may
+  have at most one element) fires at decode when the list has **more than one element
+  that certainly contributes exactly one resolved element**: literals, and multi-segment
+  format strings, which always concatenate to a single string (Expression Language
+  §1.3.2). Only a whole-field single-expression element can null-skip or list-flatten,
+  making its resolved count unknowable here. Two or more certain elements violate the
+  rule under every possible resolution; lists with at most one defer the count to job
+  creation, which re-checks after resolution. An
+  amount `min`/`max`
+  that is a format string skips the non-negative, positive and `min <= max` bound checks
+  here, and job creation re-applies all three on the resolved value
+  (`check_resolved_amount_bounds`). The same holds for `chunks.defaultTaskCount` and
+  `chunks.targetRuntimeSeconds`: decode reads `as_i64()`, which is `None` for a format
+  string, and job creation rejects a resolved value below the §3.4.1.5 minimum rather than
+  clamping it.
+
+  Only the first failing group is reported on the job-creation path, for both attributes and
+  amounts, because the caller collects through `?`. Decode accumulates every violation.
 - Parameter space: ≤16 task parameters, no duplicate names, type allowed,
   range validation per type, combination expression validation
 - Script actions: command non-empty, length limits, `Task.File.*` references
   must match embedded file names
 - Embedded files: no duplicate names, type must be `TEXT`, valid identifier names,
-  data required, filename no path separators
+  data required; `filename` must be a single safe path component — non-empty, no
+  path separators (`/` or `\`), no null characters, and not `.` or `..`
+- SimpleAction fields (`bash`/`python`/`cmd`/`powershell`/`node`, §8; only
+  when FEATURE_BUNDLE_1 is enabled — otherwise pass 7 rejects the field):
+  the field is desugared (`SimpleActionKind::desugar`) and the resulting
+  `StepScript` runs through the *same* script-action and embedded-file
+  checks above, so the sugar and its expansion can never disagree on
+  what is valid. Plus one check the desugared form cannot express: an
+  authored `args: []` is rejected (the desugared list always holds the
+  generated file reference). See
+  [Reporting on desugared forms](#reporting-on-desugared-forms) for how
+  the paths are reported.
 
 **Cycle detection:**
 - Iterative DFS with tri-state marking (Unvisited/Started/Completed) on the step
@@ -130,7 +180,9 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
 Validates or rejects features gated behind `FEATURE_BUNDLE_1`:
 
 - **SimpleAction fields** (bash, python, cmd, powershell, node): Rejected without extension;
-  mutually exclusive with `script` when enabled
+  mutually exclusive with `script` when enabled. This pass only gates the
+  field's presence — its contents are validated by passes 6 and 8 on the
+  desugared form (see Pass 8 § Step Scripts and SimpleActions).
 - **`endOfLine` on embedded files**: Rejected without extension; must be `LF`, `CRLF`, or
   `AUTO` when enabled
 
@@ -163,11 +215,83 @@ template scope — with `Job.Name`/`Step.Name`/step `let` bindings where
 applicable, but no `Session.*`, no `Env.File.*`, no `Task.*`, and the
 template function library (no `apply_path_mapping`) — even though they sit
 on actions whose `command`/`args` are `@fmtstring[host]` and validate in
-session/task scope.
+session/task scope. One helper (`validate_action_timing_fs`, wrapped per
+environment by `validate_env_actions_timing_fs`, which adds the
+unresolved `WrappedAction.*` scope on the RFC 0008 wrap hooks) applies
+the `timeout` / `notifyPeriodInSeconds` / deferred `mode` constraints for
+every action; job creation calls the same helpers with the parameters
+bound, so a parameter-dependent violation (`timeout: "{{ Param.T }}"`
+with `T = 0`) fails at submission at the same path with the same
+message (see `specs/model/job-creation.md`).
 
 4. **Task scope** — For step scripts. Adds `Task.Param.*`, `Task.RawParam.*`,
    `Task.File.*`. With EXPR: adds `Job.Name`, `Step.Name`, `Env.File.*` from
    step and job environments.
+
+### Step Scripts and SimpleActions
+
+One helper (`validate_step_script_format_strings`) validates a `StepScript`
+in full — script-level `let` bindings (into the task symtab), the
+EXPR-gated complex-expression rejection, the `onRun` action's
+`command`/`args` in task scope with the opt-in `max_resolved_arg_len`
+bound, `timeout`/`cancelation` in template scope, each embedded file's
+`data` in task scope with the opt-in `max_resolved_data_len` bound, and
+the comprehension-variable rules (against the step's and the script's
+`let` names) on `command`, `args`, and embedded `data`.
+
+An authored `script` runs through it once. Each SimpleAction field the
+step sets (§8; only when FEATURE_BUNDLE_1 is enabled and the step has no
+`script` — pass 7 rejects both other cases, and validating sugar against
+a task symtab whose `Task.File.*` came from an authored `script` would
+report the generated file reference as undefined) is desugared and runs
+through the **same helper**, so a `bash:` step is validated exactly as
+its `script:` equivalent would be — the design goal that job creation
+"re-runs exactly the checks pass 8 applies" holds for sugar too. Each
+field gets a clone of the task symtab, so its `let` bindings do not leak
+into a sibling field. Consequences worth naming, because they changed
+behaviour (all of these previously passed `check`): a SimpleAction `let`
+without EXPR is now rejected (it was silently ignored); undefined
+references in `script`/`args`/`timeout`/`notifyPeriodInSeconds` are
+checked at decode; a static `script` over an opted-in
+`max_resolved_data_len` fails `check` (it used to surface only at
+`create_job`); and the pass-6 structural checks now reach the sugar —
+`script: ""`, `args: []`, control characters in `args[k]`, literal
+`timeout: 0` / `notifyPeriodInSeconds: 700`, and a dangling
+`{{Task.File.Other}}` in `args`.
+
+#### Reporting on desugared forms
+
+Every diagnostic must name a node that exists in the template the author
+wrote — never `steps[0] -> script -> embeddedFiles[0] -> data` for a step
+that has no `script`. Validation of a desugared SimpleAction therefore runs
+into a scratch `ValidationErrors` rooted at the synthesized `script` node
+(path `[]`), and `ValidationErrors::extend_remapped` re-roots each error
+through `SimpleActionKind::remap_desugared_path` before it joins the real
+collection (messages and structured detail are carried unchanged):
+
+| Desugared path (relative to `script`)          | Reported path (relative to `steps[i] -> <kind>`) |
+|------------------------------------------------|--------------------------------------------------|
+| `let[j]`                                       | `let[j]`                                         |
+| `actions -> onRun -> args`                     | `args`                                           |
+| `actions -> onRun -> args[k]`, `k ≥ offset`    | `args[k − offset]`                               |
+| `actions -> onRun -> timeout`                  | `timeout`                                        |
+| `actions -> onRun -> cancelation`              | `cancelation`                                    |
+| `embeddedFiles[0] -> data`                     | `script`                                         |
+| anything synthesized — `command`, the `onRun` node itself, `args[k]` for `k < offset`, the generated file's `name`/`filename` | the `<kind>` field itself |
+
+`offset` is `SimpleActionKind::synthetic_arg_count()`: the interpreter
+prefix (`/C` for `cmd`, `-File` for `powershell`, none otherwise) plus the
+generated `{{Task.File.<name>}}` reference — `1` for `bash`/`python`/`node`,
+`2` for `cmd`/`powershell`. Pass 6 and job creation use the same remap, so
+a violation is reported at the same authored path whichever stage finds
+it (a dangling `Task.File.*` reference is still reported by both pass 6 —
+at the field, as the script node — and pass 8 — at the arg — exactly as
+for an authored `script`).
+
+`SimpleAction.script` is a `FormatString` (the spec types it `<DataString>`,
+`@fmtstring[host]`), so malformed `{{ ... }}` syntax fails at parse time
+like every other format-string field; it no longer survives to job
+creation.
 
 ### Let Binding Validation
 
@@ -182,6 +306,16 @@ Let bindings are validated with these rules:
 - On error, the binding is added as `unresolved(ANY)` to the symbol table to prevent
   cascading type errors in subsequent bindings that reference it. (The `unresolved(ANY)`
   type is from the `openjd-expr` type system — see `specs/expr/type-system.md`.)
+- An expression error is reported at `<scope> -> let[j]` as
+  `Invalid expression in let binding '<name>': <error>`, the caret aligned to the
+  full `name = expr` binding string.
+
+The per-binding parse/evaluate/report step (`evaluate_let_binding`) is shared
+with job creation, which re-evaluates every `let` block with the parameters
+bound (`check_carried_forward_let_bindings`, without the structural rules
+above) — so a value-dependent failure reads identically at both stages,
+including the `unresolved(ANY)` continuation. See
+`specs/model/job-creation.md`.
 
 ### Function Libraries
 
@@ -197,6 +331,160 @@ Both libraries are obtained from
 `openjd_expr::FunctionLibrary::for_profile(&profile)`. The model's
 `SpecificationProfile::to_expr_profile(host_context)` helper produces the
 right `ExprProfile` from a model profile.
+
+### Path Format
+
+Every evaluation this pass performs — format-string expressions and
+`let` bindings alike — runs under `PathFormat::Posix`. Template
+validation happens outside host context, where the model keeps all
+paths POSIX (see `preprocess_job_parameters` in
+`specs/model/job-creation.md`, which explains why paths stay POSIX
+until template evaluation on the host); only `openjd-sessions`
+evaluates under
+`PathFormat::host()`. This keeps pass 8 consistent with job creation's
+re-checks (which read POSIX-format values out of their check symbol
+tables) and makes validation outcomes independent of the OS running
+them — a template accepted by `check` on Linux is accepted on Windows
+and vice versa.
+
+### Spec-Mandated Resolved-Value Constraints
+
+Pass 8 uses the values that static evaluation can resolve: for fields
+whose spec constraints apply to the *resolved* value — "after the format
+string has been resolved" in the spec's wording — the
+`openjd_expr::StaticResolution` returned by `validate_expressions` is
+checked against a per-field `ResolvedConstraint`. This makes template
+validation the earliest of the spec's three processing stages (Template
+Schemas §7.4: template validation, job creation, task execution on the
+worker host) to catch a violation that is already knowable, instead of
+deferring it to job submission or the worker. Two stages of checking:
+
+1. **Lower bound** — `min_resolved_string_len` holds for every possible
+   run-time resolution (unresolved segments contribute 0), so a bound
+   past the field's limit is a certain violation and fails `check`
+   without knowing the unresolved parts.
+2. **Full value check** — when `resolved_value` is present the field is
+   fully static, and the same check job creation or the worker would run
+   on the resolved value runs here, with matching error messages.
+
+| Field | Target type | Bound | Fully-static check |
+|---|---|---|---|
+| job `name` (Template Schemas §1.1.1) | `string` | ≤ `max_job_name_len` (128, 512 with FB1) | non-empty (§1.1.1 min 1); no Cc control characters |
+| attribute `anyOf`/`allOf` values (Template Schemas §3.3.2.2) | `string? \| list[string]` | when certainly a string: ≤ 100; for a standard capability, ≤ longest allowed value | `validate_attribute_capability_value` (charset / allowed set) on the value, or on each element when a list flattens; `null` skips the element |
+| amount / attribute `name` (Template Schemas §3.3.1.1 / §3.3.2.1) | `string` | ≤ 100 | `helpers::check_capability_name` (length, pattern, reserved scope); then, across the requirements, uniqueness of the known names, and for a standard attribute name the standard-value and single-valued `allOf` checks on literal values |
+| task param STRING/PATH range elements (Template Schemas §3.4.2) | `string? \| list[string]` | when certainly a string: ≤ 1024 | ≤ 1024 chars per element (a list flattens); PATH elements additionally must be non-empty (see below); `null` skips the element |
+| environment variable values (Template Schemas §4.4.2) | `string` | ≤ `max_env_var_value_len` (2048) | (length is the whole constraint) |
+| action `timeout` (FB1 `<posintstring>`, Template Schemas §5) | `int?` | soft cap: 100 chars | coerced integer > 0; `null` = unset |
+| `notifyPeriodInSeconds` (Template Schemas §5.3.2, FB1) | `int?` | soft cap: 100 chars | coerced integer > 0, ≤ 600; `null` = unset |
+| cancelation `mode` (FB1 deferred, Template Schemas §5.3) | `string?` | ≤ 21 chars (longest valid value) | `TERMINATE` / `NOTIFY_THEN_TERMINATE`; `null` = cancelation unset |
+| chunks `defaultTaskCount` (TASK_CHUNKING, Template Schemas §3.4.1.5) | `int` | soft cap: 100 chars | coerced integer ≥ 1 |
+| chunks `targetRuntimeSeconds` (TASK_CHUNKING, Template Schemas §3.4.1.5) | `int?` | soft cap: 100 chars | coerced integer ≥ 0; `null` = unset |
+| amount `min` / `max` (FB1 float strings, Template Schemas §3.3.1) | `float?` | soft cap: 100 chars | finite float, ≥ 0 / > 0; `null` = unset |
+| action `command` (Template Schemas §5.1) — **opt-in** `CallerLimits::max_resolved_arg_len` | none (resolution is `resolve_string_with`) | ≤ cap, unconditionally (everything renders inline into one string) | (length is the whole constraint) |
+| action `args[*]` (Template Schemas §5.2) — **opt-in** `CallerLimits::max_resolved_arg_len` | none (resolution is `resolve_with` with no target) | when certainly a string: ≤ cap | ≤ cap per final argv entry (a list flattens into one entry per element; `null` skips) |
+| embedded file `data` (Template Schemas §6.1.2) — **opt-in** `CallerLimits::max_resolved_data_len` | none (resolution is `resolve_string_with`) | ≤ cap, unconditionally | (length is the whole constraint) |
+
+The three opt-in rows are **caller policy, not spec constraints**: §5.1,
+§5.2 and §6.1.2 deliberately set no maximum (the OS imposes its own on
+process arguments), so the caps default to `None` and impose nothing.
+When a caller sets one, this pass fails early on the lower bound — and,
+unlike the spec-mandated rows (whose literal cases the raw-text passes
+cover), also checks a purely-literal field's exact raw length, since no
+other pass length-checks args or data. Job creation re-runs the same
+checks with the job parameters bound to real values (see the
+Resolved-Value Checks on Carried-Forward Fields section of
+`specs/model/job-creation.md`), and the
+session runtime enforces the cap on the final resolved values. The
+`openjd` CLI sets `max_resolved_arg_len` to an opinionated 32K-character
+default on every platform (see `specs/cli/`).
+
+Separately from per-field constraints, pass 8 evaluates every
+format-string expression — and every `let` binding, which is the same
+expression machinery — under the caller's **evaluation budgets**
+(`CallerLimits::max_eval_memory_bytes` / `max_eval_operations`, defaults:
+the Expression Language spec's 100 MB / 10 M). These bound each segment's
+evaluation here and — when the caller mirrors them into `SessionLimits` —
+at run time; they are the spec's own lever against expression blowups
+like `'A' * 10000000`. A lowered budget fails at this pass first, as an
+ordinary `Failed to parse interpolation expression` error at the field
+path. Job creation applies the same budgets to every evaluation it
+performs (see `specs/model/job-creation.md`).
+
+Numeric fields have no exact length maximum — leading zeros are legal and
+surrounding whitespace is tolerated in string forms — so they use a soft
+100-character cap (`MAX_RESOLVED_NUMERIC_LEN`): no reasonable numeric
+value is longer, and an i64 needs at most 20 characters.
+
+#### Target types: the general rule
+
+Expression Language **§1.3.2 "Evaluation Within Template Schemas"** gives
+every format-string field a target type for its whole-field expressions,
+derived from the schema context:
+
+- a required field of type `T` targets `T`;
+- an optional field targets `T?` — a `null` result means "field omitted";
+- a list item targets `T? | list[T]` — `null` skips the item, a list
+  flattens inline (the spec's worked example is `args`; range elements
+  and attribute values are list items under the same rule);
+- a format string with surrounding text always concatenates to a string,
+  with each expression evaluated unconstrained.
+
+Every constrained field follows the rule (for
+`timeout`/`notifyPeriodInSeconds`/`mode` the Template Schemas doc also
+mandates the target explicitly), and **the later processing stages
+resolve each field with the same target validation checks it with** —
+job name and range elements in `create_job`, attribute values and amounts
+in `instantiate`, environment variable values and the action numeric
+fields in `openjd-sessions`. A field's validation-time target must
+always equal its resolution-time target, or validation rejects values
+resolution accepts (or vice versa).
+
+Consequences of the target types worth naming:
+
+- For the scalar `string` fields, there is no `list[T] → string` or
+  `null → string` conversion, so a whole-field list or `null` is an
+  error. The job name additionally may not resolve to an empty string
+  (§1.1.1 minimum length 1; checked statically here, and on the resolved
+  value at job creation) and may not contain Cc control characters.
+  The control-character rule is enforced three ways: the raw-text pass
+  rejects a control character in the name's *literal* text (literal
+  runs appear verbatim in every resolution — expression source text is
+  exempt, since it never appears in a resolved value); this pass checks
+  the resolved value when the name is fully static; and job creation
+  re-checks the resolved name, catching a control character introduced
+  by an interpolated value. Environment variable values have **no**
+  minimum — §4.4.2's minimum length is 0 characters, so an empty
+  resolution is legal. Null (and lists) *inside* surrounding text remain
+  ordinary interpolation and render their display form.
+- For the list-item fields (range elements, attribute values), a
+  whole-field `null` skips the element and a list flattens inline —
+  `range: ["first", "{{ RawParam.Paths }}", "last"]` yields one element
+  per path between the literals. The per-element constraints apply to
+  each flattened element. Because null-skips can empty a list whose
+  non-emptiness was checked on field presence at decode, job creation
+  re-checks after resolution ("has no elements after resolution"). A
+  range that is entirely one expression can also use the whole-field
+  `<ListExpressionString>` form (Expression Language §1.3.12 "Task
+  Parameter Range Field Extensions").
+- The length bound for list-item fields only applies when the resolution
+  is certainly a string (`StaticResolution::resolved_type` is `string`):
+  a list-valued resolution distributes its characters across elements,
+  so the display-form length says nothing about any single element.
+- **Empty range elements are rejected for PATH only.** §3.4.2 sets a
+  minimum length of 1 on `<TaskParameterStringValue>` (which STRING and
+  PATH ranges share), but the reference implementation enforces it only
+  for PATH — its rationale being that an empty string is not a valid
+  path on any OS — and accepts empty STRING elements end to end
+  (`TaskParameterStringValueAsJob` is explicitly `min_length=0`). We
+  match that for compatibility. PATH elements are rejected at every
+  stage where they become knowable: a literal `""` at raw-text
+  validation (structure), a static resolution here, and an interpolated
+  value at job creation (`resolve_string_range`). STRING elements are
+  never rejected for emptiness.
+
+One further deliberate exclusion: **literals**. `validate_fs` skips
+literal format strings; the raw-text passes (structure/limits) already
+check those, and for a literal the raw text and resolved value coincide.
 
 ## Pass 9: TASK_CHUNKING Gating
 

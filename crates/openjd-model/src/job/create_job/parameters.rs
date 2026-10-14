@@ -659,7 +659,7 @@ impl MergedParameterDefinition {
 }
 
 /// Coerce an `ExprValue` to the target `JobParameterType`.
-pub(super) fn coerce_to_type(
+pub(super) fn coerce_to_job_parameter_type(
     value: &openjd_expr::ExprValue,
     param_type: JobParameterType,
 ) -> Result<openjd_expr::ExprValue, String> {
@@ -681,6 +681,18 @@ pub(super) fn coerce_to_type(
             if v.fract() == 0.0 && v >= i64::MIN as f64 && v < i64::MAX as f64 {
                 return Ok(ExprValue::Int(v as i64));
             }
+        }
+        // Numeric to BOOL, decided on the number rather than on its text. The fallback
+        // below coerces through the string form, and a float carries its original literal,
+        // so `1.0` would arrive at the bool table as "1.0" and be refused while `1` is
+        // accepted. The spec's BOOL coercion admits 1 and 0 in either numeric form -- the
+        // conformance corpus asserts it for both (2.15's IntValues and FloatValues) -- so
+        // decide it here and let anything else fall through to the same refusal.
+        (ExprValue::Int(i), JobParameterType::Bool) if *i == 0 || *i == 1 => {
+            return Ok(ExprValue::Bool(*i == 1));
+        }
+        (ExprValue::Float(f), JobParameterType::Bool) if f.value() == 0.0 || f.value() == 1.0 => {
+            return Ok(ExprValue::Bool(f.value() == 1.0));
         }
         _ => {}
     }
@@ -750,7 +762,7 @@ pub(super) fn coerce_from_str(
         | JobParameterType::ListListInt => {
             // Try parsing the string as JSON for list parameter coercion.
             if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(s) {
-                json_to_expr_value(&json_val)?
+                coerce_json_to_job_parameter_type(&json_val, param_type)?
             } else {
                 return Err(format!(
                     "Value '{s}' is not valid JSON for a list parameter."
@@ -771,6 +783,11 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
             | (ExprValue::Float(_), JobParameterType::Float)
             | (ExprValue::Bool(_), JobParameterType::Bool)
             | (ExprValue::RangeExpr(_), JobParameterType::RangeExpr)
+            // No `ListPath` arm: a stored `LIST[PATH]` is a `ListString` at every length.
+            // A path is context-sensitive, and job parameters are settled before there is
+            // a host context, so paths stay POSIX strings until template evaluation on the
+            // host. `ListPath` carries a `PathFormat`, which only means something after
+            // that boundary.
             | (
                 ExprValue::ListString(_, _),
                 JobParameterType::ListString | JobParameterType::ListPath
@@ -784,15 +801,18 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
 
 /// Options controlling how PATH parameters are resolved in [`preprocess_job_parameters`].
 pub struct PathParameterOptions<'a> {
-    /// Directory containing the job template. Relative PATH defaults are joined to this.
+    /// Directory containing the job template. Relative PATH defaults (and relative
+    /// `LIST[PATH]` default elements) are joined to this.
     pub job_template_dir: &'a str,
-    /// Current working directory. Relative PATH user values are joined to this.
+    /// Current working directory. Relative PATH user values (and relative `LIST[PATH]`
+    /// user value elements) are joined to this.
     pub current_working_dir: &'a str,
     /// How path strings are interpreted for absolute/relative checks.
     /// Use `PathFormat::host()` for local filesystem paths, or `PathFormat::Posix` /
     /// `PathFormat::Windows` when paths originate from a known platform.
     pub path_format: openjd_expr::path_mapping::PathFormat,
-    /// If `false`, PATH defaults must be relative and within `job_template_dir`.
+    /// If `false`, PATH defaults (and `LIST[PATH]` default elements) must be relative
+    /// and within `job_template_dir`.
     /// If `true`, absolute defaults and `..` walk-up are permitted.
     pub allow_template_dir_walk_up: bool,
     /// If `true`, URI values (`scheme://...`) in PATH parameters are preserved as-is
@@ -867,44 +887,39 @@ pub fn preprocess_job_parameters(
         .as_ref()
         .is_some_and(|exts| exts.iter().any(|e| e.as_str() == "EXPR"));
 
+    let resolver = PathResolver {
+        job_template_dir,
+        current_working_dir,
+        path_format,
+        allow_job_template_dir_walk_up,
+        allow_uri_path_values,
+        has_expr,
+    };
+
     for param in &merged {
         let param_type = param.param_type;
         if let Some(input_val) = input_values.get(&param.name) {
             let coerced_opt: Option<openjd_expr::ExprValue> =
                 if param.param_type == JobParameterType::Path {
                     let s = input_val.as_str_repr();
-                    if !s.is_empty() && has_expr && openjd_expr::uri_path::is_uri(&s) {
-                        // EXPR extension: URI handling depends on allow_uri_path_values
-                        if !allow_uri_path_values {
-                            errors.push(format!(
-                                "Parameter '{}': URI path values are not permitted. Got '{}'",
-                                param.name, s
-                            ));
+                    match resolver.resolve(&s, PathOrigin::Submitted, &param.name, None) {
+                        Ok(Some(resolved)) => Some(openjd_expr::ExprValue::String(resolved)),
+                        Ok(None) => Some(input_val.clone()),
+                        Err(e) => {
+                            errors.push(e);
                             None
-                        } else {
-                            Some(input_val.clone())
                         }
-                    } else if !(s.is_empty() || is_absolute_for_format_no_uri(&s, path_format)) {
-                        // Relative path: join with current_working_dir if non-empty.
-                        if current_working_dir.is_empty() {
-                            Some(input_val.clone())
-                        } else {
-                            Some(openjd_expr::ExprValue::String(
-                                openjd_expr::functions::path::non_uri_join(
-                                    current_working_dir,
-                                    &s,
-                                    path_format,
-                                ),
-                            ))
-                        }
-                    } else {
-                        Some(input_val.clone())
                     }
                 } else {
                     Some(input_val.clone())
                 };
             let Some(coerced) = coerced_opt else { continue };
-            match coerce_to_type(&coerced, param_type) {
+            let coerced = coerce_to_job_parameter_type(&coerced, param_type)
+                .map_err(|e| format!("Parameter '{}': {e}", param.name))
+                .and_then(|v| {
+                    resolver.resolve_list_path(v, param_type, PathOrigin::Submitted, &param.name)
+                });
+            match coerced {
                 Ok(expr_value) => {
                     if let Err(e) = param.check_constraints(&expr_value) {
                         errors.push(model_err_message(e));
@@ -918,56 +933,16 @@ pub fn preprocess_job_parameters(
                         );
                     }
                 }
-                Err(e) => {
-                    errors.push(format!("Parameter '{}': {e}", param.name));
-                }
+                Err(e) => errors.push(e),
             }
         } else if let Some(default) = &param.default {
-            let value_str_opt: Option<String> = if param.param_type == JobParameterType::Path
-                && !default.is_empty()
-            {
-                if has_expr && allow_uri_path_values && openjd_expr::uri_path::is_uri(default) {
-                    // EXPR + allow: URI preserved as-is
-                    Some(default.clone())
-                } else if has_expr
-                    && !allow_uri_path_values
-                    && openjd_expr::uri_path::is_uri(default)
-                {
-                    errors.push(format!(
-                        "Parameter '{}': URI path values are not permitted in defaults. Got '{}'",
-                        param.name, default
-                    ));
-                    None
-                } else if is_absolute_for_format_no_uri(default, path_format) {
-                    if !allow_job_template_dir_walk_up {
-                        errors.push(format!(
-                            "The default value of PATH parameter {} is an absolute path. Default paths must be relative, and are joined to the job template's directory.",
-                            param.name
-                        ));
+            let value_str_opt: Option<String> = if param.param_type == JobParameterType::Path {
+                match resolver.resolve(default, PathOrigin::Default, &param.name, None) {
+                    Ok(resolved) => Some(resolved.unwrap_or_else(|| default.clone())),
+                    Err(e) => {
+                        errors.push(e);
                         None
-                    } else {
-                        Some(default.clone())
                     }
-                } else if !allow_job_template_dir_walk_up
-                    && is_absolute_for_format(job_template_dir, path_format)
-                {
-                    let joined = join_for_format(job_template_dir, default, path_format);
-                    let normalized = normalize_path_str(&joined, path_format);
-                    let normalized_dir = normalize_path_str(job_template_dir, path_format);
-                    if !path_is_within(&normalized, &normalized_dir, path_format) {
-                        errors.push(format!(
-                            "The default value of PATH parameter {} references a path outside of the template directory. Walking up from the template directory is not permitted.",
-                            param.name
-                        ));
-                        None
-                    } else {
-                        Some(normalized)
-                    }
-                } else if is_absolute_for_format(job_template_dir, path_format) {
-                    let joined = join_for_format(job_template_dir, default, path_format);
-                    Some(normalize_path_str(&joined, path_format))
-                } else {
-                    Some(default.clone())
                 }
             } else {
                 Some(default.clone())
@@ -975,17 +950,29 @@ pub fn preprocess_job_parameters(
             let Some(value_str) = value_str_opt else {
                 continue;
             };
-            match coerce_from_str(&value_str, param_type) {
+            let coerced = coerce_from_str(&value_str, param_type)
+                .map_err(|e| format!("Parameter '{}': {e}", param.name))
+                .and_then(|v| {
+                    resolver.resolve_list_path(v, param_type, PathOrigin::Default, &param.name)
+                });
+            match coerced {
+                // Constraints apply to the joined default (§2.2, §2.12). `create_job`
+                // re-checks job-template parameters, but only this pass sees parameters
+                // contributed by environment templates.
                 Ok(expr_value) => {
-                    result.insert(
-                        param.name.clone(),
-                        JobParameterValue {
-                            param_type,
-                            value: expr_value,
-                        },
-                    );
+                    if let Err(e) = param.check_constraints(&expr_value) {
+                        errors.push(model_err_message(e));
+                    } else {
+                        result.insert(
+                            param.name.clone(),
+                            JobParameterValue {
+                                param_type,
+                                value: expr_value,
+                            },
+                        );
+                    }
                 }
-                Err(e) => errors.push(format!("Parameter '{}': {e}", param.name)),
+                Err(e) => errors.push(e),
             }
         } else {
             missing.push(param.name.clone());
@@ -1034,6 +1021,154 @@ fn model_err_message(e: ModelError) -> String {
     }
 }
 
+/// Where a PATH value came from, which decides how a relative value is resolved (§2.2).
+#[derive(Clone, Copy)]
+enum PathOrigin {
+    /// A value supplied at submission: a relative value is joined with the current
+    /// working directory. Absolute values and walk-up are permitted.
+    Submitted,
+    /// The template's `default`: it must be relative, is joined with the job template
+    /// directory, and must stay within it (unless walk-up is allowed).
+    Default,
+}
+
+/// Applies the §2.2 PATH value rules to a scalar PATH value or to one element of a
+/// `LIST[PATH]` value (§2.12 applies the same rules element-wise).
+struct PathResolver<'a> {
+    job_template_dir: &'a str,
+    current_working_dir: &'a str,
+    path_format: openjd_expr::path_mapping::PathFormat,
+    allow_job_template_dir_walk_up: bool,
+    allow_uri_path_values: bool,
+    has_expr: bool,
+}
+
+impl PathResolver<'_> {
+    /// Resolve one path string.
+    ///
+    /// Returns `Ok(None)` when the value is used as written (empty, absolute submitted
+    /// value, permitted URI, ...), `Ok(Some(resolved))` when it was joined and
+    /// lexically normalized, and `Err(message)` when it violates the rules. `index` is
+    /// the element position for a `LIST[PATH]` value, and `None` for a scalar PATH.
+    fn resolve(
+        &self,
+        s: &str,
+        origin: PathOrigin,
+        name: &str,
+        index: Option<usize>,
+    ) -> Result<Option<String>, String> {
+        let fmt = self.path_format;
+        if s.is_empty() {
+            return Ok(None);
+        }
+        // Element position in the `item[i]` form `check_constraints` also uses.
+        let at_item = || index.map(|i| format!(" at item[{i}]")).unwrap_or_default();
+        if self.has_expr && openjd_expr::uri_path::is_uri(s) {
+            // EXPR extension: URIs are never joined; whether they are accepted at all
+            // is the caller's policy.
+            if self.allow_uri_path_values {
+                return Ok(None);
+            }
+            let in_defaults = if matches!(origin, PathOrigin::Default) {
+                " in defaults"
+            } else {
+                ""
+            };
+            return Err(format!(
+                "Parameter '{name}': URI path values are not permitted{in_defaults}. Got '{s}'{}",
+                at_item()
+            ));
+        }
+        match origin {
+            PathOrigin::Submitted => {
+                if is_absolute_for_format_no_uri(s, fmt) || self.current_working_dir.is_empty() {
+                    return Ok(None);
+                }
+                let joined =
+                    openjd_expr::functions::path::non_uri_join(self.current_working_dir, s, fmt);
+                Ok(Some(normalize_path_str(&joined, fmt)))
+            }
+            PathOrigin::Default => {
+                let subject = match index {
+                    None => format!("The default value of PATH parameter {name}"),
+                    Some(_) => format!(
+                        "The default value of LIST[PATH] parameter {name}{}",
+                        at_item()
+                    ),
+                };
+                if is_absolute_for_format_no_uri(s, fmt) {
+                    if self.allow_job_template_dir_walk_up {
+                        return Ok(None);
+                    }
+                    return Err(format!(
+                        "{subject} is an absolute path. Default paths must be relative, and are joined to the job template's directory."
+                    ));
+                }
+                // Without walk-up the template dir was checked to be absolute up front;
+                // with walk-up a relative template dir leaves the default as written.
+                if !is_absolute_for_format(self.job_template_dir, fmt) {
+                    return Ok(None);
+                }
+                let joined = join_for_format(self.job_template_dir, s, fmt);
+                let normalized = normalize_path_str(&joined, fmt);
+                if !self.allow_job_template_dir_walk_up {
+                    let normalized_dir = normalize_path_str(self.job_template_dir, fmt);
+                    if !path_is_within(&normalized, &normalized_dir, fmt) {
+                        return Err(format!(
+                            "{subject} references a path outside of the template directory. Walking up from the template directory is not permitted."
+                        ));
+                    }
+                }
+                Ok(Some(normalized))
+            }
+        }
+    }
+
+    /// Resolve each element of a `LIST[PATH]` value; any other type is returned as is.
+    ///
+    /// Every element is checked so that all bad elements are reported, not just the
+    /// first. The messages are joined by newlines, matching the accumulated error
+    /// format of [`preprocess_job_parameters`].
+    fn resolve_list_path(
+        &self,
+        value: openjd_expr::ExprValue,
+        param_type: JobParameterType,
+        origin: PathOrigin,
+        name: &str,
+    ) -> Result<openjd_expr::ExprValue, String> {
+        if param_type != JobParameterType::ListPath {
+            return Ok(value);
+        }
+        // Coercion always produces a ListString for LIST[PATH]; see `value_matches_type`.
+        let openjd_expr::ExprValue::ListString(items, _) = value else {
+            return Ok(value);
+        };
+        let mut errors = Vec::new();
+        let resolved: Vec<openjd_expr::ExprValue> = items
+            .into_iter()
+            .enumerate()
+            .map(
+                |(i, item)| match self.resolve(&item, origin, name, Some(i)) {
+                    Ok(Some(r)) => openjd_expr::ExprValue::String(r),
+                    Ok(None) => openjd_expr::ExprValue::String(item),
+                    Err(e) => {
+                        errors.push(e);
+                        openjd_expr::ExprValue::String(item)
+                    }
+                },
+            )
+            .collect();
+        if !errors.is_empty() {
+            return Err(errors.join("\n"));
+        }
+        // Every element is a String, so make_list yields a ListString and cannot fail in
+        // practice; openjd-expr has no public Vec<String> -> ListString constructor, and
+        // the error is still propagated rather than unwrapped.
+        openjd_expr::ExprValue::make_list(resolved, openjd_expr::ExprType::STRING)
+            .map_err(|e| format!("Parameter '{name}': Invalid list value: {e}"))
+    }
+}
+
 /// Check whether a path string is absolute according to the given path format.
 ///
 /// Delegates to `openjd_expr::functions::path::is_absolute` which handles
@@ -1075,33 +1210,44 @@ fn join_for_format(
 /// `preprocess_job_parameters`) should be aware that filesystem-level
 /// canonicalization (e.g. `std::fs::canonicalize`) is needed downstream
 /// before performing actual file I/O to prevent symlink-based traversal.
+///
+/// Under [`PathFormat::Windows`] both `/` and `\` separate components and
+/// drive-letter and UNC roots are recognized. Under POSIX only `/` is a
+/// separator; a backslash is an ordinary filename character, as in Python's
+/// `posixpath.normpath`.
 fn normalize_path_str(path: &str, format: openjd_expr::path_mapping::PathFormat) -> String {
     use openjd_expr::path_mapping::PathFormat;
-    let sep = match format {
-        PathFormat::Windows => '\\',
-        PathFormat::Posix | PathFormat::Uri => '/',
-    };
+    let is_windows = format == PathFormat::Windows;
+    let sep = if is_windows { '\\' } else { '/' };
+    let is_sep = |c: char| c == '/' || (is_windows && c == '\\');
+    let bytes = path.as_bytes();
 
     // Detect and preserve the root prefix
-    let (root, rest, min_components) = if path.len() >= 3
-        && path.as_bytes()[0].is_ascii_alphabetic()
-        && path.as_bytes()[1] == b':'
-        && (path.as_bytes()[2] == b'\\' || path.as_bytes()[2] == b'/')
+    let (root, rest, min_components) = if is_windows
+        && bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && is_sep(bytes[2] as char)
     {
         // Windows drive root: "C:\" or "C:/"
         let root = format!("{}:{sep}", path.chars().next().unwrap());
         (root, &path[3..], 0)
-    } else if path.starts_with("\\\\") || path.starts_with("//") {
+    } else if is_windows && bytes.len() >= 2 && is_sep(bytes[0] as char) && is_sep(bytes[1] as char)
+    {
         // UNC path — server and share components must be preserved
         (format!("{sep}{sep}"), &path[2..], 2)
-    } else if path.starts_with('/') || path.starts_with('\\') {
+    } else if !is_windows && path.starts_with("//") && !path.starts_with("///") {
+        // POSIX permits an implementation-defined meaning for exactly two leading
+        // slashes; preserve them as posixpath.normpath does.
+        ("//".to_string(), &path[2..], 0)
+    } else if path.starts_with(is_sep) {
         (sep.to_string(), &path[1..], 0)
     } else {
         (String::new(), path, 0)
     };
 
     let mut components: Vec<&str> = Vec::new();
-    for part in rest.split(['/', '\\']) {
+    for part in rest.split(is_sep) {
         match part {
             ".." => {
                 if components.len() > min_components {
@@ -1145,7 +1291,93 @@ fn path_is_within(path: &str, base: &str, format: openjd_expr::path_mapping::Pat
     }
 }
 
+/// The element type of a list parameter type, or `None` for a scalar type.
+///
+/// `LIST[LIST[INT]]` yields `LIST[INT]`, so nesting is handled by the same recursion
+/// rather than a special case.
+pub(super) fn list_element_type(param_type: JobParameterType) -> Option<JobParameterType> {
+    Some(match param_type {
+        JobParameterType::ListString => JobParameterType::String,
+        JobParameterType::ListPath => JobParameterType::Path,
+        JobParameterType::ListInt => JobParameterType::Int,
+        JobParameterType::ListFloat => JobParameterType::Float,
+        JobParameterType::ListBool => JobParameterType::Bool,
+        JobParameterType::ListListInt => JobParameterType::ListInt,
+        _ => return None,
+    })
+}
+
+/// Convert a `serde_json::Value` to an `ExprValue` of the declared parameter type.
+///
+/// [`json_to_expr_value`] maps JSON onto `ExprValue` variants structurally, so a JSON `1`
+/// becomes an `Int` whatever the parameter declared. That is not enough on its own: a
+/// `LIST[BOOL]` of `[1, 0]` has to end up a list of `Bool`, since anything downstream that
+/// asks for the value at its declared type gets `Cannot coerce int to bool` from the
+/// expression engine, which is right to refuse a lossy conversion.
+///
+/// So each leaf is coerced to the declared type through [`coerce_to_job_parameter_type`],
+/// the same path the scalar types take. `LIST[T]` therefore accepts exactly what `T`
+/// accepts, by construction rather than by a parallel table. A leaf that already matches
+/// its type is returned untouched.
+///
+/// A value that is not a list where a list type is declared is an error: the declared type
+/// is the only thing that can say so, and no later stage checks it.
+pub(super) fn coerce_json_to_job_parameter_type(
+    val: &serde_json::Value,
+    param_type: JobParameterType,
+) -> Result<openjd_expr::ExprValue, String> {
+    match (val, list_element_type(param_type)) {
+        // A list parameter: recurse, carrying the element type down. LIST[LIST[INT]]
+        // recurses twice and reaches the Int arm at the leaves.
+        (serde_json::Value::Array(arr), Some(element_type)) => {
+            let elements: Vec<openjd_expr::ExprValue> = arr
+                .iter()
+                .map(|element| coerce_json_to_job_parameter_type(element, element_type))
+                .collect::<Result<_, _>>()?;
+            // The hint types an empty list only, so it must name the variant the elements
+            // above produce. A PATH element coerces to an `ExprValue::String`, because a
+            // job parameter stores a path as a string -- see `value_matches_type` -- so
+            // `STRING` is the hint for `LIST[PATH]`. `PATH` here gave the empty case a
+            // `ListPath`, a second representation. Issue #389.
+            let hint = match element_type {
+                JobParameterType::Path => openjd_expr::ExprType::STRING,
+                other => other.expr_type(),
+            };
+            openjd_expr::ExprValue::make_list(elements, hint)
+                .map_err(|e| format!("Invalid list value: {e}"))
+        }
+        // A list type whose value is not a list. Refused here because nothing downstream
+        // does: `check_constraints` has no arm for a scalar under a list type, so passing it
+        // through leaves a value that contradicts its own declared type.
+        (other, Some(_)) => Err(format!(
+            "Value is not a list for parameter type {}. Got {}.",
+            param_type.as_spec_str(),
+            json_type_name(other)
+        )),
+        // A leaf: convert by JSON type, then coerce to what the parameter declared.
+        (other, None) => {
+            let value = json_to_expr_value(other)?;
+            coerce_to_job_parameter_type(&value, param_type)
+        }
+    }
+}
+
+/// The JSON type of `val`, for diagnostics.
+fn json_type_name(val: &serde_json::Value) -> &'static str {
+    match val {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "a boolean",
+        serde_json::Value::Number(_) => "a number",
+        serde_json::Value::String(_) => "a string",
+        serde_json::Value::Array(_) => "a list",
+        serde_json::Value::Object(_) => "an object",
+    }
+}
+
 /// Convert a serde_json::Value to an ExprValue.
+///
+/// Structural only: the caller's declared type is not consulted. Prefer
+/// [`coerce_json_to_job_parameter_type`] when the declared type is known.
 pub(super) fn json_to_expr_value(
     val: &serde_json::Value,
 ) -> Result<openjd_expr::ExprValue, String> {
@@ -1247,6 +1479,35 @@ mod tests {
     }
 
     #[test]
+    fn normalize_posix_treats_backslash_as_filename_character() {
+        // Matches posixpath.normpath: only '/' separates components under POSIX.
+        assert_eq!(
+            normalize_path_str(r"/cwd/C:\foo\..\bar", PathFormat::Posix),
+            r"/cwd/C:\foo\..\bar"
+        );
+        assert_eq!(
+            normalize_path_str("/cwd/./a/../b", PathFormat::Posix),
+            "/cwd/b"
+        );
+        assert_eq!(
+            normalize_path_str("//srv/./x", PathFormat::Posix),
+            "//srv/x"
+        );
+        assert_eq!(
+            normalize_path_str("///srv/./x", PathFormat::Posix),
+            "/srv/x"
+        );
+    }
+
+    #[test]
+    fn normalize_windows_accepts_both_separators() {
+        assert_eq!(
+            normalize_path_str(r"C:\cwd/./a\..\b", PathFormat::Windows),
+            r"C:\cwd\b"
+        );
+    }
+
+    #[test]
     fn path_is_within_accepts_descendant_and_self() {
         assert!(path_is_within("/a/job1", "/a/job1", PathFormat::Posix));
         assert!(path_is_within("/a/job1/sub", "/a/job1", PathFormat::Posix));
@@ -1292,7 +1553,7 @@ mod tests {
     #[test]
     fn coerce_int_to_float_returns_ok() {
         let val = openjd_expr::ExprValue::Int(42);
-        let result = coerce_to_type(&val, JobParameterType::Float);
+        let result = coerce_to_job_parameter_type(&val, JobParameterType::Float);
         assert!(result.is_ok(), "int-to-float coercion should succeed");
         match result.unwrap() {
             openjd_expr::ExprValue::Float(f) => assert_eq!(f.value(), 42.0),
@@ -1304,7 +1565,274 @@ mod tests {
     fn coerce_large_int_to_float_returns_ok() {
         // Large i64 that loses precision as f64 but is still finite
         let val = openjd_expr::ExprValue::Int(i64::MAX);
-        let result = coerce_to_type(&val, JobParameterType::Float);
+        let result = coerce_to_job_parameter_type(&val, JobParameterType::Float);
         assert!(result.is_ok(), "large int-to-float coercion should succeed");
+    }
+
+    /// `LIST[T]` must accept exactly what `T` accepts.
+    ///
+    /// The regression these cover: list elements were built from their JSON type and the
+    /// declared element type was never consulted, so a `LIST[BOOL]` of `[1, 0]` became a
+    /// list of `Int`. Scalar `BOOL` accepted `1` all along, so one type behaved two ways.
+    mod list_elements_coerce_to_the_declared_type {
+        use super::*;
+        use openjd_expr::ExprValue;
+
+        /// Every list type, its element type, and a value written in the element type's
+        /// alternative accepted form rather than its canonical one.
+        fn coerce(json: &str, param_type: JobParameterType) -> Result<ExprValue, String> {
+            let value: serde_json::Value = serde_json::from_str(json).expect("test json");
+            coerce_json_to_job_parameter_type(&value, param_type)
+        }
+
+        #[test]
+        fn list_bool_accepts_every_form_scalar_bool_accepts() {
+            // The scalar table is true/false, 1/0, yes/no, on/off, case insensitive. Each
+            // of these is a LIST[BOOL] default the spec permits.
+            for json in [
+                "[true, false]",
+                "[1, 0]",
+                "[1.0, 0.0]",
+                r#"["true", "false"]"#,
+                r#"["yes", "no"]"#,
+                r#"["on", "off"]"#,
+                r#"["1", "0"]"#,
+                r#"["TRUE", "False"]"#,
+                r#"[true, 1, "yes", 0.0, "off"]"#,
+            ] {
+                let result = coerce(json, JobParameterType::ListBool);
+                let value = result.unwrap_or_else(|e| panic!("{json} rejected: {e}"));
+                match value {
+                    ExprValue::ListBool(_) => {}
+                    other => panic!("{json} produced {other:?}, expected ListBool"),
+                }
+            }
+        }
+
+        #[test]
+        fn list_bool_preserves_each_elements_truth_value() {
+            // Coercing the type must not flatten the values: mixed forms keep their sense.
+            let value = coerce(
+                r#"[true, 1, "yes", 0.0, "off"]"#,
+                JobParameterType::ListBool,
+            )
+            .expect("mixed forms should coerce");
+            match value {
+                ExprValue::ListBool(items) => {
+                    assert_eq!(items, vec![true, true, true, false, false]);
+                }
+                other => panic!("expected ListBool, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn list_bool_still_rejects_a_value_that_is_not_boolean_at_all() {
+            let error = coerce(r#"["maybe"]"#, JobParameterType::ListBool)
+                .expect_err("'maybe' is not a boolean");
+            assert!(
+                error.contains("not a valid boolean"),
+                "expected the scalar bool diagnostic, got: {error}"
+            );
+        }
+
+        #[test]
+        fn list_int_accepts_int_strings_as_scalar_int_does() {
+            match coerce(r#"["1", "2"]"#, JobParameterType::ListInt).expect("int strings") {
+                ExprValue::ListInt(items) => assert_eq!(items, vec![1, 2]),
+                other => panic!("expected ListInt, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn list_int_rejects_a_non_integer_element() {
+            let error =
+                coerce(r#"["x"]"#, JobParameterType::ListInt).expect_err("'x' is not an int");
+            assert!(
+                error.contains("not a valid integer"),
+                "expected the scalar int diagnostic, got: {error}"
+            );
+        }
+
+        #[test]
+        fn list_float_accepts_ints_and_float_strings() {
+            match coerce(r#"[1, "2.5", 3.5]"#, JobParameterType::ListFloat).expect("floats") {
+                ExprValue::ListFloat(items) => {
+                    let values: Vec<f64> = items.iter().map(|f| f.value()).collect();
+                    assert_eq!(values, vec![1.0, 2.5, 3.5]);
+                }
+                other => panic!("expected ListFloat, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn list_float_rejects_a_non_numeric_element() {
+            // Same shape as the LIST[INT] and LIST[BOOL] rejection tests: the element gets the
+            // scalar type's diagnostic, so a list is no more permissive than its element type.
+            let err = coerce(r#"[1.0, "abc"]"#, JobParameterType::ListFloat)
+                .expect_err("\"abc\" is not a float and must be refused");
+            assert!(
+                err.contains("float"),
+                "expected the scalar float diagnostic, got: {err}"
+            );
+        }
+
+        #[test]
+        fn list_string_and_list_path_take_strings_unchanged() {
+            for param_type in [JobParameterType::ListString, JobParameterType::ListPath] {
+                match coerce(r#"["a", "b"]"#, param_type).expect("strings") {
+                    ExprValue::ListString(items, _) => assert_eq!(items, vec!["a", "b"]),
+                    other => panic!("expected ListString for {param_type:?}, got {other:?}"),
+                }
+            }
+        }
+
+        #[test]
+        fn list_list_int_recurses_to_its_leaves() {
+            // LIST[LIST[INT]] has to coerce two levels down, which is why the element type
+            // is threaded through the recursion rather than special-cased.
+            match coerce(r#"[["1", 2], [3]]"#, JobParameterType::ListListInt).expect("nested") {
+                ExprValue::ListList(items, _, _) => {
+                    assert_eq!(items.len(), 2);
+                    match &items[0] {
+                        ExprValue::ListInt(inner) => assert_eq!(*inner, vec![1, 2]),
+                        other => panic!("expected inner ListInt, got {other:?}"),
+                    }
+                }
+                other => panic!("expected ListList, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn a_scalar_under_a_list_type_is_refused() {
+            // A list type needs a list. Nothing downstream checks this -- check_constraints has
+            // no arm for a scalar under a list type -- so a value that parses as a JSON scalar
+            // has to be refused here or it survives as a value contradicting its own type.
+            for (json, param_type, expected_got) in [
+                ("5", JobParameterType::ListInt, "a number"),
+                ("true", JobParameterType::ListBool, "a boolean"),
+                (r#""abc""#, JobParameterType::ListString, "a string"),
+                ("1.5", JobParameterType::ListFloat, "a number"),
+                (r#""/tmp""#, JobParameterType::ListPath, "a string"),
+                ("7", JobParameterType::ListListInt, "a number"),
+            ] {
+                let err = coerce(json, param_type).expect_err(&format!(
+                    "{json} must be refused for {param_type:?}, which needs a list"
+                ));
+                assert!(
+                    err.contains("is not a list") && err.contains(expected_got),
+                    "{json} for {param_type:?} gave an unhelpful diagnostic: {err}"
+                );
+            }
+        }
+
+        #[test]
+        fn empty_list_is_accepted_for_every_list_type() {
+            // An empty list has no elements to infer from, so the hint is the only thing that
+            // can type it. Assert the variant rather than just is_ok(): an untyped ListList
+            // parses too, and would hide a LIST[T] that is not a list of T. LIST[PATH] is a
+            // ListString, the same variant its non-empty form produces.
+            for param_type in [
+                JobParameterType::ListString,
+                JobParameterType::ListPath,
+                JobParameterType::ListInt,
+                JobParameterType::ListFloat,
+                JobParameterType::ListBool,
+                JobParameterType::ListListInt,
+            ] {
+                let value = coerce("[]", param_type)
+                    .unwrap_or_else(|e| panic!("empty list rejected for {param_type:?}: {e}"));
+                let typed = match (&value, param_type) {
+                    (
+                        ExprValue::ListString(v, _),
+                        JobParameterType::ListString | JobParameterType::ListPath,
+                    ) => v.is_empty(),
+                    (ExprValue::ListInt(v), JobParameterType::ListInt) => v.is_empty(),
+                    (ExprValue::ListFloat(v), JobParameterType::ListFloat) => v.is_empty(),
+                    (ExprValue::ListBool(v), JobParameterType::ListBool) => v.is_empty(),
+                    (ExprValue::ListList(v, _, _), JobParameterType::ListListInt) => v.is_empty(),
+                    _ => false,
+                };
+                assert!(
+                    typed,
+                    "empty list for {param_type:?} arrived as {value:?}, which is not the \
+                     variant its non-empty form produces"
+                );
+            }
+        }
+
+        #[test]
+        fn scalar_bool_accepts_the_same_numeric_forms_as_list_bool() {
+            // The numeric arms live in coerce_to_job_parameter_type, which scalars use too, so this is the
+            // one place a scalar type's behaviour does change: a scalar BOOL given the float
+            // 1.0 was refused before, because Float64 keeps the original literal and "1.0" is
+            // not in the string bool table. Int 1 was already accepted through that table.
+            // Pinned here so the widening is deliberate and stays symmetric with LIST[BOOL].
+            for (value, expected) in [
+                (ExprValue::Int(1), true),
+                (ExprValue::Int(0), false),
+                (
+                    ExprValue::Float(openjd_expr::value::Float64::new(1.0).unwrap()),
+                    true,
+                ),
+                (
+                    ExprValue::Float(openjd_expr::value::Float64::new(0.0).unwrap()),
+                    false,
+                ),
+            ] {
+                let got = coerce_to_job_parameter_type(&value, JobParameterType::Bool)
+                    .unwrap_or_else(|e| panic!("{value:?} rejected for scalar BOOL: {e}"));
+                assert_eq!(
+                    got,
+                    ExprValue::Bool(expected),
+                    "{value:?} coerced to the wrong boolean"
+                );
+            }
+
+            // Only 1 and 0 are admitted. Anything else falls through to the same refusal
+            // as before, so this is not a blanket numeric-to-bool conversion.
+            for value in [
+                ExprValue::Int(2),
+                ExprValue::Int(-1),
+                ExprValue::Float(openjd_expr::value::Float64::new(0.5).unwrap()),
+                ExprValue::Float(openjd_expr::value::Float64::new(2.0).unwrap()),
+            ] {
+                assert!(
+                    coerce_to_job_parameter_type(&value, JobParameterType::Bool).is_err(),
+                    "{value:?} is not a boolean and must be refused for scalar BOOL"
+                );
+            }
+        }
+
+        #[test]
+        fn scalar_types_take_the_untyped_element_path() {
+            // list_element_type returns None for them, so they skip the element recursion
+            // entirely and go straight to the declared type's own coercion.
+            assert!(list_element_type(JobParameterType::Bool).is_none());
+            assert!(list_element_type(JobParameterType::Int).is_none());
+            assert!(list_element_type(JobParameterType::Float).is_none());
+            assert!(list_element_type(JobParameterType::String).is_none());
+            assert!(list_element_type(JobParameterType::Path).is_none());
+            assert!(list_element_type(JobParameterType::RangeExpr).is_none());
+        }
+
+        #[test]
+        fn every_list_type_has_an_element_type() {
+            // Pin the whole set: a list type added without a mapping falls back to the
+            // untyped path, where its elements silently keep their JSON types.
+            for (param_type, expected) in [
+                (JobParameterType::ListString, JobParameterType::String),
+                (JobParameterType::ListPath, JobParameterType::Path),
+                (JobParameterType::ListInt, JobParameterType::Int),
+                (JobParameterType::ListFloat, JobParameterType::Float),
+                (JobParameterType::ListBool, JobParameterType::Bool),
+                (JobParameterType::ListListInt, JobParameterType::ListInt),
+            ] {
+                assert_eq!(
+                    list_element_type(param_type),
+                    Some(expected),
+                    "{param_type:?} must declare its element type"
+                );
+            }
+        }
     }
 }

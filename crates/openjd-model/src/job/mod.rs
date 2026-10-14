@@ -32,6 +32,7 @@ use std::hash::{Hash, Hasher};
 use indexmap::IndexMap;
 use openjd_expr::format_string::FormatString;
 use openjd_expr::symbol_table::SerializedSymbolTable;
+use openjd_expr::value::Float64;
 use openjd_expr::ExprValue;
 use openjd_expr::RangeExpr;
 use serde::{Deserialize, Serialize};
@@ -118,8 +119,9 @@ pub struct Step {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StepScript {
+    #[serde(rename = "let", alias = "letBindings")]
     pub let_bindings: Option<Vec<String>>,
     pub actions: StepActions,
     pub embedded_files: Option<Vec<EmbeddedFile>>,
@@ -172,8 +174,9 @@ impl Hash for Environment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EnvironmentScript {
+    #[serde(rename = "let", alias = "letBindings")]
     pub let_bindings: Option<Vec<String>>,
     pub actions: EnvironmentActions,
     pub embedded_files: Option<Vec<EmbeddedFile>>,
@@ -345,7 +348,7 @@ pub enum TaskParameter {
         chunks: Option<ResolvedChunks>,
     },
     Float {
-        range: Vec<f64>,
+        range: Vec<Float64>,
     },
     String {
         range: Vec<String>,
@@ -359,8 +362,9 @@ pub enum TaskParameter {
     },
 }
 
-/// Manual because the `Float` variant's `Vec<f64>` has no `Hash`;
-/// floats hash via `hash_f64`.
+/// Manual because `f64` has no `Hash`; those hash via `hash_f64`. A float range
+/// element hashes its rendering too: same number, different spelling means a
+/// different command line, so not the same job.
 impl Hash for TaskParameter {
     fn hash<H: Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
@@ -371,8 +375,11 @@ impl Hash for TaskParameter {
             }
             Self::Float { range } => {
                 range.len().hash(state);
-                for &f in range {
-                    hash_f64(f, state);
+                for elem in range {
+                    // Hash the rendering as well as the value, because `Float64`'s
+                    // own `Hash` takes only the value and `PartialEq` compares both.
+                    hash_f64(elem.value(), state);
+                    elem.to_display_string().hash(state);
                 }
             }
             Self::String { range } | Self::Path { range } => range.hash(state),

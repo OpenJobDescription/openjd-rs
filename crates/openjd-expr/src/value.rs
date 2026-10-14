@@ -5,6 +5,7 @@
 //! Runtime values for expression evaluation.
 
 use crate::path_mapping::PathFormat;
+use crate::py_escape::py_string_literal;
 use crate::range_expr::RangeExpr;
 use crate::types::{ExprType, TypeCode};
 
@@ -14,10 +15,58 @@ use crate::types::{ExprType, TypeCode};
 /// Fields are private. Construction goes through [`Float64::new`] or
 /// [`Float64::with_str`], which enforce the no-NaN / no-Inf / no-`-0.0`
 /// invariants that the `Hash` and `PartialEq` impls on `ExprValue` depend on.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone)]
 pub struct Float64 {
     value: f64,
     original: Option<Box<str>>,
+}
+
+/// Equal when they render the same string, so a `Float64` carrying a preserved
+/// spelling differs from a bare one only when that spelling differs from the
+/// formatted value: `with_str(2.5, "2.5")` equals `new(2.5)`, `with_str(2.5, "2.50")`
+/// does not. Consistent with `Hash`, which hashes the value alone and so is merely
+/// coarser.
+impl PartialEq for Float64 {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value && self.display_cow() == other.display_cow()
+    }
+}
+
+/// Serialized as the `<float> | <floatstring>` union the template itself uses: a
+/// number when there is no preserved spelling, that spelling as a string when there
+/// is. Round-trips exactly, and matches `ExprValue::transport_value`, which already
+/// renders a float as its display string.
+impl serde::Serialize for Float64 {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        match &self.original {
+            Some(text) => s.serialize_str(text),
+            None => s.serialize_f64(self.value),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Float64 {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+        // Routed through the constructors so a deserialized value cannot skip the
+        // no-NaN/no-Inf/no-`-0.0` invariants that `Hash` and `PartialEq` rely on.
+        match serde_json::Value::deserialize(d)? {
+            serde_json::Value::Number(n) => {
+                let v = n
+                    .as_f64()
+                    .ok_or_else(|| D::Error::custom("invalid float"))?;
+                Self::new(v).map_err(|e| D::Error::custom(e.to_string()))
+            }
+            serde_json::Value::String(s) => {
+                let trimmed = s.trim();
+                let v = trimmed
+                    .parse::<f64>()
+                    .map_err(|_| D::Error::custom(format!("Cannot parse '{s}' as float")))?;
+                Self::with_str(v, trimmed.to_string()).map_err(|e| D::Error::custom(e.to_string()))
+            }
+            _ => Err(D::Error::custom("Expected a float or a float string")),
+        }
+    }
 }
 
 impl std::hash::Hash for Float64 {
@@ -118,6 +167,30 @@ pub(crate) fn int_float_cmp(i: i64, v: f64) -> Option<std::cmp::Ordering> {
     }))
 }
 
+/// Whether `text` spells zero: an all-zero mantissa, whatever the exponent.
+///
+/// `"0.00"`, `"-0.0"` and `"0e5"` all do; `"1e-400"` does not, even though it
+/// parses to `0.0` by underflow. Decided from the text rather than from the parsed
+/// value, because the parse is lossy in both directions — `"0." + "0"*400 + "1"`
+/// also underflows, and its digits are exactly what a `<floatstring>` is for.
+#[must_use]
+fn text_spells_zero(text: &str) -> bool {
+    let unsigned = text.strip_prefix(['+', '-']).unwrap_or(text);
+    let mantissa = unsigned.split(['e', 'E']).next().unwrap_or(unsigned);
+    mantissa.bytes().any(|b| b.is_ascii_digit()) && mantissa.bytes().all(|b| b == b'0' || b == b'.')
+}
+
+/// `text` with a leading sign removed when it spells zero, which has no sign.
+/// The digits stay, so `"-0.00"` keeps its two decimal places.
+#[must_use]
+fn unsign_zero_text(text: &str) -> &str {
+    if text_spells_zero(text) {
+        text.strip_prefix(['+', '-']).unwrap_or(text)
+    } else {
+        text
+    }
+}
+
 /// Normalize -0.0 to 0.0 (matches Python's copysign normalization).
 fn normalize_zero(v: f64) -> f64 {
     if v == 0.0 {
@@ -161,11 +234,9 @@ impl Float64 {
         }
         Ok(Self {
             value: v,
-            original: if v == 0.0 && s != "0.0" {
-                None
-            } else {
-                Some(s.into_boxed_str())
-            },
+            // Zero has no sign, and `value` was normalized above, so keeping a
+            // signed spelling would render one the value does not have.
+            original: Some(unsign_zero_text(&s).to_string().into_boxed_str()),
         })
     }
     /// The underlying `f64` value.
@@ -380,11 +451,14 @@ impl ExprValue {
             v.len() * std::mem::size_of::<String>() + v.iter().map(|s| s.len()).sum::<usize>();
         Self::ListPath(v, fmt, heap)
     }
-    fn make_list_list(v: Vec<ExprValue>, elem_hint: ExprType) -> Self {
+    /// Build a `ListList` whose element type is `elem_type` — for a
+    /// non-empty list, the join of the element types computed by
+    /// [`make_list`](Self::make_list) (`[[], [1]]` holds `list[int]`
+    /// elements whichever comes first).
+    fn make_list_list(v: Vec<ExprValue>, elem_type: ExprType) -> Self {
         // Vec buffer holds ExprValues inline; only count their additional heap allocations
         let heap = v.len() * std::mem::size_of::<ExprValue>()
             + v.iter().map(|e| e.heap_size()).sum::<usize>();
-        let elem_type = v.first().map(|e| e.expr_type()).unwrap_or(elem_hint);
         Self::ListList(v, elem_type, heap)
     }
 
@@ -438,6 +512,28 @@ impl ExprValue {
     /// Uses `hint_type` for empty lists to determine the element type.
     /// Returns an error if any element is a `ListList`, which would create 3+ nesting levels.
     ///
+    /// The element types must be mutually compatible under the
+    /// list-literal join (RFC 0005 §"List Literal Type Inference"): identical
+    /// types, the int/float and path/string pairs, and lists whose element
+    /// types join the same way, with `list[nulltype]` (the empty list)
+    /// compatible with every list type. An incompatible element — including
+    /// a list beside a list of a different, non-promotable element type,
+    /// such as `list[int]` beside `list[string]` — is an error
+    /// (`make_list expected list[int] element, got list[string]`). A
+    /// list-of-lists result carries the joined element type, so `[[], [1]]`
+    /// is `list[list[int]]`.
+    ///
+    /// A `Null` element is rejected (`Cannot create list from null
+    /// elements`): a list cannot hold `null`.
+    ///
+    /// An `Unresolved` element is rejected with an error: `make_list`
+    /// constructs concrete lists, so no constructed value nests an
+    /// `Unresolved` inside a list and
+    /// [`is_unresolved`](Self::is_unresolved) is a complete concreteness
+    /// check. Validation-time list expressions with unknown elements are
+    /// handled by the evaluator, which hoists them to a top-level
+    /// `ExprValue::unresolved(list[T])` before any list is built.
+    ///
     /// When called from an evaluator or function implementation that has
     /// an [`EvalContext`](crate::function_library::EvalContext), prefer
     /// [`make_list_checked`](Self::make_list_checked) so that an oversized
@@ -458,6 +554,39 @@ impl ExprValue {
                 "Lists may be nested at most 2 levels deep",
             ));
         }
+        // make_list constructs concrete lists: an `Unresolved` element is
+        // rejected — uniformly, rather than silently nesting inside a
+        // `ListList` (which would break the invariant that a top-level
+        // `is_unresolved()` check is a complete concreteness test).
+        // Validation-time list expressions with unknown elements are the
+        // evaluator's job: `eval_list` and the comprehension evaluator hoist
+        // to a top-level `unresolved(list[T])` before any list is built.
+        if elements.iter().any(Self::is_unresolved) {
+            return Err(crate::error::ExpressionError::type_error(
+                "make_list expected concrete elements, got unresolved",
+            ));
+        }
+        // A list cannot hold `null` (the join below treats a `nulltype`
+        // element as contributing nothing); report it as such.
+        if elements.iter().any(|e| matches!(e, Self::Null)) {
+            return Err(crate::error::ExpressionError::type_error(
+                "Cannot create list from null elements",
+            ));
+        }
+        // Element homogeneity, by the same join the evaluator's
+        // validation-time hoisting uses (`types::join_list_element`), so a
+        // combination accepted here is accepted there and vice versa. This
+        // also guards the promotion branches below: they assume every
+        // element is one side of the promoted pair.
+        let joined =
+            match crate::types::join_list_element_types(elements.iter().map(Self::expr_type)) {
+                Ok(joined) => joined,
+                Err((expected, got)) => {
+                    return Err(crate::error::ExpressionError::type_error(format!(
+                        "make_list expected {expected} element, got {got}"
+                    )))
+                }
+            };
         // Convert empty ListList([], NULLTYPE) elements to match typed list siblings.
         // e.g. in [[], [1]], the empty [] should become ListInt([]) not ListList([], NULLTYPE).
         let has_empty_listlist = elements.iter().any(
@@ -512,6 +641,8 @@ impl ExprValue {
                 _ => Self::ListList(Vec::new(), ExprType::NULLTYPE, 0),
             });
         }
+        // Non-empty, so the fold above produced a type.
+        let joined = joined.unwrap_or(ExprType::NULLTYPE);
         let has_int = elements.iter().any(|e| matches!(e, Self::Int(_)));
         let has_float = elements.iter().any(|e| matches!(e, Self::Float(_)));
         if has_int && has_float {
@@ -546,7 +677,7 @@ impl ExprValue {
                     );
                 }
             }
-            return Ok(Self::make_list_list(elements, ExprType::NULLTYPE));
+            return Ok(Self::make_list_list(elements, joined));
         }
         // Nested list path/string promotion: list[path] + list[string] → list[string]
         let has_list_path = elements
@@ -561,7 +692,7 @@ impl ExprValue {
                     *e = Self::make_list_string(std::mem::take(paths));
                 }
             }
-            return Ok(Self::make_list_list(elements, ExprType::NULLTYPE));
+            return Ok(Self::make_list_list(elements, joined));
         }
         // Path/string promotion: mix of path and string → string
         let has_path = elements.iter().any(|e| matches!(e, Self::Path { .. }));
@@ -643,7 +774,7 @@ impl ExprValue {
                     fmt,
                 )
             }
-            _ if elements[0].is_list() => Self::make_list_list(elements, ExprType::NULLTYPE),
+            _ if elements[0].is_list() => Self::make_list_list(elements, joined),
             Self::RangeExpr(_) => Self::make_list_list(elements, ExprType::RANGE_EXPR),
             _ => {
                 return Err(crate::error::ExpressionError::type_error(format!(
@@ -659,6 +790,16 @@ impl ExprValue {
         Self::Unresolved(constraint)
     }
     /// Returns `true` if this is an `Unresolved` value.
+    ///
+    /// This is a complete concreteness check: unresolved values never nest
+    /// inside lists. The evaluator hoists list expressions and
+    /// comprehensions with any unresolved element to a top-level
+    /// `unresolved(list[T])` before a list is built, function calls return
+    /// a top-level unresolved whenever any argument is unresolved, and
+    /// [`make_list`](Self::make_list) rejects unresolved elements outright.
+    /// A value for which this returns `false` is therefore fully concrete —
+    /// exactly the value run-time resolution would produce from the same
+    /// inputs.
     pub fn is_unresolved(&self) -> bool {
         matches!(self, Self::Unresolved(_))
     }
@@ -724,126 +865,446 @@ impl ExprValue {
 
     /// Coerce a value to the given type.
     ///
-    /// Coercion is non-destructive: only conversions that don't lose
+    /// Coercion answers two questions in order, and keeping them separate is
+    /// what makes abstract targets (`any`, unions) well defined:
+    ///
+    /// 1. **Satisfaction** — does the value's type already satisfy the
+    ///    target, per [`ExprType::satisfies`]? Then return it **unchanged**.
+    ///    This covers `int` against `int | string`, `list[int]` against
+    ///    `list[any]`, and every value against `any`. RFC 0005 §"Implicit
+    ///    Type Coercion" calls for coercion only "where the intent is
+    ///    obvious"; a value that is already acceptable needs none.
+    /// 2. **Conversion** — otherwise apply the non-destructive conversion
+    ///    table. A conversion needs a single concrete type to produce, so
+    ///    the target is first decomposed into its candidate destinations;
+    ///    the first destination that converts wins.
+    ///
+    /// Conversion is non-destructive: only conversions that don't lose
     /// information are attempted (`int → float`, `int → string`, etc).
     ///
-    /// An `any` target is unconstrained: every value is returned
-    /// unchanged.
+    /// Because step 1 returns the value unchanged, the result's type is the
+    /// *source* type rather than the target — coercing a `list[int]` to
+    /// `list[any]` yields a `list[int]`, not a `list[any]`. In both steps the
+    /// result is guaranteed to satisfy the target.
     ///
-    /// For union targets, the rules are:
-    ///
-    /// 1. **Match first** — if the value's type is already one of the
-    ///    union members, return it unchanged.
-    /// 2. **Per-member coercion** — otherwise try non-destructive
-    ///    coercion to each scalar member (skipping `nulltype`, `list[T]`,
-    ///    and nested unions). Return the first successful coercion.
-    /// 3. **Error** — if neither step yields a result.
-    ///
-    /// This mirrors the behavior of the pure-Python reference
-    /// implementation's `evaluate.try_coerce_nondestructive` loop and
-    /// satisfies RFC 0005 §"Implicit Type Coercion": `int | string`
-    /// accepts an `int` value as-is rather than rejecting it.
+    /// Unresolved values have no payload to inspect, so they run the same two
+    /// steps at the type level and return an unresolved value constrained to
+    /// the result type. Unbound type variables in the constraint read as
+    /// wildcards — a concrete value can never have one in its type — so
+    /// `unresolved[list[T1]]` coerces exactly as `unresolved[list[any]]`.
+    /// Checks that need a
+    /// concrete payload, such as parsing a string as an integer, are deferred
+    /// until resolution. The type-level table may therefore accept a pair
+    /// that the concrete value later rejects, but it must never reject one
+    /// the concrete value would accept — that would fail a template during
+    /// validation that would have run correctly. This invariant is enforced
+    /// mechanically by `tests/integration/test_coercion_drift.rs`, which
+    /// sweeps sample values against target types and checks the two paths
+    /// agree.
     pub fn coerce(self, target: &ExprType, path_format: PathFormat) -> Result<Self, String> {
-        // `any` is the unconstrained type: every value satisfies it, so
-        // coercion is a no-op (RFC 0005 §"Type System").
-        if target.code() == TypeCode::Any {
+        // Unresolved values carry a type constraint and nothing else, so the
+        // decision has to be made entirely at the type level.
+        if let ExprValue::Unresolved(constraint) = &self {
+            return match Self::coerce_type(constraint, target) {
+                Some(result_type) => Ok(ExprValue::unresolved(result_type)),
+                None => Err(format!("Cannot coerce {constraint} to {target}")),
+            };
+        }
+        // Step 1: already acceptable, so pass through untouched.
+        let source_type = self.expr_type();
+        if source_type.satisfies(target) {
             return Ok(self);
         }
-        // Match-first: also accepts the case where the target is a union
-        // and the value's type is one of its members. Falls back to the
-        // existing strict-equality behavior for non-union targets.
-        if self.expr_type() == *target {
-            return Ok(self);
-        }
-        if target.code() == TypeCode::Union && target.match_type(&self.expr_type()).is_some() {
-            return Ok(self);
-        }
-        // For union targets that don't match by type-membership: try
-        // non-destructive coercion to each scalar member. Skip
-        // `nulltype` (only matches `null`, which would have matched
-        // above), `list[T]` (lists must satisfy by membership, not
-        // coercion — matching the reference), and nested unions.
-        if target.code() == TypeCode::Union {
-            for member in target.params() {
-                if matches!(
-                    member.code(),
-                    TypeCode::NullType | TypeCode::List | TypeCode::Union
-                ) {
-                    continue;
-                }
-                if let Ok(coerced) = self.clone().coerce(member, path_format) {
-                    return Ok(coerced);
-                }
+        // Step 2: convert toward a candidate destination.
+        let destinations = Self::conversion_destinations(&source_type, target);
+        // A destination equal to the whole target — every non-union target —
+        // is the only rule the caller could have meant, so convert directly
+        // without a clone and keep the rule's specific diagnostic (for
+        // example the range_expr and integer-overflow messages).
+        if let [only] = destinations[..] {
+            if only == target {
+                return self.convert_to(only, path_format);
             }
-            return Err(format!("Cannot coerce {} to {target}", self.expr_type()));
         }
-        match (&self, target.code()) {
+        // Union target: the first destination that converts wins, and a
+        // failure along the way is not an error as long as a later
+        // destination succeeds. No individual diagnostic survives, since
+        // naming one member would misreport the target the caller asked for.
+        for dest in destinations {
+            if let Ok(converted) = self.clone().convert_to(dest, path_format) {
+                return Ok(converted);
+            }
+        }
+        Err(format!("Cannot coerce {source_type} to {target}"))
+    }
+
+    /// The types a value of type `source` may be converted *to* in order to
+    /// satisfy `target`, in the order they should be tried.
+    ///
+    /// A union contributes each of its members, because converting to any one
+    /// of them satisfies the union. Members are ordered **non-list before
+    /// list** — converting to a scalar produces a single value whose cost does
+    /// not depend on the source, while converting to a list materializes
+    /// elements and can fail on size limits — so a `range_expr` against
+    /// `list[int] | string` becomes the `string` its canonical form already
+    /// is, rather than expanding the range. Within each group the order is the
+    /// source type's preference, per [`Self::destination_rank`], with the
+    /// union's normalized order as the tie-break.
+    ///
+    /// Types that denote no runtime values — type variables,
+    /// `noreturn`, `unresolved[T]`, signatures, and lists parameterized by
+    /// any of them — contribute nothing, so a target made only of those
+    /// yields no destinations and coercion fails. `nulltype` likewise
+    /// contributes nothing: nothing coerces *into* `null`.
+    fn conversion_destinations<'t>(source: &ExprType, target: &'t ExprType) -> Vec<&'t ExprType> {
+        if target.code() != TypeCode::Union {
+            return if Self::is_conversion_destination(target) {
+                vec![target]
+            } else {
+                Vec::new()
+            };
+        }
+        let (mut scalars, mut lists): (Vec<&ExprType>, Vec<&ExprType>) = target
+            .params()
+            .iter()
+            .filter(|m| Self::is_conversion_destination(m))
+            .partition(|m| m.code() != TypeCode::List);
+        // Stable sorts, so equally ranked destinations keep the union's
+        // normalized order.
+        scalars.sort_by_key(|d| Self::destination_rank(source, d));
+        lists.sort_by_key(|d| Self::destination_rank(source, d));
+        scalars.extend(lists);
+        scalars
+    }
+
+    /// The scalar conversion rules, in one table with the source type's
+    /// preference among them: `Some(rank)` when a `source → dest` conversion
+    /// rule exists (lower ranks are tried first), `None` when no rule does
+    /// (RFC 0005 §"Implicit Type Coercion").
+    ///
+    /// This is the single source of truth for *which* scalar pairs convert
+    /// and *in what order* — [`Self::destination_rank`] orders destinations
+    /// by it and [`Self::convert_type`] tests rule existence with it, so a
+    /// new rule cannot gain one without the other. Only [`Self::convert_to`]
+    /// repeats the pairs, in its match arms, because it needs the payloads;
+    /// `tests/integration/test_coercion_drift.rs` checks that copy against
+    /// this one.
+    ///
+    /// The order is the destination table in RFC 0005 §"Implicit Type
+    /// Coercion", restated in `specs/expr/values.md` § Destinations: a value
+    /// prefers to stay within its own kind, and a conversion that can fail
+    /// is tried before one that always succeeds.
+    ///
+    /// There is deliberately no `string → nulltype` rule: turning the text
+    /// `"null"` into `null` is a transport-decode rule belonging to
+    /// [`Self::from_str_coerce`], not an implicit coercion (RFC 0005).
+    ///
+    /// # Example
+    ///
+    /// Coercing the string `"7"` to the union target `path | float | int`
+    /// ranks the members
+    ///
+    /// ```text
+    /// scalar_conversion_rank(String, Path)  == Some(4)
+    /// scalar_conversion_rank(String, Float) == Some(1)
+    /// scalar_conversion_rank(String, Int)   == Some(0)
+    /// ```
+    ///
+    /// so conversion tries `int`, then `float`, then `path`, and `"7"`
+    /// becomes the int `7`. The same target given `"7.5"` fails the `int`
+    /// parse and becomes the float `7.5`; given `"out/"` it falls through
+    /// to the path `out/`.
+    fn scalar_conversion_rank(source: TypeCode, dest: TypeCode) -> Option<u8> {
+        match (source, dest) {
+            (TypeCode::Int, TypeCode::Float)
+            | (TypeCode::Float, TypeCode::Int)
+            | (TypeCode::String, TypeCode::Int) => Some(0),
+            // `bool`, `path`, and `range_expr` each have `string` as their
+            // only destination, so their rank is never compared against a
+            // sibling; 1 groups them with the other to-string rules.
+            (
+                TypeCode::Bool
+                | TypeCode::Int
+                | TypeCode::Float
+                | TypeCode::Path
+                | TypeCode::RangeExpr,
+                TypeCode::String,
+            )
+            | (TypeCode::String, TypeCode::Float) => Some(1),
+            (TypeCode::String, TypeCode::Bool) => Some(2),
+            (TypeCode::String, TypeCode::RangeExpr) => Some(3),
+            (TypeCode::String, TypeCode::Path) => Some(4),
+            _ => None,
+        }
+    }
+
+    /// The source type's preference among conversion destinations of the
+    /// same shape, per [`Self::scalar_conversion_rank`]: lower ranks are
+    /// tried first.
+    ///
+    /// A list source ranks list destinations by its element type's preference,
+    /// recursively, so `list[float]` tries `list[int]` before `list[string]`.
+    /// Pairs with no conversion rule rank last; their relative order is
+    /// irrelevant because conversion fails for them anyway.
+    fn destination_rank(source: &ExprType, dest: &ExprType) -> u8 {
+        if source.code() == TypeCode::List && dest.code() == TypeCode::List {
+            if let (Some(s), Some(d)) = (source.params().first(), dest.params().first()) {
+                return Self::destination_rank(s, d);
+            }
+        }
+        Self::scalar_conversion_rank(source.code(), dest.code()).unwrap_or(u8::MAX)
+    }
+
+    /// Whether a conversion rule could produce a value of this exact type.
+    ///
+    /// `nulltype` is not among them. RFC 0005 lists no `X → nulltype`
+    /// conversion, and discounts `nulltype` when counting a union target's
+    /// candidate scalar types, so `null` is reached only by already being
+    /// `null` — which satisfaction handles. Turning the text `"null"` into
+    /// `null` is a transport-decode rule belonging to
+    /// [`Self::from_str_coerce`], not an implicit coercion; keeping it out
+    /// here is what stops it from firing inside an unrelated union such as
+    /// `int?`.
+    fn is_conversion_destination(t: &ExprType) -> bool {
+        match t.code() {
+            TypeCode::Bool
+            | TypeCode::Int
+            | TypeCode::Float
+            | TypeCode::String
+            | TypeCode::Path
+            | TypeCode::RangeExpr => true,
+            // A produced list carries its element type, so that type must be
+            // fully bindable: one that denotes runtime values, with no type
+            // variable anywhere in it — not even inside a union member,
+            // which `denotes_runtime_values` alone would tolerate.
+            TypeCode::List => matches!(t.params(), [elem]
+                if elem.denotes_runtime_values() && !elem.is_symbolic()),
+            _ => false,
+        }
+    }
+
+    /// Apply the non-destructive conversion table toward a single concrete
+    /// destination.
+    fn convert_to(self, dest: &ExprType, path_format: PathFormat) -> Result<Self, String> {
+        match (&self, dest.code()) {
             (ExprValue::Int(i), TypeCode::Float) => {
                 Ok(ExprValue::Float(Float64::new(*i as f64).unwrap()))
             }
-            (ExprValue::Float(f), TypeCode::Int) => {
-                let v = f.value();
-                if v.fract() == 0.0 && v.is_finite() {
-                    // Range check before the cast: `as i64` silently
-                    // saturates for out-of-range values (e.g. 1e30 would
-                    // become i64::MAX), so reject them with an integer
-                    // overflow error instead.
-                    if !float_fits_i64(v) {
-                        return Err(
-                            "Integer overflow: result is outside the 64-bit signed range"
-                                .to_string(),
-                        );
-                    }
-                    Ok(ExprValue::Int(v as i64))
-                } else {
-                    Err(format!(
-                        "Cannot coerce float to int: {} is not a whole number",
-                        f.to_display_string()
-                    ))
-                }
-            }
+            (ExprValue::Float(f), TypeCode::Int) => Self::convert_float_to_int(f),
             (ExprValue::Bool(b), TypeCode::String) => Ok(ExprValue::String(
                 if *b { "true" } else { "false" }.to_string(),
             )),
             (ExprValue::Int(i), TypeCode::String) => Ok(ExprValue::String(i.to_string())),
             (ExprValue::Float(f), TypeCode::String) => Ok(ExprValue::String(f.to_display_string())),
-            (ExprValue::String(s), _) => ExprValue::from_str_coerce(s, target, path_format),
+            (ExprValue::String(s), _) => ExprValue::from_str_coerce(s, dest, path_format),
             (ExprValue::Path { value, .. }, TypeCode::String) => {
                 Ok(ExprValue::String(value.clone()))
             }
             (ExprValue::RangeExpr(r), TypeCode::String) => Ok(ExprValue::String(r.to_string())),
-            (ExprValue::RangeExpr(r), TypeCode::List) => {
-                // coerce() runs outside any EvalContext (post-evaluation
-                // target-type hook, public API), so no operation or memory
-                // budget applies here. Cap the materialization at the
-                // evaluator's default operation limit: a range longer than
-                // that could not have been built as a list through any
-                // budgeted path either.
-                if r.len_u64() > crate::eval::DEFAULT_OPERATION_LIMIT as u64 {
-                    return Err(format!(
-                        "Cannot coerce range_expr of {} elements to list[int] \
-                         (maximum {})",
-                        r.len_u64(),
-                        crate::eval::DEFAULT_OPERATION_LIMIT
-                    ));
-                }
-                Ok(ExprValue::ListInt(r.to_vec()))
-            }
-            _ if target.code() == TypeCode::List && target.params().len() == 1 => {
-                let elem_type = &target.params()[0];
-                if let Some(elements) = self.list_elements() {
-                    let coerced: Result<Vec<_>, _> = elements
-                        .into_iter()
-                        .map(|e| e.coerce(elem_type, path_format))
-                        .collect();
-                    Ok(ExprValue::make_list(coerced?, elem_type.clone())
-                        .map_err(|e| e.to_string())?)
-                } else {
-                    Err(format!("Cannot coerce {} to {target}", self.expr_type()))
-                }
-            }
-            _ => Err(format!("Cannot coerce {} to {target}", self.expr_type())),
+            (ExprValue::RangeExpr(r), TypeCode::List) => Self::convert_range_expr_to_list(r, dest),
+            _ if dest.code() == TypeCode::List => self.convert_list_elementwise(dest, path_format),
+            _ => Err(format!("Cannot coerce {} to {dest}", self.expr_type())),
         }
+    }
+
+    /// `float → int`, only for values that are exactly integral.
+    fn convert_float_to_int(f: &Float64) -> Result<Self, String> {
+        let v = f.value();
+        if v.fract() != 0.0 || !v.is_finite() {
+            return Err(format!(
+                "Cannot coerce float to int: {} is not a whole number",
+                f.to_display_string()
+            ));
+        }
+        // Range check before the cast: `as i64` silently saturates for
+        // out-of-range values (e.g. 1e30 would become i64::MAX), so reject
+        // them with an integer overflow error instead.
+        if !float_fits_i64(v) {
+            return Err("Integer overflow: result is outside the 64-bit signed range".to_string());
+        }
+        Ok(ExprValue::Int(v as i64))
+    }
+
+    /// `range_expr → list[int]`, the only list type a range expression
+    /// implicitly coerces to (RFC 0005).
+    ///
+    /// Implicit rules do not chain, so the materialized `list[int]` is never
+    /// widened element-wise toward the destination; templates use the
+    /// explicit `list()` conversion (RFC 0006) when they want that. The
+    /// destination is therefore accepted only when a `list[int]` already
+    /// satisfies it, which covers `list[int]`, `list[any]`, and
+    /// `list[int | string]`, and rejects `list[float]` and `list[string]`.
+    fn convert_range_expr_to_list(
+        r: &crate::range_expr::RangeExpr,
+        dest: &ExprType,
+    ) -> Result<Self, String> {
+        if !ExprType::list(ExprType::INT).satisfies(dest) {
+            return Err(format!(
+                "Cannot coerce range_expr to {dest}: a range expression only \
+                 implicitly coerces to list[int] (use list() for an explicit \
+                 conversion)"
+            ));
+        }
+        // coerce() runs outside any EvalContext (post-evaluation target-type
+        // hook, public API), so no operation or memory budget applies here.
+        // Cap the materialization at the evaluator's default operation limit:
+        // a range longer than that could not have been built as a list
+        // through any budgeted path either.
+        if r.len_u64() > crate::eval::DEFAULT_OPERATION_LIMIT as u64 {
+            return Err(format!(
+                "Cannot coerce range_expr of {} elements to list[int] (maximum {})",
+                r.len_u64(),
+                crate::eval::DEFAULT_OPERATION_LIMIT
+            ));
+        }
+        Ok(ExprValue::ListInt(r.to_vec()))
+    }
+
+    /// `list[T] → list[U]`, coercing each element to `U`.
+    ///
+    /// An empty list converts to every list type, since there are no
+    /// elements to check.
+    fn convert_list_elementwise(
+        self,
+        dest: &ExprType,
+        path_format: PathFormat,
+    ) -> Result<Self, String> {
+        let elem_type = &dest.params()[0];
+        let Some(elements) = self.list_elements() else {
+            return Err(format!("Cannot coerce {} to {dest}", self.expr_type()));
+        };
+        let coerced: Result<Vec<_>, _> = elements
+            .into_iter()
+            .map(|e| e.coerce(elem_type, path_format))
+            .collect();
+        ExprValue::make_list(coerced?, elem_type.clone()).map_err(|e| e.to_string())
+    }
+
+    /// The type-level counterpart of [`Self::coerce`], for unresolved values.
+    ///
+    /// Returns the type the coerced value would have, or `None` if no rule
+    /// applies. Mirrors `coerce`'s two steps: satisfaction returns the
+    /// **source** type (the value would pass through unchanged), conversion
+    /// returns the union of the types every applicable destination rule
+    /// produces — the payload decides which one wins at runtime, so the
+    /// result is a sound over-approximation of the concrete result's type.
+    /// The mirror is maintained by hand;
+    /// `tests/integration/test_coercion_drift.rs` checks it stays consistent
+    /// with the concrete path.
+    fn coerce_type(source: &ExprType, target: &ExprType) -> Option<ExprType> {
+        // An unresolved constraint may itself be unresolved; the innermost
+        // constraint is what the resolved value's type will be.
+        if source.code() == TypeCode::Unresolved {
+            return source
+                .params()
+                .first()
+                .and_then(|inner| Self::coerce_type(inner, target));
+        }
+        if !target.denotes_runtime_values() {
+            return None;
+        }
+        // A concrete value can never have a type variable in its type, so an
+        // unbound variable in a source constraint reads as a wildcard: the
+        // resolved value will have *some* concrete type, which is exactly
+        // the set of possibilities `any` denotes. Erasing variables to `any`
+        // preserves the shape around them — `list[T1]` becomes `list[any]`,
+        // still a list, so only list rules apply — and the rules below need
+        // no case for variables at all. Such constraints arise from generic
+        // return types whose variable no parameter binds, e.g. list
+        // concatenation's `(list[T1], list[T2]) -> list[T3]`.
+        let erased;
+        let source = if source.is_symbolic() {
+            erased = source.erase_type_vars();
+            &erased
+        } else {
+            source
+        };
+        // A source of wholly unknown type could resolve to anything, so no
+        // pair can be ruled out and nothing narrower than the target can be
+        // promised. Promise only the members a value could land in, though:
+        // an unusable union member (`T1` in `int | T1`) denotes no runtime
+        // values, and copying it would produce a constraint that does not
+        // satisfy the target.
+        if source.code() == TypeCode::Any {
+            if target.code() == TypeCode::Union {
+                let usable: Vec<_> = target
+                    .params()
+                    .iter()
+                    .filter(|m| m.denotes_runtime_values())
+                    .cloned()
+                    .collect();
+                return Some(ExprType::union(usable));
+            }
+            return Some(target.clone());
+        }
+        // A union source resolves to exactly one of its members. Keep the
+        // members that have a rule and union their results; dropping the
+        // rest is what lets `unresolved[int | list[int]]` coerce to `int`.
+        if source.code() == TypeCode::Union {
+            let result_types: Vec<_> = source
+                .params()
+                .iter()
+                .filter_map(|member| Self::coerce_type(member, target))
+                .collect();
+            return if result_types.is_empty() {
+                None
+            } else {
+                Some(ExprType::union(result_types))
+            };
+        }
+        // Step 1: satisfaction — the value passes through unchanged, so the
+        // result keeps the source type rather than widening to the target.
+        if source.satisfies(target) {
+            return Some(source.clone());
+        }
+        // Step 2: conversion. The concrete path picks the first destination
+        // its payload converts to; without the payload no single destination
+        // can be promised, so the result is the union of every destination
+        // with a type-level rule. Anything narrower would misdescribe the
+        // resolved value: a `float` against `int | string` lands on `int` or
+        // `string` depending on whether the payload is a whole number.
+        let result_types: Vec<_> = Self::conversion_destinations(source, target)
+            .into_iter()
+            .filter_map(|dest| Self::convert_type(source, dest))
+            .collect();
+        if result_types.is_empty() {
+            None
+        } else {
+            Some(ExprType::union(result_types))
+        }
+    }
+
+    /// The type-level counterpart of [`Self::convert_to`]: the type that
+    /// converting a `source` value toward `dest` would produce, or `None` if
+    /// no rule applies.
+    fn convert_type(source: &ExprType, dest: &ExprType) -> Option<ExprType> {
+        if Self::scalar_conversion_rank(source.code(), dest.code()).is_some() {
+            return Some(dest.clone());
+        }
+        // `range_expr → list[int]` on the same condition as the concrete
+        // path, and producing the same `list[int]` it produces — not the
+        // destination, which may be wider.
+        if source.code() == TypeCode::RangeExpr && dest.code() == TypeCode::List {
+            let list_int = ExprType::list(ExprType::INT);
+            return list_int.satisfies(dest).then_some(list_int);
+        }
+        // Every well-formed list/list pair is accepted: an
+        // `unresolved[list[S]]` could resolve to the empty list, which
+        // converts to any `list[U]` element-wise over zero elements.
+        // Rejecting here would fail a template during validation that could
+        // have run correctly, so the element compatibility check waits until
+        // the payload is known. The arity check guards against malformed
+        // sources built via `ExprType::new` with zero or several parameters:
+        // no concrete value has such a type, so the empty-list argument does
+        // not apply to them and rejecting is safe. (The destination's arity
+        // is already enforced by `is_conversion_destination`.)
+        if source.code() == TypeCode::List
+            && source.params().len() == 1
+            && dest.code() == TypeCode::List
+        {
+            return Some(dest.clone());
+        }
+        None
     }
 
     /// Python-style repr: `ExprValue(42)`, `ExprValue('hello')`, `ExprValue([1, 2], type='list[int]')`.
@@ -854,15 +1315,19 @@ impl ExprValue {
             Self::Int(i) => format!("ExprValue({i})"),
             Self::Float(f) => {
                 if f.original.is_some() {
-                    format!("ExprValue('{}', type='float')", f.to_display_string())
+                    format!(
+                        "ExprValue({}, type='float')",
+                        py_string_literal(&f.to_display_string())
+                    )
                 } else {
                     format!("ExprValue({})", f.to_display_string())
                 }
             }
-            Self::String(s) => format!("ExprValue('{s}')"),
+            Self::String(s) => format!("ExprValue({})", py_string_literal(s)),
             Self::Path { value, format } => {
                 format!(
-                    "ExprValue('{value}', type='path', path_format=PathFormat.{})",
+                    "ExprValue({}, type='path', path_format=PathFormat.{})",
+                    py_string_literal(value),
                     match format {
                         PathFormat::Posix => "POSIX",
                         PathFormat::Windows => "WINDOWS",
@@ -870,7 +1335,12 @@ impl ExprValue {
                     }
                 )
             }
-            Self::RangeExpr(r) => format!("ExprValue('{}', type='range_expr')", r),
+            Self::RangeExpr(r) => {
+                format!(
+                    "ExprValue({}, type='range_expr')",
+                    py_string_literal(&r.to_string())
+                )
+            }
             Self::Unresolved(t) => format!("ExprValue.unresolved(ExprType(\"{t}\"))"),
             val if val.is_list() => {
                 let type_str = val.expr_type().to_string();
@@ -893,7 +1363,13 @@ impl ExprValue {
                     val.repr_python_list()
                 )
             }
-            _ => format!("ExprValue('{}')", self.to_display_string()),
+            // Unreachable: every variant is matched above, and the list arm's
+            // `if` guard is what stops the compiler proving it. Routed through
+            // the shared writer so it stays correct if that ever changes.
+            _ => format!(
+                "ExprValue({})",
+                py_string_literal(&self.to_display_string())
+            ),
         }
     }
 
@@ -906,7 +1382,9 @@ impl ExprValue {
                     e.repr_python_list()
                 } else {
                     match e {
-                        ExprValue::String(s) | ExprValue::Path { value: s, .. } => format!("'{s}'"),
+                        ExprValue::String(s) | ExprValue::Path { value: s, .. } => {
+                            py_string_literal(s)
+                        }
                         ExprValue::Bool(b) => if *b { "True" } else { "False" }.to_string(),
                         ExprValue::Int(i) => i.to_string(),
                         ExprValue::Float(f) => f.to_display_string(),
@@ -1147,58 +1625,59 @@ impl ExprValue {
     }
 
     /// Human-readable string for format string interpolation and display.
+    ///
+    /// Lists render as JSON arrays: element strings and paths are quoted and
+    /// JSON-escaped, with non-ASCII characters preserved verbatim. See
+    /// `specs/expr/values.md` ("List display strings").
     pub fn to_display_string(&self) -> String {
+        let mut buf = String::new();
+        self.write_display(&mut buf);
+        buf
+    }
+
+    /// Append [`Self::to_display_string`] to `buf` without an intermediate
+    /// allocation. Single source of truth for the display form; `functions/repr.rs`
+    /// uses it for the nested-list case of the shell reprs.
+    pub(crate) fn write_display(&self, buf: &mut String) {
+        use std::fmt::Write;
         match self {
-            Self::Null => "null".to_string(),
-            Self::Bool(b) => if *b { "true" } else { "false" }.to_string(),
-            Self::Int(i) => i.to_string(),
-            Self::Float(fv) => fv.to_display_string(),
-            Self::String(s) => s.clone(),
-            Self::Path { value, .. } => value.clone(),
-            Self::ListBool(v) => format!(
-                "[{}]",
-                v.iter()
-                    .map(|b| if *b { "true" } else { "false" })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::ListInt(v) => format!(
-                "[{}]",
-                v.iter()
-                    .map(|i| i.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::ListFloat(v) => format!(
-                "[{}]",
-                v.iter()
-                    .map(|f| f.to_display_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::ListString(v, _) => format!(
-                "[{}]",
-                v.iter()
-                    .map(|s| format!("\"{}\"", s))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::ListPath(v, _, _) => format!(
-                "[{}]",
-                v.iter()
-                    .map(|s| format!("\"{}\"", s))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::ListList(v, _, _) => format!(
-                "[{}]",
-                v.iter()
-                    .map(|e| e.to_display_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            Self::RangeExpr(r) => r.to_string(),
-            Self::Unresolved(t) => format!("<unresolved[{t}]>"),
+            Self::Null => buf.push_str("null"),
+            Self::Bool(b) => buf.push_str(if *b { "true" } else { "false" }),
+            Self::Int(i) => {
+                let _ = write!(buf, "{i}");
+            }
+            Self::Float(fv) => buf.push_str(&fv.display_cow()),
+            Self::String(s) => buf.push_str(s),
+            Self::Path { value, .. } => buf.push_str(value),
+            Self::ListBool(v) => {
+                write_display_list(buf, v.iter(), |buf, b| {
+                    buf.push_str(if *b { "true" } else { "false" })
+                });
+            }
+            Self::ListInt(v) => {
+                write_display_list(buf, v.iter(), |buf, i| {
+                    let _ = write!(buf, "{i}");
+                });
+            }
+            Self::ListFloat(v) => {
+                write_display_list(buf, v.iter(), |buf, f| buf.push_str(&f.display_cow()));
+            }
+            Self::ListString(v, _) | Self::ListPath(v, _, _) => {
+                write_display_list(buf, v.iter(), |buf, s| {
+                    buf.push('"');
+                    crate::json_escape::write_escaped(s, buf);
+                    buf.push('"');
+                });
+            }
+            Self::ListList(v, _, _) => {
+                write_display_list(buf, v.iter(), |buf, e| e.write_display(buf));
+            }
+            Self::RangeExpr(r) => {
+                let _ = write!(buf, "{r}");
+            }
+            Self::Unresolved(t) => {
+                let _ = write!(buf, "<unresolved[{t}]>");
+            }
         }
     }
 
@@ -1333,8 +1812,8 @@ impl ExprValue {
             (Self::Bool(a), Self::Bool(b)) => Ok(a.cmp(b)),
             (Self::String(a), Self::String(b)) => Ok(a.cmp(b)),
             (Self::Path { value: a, .. }, Self::Path { value: b, .. }) => Ok(a.cmp(b)),
-            (Self::String(a), Self::Path { value: b, .. })
-            | (Self::Path { value: b, .. }, Self::String(a)) => Ok(a.cmp(b)),
+            (Self::String(a), Self::Path { value: b, .. }) => Ok(a.cmp(b)),
+            (Self::Path { value: a, .. }, Self::String(b)) => Ok(a.cmp(b)),
             _ if self.is_list() && other.is_list() => {
                 let (a_iter, b_iter) = match (self.list_iter(), other.list_iter()) {
                     (Some(a), Some(b)) => (a, b),
@@ -1448,17 +1927,35 @@ pub fn format_float(f: f64) -> String {
     }
     let abs = f.abs();
     if !(1e-4..1e16).contains(&abs) {
-        format!("{:e}", f)
-            .replace("e-0", "e-")
-            .replace("e0", "e+0")
-            .replace("e", "e+")
-            .replace("e+-", "e-")
-            .replace("e++", "e+")
+        let rendered = format!("{f:e}");
+        if let Some((mantissa, exponent)) = rendered.split_once('e') {
+            if let Ok(exponent) = exponent.parse::<i32>() {
+                return format!("{mantissa}e{exponent:+03}");
+            }
+        }
+        rendered
     } else if f.fract() == 0.0 {
         format!("{}.0", f as i64)
     } else {
         f.to_string()
     }
+}
+
+/// Write `items` into `buf` as a JSON array, rendering each element with
+/// `write_item`.
+fn write_display_list<T>(
+    buf: &mut String,
+    items: impl Iterator<Item = T>,
+    write_item: impl Fn(&mut String, T),
+) {
+    buf.push('[');
+    for (i, item) in items.enumerate() {
+        if i > 0 {
+            buf.push_str(", ");
+        }
+        write_item(buf, item);
+    }
+    buf.push(']');
 }
 
 /// Normalize path separators to match `format`.

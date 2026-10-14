@@ -71,12 +71,21 @@ fn job_err(embedded_json: &str) {
 }
 
 fn env_ok(embedded_json: &str) {
-    decode_environment_template(env_with_embedded(embedded_json), None).unwrap();
+    decode_environment_template(
+        env_with_embedded(embedded_json),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
 }
 
 fn env_err(embedded_json: &str) {
-    let err = decode_environment_template(env_with_embedded(embedded_json), None)
-        .expect_err(&format!("expected error for embedded: {embedded_json}"));
+    let err = decode_environment_template(
+        env_with_embedded(embedded_json),
+        None,
+        &CallerLimits::default(),
+    )
+    .expect_err(&format!("expected error for embedded: {embedded_json}"));
     let msg = err.to_string();
     assert!(
         !msg.is_empty(),
@@ -133,7 +142,8 @@ fn runnable_must_be_bool() {
     let v = env_with_embedded(
         r#"{"name": "Foo", "type": "TEXT", "data": "hello", "runnable": "True"}"#,
     );
-    let err = decode_environment_template(v, None).expect_err("runnable must be bool");
+    let err = decode_environment_template(v, None, &CallerLimits::default())
+        .expect_err("runnable must be bool");
     let msg = err.to_string();
     assert!(
         msg.contains("expected a boolean"),
@@ -144,7 +154,8 @@ fn runnable_must_be_bool() {
 #[test]
 fn type_case_sensitive() {
     let v = env_with_embedded(r#"{"name": "Foo", "type": "text", "data": "hello"}"#);
-    let err = decode_environment_template(v, None).expect_err("type is case-sensitive");
+    let err = decode_environment_template(v, None, &CallerLimits::default())
+        .expect_err("type is case-sensitive");
     let msg = err.to_string();
     assert!(
         msg.contains("unknown variant `text`, expected `TEXT`"),

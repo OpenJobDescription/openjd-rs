@@ -54,7 +54,8 @@ fn check_job_err_with_ext(s: &str, supported: &[&str], expected: &[&str]) {
 
 fn check_env_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_environment_template(v, None).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_environment_template(v, None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -87,6 +88,19 @@ fn doc_string_to_object_yaml_success() {
     assert_eq!(result["key"].as_str().unwrap(), "value");
 }
 
+#[test]
+fn yaml_non_finite_floats_remain_available_for_model_validation() {
+    let result = document_string_to_object(
+        "nan: .nan\npositive_inf: .inf\nnegative_inf: -.inf\n",
+        DocumentType::Yaml,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+
+    assert_eq!(result["nan"].as_str(), Some(".nan"));
+    assert_eq!(result["positive_inf"].as_str(), Some(".inf"));
+    assert_eq!(result["negative_inf"].as_str(), Some("-.inf"));
+}
 // ══════════════════════════════════════════════════════════════
 // document_string_to_object — not a dict
 // ══════════════════════════════════════════════════════════════
@@ -225,7 +239,7 @@ fn env_decode_success() {
         }
     }"#,
     );
-    decode_environment_template(v, None).unwrap();
+    decode_environment_template(v, None, &CallerLimits::default()).unwrap();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -375,7 +389,7 @@ fn empty_extensions_job_template() {
     }"#,
     );
     assert!(
-        decode_environment_template(v2, None).is_err(),
+        decode_environment_template(v2, None, &CallerLimits::default()).is_err(),
         "Env template with empty extensions should be rejected"
     );
 }

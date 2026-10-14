@@ -29,28 +29,117 @@ pub use parameters::{
     MergedParameterDefinition, PathParameterOptions,
 };
 
+/// Caller evaluation budgets applied to every expression evaluation job
+/// creation performs (format-string resolution, `let` bindings, task
+/// ranges) — `CallerLimits::max_eval_memory_bytes` /
+/// `max_eval_operations`, the Expression Language spec's
+/// "Memory-bounded evaluation" lever. `None` uses the spec-recommended
+/// defaults. Template validation and the session runtime apply the
+/// same budgets, so job creation is never the stage where a lowered
+/// budget silently stops applying.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EvalBudgets {
+    pub(crate) memory: Option<usize>,
+    pub(crate) operations: Option<usize>,
+}
+
+impl EvalBudgets {
+    pub(crate) fn from_ctx(ctx: &ValidationContext) -> Self {
+        Self {
+            memory: ctx.caller_limits.max_eval_memory_bytes,
+            operations: ctx.caller_limits.max_eval_operations,
+        }
+    }
+
+    /// The standard job-creation resolution options: POSIX path format
+    /// (job creation resolves no host paths) plus the caller budgets.
+    /// Call sites chain their field-specific target type onto it.
+    pub(crate) fn fs_options(&self) -> openjd_expr::FormatStringOptions<'static> {
+        let mut opts = openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix);
+        if let Some(m) = self.memory {
+            opts = opts.with_memory_limit(m);
+        }
+        if let Some(o) = self.operations {
+            opts = opts.with_operation_limit(o);
+        }
+        opts
+    }
+}
+
 /// Create an instantiated Job from a validated JobTemplate and preprocessed parameter values.
 ///
 /// Environment template parameters should already be merged into `job_parameter_values`
 /// via [`preprocess_job_parameters`] before calling this function.
 ///
 /// The `ctx` parameter carries the specification revision, enabled
-/// extensions, and caller limits that apply to this job instance. It
-/// is the caller's responsibility to pass a `ValidationContext`
-/// compatible with the one the template was validated against —
-/// typically the same one. Passing a context whose extensions differ
-/// from the template's declared extensions allows application-level
-/// policy (e.g. "strip EXPR even if the template requests it" or
-/// "enforce stricter caller limits on this queue") to apply at
-/// job-creation time as well as at decode time.
+/// extensions, and caller limits that apply to this job instance. Its
+/// revision must match the template's, and it must enable every
+/// extension the template declares (enabling more is allowed — extra
+/// extensions only add symbols and functions the template never
+/// references); `create_job` returns a `Compatibility` error otherwise.
+/// A context enabling *fewer* extensions than the template declares
+/// would make every downstream evaluation ambiguous — an error could be
+/// a template defect or a context artifact. An application that does
+/// not support an extension already rejects such templates at decode
+/// via `supported_extensions`; the convenient "do what the template
+/// says" context is [`JobTemplate::default_validation_context`], with
+/// [`with_caller_limits`](crate::types::ValidationContext::with_caller_limits)
+/// layered on for caller policy (e.g. "enforce stricter caller limits
+/// on this queue").
 ///
 /// When `ctx.caller_limits.max_task_count` is set, the total task count
 /// across all steps is checked after parameter spaces are resolved.
+///
+/// The resolved-value re-checks on carried-forward fields (and the
+/// `let` bindings feeding them) are reported together: every such
+/// failure across job environments, steps, and step environments
+/// becomes one `ModelError::ModelValidation`, in template-validation
+/// order. Failures that make a step uninstantiable (resolving its host
+/// requirements or parameter space) abort immediately and are reported
+/// alone.
 pub fn create_job(
     job_template: &JobTemplate,
     job_parameter_values: &JobParameterValues,
     ctx: &ValidationContext,
 ) -> Result<job::Job, ModelError> {
+    // The context must be compatible with what the template declares:
+    // same revision, and at least the template's extensions enabled.
+    // Anything less makes the evaluation passes below ambiguous (an
+    // error could be a context artifact instead of a template defect),
+    // which is why evaluation errors can be reported strictly.
+    let template_profile = job_template.profile();
+    // Unreachable until a second SpecificationRevision variant exists
+    // (V2023_09 is the only one today, so both sides are always equal);
+    // written now so revision coverage doesn't silently go missing when
+    // one is added. No test can pin this error message until then.
+    if ctx.profile.revision() != template_profile.revision() {
+        return Err(ModelError::Compatibility(format!(
+            "create_job requires a context matching the template's specification revision: \
+             the template is {}, but the context is {}.",
+            template_profile.revision(),
+            ctx.profile.revision(),
+        )));
+    }
+    // Iterate the template's own extension set rather than
+    // `ModelExtension::ALL`: exhaustive by construction, so a future
+    // variant omitted from `ALL` cannot escape the check. Sorted so the
+    // message is deterministic (the set is a HashSet).
+    let mut missing: Vec<&str> = template_profile
+        .extensions()
+        .iter()
+        .filter(|e| !ctx.profile.has_extension(**e))
+        .map(|e| e.as_str())
+        .collect();
+    missing.sort_unstable();
+    if !missing.is_empty() {
+        return Err(ModelError::Compatibility(format!(
+            "create_job requires a context enabling every extension the template declares: \
+             missing {}. An application that does not support an extension should reject \
+             the template at decode via its supported-extensions list.",
+            missing.join(", "),
+        )));
+    }
+
     // Validate parameter values against template constraints.
     let merged = parameters::merge_job_parameter_definitions(job_template, &[])?;
     for param in &merged {
@@ -65,13 +154,23 @@ pub fn create_job(
         .profile
         .has_extension(crate::types::ModelExtension::Expr);
     let limits = EffectiveLimits::from_context(ctx);
+    let budgets = EvalBudgets::from_ctx(ctx);
 
+    // Required string field (§1.1.1): a single whole-field expression
+    // resolves with target type `string` (Expression Language §1.3.2), so
+    // `null` and list values are errors rather than display renderings.
     let job_name = job_template
         .name
-        .resolve_string_with(
+        .resolve_with(
             &symtab,
-            &openjd_expr::FormatStringOptions::new().with_path_format(PathFormat::Posix),
+            &budgets
+                .fs_options()
+                .with_target_type(&openjd_expr::ExprType::STRING),
         )
+        .map(|v| match v {
+            openjd_expr::ExprValue::String(s) => s,
+            other => other.to_display_string(),
+        })
         .map_err(|e| ModelError::FormatStringError {
             message: format!("Failed to resolve job name: {e}"),
             input: Some(job_template.name.raw().to_string()),
@@ -79,12 +178,29 @@ pub fn create_job(
             end: None,
         })?;
 
-    if job_name.len() > limits.max_job_name_len {
+    if job_name.chars().count() > limits.max_job_name_len {
         return Err(ModelError::DecodeValidation(format!(
             "Job name exceeds maximum length of {} characters (got {})",
             limits.max_job_name_len,
-            job_name.len()
+            job_name.chars().count()
         )));
+    }
+    // §1.1.1 minimum length 1: the raw-text pass rejects an empty literal,
+    // but an interpolated name is only known here.
+    if job_name.is_empty() {
+        return Err(ModelError::DecodeValidation(
+            "Job name must not resolve to an empty string".to_string(),
+        ));
+    }
+    // §1.1.1 forbids control (Cc) characters in the resolved name. The
+    // raw-text pass rejects control characters in the literal text, and
+    // the format-string pass checks the resolved value when the name is
+    // fully static — but a control character introduced by an
+    // interpolated value is only known here.
+    if job_name.chars().any(char::is_control) {
+        return Err(ModelError::DecodeValidation(
+            "Job name must not contain control characters".to_string(),
+        ));
     }
 
     if has_expr {
@@ -105,11 +221,67 @@ pub fn create_job(
         })
         .collect();
 
-    let steps = job_template
-        .steps
-        .iter()
-        .map(|st| instantiate::instantiate_step(st, &symtab, has_expr, &limits, ctx))
-        .collect::<Result<Vec<_>, _>>()?;
+    // Re-run the carried-forward resolved-value checks (and evaluate the
+    // `let` bindings feeding them) against check symbol tables where job
+    // parameters are bound to real values. A violation template
+    // validation could only lower-bound is decidable here — fail at
+    // submission, not on the worker.
+    //
+    // Every check failure across the whole template accumulates into
+    // this one collection and is reported together as a single
+    // `ModelValidation` error, in pass 8's order: `jobEnvironments`
+    // first, then each step in turn (step `let`, script, step
+    // environments). Resolution failures that leave a step
+    // uninstantiable (host requirements, parameter space) are not
+    // checks: they abort immediately, reported alone.
+    let mut check_errors = crate::error::ValidationErrors::default();
+    if let Some(envs) = &job_template.job_environments {
+        for (i, env) in envs.iter().enumerate() {
+            let env_path = [
+                crate::error::PathElement::Field("jobEnvironments".to_string()),
+                crate::error::PathElement::Index(i),
+            ];
+            let env_symtab = instantiate::build_env_check_symtab(
+                env,
+                &symtab,
+                has_expr,
+                ctx,
+                &env_path,
+                &mut check_errors,
+            )?;
+            crate::template::validate_v2023_09::format_strings::check_carried_forward_environment(
+                env,
+                &env_symtab,
+                &symtab,
+                ctx,
+                limits.max_env_var_value_len,
+                &env_path,
+                &mut check_errors,
+            );
+        }
+    }
+
+    let mut steps = Vec::with_capacity(job_template.steps.len());
+    for (step_index, st) in job_template.steps.iter().enumerate() {
+        steps.push(instantiate::instantiate_step(
+            st,
+            &symtab,
+            has_expr,
+            &limits,
+            ctx,
+            step_index,
+            budgets,
+            &mut check_errors,
+        )?);
+    }
+    check_errors.into_result("JobTemplate")?;
+    // `instantiate_step` only declines to build a step after recording
+    // the failure in `check_errors`, so every step is present here.
+    let steps: Vec<job::Step> = steps.into_iter().collect::<Option<_>>().ok_or_else(|| {
+        ModelError::DecodeValidation(
+            "internal error: a step was skipped without a recorded error".to_string(),
+        )
+    })?;
 
     // Caller-imposed total task count limit across all steps
     if let Some(max_task_count) = ctx.caller_limits.max_task_count {

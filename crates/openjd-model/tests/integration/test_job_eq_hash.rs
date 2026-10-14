@@ -14,6 +14,7 @@
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+use openjd_expr::value::Float64;
 use openjd_expr::{ExprValue, FormatString};
 use openjd_model::job::{
     AmountRequirement, Environment, HostRequirements, Job, StepParameterSpace, TaskParameter,
@@ -279,20 +280,116 @@ fn amount_requirement_negative_zero_eq_and_hash() {
     assert_eq!(hash_of(&hr_a), hash_of(&hr_b));
 }
 
+/// `Float64`'s constructors return `Result`; these keep the assertions readable.
+fn f64_of(v: f64) -> Float64 {
+    Float64::new(v).expect("finite")
+}
+
+fn f64_text(v: f64, text: &str) -> Float64 {
+    Float64::with_str(v, text.to_string()).expect("finite")
+}
+
 #[test]
 fn task_parameter_float_negative_zero_eq_and_hash() {
-    let a = TaskParameter::Float {
-        range: vec![0.0, 1.5],
+    let floats = |vals: &[f64]| TaskParameter::Float {
+        range: vals.iter().map(|v| f64_of(*v)).collect(),
     };
-    let b = TaskParameter::Float {
-        range: vec![-0.0, 1.5],
-    };
+    let a = floats(&[0.0, 1.5]);
+    let b = floats(&[-0.0, 1.5]);
     assert_eq!(a, b, "-0.0 == 0.0 under PartialEq");
     assert_eq!(hash_of(&a), hash_of(&b), "hash must agree with eq");
-    let c = TaskParameter::Float {
-        range: vec![0.0, 2.5],
-    };
+    let c = floats(&[0.0, 2.5]);
     assert_ne!(a, c);
+}
+
+#[test]
+fn task_parameter_float_rendering_text_participates_in_eq_and_hash() {
+    // Same number, different rendering means a different command line. Hash must
+    // follow eq, or a cache keyed on it could serve one for the other.
+    let bare = TaskParameter::Float {
+        range: vec![f64_of(2.5)],
+    };
+    let scaled = TaskParameter::Float {
+        range: vec![f64_text(2.5, "2.50")],
+    };
+    assert_ne!(bare, scaled);
+    assert_ne!(hash_of(&bare), hash_of(&scaled));
+
+    let same = TaskParameter::Float {
+        range: vec![f64_text(2.5, "2.50")],
+    };
+    assert_eq!(scaled, same);
+    assert_eq!(hash_of(&scaled), hash_of(&same));
+
+    // The converse: text that renders identically to no text at all is the same
+    // element. eq compares the rendering, not the stored Option.
+    let redundant = TaskParameter::Float {
+        range: vec![f64_text(2.5, "2.5")],
+    };
+    assert_eq!(bare, redundant);
+    assert_eq!(hash_of(&bare), hash_of(&redundant));
+}
+
+/// Zero has no sign, and `Float64::with_str` drops a signed zero's text when
+/// rendering, so storing it would leave two elements that emit byte-identical
+/// command lines comparing unequal and hashing differently.
+#[test]
+fn task_parameter_float_signed_zero_matches_its_rendering() {
+    let floats = |v: f64, t: &str| TaskParameter::Float {
+        range: vec![f64_text(v, t)],
+    };
+    let unsigned = floats(0.0, "0.0");
+    let signed = floats(-0.0, "-0.0");
+    assert_eq!(signed, unsigned, "both render 0.0");
+    assert_eq!(hash_of(&signed), hash_of(&unsigned));
+
+    // The decimal places survive the sign being dropped, so a signed and an
+    // unsigned zero written to two places stay equal to each other and distinct
+    // from one written to one place.
+    assert_eq!(floats(-0.0, "-0.00"), floats(0.0, "0.00"));
+    assert_ne!(floats(0.0, "0.00"), floats(0.0, "0.0"));
+
+    // Zero-ness is decided from the text, not from the parse, which underflows in
+    // both notations. An all-zero mantissa spells zero whatever the exponent; a
+    // tiny value's digits are the author's request and survive.
+    assert_eq!(f64_text(0.0, "-0e5").to_display_string(), "0e5");
+    assert_eq!(f64_text(0.0, "1e-400").to_display_string(), "1e-400");
+    let tiny = format!("0.{}1", "0".repeat(400));
+    assert_eq!(f64_text(0.0, &tiny).to_display_string(), tiny);
+}
+
+/// `Float64` round-trips as the `<float> | <floatstring>` union, and routes through
+/// its constructors so it cannot deserialize into a state they forbid.
+///
+/// Normalization and the length cap are deliberately *not* here. Those are §7.5
+/// range-element rules applied by `resolve_float_range`, and `Float64` also carries
+/// job parameter defaults and expression literals, which preserve their spelling
+/// verbatim. `Deserialize` is not a validation boundary for any range type —
+/// `TaskParameter::String`'s `Vec<String>` has no cap on this path either.
+#[test]
+fn float64_deserialize_routes_through_the_constructors() {
+    let de = |json: &str| serde_json::from_str::<Float64>(json);
+
+    // The union, both ways, exactly.
+    assert_eq!(de("2.5").unwrap(), f64_of(2.5));
+    assert_eq!(de(r#""2.50""#).unwrap(), f64_text(2.5, "2.50"));
+    assert_eq!(serde_json::to_string(&f64_of(2.5)).unwrap(), "2.5");
+    assert_eq!(
+        serde_json::to_string(&f64_text(2.5, "2.50")).unwrap(),
+        r#""2.50""#
+    );
+
+    // Surrounding whitespace cannot reach a command line.
+    assert_eq!(de(r#"" 2.50 ""#).unwrap().to_display_string(), "2.50");
+
+    // Non-finite is rejected rather than becoming a NaN `value`, which would stop
+    // `PartialEq` being reflexive while `Hash` still agreed.
+    assert!(de(r#""NaN""#).is_err());
+    assert!(de(r#""inf""#).is_err());
+    assert!(de(r#""-Infinity""#).is_err());
+
+    // The constructors' zero rule applies here too: zero has no sign.
+    assert_eq!(de(r#""-0.00""#).unwrap().to_display_string(), "0.00");
 }
 
 #[test]

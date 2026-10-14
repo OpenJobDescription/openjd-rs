@@ -13,7 +13,7 @@
 //! - Pass 10: WRAP_ACTIONS (validate or reject, RFC 0008)
 
 mod feature_bundle_1;
-mod format_strings;
+pub(crate) mod format_strings;
 pub(crate) mod helpers;
 mod limits;
 mod structure;
@@ -38,11 +38,23 @@ pub struct EffectiveLimits {
     /// raises the job-template limit to 200.
     pub max_env_template_param_count: usize,
     pub max_filename_len: usize,
+    /// Maximum elements in a task parameter's *list*-form range —
+    /// `<IntRangeList>` (§3.4.1.1), `<FloatRangeList>` (§3.4.1.2) and
+    /// `<StringRangeList>` (§3.4.1.3).
+    ///
+    /// Do not apply this to an `<IntRangeExpr>` expansion. §3.4.1.1.1
+    /// constrains that form only by "no two ranges may overlap", and its stated
+    /// purpose is expressing frame ranges succinctly — capping the expansion
+    /// rejects the form's primary use case and pre-empts the host service's own
+    /// task-count limits, which it may raise per account. A host that wants to
+    /// bound fan-out has `CallerLimits::max_task_count`.
     pub max_task_param_range_len: usize,
     pub max_task_param_string_len: usize,
     pub max_job_param_string_len: usize,
     pub max_command_len: usize,
     pub max_description_len: usize,
+    /// §4.4.2: maximum characters in an environment variable value (resolved).
+    pub max_env_var_value_len: usize,
 }
 
 // Note: there is no `Default` impl for `EffectiveLimits`. All call sites
@@ -79,6 +91,11 @@ impl EffectiveLimits {
             max_job_param_string_len: 1024,
             max_command_len: 1024,
             max_description_len: 2048,
+            // §4.4.2: environment variable value, 2048 characters. Its own
+            // field even though it matches max_description_len today — the
+            // two limits come from different spec sections (§7.2 vs §4.4.2)
+            // and must be able to move independently.
+            max_env_var_value_len: 2048,
         }
     }
 }
@@ -89,11 +106,12 @@ pub struct EffectiveRules {
     pub allowed_job_param_types: std::collections::HashSet<JobParameterType>,
     pub allowed_task_param_types: std::collections::HashSet<TaskParameterType>,
     pub allow_fmtstring_in_numeric_fields: bool,
-    /// When the `WRAP_ACTIONS` extension is enabled, an environment script
-    /// is valid if it defines any of `onEnter`, `onExit`, or one of the
-    /// RFC 0008 wrap hooks (`onWrapEnvEnter`, `onWrapTaskRun`, `onWrapEnvExit`).
-    /// Without the extension, the base 2023-09 rule applies:
-    /// `onEnter` is required whenever `script` is present.
+    /// An environment script must define at least one action whether or not
+    /// this flag is set, and either `onEnter` or `onExit` alone satisfies
+    /// that. The flag decides two things: whether the RFC 0008 wrap hooks
+    /// (`onWrapEnvEnter`, `onWrapTaskRun`, `onWrapEnvExit`) also count as an
+    /// acceptable choice, and which wording the error uses when no action is
+    /// defined. It does not make `onEnter` required.
     pub wrap_actions_enabled: bool,
 }
 

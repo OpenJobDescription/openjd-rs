@@ -327,6 +327,55 @@ fn uri_fsx() {
     );
 }
 
+// Scheme must be at least two characters: `C://...` is a Windows drive-rooted
+// path with a doubled separator, not a URI with scheme `c`. See spec §1.2.1.
+#[test]
+fn drive_letter_double_slash_is_not_uri_posix() {
+    // PurePosixPath("C://data/file.txt") → "C:/data/file.txt", parts ["C:", "data", "file.txt"]
+    let r = eval("path('C://data/file.txt')");
+    assert_eq!(r.to_display_string(), "C:/data/file.txt");
+    let parts = eval("path('C://data/file.txt').parts");
+    assert_eq!(parts.to_display_string(), r#"["C:", "data", "file.txt"]"#);
+}
+#[test]
+fn drive_letter_double_slash_is_not_uri_windows() {
+    // PureWindowsPath("C://data/file.txt") → "C:\data\file.txt", parts ["C:\", "data", "file.txt"]
+    let st = SymbolTable::new();
+    let symtabs = [&st];
+    let r = ParsedExpression::new("path('C://data/file.txt')")
+        .unwrap()
+        .with_path_format(PathFormat::Windows)
+        .evaluate(&symtabs)
+        .unwrap();
+    assert_eq!(r.to_display_string(), r"C:\data\file.txt");
+    let parts = ParsedExpression::new("path('C://data/file.txt').parts")
+        .unwrap()
+        .with_path_format(PathFormat::Windows)
+        .evaluate(&symtabs)
+        .unwrap();
+    assert_eq!(parts.to_display_string(), r#"["C:\\", "data", "file.txt"]"#);
+}
+#[test]
+fn single_letter_scheme_is_not_uri() {
+    // `x://y/z` collapses like any filesystem path; a real URI would be preserved verbatim.
+    let r = eval("path('x://y//z')");
+    assert_eq!(r.to_display_string(), "x:/y/z");
+}
+#[test]
+fn two_letter_scheme_is_uri() {
+    // Two characters is enough — `ab://` stays opaque, `//` preserved.
+    let r = eval("path('ab://host/a//b')");
+    assert_eq!(r.to_display_string(), "ab://host/a//b");
+}
+#[test]
+fn path_list_constructor_drive_letter_is_not_uri() {
+    // List-form path() must apply the same scheme rule as the string form.
+    let r = eval("path(['C://data', 'a', 'b'])");
+    assert_eq!(r.to_display_string(), "C:/data/a/b");
+    let u = eval("path(['s3://bucket', 'a', '', 'b'])");
+    assert_eq!(u.to_display_string(), "s3://bucket/a//b");
+}
+
 // URI in symbol table
 #[test]
 fn uri_join_in_symtab() {
@@ -432,7 +481,6 @@ fn uri_from_parts_bare() {
 }
 #[test]
 fn uri_join_absolute_replaces() {
-    // Joining an absolute path replaces the left side
     assert_eq!(
         eval_with("P / '/new/path'", &uri_st("P", "s3://bucket/old")).to_display_string(),
         "/new/path"
@@ -878,11 +926,13 @@ fn join_multi_four_segments() {
     );
 }
 
-// TestUriPathOperators: join with path() object (Python test_join_absolute_replaces)
+// TestUriPathOperators: absolute path objects replace the URI.
 #[test]
 fn join_absolute_path_object_replaces() {
-    let r = eval("path('s3://bucket/dir') / path('/local/path')");
-    assert!(r.to_display_string().ends_with("/local/path"));
+    assert_eq!(
+        eval("path('s3://bucket/dir') / path('/local/path')").to_display_string(),
+        "/local/path"
+    );
 }
 
 // TestUriPathOperators: join_string with sub/file.obj (Python exact)

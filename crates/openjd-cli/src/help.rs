@@ -61,7 +61,7 @@ fn generate_template_help(
     let template_value = parse::document_string_to_object(
         &content,
         crate::common::document_type(path),
-        &openjd_model::CallerLimits::default(),
+        &crate::common::caller_limits(),
     )?;
 
     let default_exts = vec![
@@ -79,7 +79,7 @@ fn generate_template_help(
     let template = parse::decode_job_template(
         template_value,
         Some(&supported_exts),
-        &openjd_model::CallerLimits::default(),
+        &crate::common::caller_limits(),
     )
     .map_err(|e| format!("Invalid job template: {e}"))?;
 

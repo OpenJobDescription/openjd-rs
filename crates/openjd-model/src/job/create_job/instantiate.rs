@@ -8,25 +8,49 @@ use openjd_expr::format_string::copy_symbol_value;
 use openjd_expr::path_mapping::PathFormat;
 use openjd_expr::symbol_table::SymbolTable;
 
-use crate::error::ModelError;
+use crate::error::{path_field, path_index, ModelError, PathElement, ValidationErrors};
 use crate::job;
 use crate::template;
+use crate::template::validate_v2023_09::helpers::{check_capability_name, CapabilityKind};
 use crate::template::validate_v2023_09::EffectiveLimits;
 use openjd_expr::ExpressionError;
 
 use super::ranges;
 
 /// Instantiate a StepTemplate into a Step.
+///
+/// The step's carried-forward resolved-value checks — and its `let`
+/// bindings, step-level and script/environment-level — report into
+/// `check_errors`, which `create_job` threads through every step and job
+/// environment and converts into one `ModelValidation` error at the end
+/// (whole-template aggregation, as pass 8 reports). Resolution failures
+/// that leave the step uninstantiable — host requirements, the
+/// parameter space — are returned as `Err` and abort job creation
+/// immediately.
+///
+/// Returns `Ok(None)` when a step-level `let` binding failed: the
+/// failed names are bound `Unresolved` so the step's carried-forward
+/// checks still run (as at pass 8), but host requirements and the
+/// parameter space need the concrete values, so they are skipped. The
+/// failure is already recorded in `check_errors`, so job creation fails.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn instantiate_step(
     st: &template::StepTemplate,
     symtab: &SymbolTable,
     has_expr: bool,
     limits: &EffectiveLimits,
     ctx: &crate::types::ValidationContext,
-) -> Result<job::Step, ModelError> {
+    step_index: usize,
+    budgets: super::EvalBudgets,
+    check_errors: &mut ValidationErrors,
+) -> Result<Option<job::Step>, ModelError> {
     let mut step_symtab = symtab.clone();
 
     let step_name = st.name.clone();
+    let step_path = [
+        PathElement::Field("steps".to_string()),
+        PathElement::Index(step_index),
+    ];
 
     if has_expr {
         step_symtab.set(
@@ -35,179 +59,113 @@ pub(super) fn instantiate_step(
         )?;
     }
 
-    // Evaluate step-level let bindings (TEMPLATE scope — no PATH Param.*, no host context)
+    // Evaluate step-level let bindings (TEMPLATE scope — no PATH Param.*,
+    // no host context), reported at `steps[i] -> let[j]` like pass 8.
+    let mut step_let_failed = false;
     if has_expr {
         if let Some(bindings) = &st.let_bindings {
-            let template_profile = ctx.profile.to_expr_profile(openjd_expr::HostContext::None);
-            let template_lib = openjd_expr::FunctionLibrary::for_profile(&template_profile);
-            for binding in bindings {
-                if let Some(eq_pos) = binding.find('=') {
-                    let name = binding[..eq_pos].trim();
-                    let expr = binding[eq_pos + 1..].trim();
-                    if !name.is_empty() && !expr.is_empty() {
-                        let parsed = openjd_expr::eval::ParsedExpression::with_profile(
-                            expr,
-                            &template_profile,
-                        )
-                        .map_err(|e| {
-                            ModelError::Expression(ExpressionError::new(format!(
-                                "let binding '{name}': {e}"
-                            )))
-                        })?;
-                        let val = parsed
-                            .with_path_format(PathFormat::Posix)
-                            .with_library(&template_lib)
-                            .evaluate(&[&step_symtab as &SymbolTable])
-                            .map_err(|e| {
-                                ModelError::Expression(ExpressionError::new(format!(
-                                    "let binding '{name}': {e}"
-                                )))
-                            })?;
-                        step_symtab.set(name, val)?;
-                    }
-                }
-            }
+            let before = check_errors.len();
+            crate::template::validate_v2023_09::format_strings::check_carried_forward_let_bindings(
+                bindings,
+                &path_field(&step_path, "let"),
+                &mut step_symtab,
+                ctx,
+                openjd_expr::HostContext::None,
+                check_errors,
+            );
+            step_let_failed = check_errors.len() > before;
         }
     }
 
-    let script_template = st.resolve_syntax_sugar()?.or_else(|| st.script.clone());
+    let script_template = st.resolve_syntax_sugar();
     let script = script_template.as_ref().map(convert_step_script);
+    // When the script came from a SimpleAction (§8), diagnostics on the
+    // desugared form must point at the field the author wrote.
+    let sugar_kind = if st.script.is_none() {
+        st.simple_actions().next().map(|(kind, _)| kind)
+    } else {
+        None
+    };
 
-    // Type-check script-level let bindings with unresolved host context
-    if has_expr {
-        if let Some(s) = &script_template {
-            if let Some(bindings) = &s.let_bindings {
-                let mut check_symtab = step_symtab.clone();
-
-                // PATH Param.* are excluded from the template-scope symtab (they
-                // require session-time path mapping). Add them as Unresolved with
-                // the correct type so script-level let bindings can reference them
-                // for type-checking.
-                if let Some(raw_param_table) = step_symtab.get_table("RawParam") {
-                    for name in raw_param_table.keys() {
-                        let param_key = format!("Param.{name}");
-                        if !step_symtab.contains(&param_key) {
-                            // Derive the Param type from the RawParam value: if it's
-                            // a list, use list(PATH); otherwise use PATH.
-                            let raw_key = format!("RawParam.{name}");
-                            let unresolved_type = match step_symtab.get_value(&raw_key) {
-                                Some(
-                                    openjd_expr::ExprValue::ListPath(..)
-                                    | openjd_expr::ExprValue::ListString(..),
-                                ) => openjd_expr::ExprType::list(openjd_expr::ExprType::PATH),
-                                _ => openjd_expr::ExprType::PATH,
-                            };
-                            let _ = check_symtab.set(
-                                &param_key,
-                                openjd_expr::ExprValue::Unresolved(unresolved_type),
-                            );
-                        }
-                    }
-                }
-
-                let _ = check_symtab.set(
-                    "Session.WorkingDirectory",
-                    openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-                );
-                let _ = check_symtab.set(
-                    "Session.HasPathMappingRules",
-                    openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::BOOL),
-                );
-                let _ = check_symtab.set(
-                    "Session.PathMappingRulesFile",
-                    openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-                );
-
-                if let Some(ps) = &st.parameter_space {
-                    for tp in &ps.task_parameter_definitions {
-                        let tp_type = match tp {
-                            crate::template::TaskParameterDefinition::INT(_) => {
-                                openjd_expr::ExprType::INT
-                            }
-                            crate::template::TaskParameterDefinition::CHUNK_INT(_) => {
-                                openjd_expr::ExprType::RANGE_EXPR
-                            }
-                            crate::template::TaskParameterDefinition::FLOAT(_) => {
-                                openjd_expr::ExprType::FLOAT
-                            }
-                            crate::template::TaskParameterDefinition::STRING(_) => {
-                                openjd_expr::ExprType::STRING
-                            }
-                            crate::template::TaskParameterDefinition::PATH(_) => {
-                                openjd_expr::ExprType::PATH
-                            }
-                        };
-                        let _ = check_symtab.set(
-                            &format!("Task.Param.{}", tp.name()),
-                            openjd_expr::ExprValue::Unresolved(tp_type.clone()),
-                        );
-                        let raw_type = match tp {
-                            crate::template::TaskParameterDefinition::PATH(_) => {
-                                openjd_expr::ExprType::STRING
-                            }
-                            _ => tp_type,
-                        };
-                        let _ = check_symtab.set(
-                            &format!("Task.RawParam.{}", tp.name()),
-                            openjd_expr::ExprValue::Unresolved(raw_type),
-                        );
-                    }
-                }
-
-                if let Some(files) = &s.embedded_files {
-                    for f in files {
-                        let _ = check_symtab.set(
-                            &format!("Task.File.{}", f.name),
-                            openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
-                        );
-                    }
-                }
-
-                let host_profile = ctx
-                    .profile
-                    .to_expr_profile(openjd_expr::HostContext::Unresolved);
-                let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
-                for binding in bindings {
-                    if let Some(eq_pos) = binding.find('=') {
-                        let name = binding[..eq_pos].trim();
-                        let expr = binding[eq_pos + 1..].trim();
-                        if !name.is_empty() && !expr.is_empty() {
-                            let parsed = openjd_expr::eval::ParsedExpression::with_profile(
-                                expr,
-                                &host_profile,
-                            )
-                            .map_err(|e| {
-                                ModelError::Expression(ExpressionError::new(format!(
-                                    "script let binding '{name}': {e}"
-                                )))
-                            })?;
-                            let val = parsed
-                                .with_path_format(PathFormat::Posix)
-                                .with_library(&host_lib)
-                                .evaluate(&[&check_symtab as &SymbolTable])
-                                .map_err(|e| {
-                                    ModelError::Expression(ExpressionError::new(format!(
-                                        "script let binding '{name}': {e}"
-                                    )))
-                                })?;
-                            check_symtab.set(name, val)?;
-                        }
-                    }
-                }
-            }
+    // Re-run the carried-forward format-string resolved-value checks —
+    // the script's `let` bindings, the `onRun` action's
+    // `command`/`args`/`timeout`/`cancelation`, and each embedded file's
+    // `data` — against check symbol tables where job parameters are
+    // bound to real values. A violation template validation could only
+    // lower-bound is decidable here: fail at submission, not on every
+    // worker. These are exactly the checks pass 8 applies — to the same
+    // desugared form for a SimpleAction step, with the same path remap
+    // back onto the authored field.
+    if let Some(s) = &script_template {
+        // A SimpleAction's checks run into a scratch collection rooted at
+        // the desugared `script` node and are re-rooted afterwards.
+        let mut scratch = ValidationErrors::default();
+        let (script_path, target): (Vec<PathElement>, &mut ValidationErrors) = match sugar_kind {
+            Some(_) => (Vec::new(), &mut scratch),
+            None => (path_field(&step_path, "script"), &mut *check_errors),
+        };
+        // Check symbol table for the step script's carried-forward
+        // (session/task-scope) format strings: `step_symtab`'s concrete
+        // values plus `Unresolved` placeholders for everything only a
+        // session can bind, with the script-level `let` bindings
+        // evaluated in (reported at `<script> -> let[j]`).
+        let cst =
+            build_task_check_symtab(st, s, &step_symtab, has_expr, ctx, &script_path, target)?;
+        crate::template::validate_v2023_09::format_strings::check_carried_forward_step_script(
+            s,
+            &cst,
+            &step_symtab,
+            ctx,
+            &script_path,
+            target,
+        );
+        if let Some(kind) = sugar_kind {
+            let sa_path = path_field(&step_path, kind.field_name());
+            check_errors.extend_remapped(scratch, |rel| {
+                let mut p = sa_path.clone();
+                p.extend(kind.remap_desugared_path(rel));
+                p
+            });
         }
+    }
+
+    // The same checks for this step's environments (session scope):
+    // `let` bindings, `variables` values, every action's
+    // `command`/`args`/`timeout`/`cancelation`, embedded-file `data`.
+    if let Some(envs) = &st.step_environments {
+        for (j, env) in envs.iter().enumerate() {
+            let env_path = path_index(&path_field(&step_path, "stepEnvironments"), j);
+            let env_symtab =
+                build_env_check_symtab(env, &step_symtab, has_expr, ctx, &env_path, check_errors)?;
+            crate::template::validate_v2023_09::format_strings::check_carried_forward_environment(
+                env,
+                &env_symtab,
+                &step_symtab,
+                ctx,
+                limits.max_env_var_value_len,
+                &env_path,
+                check_errors,
+            );
+        }
+    }
+
+    // Host requirements and the parameter space are resolved for real
+    // and need the step-level `let` values; with one of those failed
+    // (already reported) the step cannot be instantiated.
+    if step_let_failed {
+        return Ok(None);
     }
 
     let host_requirements = st
         .host_requirements
         .as_ref()
-        .map(|hr| resolve_host_requirements(hr, &step_symtab))
+        .map(|hr| resolve_host_requirements(hr, &step_symtab, ctx, step_index, budgets))
         .transpose()?;
 
     let parameter_space = st
         .parameter_space
         .as_ref()
-        .map(|ps| ranges::resolve_parameter_space(ps, &step_symtab, limits))
+        .map(|ps| ranges::resolve_parameter_space(ps, &step_symtab, limits, budgets))
         .transpose()?;
 
     // Validate the resolved parameter space (e.g. association length mismatches)
@@ -238,7 +196,7 @@ pub(super) fn instantiate_step(
         st.let_bindings.as_deref(),
     );
 
-    Ok(job::Step {
+    Ok(Some(job::Step {
         name: step_name,
         description: st.description.as_ref().map(|d| d.0.clone()),
         script,
@@ -249,7 +207,188 @@ pub(super) fn instantiate_step(
         resolved_symtab: Some(openjd_expr::SerializedSymbolTable::from_symtab(
             &filtered_symtab,
         )),
-    })
+    }))
+}
+
+/// Add `Unresolved` placeholders for the symbols only a session can
+/// bind: `Session.*`, plus `Param.*` for PATH-typed job parameters
+/// (excluded from the job-creation symtab because they require
+/// session-time path mapping — the Param type is derived from the
+/// `RawParam.*` value that is present).
+///
+/// Seed failures (a key path colliding with an existing scalar) are
+/// propagated rather than ignored — a silently failed seed would
+/// degrade the downstream checks to no-ops. The seed keys are
+/// uppercase-rooted and `let` bindings must start lowercase, so this
+/// only fails if an internal invariant is broken.
+fn add_unresolved_session_symbols(symtab: &mut SymbolTable) -> Result<(), ModelError> {
+    let raw_param_names: Vec<String> = symtab
+        .get_table("RawParam")
+        .map(|t| t.keys().map(str::to_string).collect())
+        .unwrap_or_default();
+    for name in raw_param_names {
+        let param_key = format!("Param.{name}");
+        if !symtab.contains(&param_key) {
+            let raw_key = format!("RawParam.{name}");
+            let unresolved_type = match symtab.get_value(&raw_key) {
+                Some(
+                    openjd_expr::ExprValue::ListPath(..) | openjd_expr::ExprValue::ListString(..),
+                ) => openjd_expr::ExprType::list(openjd_expr::ExprType::PATH),
+                _ => openjd_expr::ExprType::PATH,
+            };
+            symtab.set(
+                &param_key,
+                openjd_expr::ExprValue::Unresolved(unresolved_type),
+            )?;
+        }
+    }
+    symtab.set(
+        "Session.WorkingDirectory",
+        openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+    )?;
+    symtab.set(
+        "Session.HasPathMappingRules",
+        openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::BOOL),
+    )?;
+    symtab.set(
+        "Session.PathMappingRulesFile",
+        openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+    )?;
+    Ok(())
+}
+
+/// Build the check symbol table for a step script's carried-forward
+/// format strings (task scope): the step's symtab (concrete `Param.*` /
+/// `RawParam.*` / `Job.Name` / `Step.Name` / step-level `let`
+/// bindings) plus `Unresolved` placeholders for `Session.*`, PATH
+/// `Param.*`, `Task.Param.*` / `Task.RawParam.*`, and `Task.File.*` —
+/// the same scope the session runtime binds when it resolves these
+/// format strings at run time.
+///
+/// Script-level `let` bindings are evaluated into the table with
+/// unresolved host context through pass 8's own evaluation helper
+/// (`check_carried_forward_let_bindings`): a binding that fails with the
+/// real parameter values is reported into `errors` at
+/// `<script_path> -> let[j]` with pass 8's message and caret, and bound
+/// `Unresolved` so the script's remaining checks still run.
+///
+/// `Err` only for a failed symbol seed — an internal invariant (see
+/// [`add_unresolved_session_symbols`]).
+fn build_task_check_symtab(
+    st: &template::StepTemplate,
+    script: &template::StepScript,
+    step_symtab: &SymbolTable,
+    has_expr: bool,
+    ctx: &crate::types::ValidationContext,
+    script_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) -> Result<SymbolTable, ModelError> {
+    let mut check_symtab = step_symtab.clone();
+    add_unresolved_session_symbols(&mut check_symtab)?;
+
+    if let Some(ps) = &st.parameter_space {
+        for tp in &ps.task_parameter_definitions {
+            let tp_type = match tp {
+                crate::template::TaskParameterDefinition::INT(_) => openjd_expr::ExprType::INT,
+                crate::template::TaskParameterDefinition::CHUNK_INT(_) => {
+                    openjd_expr::ExprType::RANGE_EXPR
+                }
+                crate::template::TaskParameterDefinition::FLOAT(_) => openjd_expr::ExprType::FLOAT,
+                crate::template::TaskParameterDefinition::STRING(_) => {
+                    openjd_expr::ExprType::STRING
+                }
+                crate::template::TaskParameterDefinition::PATH(_) => openjd_expr::ExprType::PATH,
+            };
+            check_symtab.set(
+                &format!("Task.Param.{}", tp.name()),
+                openjd_expr::ExprValue::Unresolved(tp_type.clone()),
+            )?;
+            let raw_type = match tp {
+                crate::template::TaskParameterDefinition::PATH(_) => openjd_expr::ExprType::STRING,
+                _ => tp_type,
+            };
+            check_symtab.set(
+                &format!("Task.RawParam.{}", tp.name()),
+                openjd_expr::ExprValue::Unresolved(raw_type),
+            )?;
+        }
+    }
+
+    if let Some(files) = &script.embedded_files {
+        for f in files {
+            check_symtab.set(
+                &format!("Task.File.{}", f.name),
+                openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+            )?;
+        }
+    }
+
+    if has_expr {
+        if let Some(bindings) = &script.let_bindings {
+            crate::template::validate_v2023_09::format_strings::check_carried_forward_let_bindings(
+                bindings,
+                &path_field(script_path, "let"),
+                &mut check_symtab,
+                ctx,
+                openjd_expr::HostContext::Unresolved,
+                errors,
+            );
+        }
+    }
+
+    Ok(check_symtab)
+}
+
+/// Build the check symbol table for an environment's carried-forward
+/// format strings (session scope; job-level or step-level
+/// environments): the base symtab (concrete `Param.*` / `RawParam.*` /
+/// `Job.Name`, plus `Step.Name` and step-level `let` bindings when
+/// `base` is a step's table) with `Unresolved` placeholders for
+/// `Session.*`, PATH `Param.*`, and this environment's `Env.File.*`,
+/// and the environment's script-level `let` bindings evaluated in —
+/// mirroring what the session runtime binds when it resolves the
+/// environment at run time.
+///
+/// A `let` binding that fails to evaluate is reported into `errors` at
+/// `<env_path> -> script -> let[j]` exactly as for a step script (see
+/// [`build_task_check_symtab`]): the bindings only evaluate when the
+/// context profile enables EXPR, their expressions already type-checked
+/// at pass 8 with everything unresolved, so a failure here comes from
+/// the real parameter values and would deterministically recur in every
+/// session entering the environment.
+pub(super) fn build_env_check_symtab(
+    env: &template::Environment,
+    base: &SymbolTable,
+    has_expr: bool,
+    ctx: &crate::types::ValidationContext,
+    env_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) -> Result<SymbolTable, ModelError> {
+    let mut symtab = base.clone();
+    add_unresolved_session_symbols(&mut symtab)?;
+    if let Some(script) = &env.script {
+        if let Some(files) = &script.embedded_files {
+            for f in files {
+                symtab.set(
+                    &format!("Env.File.{}", f.name),
+                    openjd_expr::ExprValue::Unresolved(openjd_expr::ExprType::PATH),
+                )?;
+            }
+        }
+        if has_expr {
+            if let Some(bindings) = &script.let_bindings {
+                crate::template::validate_v2023_09::format_strings::check_carried_forward_let_bindings(
+                    bindings,
+                    &path_field(&path_field(env_path, "script"), "let"),
+                    &mut symtab,
+                    ctx,
+                    openjd_expr::HostContext::Unresolved,
+                    errors,
+                );
+            }
+        }
+    }
+    Ok(symtab)
 }
 
 fn convert_action(a: &template::Action) -> job::Action {
@@ -347,28 +486,66 @@ pub fn convert_environment_with_symtab(
 fn resolve_host_requirements(
     hr: &template::HostRequirements,
     symtab: &SymbolTable,
+    ctx: &crate::types::ValidationContext,
+    step_index: usize,
+    budgets: super::EvalBudgets,
 ) -> Result<job::HostRequirements, ModelError> {
     let amounts = hr
         .amounts
         .as_ref()
         .map(|amts| {
+            let standard = crate::capabilities::standard_amount_capability_names(
+                ctx.profile.revision(),
+                ctx.profile.extensions(),
+            )?;
+            let names = amts
+                .iter()
+                .enumerate()
+                .map(|(amount_index, a)| {
+                    resolve_capability_name(
+                        &a.name,
+                        CapabilityKind::Amount,
+                        standard,
+                        symtab,
+                        budgets,
+                        step_index,
+                        amount_index,
+                    )
+                })
+                .collect::<Result<Vec<_>, ModelError>>()?;
+            check_resolved_names_unique(&names, CapabilityKind::Amount, step_index)?;
             amts.iter()
-                .map(|a| {
+                .zip(names)
+                .enumerate()
+                .map(|(amount_index, (a, name))| {
                     let min = a
                         .min
                         .as_ref()
-                        .map(|fs| ranges::resolve_to_f64(fs, symtab, "hostRequirements amount min"))
-                        .transpose()?;
+                        .map(|fs| {
+                            ranges::resolve_to_f64(
+                                fs,
+                                symtab,
+                                "hostRequirements amount min",
+                                budgets,
+                            )
+                        })
+                        .transpose()?
+                        .flatten();
                     let max = a
                         .max
                         .as_ref()
-                        .map(|fs| ranges::resolve_to_f64(fs, symtab, "hostRequirements amount max"))
-                        .transpose()?;
-                    Ok(job::AmountRequirement {
-                        name: a.name.clone(),
-                        min,
-                        max,
-                    })
+                        .map(|fs| {
+                            ranges::resolve_to_f64(
+                                fs,
+                                symtab,
+                                "hostRequirements amount max",
+                                budgets,
+                            )
+                        })
+                        .transpose()?
+                        .flatten();
+                    check_resolved_amount_bounds(min, max, step_index, amount_index)?;
+                    Ok(job::AmountRequirement { name, min, max })
                 })
                 .collect::<Result<Vec<_>, ModelError>>()
         })
@@ -378,21 +555,77 @@ fn resolve_host_requirements(
         .attributes
         .as_ref()
         .map(|attrs| {
+            let standard = crate::capabilities::standard_attribute_capabilities(
+                ctx.profile.revision(),
+                ctx.profile.extensions(),
+            )?;
+            let standard_names: Vec<&str> = standard.iter().map(|(name, _)| *name).collect();
+            let names = attrs
+                .iter()
+                .enumerate()
+                .map(|(attr_index, a)| {
+                    resolve_capability_name(
+                        &a.name,
+                        CapabilityKind::Attribute,
+                        &standard_names,
+                        symtab,
+                        budgets,
+                        step_index,
+                        attr_index,
+                    )
+                })
+                .collect::<Result<Vec<_>, ModelError>>()?;
+            check_resolved_names_unique(&names, CapabilityKind::Attribute, step_index)?;
             attrs
                 .iter()
-                .map(|a| {
+                .zip(names)
+                .enumerate()
+                .map(|(attr_index, (a, name))| {
                     let any_of = a
                         .any_of
                         .as_ref()
-                        .map(|vals| ranges::resolve_string_list(vals, symtab))
+                        .map(|vals| ranges::resolve_string_list(vals, symtab, budgets))
                         .transpose()?;
                     let all_of = a
                         .all_of
                         .as_ref()
-                        .map(|vals| ranges::resolve_string_list(vals, symtab))
+                        .map(|vals| ranges::resolve_string_list(vals, symtab, budgets))
                         .transpose()?;
+                    let attr_lower = name.to_lowercase();
+                    let is_single_valued = attr_lower == "attr.worker.os.family"
+                        || attr_lower == "attr.worker.cpu.arch";
+                    for (field, values) in [("anyOf", &any_of), ("allOf", &all_of)] {
+                        if let Some(values) = values {
+                            // Decode checks these counts on the template's
+                            // element list, but a whole-field expression
+                            // flattens a list inline (Expression Language
+                            // §1.3.2), so the resolved count is unrelated
+                            // to the count decode saw. Re-apply the rules
+                            // on the resolved list, like the emptiness
+                            // check below and the range-element cap in
+                            // resolve_string_range.
+                            if values.is_empty() {
+                                return Err(ModelError::DecodeValidation(format!(
+                                    "steps[{step_index}] -> hostRequirements -> attributes[{attr_index}] -> {field}: has no elements after resolution"
+                                )));
+                            }
+                            if values.len() > 50 {
+                                return Err(ModelError::DecodeValidation(format!(
+                                    "steps[{step_index}] -> hostRequirements -> attributes[{attr_index}] -> {field}: exceeds 50 elements after resolution"
+                                )));
+                            }
+                            if is_single_valued && field == "allOf" && values.len() > 1 {
+                                return Err(ModelError::DecodeValidation(format!(
+                                    "steps[{step_index}] -> hostRequirements -> attributes[{attr_index}] -> {field}: single-valued attribute cannot have more than 1 element after resolution"
+                                )));
+                            }
+                            check_resolved_attribute_values(
+                                &name, field, values, standard, step_index, attr_index,
+                            )?;
+                        }
+                    }
                     Ok(job::AttributeRequirement {
-                        name: a.name.clone(),
+                        name,
                         any_of,
                         all_of,
                     })
@@ -407,12 +640,207 @@ fn resolve_host_requirements(
     })
 }
 
+/// Resolve a `hostRequirements` capability name and check the §3.3.1.1 /
+/// §3.3.2.1 constraints on the resolved value.
+///
+/// `name` is `@fmtstring`, and template validation can only check a name
+/// whose value it knows: a literal, or one that is fully static. Job
+/// creation resolves every name, so the checks run here on the resolved
+/// value, through the same [`check_capability_name`] template validation
+/// uses, so a violation reads the same way whichever stage caught it.
+fn resolve_capability_name(
+    name: &openjd_expr::FormatString,
+    kind: CapabilityKind,
+    standard: &[&str],
+    symtab: &SymbolTable,
+    budgets: super::EvalBudgets,
+    step_index: usize,
+    index: usize,
+) -> Result<String, ModelError> {
+    // Required string field: a single whole-field expression resolves with
+    // target type `string` (Expression Language §1.3.2).
+    let resolved = name
+        .resolve_with(
+            symtab,
+            &budgets
+                .fs_options()
+                .with_target_type(&openjd_expr::ExprType::STRING),
+        )
+        .map(|v| match v {
+            openjd_expr::ExprValue::String(s) => s,
+            other => other.to_display_string(),
+        })
+        .map_err(|e| ModelError::FormatStringError {
+            message: format!("hostRequirements {} name: {e}", kind.noun()),
+            input: Some(name.raw().to_string()),
+            start: None,
+            end: None,
+        })?;
+    let path = vec![
+        PathElement::Field("steps".to_string()),
+        PathElement::Index(step_index),
+        PathElement::Field("hostRequirements".to_string()),
+        PathElement::Field(kind.field().to_string()),
+        PathElement::Index(index),
+    ];
+    let mut errors = ValidationErrors::default();
+    check_capability_name(&resolved, kind, standard, &path, &mut errors);
+    errors.into_result("JobTemplate")?;
+    Ok(resolved)
+}
+
+/// Check the §3.3 constraint that no two amounts, and no two attributes,
+/// have the same name after the name format strings have been resolved.
+///
+/// Decode compares literal names only, since a name containing expressions
+/// is unknown there. Two different templates names can resolve to the same
+/// capability, so the resolved names are compared here, case-insensitively
+/// as §3.3.1.1 / §3.3.2.1 require.
+fn check_resolved_names_unique(
+    names: &[String],
+    kind: CapabilityKind,
+    step_index: usize,
+) -> Result<(), ModelError> {
+    let mut seen = std::collections::HashSet::new();
+    let mut errors = ValidationErrors::default();
+    for (index, name) in names.iter().enumerate() {
+        if !seen.insert(name.to_lowercase()) {
+            errors.add(
+                &[
+                    PathElement::Field("steps".to_string()),
+                    PathElement::Index(step_index),
+                    PathElement::Field("hostRequirements".to_string()),
+                    PathElement::Field(kind.field().to_string()),
+                    PathElement::Index(index),
+                ],
+                format!("duplicate {} name '{name}'.", kind.noun()),
+            );
+        }
+    }
+    errors.into_result("JobTemplate")
+}
+
+/// Re-check the `amounts[].min` / `amounts[].max` bounds (§3.3.1) on resolved
+/// values.
+///
+/// Under FEATURE_BUNDLE_1 both fields may be format strings, so the bounds
+/// cannot be applied at decode — `validate_v2023_09::structure`'s
+/// `parse_literal_amount` returns `None` for a non-literal for exactly that
+/// reason, which skips all three checks. Job creation resolves the values, so
+/// the deferred checks resume here.
+///
+/// `min` is `<nonnegativefloat>` and `max` is `<positivefloat>`, so `0` is
+/// legal for one and not the other. Paths and wording match the decode-time
+/// checks, so a violation reads the same way whichever path caught it.
+fn check_resolved_amount_bounds(
+    min: Option<f64>,
+    max: Option<f64>,
+    step_index: usize,
+    amount_index: usize,
+) -> Result<(), ModelError> {
+    let amount_path = vec![
+        PathElement::Field("steps".to_string()),
+        PathElement::Index(step_index),
+        PathElement::Field("hostRequirements".to_string()),
+        PathElement::Field("amounts".to_string()),
+        PathElement::Index(amount_index),
+    ];
+    let mut errors = ValidationErrors::default();
+    // Decode enforces "at least one of min or max" on field *presence*,
+    // but a whole-field expression resolving to null under the `float?`
+    // target means "bound unset" — so a present field can still resolve
+    // away. Re-apply the rule on the resolved values; without it the job
+    // would carry a boundless amount requirement that matches every
+    // worker. The "after resolution" suffix distinguishes this from the
+    // decode-time message: the author *did* provide the field.
+    if min.is_none() && max.is_none() {
+        errors.add(
+            &amount_path,
+            "must have at least one of min or max after resolution.",
+        );
+    }
+    if let Some(min) = min {
+        if min < 0.0 {
+            errors.add(&path_field(&amount_path, "min"), "must be non-negative.");
+        }
+    }
+    if let Some(max) = max {
+        if max <= 0.0 {
+            errors.add(&path_field(&amount_path, "max"), "must be positive.");
+        }
+    }
+    if let (Some(min), Some(max)) = (min, max) {
+        if min > max {
+            errors.add(&amount_path, format!("min ({min}) > max ({max})."));
+        }
+    }
+    errors.into_result("JobTemplate")
+}
+
+/// Re-check `<AttributeCapabilityValue>` constraints (§3.3.2.2) on resolved
+/// `attributes[].anyOf` / `attributes[].allOf` values.
+///
+/// Both fields are `@fmtstring` in base 2023-09, so a value written as a
+/// format string is unknown at decode and its constraints cannot be applied
+/// there — `validate_v2023_09::structure` gates the decode-time check on
+/// `FormatString::is_literal` for exactly that reason. Job creation resolves
+/// the value, so the deferred check resumes here.
+///
+/// Errors are reported at the path and with the wording the decode-time check
+/// uses for the same violation, so a violation reads the same way whichever
+/// path caught it. Two differences are deliberate: the path always carries the
+/// failing element's index, which decode omits for standard capabilities, and
+/// the length message names the resolved value.
+///
+/// Only the first failing `anyOf`/`allOf` group on the first failing attribute
+/// is reported, because the caller collects through `?`. Decode accumulates
+/// every violation instead. Closing that gap means threading one
+/// `ValidationErrors` through the whole of `resolve_host_requirements`.
+fn check_resolved_attribute_values(
+    capability_name: &str,
+    field: &str,
+    values: &[String],
+    standard: &[(&str, &[&str])],
+    step_index: usize,
+    attr_index: usize,
+) -> Result<(), ModelError> {
+    let mut errors = ValidationErrors::default();
+    for (value_index, value) in values.iter().enumerate() {
+        if let Err(message) = crate::capabilities::validate_attribute_capability_value(
+            capability_name,
+            value,
+            standard,
+        ) {
+            errors.add(
+                &[
+                    PathElement::Field("steps".to_string()),
+                    PathElement::Index(step_index),
+                    PathElement::Field("hostRequirements".to_string()),
+                    PathElement::Field("attributes".to_string()),
+                    PathElement::Index(attr_index),
+                    PathElement::Field(field.to_string()),
+                    PathElement::Index(value_index),
+                ],
+                message,
+            );
+        }
+    }
+    errors.into_result("JobTemplate")
+}
+
 /// Evaluate let bindings and return a new symbol table with bound values.
+///
+/// `memory_limit` / `operation_limit` bound each binding's expression
+/// evaluation (the Expression Language spec's "Memory-bounded evaluation"
+/// budgets — `CallerLimits::max_eval_memory_bytes` /
+/// `max_eval_operations`); `None` uses the spec-recommended defaults.
 pub fn evaluate_let_bindings(
     bindings: &[String],
     symtab: &SymbolTable,
     library: Option<&openjd_expr::function_library::FunctionLibrary>,
     path_format: PathFormat,
+    memory_limit: Option<usize>,
+    operation_limit: Option<usize>,
 ) -> Result<SymbolTable, ModelError> {
     let mut result = symtab.clone();
     for binding in bindings {
@@ -434,6 +862,12 @@ pub fn evaluate_let_bindings(
         let mut builder = parsed.with_path_format(path_format);
         if let Some(lib) = library {
             builder = builder.with_library(lib);
+        }
+        if let Some(m) = memory_limit {
+            builder = builder.with_memory_limit(m);
+        }
+        if let Some(o) = operation_limit {
+            builder = builder.with_operation_limit(o);
         }
         let value = builder.evaluate(&[&result as &SymbolTable]).map_err(|e| {
             ModelError::Expression(ExpressionError::new(format!(

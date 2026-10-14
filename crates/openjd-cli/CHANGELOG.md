@@ -5,6 +5,130 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.3.2...openjd-cli-v0.4.0) - 2026-10-07
+
+### Bug fixes
+
+- [**breaking**] Update ruff parser to 0.16.10, pin exact version, raise MSRV to 1.97 ([#429](https://github.com/OpenJobDescription/openjd-rs/pull/429)) ([#429](https://github.com/OpenJobDescription/openjd-rs/pull/429))
+
+
+## [0.3.2](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.3.1...openjd-cli-v0.3.2) - 2026-10-02
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-model, openjd-sessions
+
+
+## [0.3.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.3.0...openjd-cli-v0.3.1) - 2026-09-30
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-expr, openjd-model, openjd-sessions
+
+
+## [0.3.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.2.0...openjd-cli-v0.3.0) - 2026-09-28
+
+### Features
+
+- [**breaking**] Require create_job's context to cover the template's extensions ([#407](https://github.com/OpenJobDescription/openjd-rs/pull/407))
+
+
+## [0.2.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.18...openjd-cli-v0.2.0) - 2026-09-18
+
+### Features
+
+- [**breaking**] Opt-in resolved-value caps and evaluation-budget plumbing ([#399](https://github.com/OpenJobDescription/openjd-rs/pull/399))
+
+
+### Miscellaneous
+
+- [**breaking**] Raise MSRV to 1.96.0; dep sweep (ruff 0.16, rusqlite 0.40) ([#403](https://github.com/OpenJobDescription/openjd-rs/pull/403))
+
+
+## [0.1.18](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.17...openjd-cli-v0.1.18) - 2026-09-15
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-expr, openjd-model, openjd-sessions
+
+
+## [0.1.17](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.16...openjd-cli-v0.1.17) - 2026-09-11
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-model, openjd-sessions
+
+
+## [0.1.16](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.15...openjd-cli-v0.1.16) - 2026-09-10
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-expr, openjd-model, openjd-sessions
+
+
+## [0.1.15](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.14...openjd-cli-v0.1.15) - 2026-09-09
+
+### Miscellaneous
+
+- Update Cargo.lock dependencies
+
+
+## [0.1.14](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.13...openjd-cli-v0.1.14) - 2026-09-03
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-expr, openjd-model, openjd-sessions
+
+
+## [0.1.13](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.12...openjd-cli-v0.1.13) - 2026-09-01
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-model, openjd-sessions
+
+
+## [0.1.12](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.11...openjd-cli-v0.1.12) - 2026-08-25
+
+### Miscellaneous
+
+- Update Cargo.lock dependencies
+
+
+## [0.1.11](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.10...openjd-cli-v0.1.11) - 2026-08-21
+
+### Miscellaneous
+
+- Update Cargo.lock dependencies
+
+
+## [0.1.10](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.9...openjd-cli-v0.1.10) - 2026-08-14
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-model, openjd-sessions
+
+
+## [0.1.9](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.8...openjd-cli-v0.1.9) - 2026-08-13
+
+### Bug fixes
+
+- PATHEXT-aware Windows executable resolution on both spawn paths ([#286](https://github.com/OpenJobDescription/openjd-rs/pull/286))
+
+- Defer zero-duration chunk adjustment ([#282](https://github.com/OpenJobDescription/openjd-rs/pull/282))
+
+- Close remaining RFC 0008 wrap-action gaps in hook scoping, cleanup, and preflight
+
+
+### Miscellaneous
+
+- Update serde-saphyr to 1.0.1 ([#304](https://github.com/OpenJobDescription/openjd-rs/pull/304))
+
+
+### Refactor
+
+- Simplify run lifecycle and wrap dispatch ([#280](https://github.com/OpenJobDescription/openjd-rs/pull/280))
+
+
 ## [0.1.8](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.1.7...openjd-cli-v0.1.8) - 2026-07-22
 
 ### Bug fixes

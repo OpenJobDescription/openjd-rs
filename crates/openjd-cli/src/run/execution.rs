@@ -73,14 +73,14 @@ fn prepare_run(args: &RunArgs) -> Result<PreparedRun, RunError> {
     let template_value = parse::document_string_to_object(
         &content,
         crate::common::document_type(path),
-        &openjd_model::CallerLimits::default(),
+        &crate::common::caller_limits(),
     )?;
     let exts = crate::common::parse_extensions(&args.extensions)?;
     let supported_exts: Vec<&str> = exts.iter().map(String::as_str).collect();
     let job_template = parse::decode_job_template(
         template_value,
         Some(&supported_exts),
-        &openjd_model::CallerLimits::default(),
+        &crate::common::caller_limits(),
     )?;
 
     let mut env_templates = Vec::new();
@@ -89,11 +89,12 @@ fn prepare_run(args: &RunArgs) -> Result<PreparedRun, RunError> {
         let env_value = parse::document_string_to_object(
             &env_content,
             crate::common::document_type(env_path),
-            &openjd_model::CallerLimits::default(),
+            &crate::common::caller_limits(),
         )?;
         env_templates.push(parse::decode_environment_template(
             env_value,
             Some(&supported_exts),
+            &crate::common::caller_limits(),
         )?);
     }
 
@@ -120,18 +121,14 @@ fn prepare_run(args: &RunArgs) -> Result<PreparedRun, RunError> {
     )
     .map_err(|e| format!("{e}\n\n{}", crate::help::format_help(&job_template, path)))?;
 
-    let mut profile_extensions = std::collections::HashSet::new();
-    if let Some(ext_list) = &job_template.extensions {
-        profile_extensions.extend(ext_list.iter().filter_map(|e| {
-            e.as_str()
-                .parse::<openjd_model::types::ModelExtension>()
-                .ok()
-        }));
-    }
-    let revision_profile = ModelProfile::new(openjd_model::types::SpecificationRevision::V2023_09)
-        .with_extensions(profile_extensions);
-    let revision_ctx =
-        openjd_model::types::ValidationContext::from_profile(revision_profile.clone());
+    // Derive the profile and context from the template itself —
+    // `create_job` requires the context's revision/extensions to cover
+    // the template's — and carry the CLI's caller limits so job
+    // creation enforces the same caps the decode ran under.
+    let revision_profile = job_template.profile();
+    let revision_ctx = job_template
+        .default_validation_context()
+        .with_caller_limits(crate::common::caller_limits());
     let job = openjd_model::create_job(&job_template, &param_values, &revision_ctx)
         .map_err(|e| format!("{e}\n\n{}", crate::help::format_help(&job_template, path)))?;
 
@@ -290,6 +287,10 @@ fn create_session(
         sticky_bit_policy: Default::default(),
         debug_collect_stdout: false,
         echo_openjd_directives: true,
+        // Run-time mirror of the CLI's caller-limits policy: derived from
+        // the same `common::caller_limits()` value the decode/creation
+        // stages use, so the two cannot drift.
+        limits: openjd_sessions::SessionLimits::from(&crate::common::caller_limits()),
     };
     Session::with_config(session_config)
         .map_err(|e| format!("Failed to create session: {e}").into())

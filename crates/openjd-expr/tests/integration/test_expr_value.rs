@@ -148,6 +148,262 @@ fn coerce_list_elements() {
     assert_eq!(v.expr_type().to_string(), "list[int]");
 }
 
+#[test]
+fn coerce_compatible_unresolved_preserves_constraint() {
+    let value = ExprValue::unresolved(ExprType::INT)
+        .coerce(&ExprType::INT, PathFormat::Posix)
+        .unwrap();
+    assert_eq!(value, ExprValue::unresolved(ExprType::INT));
+}
+
+#[test]
+fn coerce_unresolved_applies_type_level_rules() {
+    let cases = [
+        (ExprType::INT, ExprType::STRING),
+        (ExprType::INT, ExprType::FLOAT),
+        (ExprType::PATH, ExprType::STRING),
+        (
+            ExprType::list(ExprType::INT),
+            ExprType::list(ExprType::FLOAT),
+        ),
+        (ExprType::RANGE_EXPR, ExprType::list(ExprType::INT)),
+    ];
+    for (source, target) in cases {
+        let value = ExprValue::unresolved(source)
+            .coerce(&target, PathFormat::Posix)
+            .unwrap();
+        assert_eq!(value, ExprValue::unresolved(target));
+    }
+}
+
+#[test]
+fn coerce_unresolved_defers_payload_checks() {
+    let value = ExprValue::unresolved(ExprType::STRING)
+        .coerce(&ExprType::INT, PathFormat::Posix)
+        .unwrap();
+    assert_eq!(value, ExprValue::unresolved(ExprType::INT));
+}
+
+#[test]
+fn coerce_unresolved_narrows_union_constraint() {
+    let value = ExprValue::unresolved(ExprType::union(vec![ExprType::INT, ExprType::STRING]))
+        .coerce(&ExprType::INT, PathFormat::Posix)
+        .unwrap();
+    assert_eq!(value, ExprValue::unresolved(ExprType::INT));
+}
+
+#[test]
+fn coerce_unresolved_keeps_successful_union_members() {
+    let value = ExprValue::unresolved(ExprType::union(vec![
+        ExprType::INT,
+        ExprType::list(ExprType::INT),
+    ]))
+    .coerce(&ExprType::INT, PathFormat::Posix)
+    .unwrap();
+    assert_eq!(value, ExprValue::unresolved(ExprType::INT));
+}
+
+#[test]
+fn coerce_unresolved_nullable_and_nested_union_sources() {
+    let cases = [
+        ("int?", "string", "string"),
+        ("int?", "int", "int"),
+        ("int?", "int | string", "int"),
+        ("string?", "int | string", "string"),
+        ("int?", "int? | list[int]", "int?"),
+        ("int? | list[int]", "int | list[int]", "int | list[int]"),
+        ("string? | list[string]", "string?", "string?"),
+    ];
+
+    for (source, target, expected) in cases {
+        let value = ExprValue::unresolved(ExprType::parse(source).unwrap())
+            .coerce(&ExprType::parse(target).unwrap(), PathFormat::Posix)
+            .unwrap();
+        assert_eq!(
+            value,
+            ExprValue::unresolved(ExprType::parse(expected).unwrap()),
+            "source={source}, target={target}"
+        );
+    }
+}
+
+#[test]
+fn coerce_unresolved_empty_list_to_typed_list() {
+    let value = ExprValue::unresolved(ExprType::list(ExprType::NULLTYPE))
+        .coerce(&ExprType::list(ExprType::STRING), PathFormat::Posix)
+        .unwrap();
+    assert_eq!(
+        value,
+        ExprValue::unresolved(ExprType::list(ExprType::STRING))
+    );
+}
+
+/// Any list/list pair is accepted at the type level, even when the
+/// element types have no coercion rule: an `unresolved[list[S]]` could
+/// resolve to the empty list, which the concrete path coerces to any
+/// `list[U]`. Rejecting the pair would fail a template during validation
+/// that could have run correctly. The element check defers to resolution.
+#[test]
+fn coerce_unresolved_list_pair_accepted_unconditionally() {
+    for (source, target) in [
+        ("list[int]", "list[bool]"),
+        ("list[int]", "list[path]"),
+        ("list[string]", "list[list[int]]"),
+    ] {
+        let source = ExprType::parse(source).unwrap();
+        let target = ExprType::parse(target).unwrap();
+        // The concrete empty list coerces to the target...
+        let empty = ExprValue::make_list(vec![], source.params()[0].clone()).unwrap();
+        assert!(
+            empty.coerce(&target, PathFormat::Posix).is_ok(),
+            "concrete [] as {source} should coerce to {target}"
+        );
+        // ...so the unresolved pair must be accepted too.
+        let value = ExprValue::unresolved(source.clone())
+            .coerce(&target, PathFormat::Posix)
+            .unwrap();
+        assert_eq!(
+            value,
+            ExprValue::unresolved(target.clone()),
+            "unresolved[{source}] should coerce to {target}"
+        );
+    }
+}
+
+#[test]
+fn coerce_unresolved_unions_successful_result_types() {
+    let value = ExprValue::unresolved(ExprType::union(vec![ExprType::BOOL, ExprType::INT]))
+        .coerce(
+            &ExprType::union(vec![ExprType::FLOAT, ExprType::STRING]),
+            PathFormat::Posix,
+        )
+        .unwrap();
+    assert_eq!(
+        value,
+        ExprValue::unresolved(ExprType::union(vec![ExprType::FLOAT, ExprType::STRING]))
+    );
+}
+
+#[test]
+fn coerce_unresolved_does_not_broaden_for_union_target() {
+    let value = ExprValue::unresolved(ExprType::INT)
+        .coerce(
+            &ExprType::union(vec![ExprType::INT, ExprType::STRING]),
+            PathFormat::Posix,
+        )
+        .unwrap();
+    assert_eq!(value, ExprValue::unresolved(ExprType::INT));
+}
+
+#[test]
+fn coerce_incompatible_unresolved_errors() {
+    let error = ExprValue::unresolved(ExprType::list(ExprType::INT))
+        .coerce(&ExprType::INT, PathFormat::Posix)
+        .unwrap_err();
+    assert_eq!(error, "Cannot coerce list[int] to int");
+}
+
+#[test]
+fn coerce_unresolved_errors_when_no_union_member_succeeds() {
+    let source = ExprType::union(vec![ExprType::PATH, ExprType::list(ExprType::INT)]);
+    let error = ExprValue::unresolved(source.clone())
+        .coerce(&ExprType::INT, PathFormat::Posix)
+        .unwrap_err();
+    assert_eq!(error, format!("Cannot coerce {source} to int"));
+}
+
+/// RFC 0005: `list[int]` is the only list type a `range_expr` implicitly
+/// coerces to, and a coerced value must satisfy the target it was coerced
+/// to — so the coercion yields a `list[int]`, never a widened list. Any
+/// target a `list[int]` already satisfies is accepted, since no widening is
+/// involved: `list[any]` and `list[int | string]` as well as `list[int]`.
+#[test]
+fn coerce_range_expr_to_list_int_only() {
+    let range = RangeExpr::from_values(vec![1, 2, 3]).unwrap();
+    for target in ["list[int]", "list[any]", "list[int | string]"] {
+        let target = ExprType::parse(target).unwrap();
+        let value = ExprValue::RangeExpr(range.clone())
+            .coerce(&target, PathFormat::Posix)
+            .unwrap();
+        assert_eq!(value, ExprValue::ListInt(vec![1, 2, 3]), "target={target}");
+    }
+}
+
+/// Implicit coercion rules do not chain: a `list[T]` target with any
+/// element type other than `int` is rejected on both the concrete and
+/// unresolved paths, rather than materializing and widening element-wise.
+/// Templates use the explicit `list()` conversion for that.
+#[test]
+fn coerce_range_expr_to_other_list_errors_on_both_paths() {
+    let range = RangeExpr::from_values(vec![1, 2, 3]).unwrap();
+    for target in ["list[float]", "list[string]", "list[bool]"] {
+        let target = ExprType::parse(target).unwrap();
+        assert!(
+            ExprValue::RangeExpr(range.clone())
+                .coerce(&target, PathFormat::Posix)
+                .is_err(),
+            "concrete should reject {target}"
+        );
+        assert_eq!(
+            ExprValue::unresolved(ExprType::RANGE_EXPR)
+                .coerce(&target, PathFormat::Posix)
+                .unwrap_err(),
+            format!("Cannot coerce range_expr to {target}")
+        );
+    }
+}
+
+/// The unresolved table must agree with the concrete one: it accepts the same
+/// targets, and for these targets — where the `range_expr` rule is the only
+/// destination that applies — it yields the same result type. Since a
+/// `range_expr` only ever materializes to a `list[int]`, that is the constraint
+/// the placeholder carries even when the target is wider: a `list[any]` target
+/// does not turn the result into an `unresolved[list[any]]`.
+///
+/// Result types agree only when a single destination applies; see
+/// `specs/expr/values.md` for why the type level cannot generally predict which
+/// member of a multi-destination target a payload will land in.
+#[test]
+fn coerce_unresolved_range_expr_to_list_matches_concrete() {
+    let range = RangeExpr::from_values(vec![1, 2, 3]).unwrap();
+    for target in ["list[int]", "list[any]", "list[int | string]"] {
+        let target = ExprType::parse(target).unwrap();
+        let concrete = ExprValue::RangeExpr(range.clone())
+            .coerce(&target, PathFormat::Posix)
+            .unwrap();
+        let unresolved = ExprValue::unresolved(ExprType::RANGE_EXPR)
+            .coerce(&target, PathFormat::Posix)
+            .unwrap();
+        assert_eq!(
+            unresolved,
+            ExprValue::unresolved(concrete.expr_type()),
+            "target={target}"
+        );
+    }
+}
+
+/// A concrete value never coerces to a type variable, so an unresolved
+/// placeholder must not either — otherwise validation would accept an
+/// expression that can only fail once the value is known.
+#[test]
+fn coerce_unresolved_rejects_type_var_target() {
+    for target in ["T", "T1", "T2", "T3"] {
+        let target = ExprType::parse(target).unwrap();
+        assert!(
+            ExprValue::Int(42)
+                .coerce(&target, PathFormat::Posix)
+                .is_err(),
+            "concrete should reject {target}"
+        );
+        assert_eq!(
+            ExprValue::unresolved(ExprType::INT)
+                .coerce(&target, PathFormat::Posix)
+                .unwrap_err(),
+            format!("Cannot coerce int to {target}")
+        );
+    }
+}
+
 // ══════════════════════════════════════════════════════════════
 // repr_python
 // ══════════════════════════════════════════════════════════════
@@ -1302,4 +1558,149 @@ fn nonempty_list_elem_type_unchanged() {
 
     let v = ExprValue::ListString(vec!["a".into(), "b".into()], 2);
     assert_eq!(v.list_elem_type(), Some(ExprType::STRING));
+}
+
+// ══════════════════════════════════════════════════════════════
+// repr_python escapes its embedded literal
+// ══════════════════════════════════════════════════════════════
+//
+// `repr_python` builds Python literals but did not escape them, not even the
+// quote or the backslash. It shares `repr_py`'s writer now, so each expectation
+// below is CPython's `repr` of the inner string, dropped into the existing
+// wrapper. Checked against CPython 3.11.12, 3.12.10, 3.13.7 and 3.14.0b4.
+
+#[test]
+fn repr_python_switches_delimiter_for_an_embedded_single_quote() {
+    // Was `ExprValue('it's')`, which CPython refuses to parse.
+    assert_eq!(
+        ExprValue::String("it's".to_string()).repr_python(),
+        "ExprValue(\"it's\")"
+    );
+}
+
+#[test]
+fn repr_python_doubles_a_backslash() {
+    // Was `ExprValue('a\b')`, which parses as a backspace: silent corruption.
+    assert_eq!(
+        ExprValue::String("a\\b".to_string()).repr_python(),
+        r"ExprValue('a\\b')"
+    );
+}
+
+#[test]
+fn repr_python_escapes_a_newline() {
+    assert_eq!(
+        ExprValue::String("hello\nworld".to_string()).repr_python(),
+        r"ExprValue('hello\nworld')"
+    );
+}
+
+#[test]
+fn repr_python_escapes_a_nul() {
+    assert_eq!(
+        ExprValue::String("a\u{0}b".to_string()).repr_python(),
+        r"ExprValue('a\x00b')"
+    );
+}
+
+#[test]
+fn repr_python_escapes_non_printable_non_ascii() {
+    assert_eq!(
+        ExprValue::String("a\u{a0}b".to_string()).repr_python(),
+        r"ExprValue('a\xa0b')"
+    );
+}
+
+#[test]
+fn repr_python_keeps_printable_non_ascii_verbatim() {
+    assert_eq!(
+        ExprValue::String("café".to_string()).repr_python(),
+        "ExprValue('café')"
+    );
+}
+
+#[test]
+fn repr_python_escapes_inside_a_path() {
+    let v = ExprValue::new_path("/tmp/a\nb.txt".to_string(), PathFormat::Posix);
+    assert_eq!(
+        v.repr_python(),
+        r"ExprValue('/tmp/a\nb.txt', type='path', path_format=PathFormat.POSIX)"
+    );
+}
+
+#[test]
+fn repr_python_escapes_inside_list_elements() {
+    let v = ExprValue::make_list(
+        vec![
+            ExprValue::String("it's".to_string()),
+            ExprValue::String("a\nb".to_string()),
+        ],
+        ExprType::list(ExprType::STRING),
+    )
+    .unwrap();
+    // CPython selects a delimiter per element, so the two differ:
+    //   >>> repr(["it's", 'a\nb'])
+    //   ["it's", 'a\nb']
+    assert_eq!(
+        v.repr_python(),
+        r#"ExprValue(["it's", 'a\nb'], type='list[string]')"#
+    );
+}
+
+#[test]
+fn repr_python_leaves_a_float_original_spelling_unchanged() {
+    // Numeric text needs no escaping, so routing it through the shared writer
+    // must not alter it.
+    assert_eq!(
+        ExprValue::Float(Float64::with_str(3.5, "3.500".to_string()).unwrap()).repr_python(),
+        "ExprValue('3.500', type='float')"
+    );
+}
+
+#[test]
+fn repr_python_leaves_a_range_expression_unchanged() {
+    let v = ExprValue::RangeExpr("1-5".parse::<RangeExpr>().unwrap());
+    assert_eq!(v.repr_python(), "ExprValue('1-5', type='range_expr')");
+}
+
+#[test]
+fn repr_python_escapes_inside_list_of_path_elements() {
+    // `repr_python_list` matches `String` and `Path` in one arm. Splitting them
+    // would leave `list[path]` unescaped, which no `list[string]` test notices.
+    //
+    // The Windows format normalises the leading `/` to `\`, so the value is
+    // backslash, `a`, newline, `b`. That exercises backslash doubling and
+    // newline escaping together:
+    //   >>> repr(['\\a\nb'])
+    //   ['\\a\nb']
+    let v = ExprValue::make_list(
+        vec![ExprValue::new_path(
+            "/a\nb".to_string(),
+            PathFormat::Windows,
+        )],
+        ExprType::list(ExprType::PATH),
+    )
+    .unwrap();
+    assert_eq!(
+        v.repr_python(),
+        r"ExprValue(['\\a\nb'], type='list[path]', path_format=PathFormat.WINDOWS)"
+    );
+}
+
+#[test]
+fn repr_python_escapes_inside_a_nested_list() {
+    let inner = ExprValue::make_list(
+        vec![ExprValue::String("a\nb".to_string())],
+        ExprType::list(ExprType::STRING),
+    )
+    .unwrap();
+    let v = ExprValue::make_list(
+        vec![inner],
+        ExprType::list(ExprType::list(ExprType::STRING)),
+    )
+    .unwrap();
+    assert_eq!(
+        v.repr_python(),
+        r"ExprValue([['a\nb']], type='list[list[string]]')"
+    );
 }

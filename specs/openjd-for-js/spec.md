@@ -114,6 +114,10 @@ Callers who want non-throwing validation use `try { decodeJobTemplate(...) } cat
 | `maxStepScriptSize` | `number` | Max JSON-encoded size of a step script, in bytes. |
 | `maxEnvironmentSize` | `number` | Max JSON-encoded size of an environment, in bytes. |
 | `maxTemplateSize` | `number` | Max total template document size, in bytes. Checked before parsing begins. |
+| `maxResolvedArgLen` | `number` | Opt-in cap on any resolved string destined for a process argument (action `command`, each argv entry an `args` element produces). §5.1/§5.2 set no spec maximum. |
+| `maxResolvedDataLen` | `number` | Opt-in cap on each resolved embedded-file `data` value (§6.1.2 sets no spec limit). |
+| `maxEvalMemoryBytes` | `number` | Evaluation memory budget per format-string expression, in bytes. Omit for the spec-recommended 100 MB default. |
+| `maxEvalOperations` | `number` | Evaluation operation budget per format-string expression. Omit for the spec-recommended 10 M default. |
 
 `CallerLimits` is exposed as a plain object rather than an exported class: callers construct object literals and reuse them across calls with no `.free()` ceremony. Resolves review finding F4.
 

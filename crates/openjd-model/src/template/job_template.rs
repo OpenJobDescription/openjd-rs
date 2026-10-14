@@ -80,13 +80,15 @@ impl JobTemplate {
     /// default caller limits. Equivalent to
     /// `ValidationContext::from_profile(self.profile())`.
     ///
-    /// This is the convenient "do what the template says" context for
-    /// callers that do not want to override revision/extension policy.
-    /// Callers that *do* want to override (e.g. a service stripping EXPR
-    /// regardless of template intent) should build a
-    /// `ValidationContext` explicitly and use
+    /// This is the "do what the template says" context for `create_job`,
+    /// which requires a context whose revision matches the template's
+    /// and whose extensions cover everything the template declares.
+    /// Callers imposing policy (caller limits, extra extensions) should
+    /// layer it on with
     /// [`with_caller_limits`](crate::types::ValidationContext::with_caller_limits)
-    /// as needed.
+    /// or build a `ValidationContext` explicitly; note that this
+    /// convenience uses **default** caller limits, so a caller that set
+    /// limits at decode must carry them here too.
     pub fn default_validation_context(&self) -> crate::types::ValidationContext {
         crate::types::ValidationContext::from_profile(self.profile())
     }

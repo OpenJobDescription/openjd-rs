@@ -129,7 +129,9 @@ openjd run template.yaml --tasks file://tasks.yaml
 ```
 
 The file or inline string must parse to a JSON array of objects. Each object maps parameter
-names to string or numeric values. Numeric values are stringified.
+names to string or numeric values. Numeric values are stringified. YAML task files use strict
+boolean parsing, so shorthand words such as `yes`, `no`, `on`, and `off` remain strings; only
+`true` and `false` are booleans.
 
 ### Validation
 

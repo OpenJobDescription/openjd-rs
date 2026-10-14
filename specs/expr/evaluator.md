@@ -175,6 +175,16 @@ evaluator is consumed once, at the root `evaluate` entry point. A node
 kind added later is therefore unconstrained-by-default rather than
 inheriting the caller's target by accident.
 
+Coercion can change a value's size (`int` → `string`, `list[int]` →
+`list[string]`, `range_expr` → `list[int]`), and later releases of the
+value use the coerced size. So `eval_node` releases the value at the size
+the child tracked it at, coerces, and tracks the coerced value. This is
+also the only memory check a materialized `range_expr` gets: `coerce`
+runs outside the budget (it is a post-evaluation hook and a public API),
+so the `list[int]` is allocated first, capped by `coerce` itself at the
+default operation limit's worth of elements, and then tracked, which is
+where it is checked against the memory limit.
+
 **Symbolic parameter types unconstrain their position.** `sorted:
 (list[T1]) -> list[T1]` constrains its argument to any list type, which
 is not a type `ExprValue::coerce` can coerce toward, so the position gets
@@ -216,6 +226,15 @@ Handles dotted access like `Param.Frame` or `path.name`. Resolution order:
 
 This dual-purpose resolution is why `Param.Frame` works as a variable lookup and
 `my_path.name` works as a property access, using the same syntax.
+
+Steps 2 and 3 replace the original error with a friendlier one: a failed base
+evaluation with a dotted path becomes "Undefined variable 'Param.Frame'" with
+a suggestion, and a failed property dispatch becomes "'name' property is not
+available for string" (or "is a method, not a property"). Budget errors are
+not replaced; they propagate unchanged. A replaced budget error would be a
+value error that an enclosing construct may absorb (see
+[Speculative evaluation](#speculative-evaluation)), and the memory and
+operations were spent regardless.
 
 ### Operator dispatch table (`eval/op_table.rs`)
 
@@ -282,10 +301,25 @@ in  → __contains__(container, item)    # note: args swapped
 not in → __not_contains__(container, item)
 ```
 
+An unresolved operand does not short-circuit a comparison. The operands still
+go through library dispatch, which matches their types (the constraint of an
+unresolved value) against the operator's signatures and returns
+`Unresolved(BOOL)` on success, so a pair with no signature — `Param.Name in
+[1, 2]` for a STRING parameter, or `Param.N in 'abc'` — is refused at
+validation time. Only the value is deferred, not the type check. A chain with
+any unresolved link evaluates to `Unresolved(BOOL)` unless an earlier link is
+statically `false`.
+
 Chained comparisons short-circuit: `a < b < c` evaluates `a < b`, and only if true,
 evaluates `b < c`. The intermediate value `b` is reused. All comparison operands
 are evaluated unconstrained (see [Target Type
 Propagation](#target-type-propagation)).
+
+Memory accounting: each link hands its two operands to dispatch, which releases
+them (see [Dispatch Flow](#dispatch-flow)). When the chain continues, the right
+operand is cloned first and the clone is tracked as the value carried into the
+next link, so each operand is charged once and released by the link that
+consumes it.
 
 Comparison stays in the evaluator (not fully delegated to the library) because the
 chaining logic requires control flow that doesn't fit the simple dispatch model.
@@ -344,15 +378,54 @@ would fail on the discarded ones (issue #291, case B).
 When an earlier operand is unresolved, subsequent operands are still evaluated (to
 catch type errors in them), but the final result is `Unresolved(BOOL)` unless a
 subsequent concrete operand proves the result by short-circuiting (e.g.,
-`Unresolved and false` returns `false`). Errors in operands past the unresolved one
-are suppressed, since a runtime short-circuit could make them unreachable.
+`Unresolved and false` returns `false`). Operands after the unresolved one are
+evaluated speculatively (see [Speculative evaluation](#speculative-evaluation)): a
+value error is absorbed, since a runtime short-circuit could make the operand
+unreachable; a budget error propagates. Every operand value the result does not
+carry is released: the unresolved placeholder (the result is a fresh
+`Unresolved(BOOL)`), a concrete operand replaced by the next, and a speculative
+operand that did not decide the result.
+
+### Speculative evaluation
+
+Two constructs evaluate sub-expressions whose failure they may absorb rather than
+propagate: the branches of an unresolved-test conditional, and the operands of a
+boolop after an unresolved one. Both use one helper, `eval_speculative`, which
+applies two rules:
+
+- A budget error (`MemoryLimitExceeded` / `OperationLimitExceeded`, directly or
+  inside a compound error's sub-errors) is never absorbed. The memory and
+  operations were spent regardless of what a runtime would skip. It propagates
+  immediately: a conditional whose if-branch exceeds the budget does not evaluate
+  the else-branch.
+- A value error is absorbed and the live footprint (`current_memory`) is reset to
+  what it was before the attempt, because the failed sub-expression's values are
+  gone. Peak memory and the operation count keep what the attempt consumed.
+  Dispatch also releases a failed call's operands (see
+  [Dispatch Flow](#dispatch-flow)); the reset applies regardless of how the
+  sub-expression failed.
+
+The caller decides what an absorbed failure means: an `Unresolved` of the other
+branch's type, a runtime short-circuit, or a compound "both branches fail" error.
+
+The first rule requires that every construct between the budget failure and
+the absorbing one passes the error through unchanged. Two places replace
+errors with friendlier ones: [`eval_attribute`](#attribute-eval_attribute)'s
+fallbacks and [`eval_call`](#call-eval_call)'s "is a property, not a method"
+error for a failed method call. Both leave budget errors as they are.
 
 ### IfExp (`eval_ifexp`)
 Ternary: `x if condition else y`. Evaluates the condition unconstrained
 (see [Target Type Propagation](#target-type-propagation)) and asserts it
 is bool-compatible, then evaluates only the selected branch with the
 parent target type. When the condition is unresolved, both branches are
-evaluated and the result type is the union.
+evaluated speculatively (see above) and the result is an `Unresolved`
+carrying only a type: the union of both branch types when both succeed;
+the other branch's type when exactly one fails with a value error (a
+runtime with the condition resolved may never take the failing branch);
+a compound error carrying both as sub-errors when both fail. A budget
+error in either branch propagates immediately. Because the result
+carries no value, every branch value is released.
 
 ### Call (`eval_call`)
 Handles both function calls (`len(x)`) and method calls (`x.upper()`).
@@ -369,12 +442,57 @@ are evaluated unconstrained; coercion is signature-driven inside
 
 Rejects:
 - Direct dunder calls (`__add__(1, 2)` — use `1 + 2` instead)
-- Calling properties as methods (`path.name()` — use `path.name` instead)
+- Calling properties as methods (`path.name()` — use `path.name` instead).
+  When a method call fails and a property of the same name exists, the
+  original error is replaced with "is a property, not a method". Budget
+  errors are not replaced (see
+  [Speculative evaluation](#speculative-evaluation)). No method in the
+  default library shares a name with a property, so this only applies to
+  custom libraries.
 
 ### List (`eval_list`)
 Evaluates list literals. Validates max 2 nesting levels. Coerces elements when mixed
 types are present (int→float, path→string). Empty lists use the target type context
 to determine element type.
+
+Without a `list[T]` target, the element types must join under the shared
+list-element join (see [type-system.md § List element
+join](type-system.md#list-element-join)); otherwise the literal fails with
+"List literal contains incompatible types: …", listing each distinct element
+type once in first-seen order (`int and string`, `int, float, string, and
+path`). The same join decides the concrete list's element type in
+`make_list` and the hoisted element type below, so the three evaluation
+stages — template validation (all symbols unresolved), job creation
+(`Param.*` concrete, `Task.*`/`Session.*` unresolved), and run time (all
+concrete) — accept and reject the same combinations.
+
+A literal with any `Unresolved` element hoists to a top-level
+`unresolved(list[T])` (`unresolved_list_from_elements`), never a list
+nesting an `Unresolved`. `T` is the join of the element types, an unresolved
+element contributing its constraint: a concrete empty list `list[nulltype]`
+yields to an unresolved `list[int]` sibling (`[[], [Task.Param.I]]` →
+`unresolved[list[list[int]]]`), nested lists promote (`[[Param.N],
+[Task.Param.F]]` → `unresolved[list[list[float]]]`), and a union element
+joins through its compatible members (`[Task.Param.I ** 2, Param.N]` →
+`unresolved[list[float | int]]`; `[([] if H else [1]), [Task.Param.S]]` →
+`unresolved[list[list[string]]]` through the union's empty-list member). An optional element contributes its
+non-null member (`[Task.Param.I if H else None]` → `unresolved[list[int]]`),
+so `[I if H else None, S if H else None]` fails as the `int and string`
+conflict and its nested form as `list[int] and list[string]` — every value of
+either fails at run time. Incompatible elements are the same error as for a
+concrete literal, naming each element by the type it contributes. A
+concrete `null` element (only a comprehension body can produce one — a
+literal rejects `None` first) fails as "Cannot create list from null
+elements", the message `make_list` gives the same list at run time.
+
+Memory accounting: each element is tracked as it is evaluated, then released as the
+elements are consumed into the list, which is charged as one value (or as a
+type-only `Unresolved` placeholder when any element is unresolved). A literal's
+footprint is the list, not the list plus every element again. The error returns
+before that point (a `null` element, excessive nesting) leave the elements
+charged like any failed sub-expression's operands; an enclosing construct that
+absorbs the error resets the footprint (see
+[Speculative evaluation](#speculative-evaluation)).
 
 ### ListComp (`eval_listcomp`)
 Evaluates list comprehensions: `[expr for var in iterable if condition]`.
@@ -382,7 +500,67 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
 - Single generator only (no nested `for` clauses)
 - Creates a local scope per iteration (loop variable doesn't leak)
 - Handles unresolved iterables by evaluating the body once with an unresolved loop variable
+- A filter condition that evaluates to an *unresolved* value on a
+  concrete element concludes the same way: per-element inclusion is
+  undecidable, so any accumulated elements are abandoned and the
+  comprehension returns `unresolved(list[body_type])`, with the body's
+  type derived under an unresolved loop variable (evaluating the body
+  on a concrete element the runtime filter may exclude could raise a
+  spurious value error). This state — iterable concrete, filter
+  unresolved — is exactly what job creation evaluates under when the
+  iterable depends on `Param.*` and the filter on `Task.*`/`Session.*`;
+  a hard error here would reject templates that both validate and run.
+  A filter whose *type* can never be a boolean is still an error on
+  both paths.
+- Over a concrete iterable, the results build through `make_list`, which
+  applies the shared list-element join; an incompatible pair fails with
+  "make_list expected `T` element, got `U`" (`T` the join of the elements
+  before it). When any result is `Unresolved` (the body references an
+  unresolved symbol on some iterations), the comprehension hoists exactly
+  as a list literal does, with the joined element type:
+  `[[] if x > 2 else [Task.Param.I] for x in Param.L]` at job creation is
+  `unresolved[list[list[int]]]`, and `[[x] if x > 2 else [Task.Param.F] for
+  x in Param.L]` is `unresolved[list[list[float]]]` — the types run time
+  builds. `[[x] if x > 2 else [Task.Param.S] for x in Param.L]` fails at
+  job creation as it does at run time (`list[int]` beside `list[string]`),
+  though template validation, typing the body once as a union, accepts it.
+- Over an unresolved iterable (or an unresolved filter), the result is
+  `unresolved(list[T])` with `T` the body type's list-element contribution
+  (see [type-system.md § List element join](type-system.md#list-element-join)):
+  a `null` member is dropped (`int?` gives `list[int]`) and the result is
+  simplified as a join result, so `list[nulltype]` yields to a typed list
+  member and `[[] if x > 2 else [Task.Param.S] for x
+  in Param.L]` is `unresolved[list[list[string]]]` at template validation as
+  at job creation. A body that can only be `null` keeps its type (the
+  comprehension still succeeds over an empty iterable).
 - Operation count: +1 per iteration
+- Each iteration's child evaluator hands its *spend* — memory
+  high-water mark and operation count — back to the parent on **every**
+  exit, including when the filter or body errors. A failing iteration
+  has still spent its memory and operations in this evaluation; if an
+  enclosing construct absorbs the error (an unresolved-test conditional
+  or boolop) and continues, the parent's counters must include that
+  spend, or every absorbed comprehension failure evaluates
+  under-metered. The child's *live footprint* is never absorbed: on
+  every exit — success, failure, or abandonment, and on every exit of
+  the unresolved-iterable path — the parent's `current_memory` is reset
+  to its pre-iteration baseline. Nothing the child tracks survives the
+  iteration: the body's intermediates and its result are dropped (the
+  loop variable's own slot in the temp symbol table is never tracked;
+  what `eval_name` tracks is the clone it returns when the body reads
+  it), and the element being pushed is charged exactly once, by
+  `BudgetedVec`'s pre-check — not a second time through the child's
+  footprint, which would shrink the effective limit by one element per
+  push. The absorbing construct keeps evaluating on this evaluator, so
+  a stale footprint would charge every later allocation for memory
+  that is not live.
+- The iterable is consumed by the comprehension. The success path
+  releases it after the loop; every exit that *abandons* the
+  comprehension — an unresolved iterable, a non-iterable value, a
+  failing filter or body, a push-time exceedance — resets
+  `current_memory` to the footprint captured *before* the iterable was
+  evaluated, so an enclosing construct that absorbs the error is not
+  charged for a list nothing references.
 - Iterates lists without copying and symbolic ranges lazily
 - Pre-checks the growing result vector's values and projected capacity against the memory limit
 
@@ -397,6 +575,13 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
   target describes the subscript's *result*, so `[10, 20, 30][0]` with
   `target_type=int` must not coerce the `list[int]` receiver or the index
   (issue #291, case A)
+- A slice's four operands (receiver, start, stop, step) are tracked and
+  released symmetrically. An omitted bound is passed to `__getitem__` as
+  a `Null` placeholder, which is tracked when created so that dispatch's
+  release of every operand matches. When the result is a type-only
+  `Unresolved` (the receiver or any bound is unresolved), the operands
+  are released before the result is tracked. This is a success path, so
+  nothing else would reset the memory tracking.
 
 ## Dispatch Flow
 
@@ -405,21 +590,31 @@ The `dispatch` method is the centralized point for calling library functions:
 ```
 dispatch(name, args, ast_node)
     │
-    ├── Release input values from memory tracking
-    │
-    ├── Check if any arg is unresolved
-    │   └── Yes → infer return type from signature, return Unresolved(return_type)
-    │
     ├── Call library.call(name, args, eval_context)
     │   │
+    │   ├── Any arg unresolved → infer return type from signature,
+    │   │                         return Unresolved(return_type)
     │   ├── Phase 1: Exact non-generic match
     │   ├── Phase 2: Non-generic with coercion (skip receiver coercion for methods)
     │   └── Phase 3: Generic match with type variable binding
     │
-    ├── Track output value in memory
+    ├── Release input values from memory tracking (on success and on error)
+    │
+    ├── On success: track output value in memory
     │
     └── On error: attach AST node context for caret formatting
 ```
+
+The arguments are consumed by the call, so they are released from the
+live footprint whether the call succeeds or fails. Releasing on failure
+matters because the error may be absorbed by an enclosing construct (see
+[Speculative evaluation](#speculative-evaluation)) that keeps evaluating
+on the same evaluator: the operands are gone and must not stay charged.
+`eval_call` releases its arguments before dispatch for the same reason;
+the operator paths (`dispatch_with_node` / `dispatch_with_span`, sharing
+`dispatch_released`) do the same. The operation-count check before the
+call is the one exit that does not release; it fails only with a budget
+error, which is never absorbed.
 
 ## Fast Path: Simple Name Lookup
 

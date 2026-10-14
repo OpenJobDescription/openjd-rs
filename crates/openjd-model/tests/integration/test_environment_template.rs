@@ -8,6 +8,7 @@
 //! Gold standard: failure tests assert the full error message including path.
 
 use openjd_model::decode_environment_template;
+use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_json::Value {
     serde_saphyr::from_str(s).unwrap()
@@ -15,12 +16,14 @@ fn yaml_val(s: &str) -> serde_json::Value {
 
 fn decode_ok(s: &str) {
     let v = yaml_val(s);
-    decode_environment_template(v, None).unwrap_or_else(|_| panic!("Expected success for: {s}"));
+    decode_environment_template(v, None, &CallerLimits::default())
+        .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 fn check_env_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
-    let err = decode_environment_template(v, None).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_environment_template(v, None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -449,6 +452,47 @@ fn test_embedded_filename_backslash() {
 }
 
 #[test]
+fn test_embedded_filename_dot() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {
+            "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": "hello", "filename": "."}],
+            "actions": {"onEnter": {"command": "foo"}}
+        }}
+    }"#,
+        &["environment -> script -> embeddedFiles[0] -> filename:\n\tmust not be '.'."],
+    );
+}
+
+#[test]
+fn test_embedded_filename_dotdot() {
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {
+            "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": "hello", "filename": ".."}],
+            "actions": {"onEnter": {"command": "foo"}}
+        }}
+    }"#,
+        &["environment -> script -> embeddedFiles[0] -> filename:\n\tmust not be '..'."],
+    );
+}
+
+#[test]
+fn test_embedded_filename_null_character() {
+    check_env_err(r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {
+            "embeddedFiles": [{"name": "MyFile", "type": "TEXT", "data": "hello", "filename": "a\u0000b"}],
+            "actions": {"onEnter": {"command": "foo"}}
+        }}
+    }"#, &[
+        "environment -> script -> embeddedFiles[0] -> filename:\n\tmust not contain null characters.",
+    ]);
+}
+
+#[test]
 fn test_embedded_duplicate_names() {
     check_env_err(
         r#"{
@@ -471,14 +515,14 @@ fn test_embedded_duplicate_names() {
 
 fn decode_with_exts(s: &str, exts: &[&str]) {
     let v = yaml_val(s);
-    decode_environment_template(v, Some(exts))
+    decode_environment_template(v, Some(exts), &CallerLimits::default())
         .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
 fn check_env_err_with_exts(s: &str, exts: &[&str], expected: &[&str]) {
     let v = yaml_val(s);
-    let err =
-        decode_environment_template(v, Some(exts)).expect_err(&format!("Expected error for: {s}"));
+    let err = decode_environment_template(v, Some(exts), &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
     let msg = err.to_string();
     for line in expected {
         assert!(
@@ -744,18 +788,41 @@ fn test_env_name_513_chars_with_extension_fails() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// Bug fix: onEnter is required per spec §4.3
+// Environment actions: at least one of onEnter or onExit (spec §4.3)
 // ══════════════════════════════════════════════════════════════
 
 #[test]
-fn test_env_actions_on_enter_required() {
-    // onExit alone should fail — onEnter is required
-    check_env_err(
+fn test_env_actions_on_exit_only_is_valid() {
+    // onExit alone is sufficient: a queue environment whose only work is
+    // cleanup does not need an onEnter.
+    decode_ok(
         r#"{
         "specificationVersion": "environment-2023-09",
         "environment": {"name": "Foo", "script": {"actions": {"onExit": {"command": "cleanup"}}}}
     }"#,
-        &["environment -> script -> actions:\n\tonEnter is required."],
+    );
+}
+
+#[test]
+fn test_env_actions_on_enter_only_is_valid() {
+    decode_ok(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "setup"}}}}
+    }"#,
+    );
+}
+
+#[test]
+fn test_env_actions_empty_is_rejected() {
+    // Removing the onEnter requirement must not make an empty actions object
+    // acceptable.
+    check_env_err(
+        r#"{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "script": {"actions": {}}}
+    }"#,
+        &["environment -> script -> actions:\n\tmust define at least one of onEnter or onExit."],
     );
 }
 

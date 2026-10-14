@@ -2,6 +2,8 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
+// Cross-platform: both runners frame child output through it.
+mod framer;
 #[cfg(windows)]
 mod job_object;
 mod protocol;

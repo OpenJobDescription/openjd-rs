@@ -50,6 +50,24 @@ pub const MAX_FORMAT_STRING_LEN: usize = 1024 * 1024;
 /// See `specs/expr/format-string.md` (Defensive caps) for rationale.
 pub const MAX_FORMAT_STRING_SEGMENTS: usize = 1_000;
 
+/// Maximum size, in bytes, of the concatenated string
+/// [`FormatString::validate_expressions`] will materialize as
+/// [`StaticResolution::resolved_value`] for a multi-segment format string.
+///
+/// Each segment's evaluation is individually memory-bounded, but the
+/// per-segment limit does not compose: [`MAX_FORMAT_STRING_SEGMENTS`]
+/// segments of `{{ 'A' * 99999999 }}` fit in a 1 MB format string yet
+/// concatenate to a multi-gigabyte value. Past this cap validation stops
+/// accumulating (and reports `resolved_value: None`);
+/// [`StaticResolution::min_resolved_string_len`] keeps counting and is,
+/// by itself, enough for a consumer to reject the string — any real
+/// resolved-value limit is far below this cap. The typed single-expression
+/// passthrough is not affected: it performs no concatenation and is bounded
+/// by the evaluator's own memory limit.
+///
+/// See `specs/expr/format-string.md` (Defensive caps) for rationale.
+pub const MAX_STATIC_RESOLVED_VALUE_LEN: usize = 10 * 1024 * 1024;
+
 impl FormatString {
     /// Parse a format string using the "latest" profile
     /// ([`ExprProfile::latest`]): the current revision with every known
@@ -120,7 +138,7 @@ impl FormatString {
         symtab: &SymbolTable,
         opts: &FormatStringOptions<'_>,
     ) -> Result<ExprValue, ExpressionError> {
-        self.resolve_inner(symtab, opts.library, opts.path_format, opts.target_type)
+        self.resolve_inner(symtab, opts)
     }
 
     /// Resolve to `String`, concatenating every segment.
@@ -133,25 +151,51 @@ impl FormatString {
     /// constructed:
     /// - `PathFormat::Posix` in template context (create_job, let bindings)
     /// - `PathFormat::host()` in session/host context (action execution)
+    ///
+    /// Memory: each segment's evaluation is bounded by the options'
+    /// memory limit, and — because the per-segment limit does not compose
+    /// across segments — the accumulated **evaluated** portion of the
+    /// result (each expression segment's rendered bytes) is charged
+    /// against the same limit: resolution fails with
+    /// [`MemoryLimitExceeded`](crate::ExpressionErrorKind::MemoryLimitExceeded)
+    /// as soon as the evaluated bytes exceed it, rather than
+    /// materializing an unbounded string. Literal text is never charged —
+    /// it involves no evaluation, is already bounded by
+    /// [`MAX_FORMAT_STRING_LEN`], and `validate_expressions` does not
+    /// charge it either, keeping validation and resolution in agreement
+    /// (a literal-heavy string with a small interpolation must not pass
+    /// `check` and then fail here). Peak memory is therefore bounded by
+    /// roughly twice the limit plus the literal text.
     pub fn resolve_string_with(
         &self,
         symtab: &SymbolTable,
         opts: &FormatStringOptions<'_>,
     ) -> Result<String, ExpressionError> {
-        let FormatStringOptions {
-            library,
-            path_format,
-            target_type: _,
-        } = *opts;
+        let memory_limit = opts
+            .memory_limit
+            .unwrap_or(crate::eval::DEFAULT_MEMORY_LIMIT);
         let mut result = String::new();
+        // Bytes contributed by expression segments only — the quantity
+        // the memory budget bounds. Literal bytes are excluded.
+        let mut charged = 0usize;
         for seg in &self.segments {
             match seg {
                 Segment::Literal(s) => result.push_str(s),
                 Segment::Expression { parsed, .. } => {
-                    let val = self.eval_parsed(parsed, symtab, library, path_format, None)?;
+                    let val = self.eval_parsed(parsed, symtab, opts, None)?;
                     // None/null renders as empty string in format strings
                     if !matches!(val, ExprValue::Null) {
-                        result.push_str(&val.to_display_string());
+                        let at = result.len();
+                        val.write_display(&mut result);
+                        charged = charged.saturating_add(result.len() - at);
+                    }
+                    if charged > memory_limit {
+                        return Err(ExpressionError::from_kind(
+                            crate::error::ExpressionErrorKind::MemoryLimitExceeded {
+                                used: charged,
+                                limit: memory_limit,
+                            },
+                        ));
                     }
                 }
             }
@@ -162,40 +206,38 @@ impl FormatString {
     fn resolve_inner(
         &self,
         symtab: &SymbolTable,
-        library: Option<&crate::function_library::FunctionLibrary>,
-        path_format: crate::path_mapping::PathFormat,
-        target_type: Option<&crate::types::ExprType>,
+        opts: &FormatStringOptions<'_>,
     ) -> Result<ExprValue, ExpressionError> {
         if self.segments.len() == 1 {
             if let Segment::Expression { parsed, .. } = &self.segments[0] {
-                return self.eval_parsed(parsed, symtab, library, path_format, target_type);
+                return self.eval_parsed(parsed, symtab, opts, opts.target_type);
             }
         }
-        self.resolve_string_with(
-            symtab,
-            &FormatStringOptions {
-                library,
-                path_format,
-                target_type: None,
-            },
-        )
-        .map(ExprValue::String)
+        // The target type only applies to the single-expression typed
+        // passthrough; resolve_string_with ignores it.
+        self.resolve_string_with(symtab, opts)
+            .map(ExprValue::String)
     }
 
     fn eval_parsed(
         &self,
         parsed: &crate::eval::ParsedExpression,
         symtab: &SymbolTable,
-        library: Option<&crate::function_library::FunctionLibrary>,
-        path_format: crate::path_mapping::PathFormat,
+        opts: &FormatStringOptions<'_>,
         target_type: Option<&crate::types::ExprType>,
     ) -> Result<ExprValue, ExpressionError> {
-        let mut builder = parsed.with_path_format(path_format);
-        if let Some(lib) = library {
+        let mut builder = parsed.with_path_format(opts.path_format);
+        if let Some(lib) = opts.library {
             builder = builder.with_library(lib);
         }
         if let Some(tt) = target_type {
             builder = builder.with_target_type(tt);
+        }
+        if let Some(limit) = opts.memory_limit {
+            builder = builder.with_memory_limit(limit);
+        }
+        if let Some(limit) = opts.operation_limit {
+            builder = builder.with_operation_limit(limit);
         }
         builder.evaluate(&[symtab])
     }
@@ -204,27 +246,242 @@ impl FormatString {
     /// The symbol table should contain `ExprValue::unresolved(T)` for symbols
     /// whose values are not yet known. This is the spec's approach to static
     /// type checking — just evaluate normally with unresolved types.
+    ///
+    /// `opts` must be the same options the caller will later pass to
+    /// [`resolve_with`](Self::resolve_with) (or defaults if the caller
+    /// resolves without any), so that validation observes exactly the values
+    /// resolution will produce. In particular the target type follows the
+    /// same rule as resolution: for a format string that is exactly one
+    /// expression segment and nothing else, the root value is coerced toward
+    /// the target (so `{{ 1.0 }}` in an `int`-typed field validates as the
+    /// int `1`, one character); in the concatenated multi-segment case the
+    /// target is ignored, mirroring
+    /// [`resolve_string_with`](Self::resolve_string_with). A value that
+    /// cannot coerce to the target fails validation, just as it would fail
+    /// resolution. The evaluation memory/operation limits on `opts` bound
+    /// each segment's evaluation exactly as they do during resolution, and
+    /// the accumulated evaluated bytes across concrete segments are charged
+    /// against the memory limit exactly as `resolve_string_with` charges
+    /// them — a fully static string that resolution rejects on this budget
+    /// fails here too. Unresolved segments contribute 0 to that charge, so
+    /// validation only ever under-counts host-dependent content.
+    ///
+    /// On success, returns a [`StaticResolution`] describing what the
+    /// evaluation determined statically: a guaranteed lower bound on the
+    /// resolved length, and — when no segment depended on an unresolved
+    /// symbol — the exact resolved value. Callers that only need pass/fail
+    /// can ignore the returned value.
+    ///
+    /// Memory: segments render once into a single buffer and are dropped
+    /// as they are consumed, so peak memory is bounded by one segment's
+    /// evaluation plus the concatenated value, which is itself capped at
+    /// [`MAX_STATIC_RESOLVED_VALUE_LEN`] — past the cap, `resolved_value` is
+    /// `None` and only the running length is tracked.
     pub fn validate_expressions(
         &self,
         symtab: &SymbolTable,
-        lib: &crate::function_library::FunctionLibrary,
-    ) -> Result<(), FormatStringValidationError> {
+        opts: &FormatStringOptions<'_>,
+    ) -> Result<StaticResolution, FormatStringValidationError> {
+        let mut min_resolved_string_len = 0usize;
+        let mut all_concrete = true;
+        // Bytes contributed by concrete expression segments — the same
+        // quantity resolve_string_with charges against the memory limit.
+        // Literal text and unresolved segments contribute 0.
+        let mut charged = 0usize;
+        let memory_limit = opts
+            .memory_limit
+            .unwrap_or(crate::eval::DEFAULT_MEMORY_LIMIT);
+        // The target type only applies in the single-expression typed
+        // passthrough case, exactly as in resolve_inner: resolve_string_with
+        // evaluates every segment with no target.
+        let single_expression =
+            self.segments.len() == 1 && matches!(self.segments[0], Segment::Expression { .. });
+        // The static type the format string resolves to. For the
+        // single-expression passthrough it is the type of that expression's
+        // value (target-coerced), which is knowable even when the value is
+        // an unresolved placeholder; every other shape resolves to a string.
+        let mut resolved_type = crate::types::ExprType::STRING;
+        // One buffer, two jobs: scratch for measuring a segment's rendered
+        // length, and — when one is being built — the concatenated
+        // `resolved_value` itself. Each segment renders exactly once, is
+        // dropped as soon as it has been consumed, and no per-segment
+        // values are retained: peak memory stays bounded by one segment's
+        // evaluation plus the (capped) concatenation.
+        let mut concat = String::new();
+        let mut building = !single_expression;
+        // Set when the concatenation passes MAX_STATIC_RESOLVED_VALUE_LEN: the
+        // per-segment evaluator memory limit does not compose across
+        // segments, so the concatenation needs its own ceiling. Past it,
+        // `resolved_value` is None and `min_resolved_string_len` — which
+        // keeps counting — is enough for consumers to reject the string.
+        let mut capped = false;
+        // The typed passthrough value for the single-expression case.
+        let mut single: Option<ExprValue> = None;
+        // Stop building and release the partial concatenation.
+        fn stop_building(building: &mut bool, concat: &mut String) {
+            *building = false;
+            *concat = String::new();
+        }
         for seg in &self.segments {
             let (parsed, start, end) = match seg {
-                Segment::Literal(_) => continue,
+                Segment::Literal(text) => {
+                    min_resolved_string_len =
+                        min_resolved_string_len.saturating_add(text.chars().count());
+                    if building {
+                        concat.push_str(text);
+                        if concat.len() > MAX_STATIC_RESOLVED_VALUE_LEN {
+                            capped = true;
+                            stop_building(&mut building, &mut concat);
+                        }
+                    }
+                    continue;
+                }
                 Segment::Expression { parsed, start, end } => (parsed, *start, *end),
             };
-            if let Err(e) = parsed.with_library(lib).evaluate(&[symtab]) {
-                return Err(FormatStringValidationError {
-                    message: e.to_string(),
-                    input: self.raw.clone(),
-                    start,
-                    end,
-                    expression_error: Some(Box::new(e)),
-                });
+            let mut builder = parsed.with_path_format(opts.path_format);
+            if let Some(lib) = opts.library {
+                builder = builder.with_library(lib);
+            }
+            if single_expression {
+                if let Some(tt) = opts.target_type {
+                    builder = builder.with_target_type(tt);
+                }
+            }
+            if let Some(limit) = opts.memory_limit {
+                builder = builder.with_memory_limit(limit);
+            }
+            if let Some(limit) = opts.operation_limit {
+                builder = builder.with_operation_limit(limit);
+            }
+            match builder.evaluate(&[symtab]) {
+                Ok(val) => {
+                    if single_expression {
+                        // Passthrough: the value's type is the resolved
+                        // type. The `unresolved[...]` marker is a
+                        // validation-time artifact — the run-time value it
+                        // stands for will not be unresolved — so read
+                        // through it to the constraint. Normalization hoists
+                        // the marker to the root (`list[unresolved[T]]` →
+                        // `unresolved[list[T]]`, and likewise for unions),
+                        // so one unwrap suffices.
+                        let t = val.expr_type();
+                        resolved_type = if t.code() == crate::types::TypeCode::Unresolved {
+                            t.params()
+                                .first()
+                                .cloned()
+                                .expect("unresolved[T] always has exactly one parameter")
+                        } else {
+                            t
+                        };
+                    }
+                    if val.is_unresolved() {
+                        // May resolve to anything, including the empty
+                        // string: contributes 0 to the lower bound, and no
+                        // resolved value is possible. Release the partial
+                        // concatenation rather than carrying it to the end.
+                        all_concrete = false;
+                        stop_building(&mut building, &mut concat);
+                    } else if matches!(val, ExprValue::Null) {
+                        // Null interpolates as the empty string (see
+                        // resolve_string_with), so it contributes 0.
+                        if single_expression {
+                            single = Some(val);
+                        }
+                    } else {
+                        // String and Path already hold their rendered form,
+                        // so measure them in place. Everything else renders
+                        // into the shared buffer once, and the scratch
+                        // portion is truncated away when no concatenation
+                        // is being built.
+                        match &val {
+                            ExprValue::String(s) => {
+                                min_resolved_string_len =
+                                    min_resolved_string_len.saturating_add(s.chars().count());
+                                charged = charged.saturating_add(s.len());
+                                if building {
+                                    concat.push_str(s);
+                                }
+                            }
+                            ExprValue::Path { value, .. } => {
+                                min_resolved_string_len =
+                                    min_resolved_string_len.saturating_add(value.chars().count());
+                                charged = charged.saturating_add(value.len());
+                                if building {
+                                    concat.push_str(value);
+                                }
+                            }
+                            _ => {
+                                let at = concat.len();
+                                val.write_display(&mut concat);
+                                min_resolved_string_len = min_resolved_string_len
+                                    .saturating_add(concat[at..].chars().count());
+                                charged = charged.saturating_add(concat.len() - at);
+                                if !building {
+                                    concat.truncate(at);
+                                }
+                            }
+                        }
+                        // Mirror of resolve_string_with's evaluated-bytes
+                        // charge: the per-segment evaluator limit does not
+                        // compose across segments, and validation must
+                        // observe exactly what resolution will produce — a
+                        // fully static string that resolution rejects on
+                        // this budget must fail here too. (Unresolved
+                        // segments contribute 0, so validation only ever
+                        // under-counts; the run-time check remains
+                        // authoritative for host-dependent content.)
+                        if charged > memory_limit {
+                            let e = ExpressionError::from_kind(
+                                crate::error::ExpressionErrorKind::MemoryLimitExceeded {
+                                    used: charged,
+                                    limit: memory_limit,
+                                },
+                            );
+                            return Err(FormatStringValidationError {
+                                message: e.to_string(),
+                                input: self.raw.clone(),
+                                start,
+                                end,
+                                expression_error: Some(Box::new(e)),
+                            });
+                        }
+                        if building && concat.len() > MAX_STATIC_RESOLVED_VALUE_LEN {
+                            capped = true;
+                            stop_building(&mut building, &mut concat);
+                        }
+                        if single_expression {
+                            single = Some(val);
+                        }
+                    }
+                }
+                Err(e) => {
+                    return Err(FormatStringValidationError {
+                        message: e.to_string(),
+                        input: self.raw.clone(),
+                        start,
+                        end,
+                        expression_error: Some(Box::new(e)),
+                    });
+                }
             }
         }
-        Ok(())
+
+        let resolved_value = if !all_concrete || capped {
+            None
+        } else if single_expression {
+            // Typed passthrough, mirroring resolve_with: exactly one
+            // expression segment and nothing else keeps the typed value.
+            single
+        } else {
+            // Concatenated string, mirroring resolve_string_with.
+            Some(ExprValue::String(concat))
+        };
+
+        Ok(StaticResolution {
+            min_resolved_string_len,
+            resolved_value,
+            resolved_type,
+        })
     }
 
     /// Validate list comprehension loop variables in expressions.
@@ -269,6 +526,34 @@ impl FormatString {
         self.segments
             .iter()
             .all(|s| matches!(s, Segment::Literal(_)))
+    }
+
+    /// Number of parsed segments — literal runs and `{{...}}` expressions.
+    ///
+    /// Useful for reasoning statically about resolution shape: a format
+    /// string with **more than one** segment always concatenates to a
+    /// single string (Expression Language §1.3.2 — only a whole-field
+    /// single-expression format string resolves as a typed passthrough,
+    /// where a `null` result can skip a list element and a list result
+    /// can flatten). [`is_literal`](Self::is_literal) distinguishes the
+    /// two single-segment cases.
+    pub fn segment_count(&self) -> usize {
+        self.segments.len()
+    }
+
+    /// The literal (non-expression) text runs of this format string, in
+    /// order.
+    ///
+    /// Literal runs appear verbatim in every possible resolution, so a
+    /// property that holds for a literal run (e.g. "contains a control
+    /// character") holds for every string the format string can resolve
+    /// to. Expression *source* text is not included — it never appears
+    /// in a resolved value, only what it evaluates to does.
+    pub fn literal_segments(&self) -> impl Iterator<Item = &str> {
+        self.segments.iter().filter_map(|s| match s {
+            Segment::Literal(text) => Some(text.as_str()),
+            Segment::Expression { .. } => None,
+        })
     }
 
     /// Copy symbol table entries referenced by this format string's expressions
@@ -424,9 +709,8 @@ fn check_comprehension_vars(
             check_comprehension_vars(&u.operand, let_names)?;
         }
         ast::Expr::Compare(c) => {
-            check_comprehension_vars(&c.left, let_names)?;
-            for r in &c.comparators {
-                check_comprehension_vars(r, let_names)?;
+            for operand in &c.operands {
+                check_comprehension_vars(operand, let_names)?;
             }
         }
         ast::Expr::BoolOp(b) => {
@@ -538,6 +822,94 @@ fn parse_segments(input: &str, profile: &ExprProfile) -> Result<Vec<Segment>, Ex
     Ok(segments)
 }
 
+/// Outcome of statically evaluating a format string against a symbol table
+/// that may contain [`ExprValue::unresolved`] placeholders.
+///
+/// Returned by [`FormatString::validate_expressions`]. Callers that only
+/// care about pass/fail can ignore it. Callers enforcing resolved-value
+/// constraints (e.g. spec limits stated "after the format string has been
+/// resolved") use [`min_resolved_string_len`](Self::min_resolved_string_len) — a bound
+/// that holds even when parts of the string are unknown — and
+/// [`resolved_value`](Self::resolved_value), the exact resolved value when
+/// nothing is unknown.
+#[derive(Debug, Clone)]
+pub struct StaticResolution {
+    /// Lower bound, in characters, on the length of any string this format
+    /// string can resolve to. Literal segments contribute their character
+    /// count; expression segments that evaluated to a concrete value
+    /// contribute their interpolated display length (`null` interpolates as
+    /// the empty string, contributing 0); segments whose value is (or
+    /// contains) an unresolved placeholder contribute 0, since they may
+    /// resolve to the empty string. Exact when
+    /// [`resolved_value`](Self::resolved_value) is `Some`.
+    ///
+    /// The bound describes resolution under the same `target_type` that was
+    /// passed to [`validate_expressions`](FormatString::validate_expressions)
+    /// — it is only a valid bound for a resolution using that same target.
+    ///
+    /// Accumulation is saturating: up to [`MAX_FORMAT_STRING_SEGMENTS`]
+    /// segments can each contribute up to the evaluator's memory limit in
+    /// characters, which can exceed `usize::MAX` on 32-bit targets.
+    /// Saturating is the safe direction for a lower bound — a wrapped sum
+    /// would *shrink* the bound and let an oversized string pass a limit
+    /// check, while a saturated one still exceeds any real limit.
+    ///
+    /// For a single-expression format string whose value is a list, the
+    /// bound measures the interpolated display form (e.g. `[1, 2, 3]`, 9
+    /// characters), while [`resolved_value`](Self::resolved_value) is the typed
+    /// list. Consumers enforcing string-length limits should only apply the
+    /// bound to fields consumed as strings.
+    pub min_resolved_string_len: usize,
+    /// The fully resolved value, present iff every expression segment
+    /// evaluated to a concrete (non-unresolved) value **and**, in the
+    /// concatenated case, the resulting string is at most
+    /// [`MAX_STATIC_RESOLVED_VALUE_LEN`] bytes — a defensive cap, since the
+    /// per-segment evaluation memory limit does not compose across
+    /// segments. When the cap is exceeded this is `None` while
+    /// [`min_resolved_string_len`](Self::min_resolved_string_len) still
+    /// counts the full length, which is enough to reject the string.
+    /// Follows the [`resolve_with`](FormatString::resolve_with)
+    /// typed-passthrough rule: for a format string that is exactly one
+    /// expression segment and nothing else, this is the typed value (which
+    /// may be a list or `null`, and is not subject to the cap — no
+    /// concatenation occurs), coerced toward the `target_type` given to
+    /// [`validate_expressions`](FormatString::validate_expressions);
+    /// otherwise it is the concatenated string, with `null` segments
+    /// interpolated as the empty string.
+    ///
+    /// `path()` values in this value are rendered with the *validating*
+    /// host's [`PathFormat`](crate::PathFormat) (the evaluator default),
+    /// not the worker's. Character counts are identical either way, so
+    /// [`min_resolved_string_len`](Self::min_resolved_string_len) is unaffected, but do
+    /// not treat the separators in this value as the value the job will see
+    /// on another host.
+    pub resolved_value: Option<ExprValue>,
+    /// The static type the format string resolves to under the same
+    /// `target_type` given to
+    /// [`validate_expressions`](FormatString::validate_expressions).
+    ///
+    /// This is the type of the value resolution will eventually produce —
+    /// the run-time value is never unresolved, so `unresolved[T]`
+    /// placeholders read through to their constraint `T`. Unlike
+    /// [`resolved_value`](Self::resolved_value), it is therefore available
+    /// even when a segment is unresolved. For a format string that is
+    /// exactly one expression segment and nothing else, it is that
+    /// expression's value type after target-type coercion — `int` for
+    /// `{{ 1.0 }}` under an `int` target, `list[int]` for `{{ [1, 2] }}`,
+    /// and `list[string]` for an unresolved `list[string]` symbol. A
+    /// coercion whose outcome depends on the unknown payload yields a
+    /// union of the possible result types (e.g. an unresolved
+    /// `string | list[int]` under a `nulltype | string | list[string]`
+    /// target resolves to `string | list[string]`). Every other shape
+    /// (literals, or two or more segments) resolves to a concatenated
+    /// string, so this is [`ExprType::STRING`](crate::ExprType::STRING).
+    /// Callers can use it to decide whether the resolved value is a string
+    /// (so [`min_resolved_string_len`](Self::min_resolved_string_len) is a true
+    /// string-length bound) or a typed value whose display form the bound
+    /// merely measures.
+    pub resolved_type: crate::types::ExprType,
+}
+
 /// Structured error from [`FormatString::validate_expressions`].
 ///
 /// Carries the position of the failing interpolation within the format string
@@ -591,6 +963,8 @@ pub struct FormatStringOptions<'a> {
     library: Option<&'a crate::function_library::FunctionLibrary>,
     path_format: crate::path_mapping::PathFormat,
     target_type: Option<&'a crate::types::ExprType>,
+    memory_limit: Option<usize>,
+    operation_limit: Option<usize>,
 }
 
 impl<'a> Default for FormatStringOptions<'a> {
@@ -599,6 +973,8 @@ impl<'a> Default for FormatStringOptions<'a> {
             library: None,
             path_format: crate::path_mapping::PathFormat::host(),
             target_type: None,
+            memory_limit: None,
+            operation_limit: None,
         }
     }
 }
@@ -643,6 +1019,32 @@ impl<'a> FormatStringOptions<'a> {
         self.target_type = Some(t);
         self
     }
+
+    /// Cap the memory used to evaluate each expression segment, in bytes.
+    /// Default: [`DEFAULT_MEMORY_LIMIT`](crate::DEFAULT_MEMORY_LIMIT).
+    ///
+    /// This is the Expression Language spec's "Memory-bounded evaluation"
+    /// budget — its configurable lever against expressions like
+    /// `'a' * 10000000`. The limit applies per expression segment, both
+    /// during resolution and during
+    /// [`validate_expressions`](FormatString::validate_expressions).
+    #[must_use]
+    pub fn with_memory_limit(mut self, limit: usize) -> Self {
+        self.memory_limit = Some(limit);
+        self
+    }
+
+    /// Cap the number of operations used to evaluate each expression
+    /// segment. Default:
+    /// [`DEFAULT_OPERATION_LIMIT`](crate::DEFAULT_OPERATION_LIMIT).
+    ///
+    /// Applies per expression segment, both during resolution and during
+    /// [`validate_expressions`](FormatString::validate_expressions).
+    #[must_use]
+    pub fn with_operation_limit(mut self, limit: usize) -> Self {
+        self.operation_limit = Some(limit);
+        self
+    }
 }
 
 /// Escape `{{` and `}}` in a string so the format string parser treats them as literals.
@@ -676,6 +1078,51 @@ mod tests {
             fs.resolve_string_with(&SymbolTable::new(), &FormatStringOptions::default())
                 .unwrap(),
             "hello"
+        );
+    }
+    #[test]
+    fn segment_count_by_shape() {
+        // Single literal run and whole-field single expression are both
+        // one segment; is_literal() distinguishes them.
+        assert_eq!(FormatString::new("hello").unwrap().segment_count(), 1);
+        assert_eq!(FormatString::new("{{Param.X}}").unwrap().segment_count(), 1);
+        // Any surrounding text makes it multi-segment — the shape that
+        // always concatenates to a single string on resolution.
+        assert_eq!(
+            FormatString::new("v{{Param.X}}").unwrap().segment_count(),
+            2
+        );
+        assert_eq!(
+            FormatString::new("{{Param.X}}-{{Param.Y}}")
+                .unwrap()
+                .segment_count(),
+            3
+        );
+        // Empty input parses to zero segments (and is literal).
+        let empty = FormatString::new("").unwrap();
+        assert_eq!(empty.segment_count(), 0);
+        assert!(empty.is_literal());
+    }
+
+    #[test]
+    fn literal_segments_excludes_expression_source() {
+        let fs = FormatString::new("a-{{ Param.X }}-b{{ 'y' }}").unwrap();
+        let literals: Vec<&str> = fs.literal_segments().collect();
+        assert_eq!(literals, vec!["a-", "-b"]);
+        // Expression-only and literal-only shapes.
+        assert_eq!(
+            FormatString::new("{{ Param.X }}")
+                .unwrap()
+                .literal_segments()
+                .count(),
+            0
+        );
+        assert_eq!(
+            FormatString::new("plain")
+                .unwrap()
+                .literal_segments()
+                .collect::<Vec<_>>(),
+            vec!["plain"]
         );
     }
     #[test]
@@ -735,7 +1182,10 @@ mod tests {
                 crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
             ));
         assert!(fs
-            .validate_expressions(&SymbolTable::new(), &host_lib)
+            .validate_expressions(
+                &SymbolTable::new(),
+                &FormatStringOptions::new().with_library(&*host_lib)
+            )
             .is_err());
     }
     #[test]
@@ -755,7 +1205,10 @@ mod tests {
                 crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
             ));
         let fs = FormatString::new("{{ re_replace('hello', '', 'x') }}").unwrap();
-        let result = fs.validate_expressions(&SymbolTable::new(), &host_lib);
+        let result = fs.validate_expressions(
+            &SymbolTable::new(),
+            &FormatStringOptions::new().with_library(&*host_lib),
+        );
         assert!(
             result.is_err(),
             "Format string validation should error, got: {:?}",
@@ -795,7 +1248,9 @@ mod tests {
             crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
                 crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
             ));
-        assert!(fs.validate_expressions(&st, &host_lib).is_ok());
+        assert!(fs
+            .validate_expressions(&st, &FormatStringOptions::new().with_library(&*host_lib))
+            .is_ok());
     }
     #[test]
     fn validate_allows_arithmetic() {
@@ -810,7 +1265,9 @@ mod tests {
             crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
                 crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
             ));
-        assert!(fs.validate_expressions(&st, &host_lib).is_ok());
+        assert!(fs
+            .validate_expressions(&st, &FormatStringOptions::new().with_library(&*host_lib))
+            .is_ok());
     }
 
     #[test]
@@ -1190,5 +1647,134 @@ mod tests {
             fs.resolve_with(&st, &opts).is_err(),
             "should reject unknown function"
         );
+    }
+
+    #[test]
+    fn options_with_memory_limit_bounds_resolution() {
+        // The Expression Language spec's memory-bounded evaluation lever:
+        // a lowered budget rejects 'a' * N blowups during resolution.
+        let fs = FormatString::new("{{ 'a' * 100000 }}").unwrap();
+        let st = SymbolTable::new();
+        let opts = FormatStringOptions::new().with_memory_limit(1000);
+        let err = fs.resolve_with(&st, &opts).unwrap_err();
+        assert!(
+            err.to_string().contains("exceeded limit (1000 bytes)"),
+            "got: {err}"
+        );
+        // The same format string resolves fine under the default budget.
+        assert!(fs.resolve_with(&st, &FormatStringOptions::new()).is_ok());
+    }
+
+    #[test]
+    fn options_with_memory_limit_bounds_validation() {
+        // validate_expressions applies the same per-segment budget as
+        // resolution, so a lowered budget fails statically too.
+        let fs = FormatString::new("{{ 'a' * 100000 }}").unwrap();
+        let st = SymbolTable::new();
+        let opts = FormatStringOptions::new().with_memory_limit(1000);
+        let err = fs.validate_expressions(&st, &opts).unwrap_err();
+        assert!(
+            err.message.contains("exceeded limit (1000 bytes)"),
+            "got: {}",
+            err.message
+        );
+        assert!(fs
+            .validate_expressions(&st, &FormatStringOptions::new())
+            .is_ok());
+    }
+
+    #[test]
+    fn options_with_operation_limit_bounds_resolution_and_validation() {
+        let fs = FormatString::new("{{ sum([1] * 1000) }}").unwrap();
+        let st = SymbolTable::new();
+        let opts = FormatStringOptions::new().with_operation_limit(50);
+        let err = fs.resolve_with(&st, &opts).unwrap_err();
+        assert!(
+            err.to_string().contains("exceeded limit (50)"),
+            "got: {err}"
+        );
+        let err = fs.validate_expressions(&st, &opts).unwrap_err();
+        assert!(
+            err.message.contains("exceeded limit (50)"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn options_with_memory_limit_applies_per_segment_in_string_resolution() {
+        // resolve_string_with evaluates each segment under the same budget.
+        let fs = FormatString::new("prefix {{ 'a' * 100000 }} suffix").unwrap();
+        let st = SymbolTable::new();
+        let opts = FormatStringOptions::new().with_memory_limit(1000);
+        let err = fs.resolve_string_with(&st, &opts).unwrap_err();
+        assert!(
+            err.to_string().contains("exceeded limit (1000 bytes)"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn memory_limit_bounds_the_concatenation_across_segments() {
+        // The per-segment evaluator limit does not compose: each of these
+        // segments fits the budget on its own, but the accumulated
+        // evaluated bytes must not materialize past it. Charged at the
+        // first expression checkpoint over the limit — identically at
+        // validation and at resolution.
+        let fs = FormatString::new("{{ 'a' * 800 }}{{ 'b' * 800 }}{{ 'c' * 800 }}").unwrap();
+        let st = SymbolTable::new();
+        let opts = FormatStringOptions::new().with_memory_limit(1000);
+        let err = fs.resolve_string_with(&st, &opts).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Expression memory usage (1600 bytes) exceeded limit (1000 bytes)"
+        );
+        let err = fs.validate_expressions(&st, &opts).unwrap_err();
+        assert_eq!(
+            err.message,
+            "Expression memory usage (1600 bytes) exceeded limit (1000 bytes)"
+        );
+        // The same shape under a sufficient budget resolves fine.
+        let opts = FormatStringOptions::new().with_memory_limit(10_000);
+        assert_eq!(fs.resolve_string_with(&st, &opts).unwrap().len(), 2400);
+        assert!(fs.validate_expressions(&st, &opts).is_ok());
+    }
+
+    #[test]
+    fn memory_limit_does_not_charge_literal_text() {
+        // Literal text involves no evaluation and is bounded by
+        // MAX_FORMAT_STRING_LEN — only the evaluated portion is charged,
+        // identically at validation and at resolution, so a
+        // literal-heavy string with a small interpolation cannot pass
+        // `check` and then fail at run time.
+        let text = "x".repeat(5000);
+        let fs = FormatString::new(&text).unwrap();
+        let st = SymbolTable::new();
+        let opts = FormatStringOptions::new().with_memory_limit(1000);
+        assert_eq!(fs.resolve_string_with(&st, &opts).unwrap(), text);
+
+        // The reviewer's embedded-file shape: a large literal body plus a
+        // tiny interpolation. The literal bytes are not charged.
+        let mixed = format!("{}{}", "x".repeat(2000), "{{ 1 }}");
+        let fs = FormatString::new(&mixed).unwrap();
+        let resolved = fs.resolve_string_with(&st, &opts).unwrap();
+        assert_eq!(resolved.len(), 2001);
+        assert!(fs.validate_expressions(&st, &opts).is_ok());
+    }
+
+    #[test]
+    fn validation_does_not_charge_unresolved_segments() {
+        // An unresolved segment's run-time size is unknowable: it
+        // contributes 0 at validation (which therefore only ever
+        // under-counts), and the run-time check stays authoritative.
+        let fs = FormatString::new("{{ Param.X }}{{ 'b' * 800 }}").unwrap();
+        let mut st = SymbolTable::new();
+        st.set(
+            "Param.X",
+            ExprValue::unresolved(crate::types::ExprType::STRING),
+        )
+        .unwrap();
+        let opts = FormatStringOptions::new().with_memory_limit(1000);
+        assert!(fs.validate_expressions(&st, &opts).is_ok());
     }
 }

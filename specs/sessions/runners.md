@@ -60,11 +60,11 @@ runner completion states to session state transitions.
 ## resolve_action_args
 
 ```rust
-pub fn resolve_action_args(
+pub(crate) fn resolve_action_args(
     action: &Action,
     symtab: &SymbolTable,
-    library: &FunctionLibrary,
-    path_mapping_rules: &[PathMappingRule],
+    library: Option<&FunctionLibrary>,
+    limits: &SessionLimits,
 ) -> Result<Vec<String>, SessionError>
 ```
 
@@ -76,6 +76,18 @@ Resolves format strings in the action's `command` and `args` fields:
    - If the result is `null` (ExprValue::None), skip the arg entirely
    - If the result is a list, flatten each element into the args vector
    - Otherwise, convert to string and append
+
+All evaluation runs under the limits' memory/operation budgets. When
+`limits.max_resolved_arg_len` is set (opt-in — §5.1/§5.2 set no spec
+maximum, but the OS imposes one), the resolved command and **every
+final argv entry** — after null-skips and list-flattening — are
+checked against it. Task execution is the enforcement boundary for
+resolved-value limits: template validation fails early on
+statically-knowable violations, but only this check holds
+for jobs that never passed through that stage. A violation is
+`SessionError::FormatString` with context `command` / `args[j]` and
+reason `resolved value is {n} characters, exceeding the maximum of
+{max}.`.
 
 ### Why null args are skipped
 
@@ -224,8 +236,17 @@ pub(crate) fn resolve_action_timeout(
 ```
 
 Resolves an action's `timeout` format string to a `Duration`. If the action has no
-timeout field, returns the `default`. The resolved value must be a positive integer
-(seconds). Zero is rejected with an error.
+timeout field, returns the `default`. A single whole-field expression resolves with
+target type `int?` (Template Schemas §5): a `null` result means "not provided" (the
+default applies), and coercible values like `{{ 120.0 }}` or `{{ '120' }}` become the
+int they denote. A multi-segment format string concatenates to a string and is parsed
+as an integer. The resolved value must be a positive integer (seconds); zero is
+rejected with an error.
+
+The same target-typing applies to the other numeric/enum cancelation fields:
+`resolve_notify_period_seconds` resolves with `int?` (§5.3.2; additionally enforcing
+the 600-second maximum), and `resolve_effective_cancelation` resolves a deferred
+`mode` with `string?` (a `null` drops the whole cancelation object).
 
 ## Runner Builder Methods
 

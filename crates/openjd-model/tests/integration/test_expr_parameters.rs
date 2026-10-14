@@ -805,8 +805,10 @@ fn test_lowercase_range_expr_with_expr() {
     ));
 }
 
-// Note: Python tests for case-insensitive types failing without EXPR are not ported
-// because the Rust implementation accepts case-insensitive types by default.
+// The Python counterparts that assert case-insensitive type names FAIL without EXPR
+// live in test_param_type_name_case.rs, which covers all four combinations of
+// extension state by spelling, for job parameters, task parameters and environment
+// templates.
 
 // ============================================================
 // LIST[FLOAT] parameter — additional tests

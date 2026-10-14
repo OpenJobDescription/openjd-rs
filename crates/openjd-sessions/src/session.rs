@@ -46,6 +46,12 @@ use crate::embedded_files::{EmbeddedFiles, EmbeddedFilesScope};
 /// Default notify period (in seconds) for `NOTIFY_THEN_TERMINATE` cancel when
 /// no explicit time_limit is provided. Matches the OpenJD spec default.
 pub const DEFAULT_CANCEL_NOTIFY_PERIOD_SECS: u64 = 5;
+
+/// Maximum characters in a resolved environment variable value (Template
+/// Schemas §4.4.2). The session runtime is the enforcement stage for
+/// interpolated values, which are unknown at template validation; kept in
+/// sync with the model's `EffectiveLimits::max_env_var_value_len`.
+const ENV_VAR_VALUE_MAX_LEN: usize = 2048;
 #[cfg(unix)]
 use crate::cross_user_helper::CrossUserHelper;
 #[cfg(windows)]
@@ -100,6 +106,13 @@ pub struct SessionConfig {
     pub retain_working_dir: bool,
     pub callback: Option<SessionCallbackType>,
     pub os_env_vars: Option<HashMap<String, String>>,
+    /// Root directory under which the session's working and embedded-files
+    /// directories are created. If `None`, a temporary directory is used.
+    ///
+    /// A relative path is resolved to an absolute path (against the process
+    /// current working directory) when the session is created, so all derived
+    /// paths are always rooted — a requirement of the embedded-file
+    /// containment check.
     pub session_root_directory: Option<PathBuf>,
     pub user: Option<Arc<dyn SessionUser>>,
     /// Revision + extensions profile that drives expression-function
@@ -140,6 +153,13 @@ pub struct SessionConfig {
     /// redacted. Setting this flag to `false` does not improve security —
     /// it just removes the directive lines from operator-facing output.
     pub echo_openjd_directives: bool,
+    /// Caller-policy caps and evaluation budgets enforced by this session
+    /// — the enforcement boundary for resolved-value limits, since a
+    /// worker can run a job that never passed through this client's
+    /// template validation or job creation. Mirrors the corresponding
+    /// `openjd_model::CallerLimits` fields a submitting service would
+    /// set. Defaults to no limits beyond the OpenJD specification.
+    pub limits: crate::limits::SessionLimits,
 }
 
 fn format_exit_code(code: Option<i32>) -> String {
@@ -403,12 +423,14 @@ fn declared_terminate_delay(
     cancelation: &Option<openjd_model::job::CancelationMode>,
     symtab: &SymbolTable,
     library: Option<&FunctionLibrary>,
+    limits: &crate::limits::SessionLimits,
     default_notify_period: Duration,
 ) -> Option<Duration> {
     match crate::runner::cancel_method_for_action(
         cancelation,
         symtab,
         library,
+        limits,
         default_notify_period,
     ) {
         Ok(crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay }) => {
@@ -474,6 +496,12 @@ pub struct Session {
     // Environment tracking
     environments: HashMap<EnvironmentIdentifier, Environment>,
     environments_entered: Vec<EnvironmentIdentifier>,
+    /// Cached embedded-file records for wrap environments. Paths are allocated
+    /// once per wrap environment and reused for every subsequent wrap-hook
+    /// invocation so `Env.File.*` paths stay stable across tasks and unnamed
+    /// files do not accumulate on disk; contents are re-written per invocation
+    /// so each invocation starts from the authored content.
+    wrap_env_file_records: HashMap<EnvironmentIdentifier, EmbeddedFiles>,
     // Env var tracking
     env_vars: HashMap<String, String>,
     process_env: HashMap<String, String>,
@@ -501,6 +529,9 @@ pub struct Session {
     /// Whether to echo `openjd_*` directive lines to the log. See
     /// [`SessionConfig::echo_openjd_directives`].
     echo_openjd_directives: bool,
+    /// Caller-policy caps and evaluation budgets (see
+    /// [`SessionConfig::limits`]).
+    limits: crate::limits::SessionLimits,
 }
 
 impl Session {
@@ -521,6 +552,7 @@ impl Session {
             _files_dir: None,
             environments: HashMap::new(),
             environments_entered: Vec::new(),
+            wrap_env_file_records: HashMap::new(),
             env_vars: HashMap::new(),
             process_env: HashMap::new(),
             created_env_vars: HashMap::new(),
@@ -540,6 +572,7 @@ impl Session {
             redacted_values: HashSet::new(),
             profile: None,
             debug_collect_stdout: true, // test constructor — tests need captured stdout
+            limits: crate::limits::SessionLimits::default(),
             echo_openjd_directives: true, // matches default in production config
         }
     }
@@ -549,6 +582,13 @@ impl Session {
     #[cfg(any(test, feature = "test-utils"))]
     pub fn set_cancel_writer_for_test(&mut self, writer: std::fs::File) {
         self.cross_user.cancel_writer = Some(writer);
+    }
+
+    /// Test-only: override the session's caller-policy limits (caps and
+    /// evaluation budgets) without going through `SessionConfig`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_limits_for_test(&mut self, limits: crate::limits::SessionLimits) {
+        self.limits = limits;
     }
 
     /// Test-only: inject a `helper_auth_token` so `cancel_action` writes a
@@ -566,10 +606,28 @@ impl Session {
         self.state = state;
     }
 
+    /// Test-only: inject job parameter values for unit-testing `build_symbol_table`.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_job_parameter_values_for_test(&mut self, values: JobParameterValues) {
+        self.job_parameter_values = values;
+    }
+
     /// Full constructor from SessionConfig.
     pub fn with_config(mut config: SessionConfig) -> Result<Self, SessionError> {
         let root_dir = match &config.session_root_directory {
-            Some(d) => d.clone(),
+            // Absolutize a caller-supplied root so every path derived from it
+            // (working directory, embedded-files directory) is rooted. The
+            // embedded-file containment check (`ensure_within`) is only sound
+            // for rooted paths and rejects relative ones outright; without this
+            // a relative `session_root_directory` would surface as a spurious
+            // "unsafe filename" error for every named embedded file. This is a
+            // purely lexical operation (`std::path::absolute` joins onto the
+            // current directory and does not touch the filesystem or resolve
+            // symlinks). `openjd_temp_dir` already returns an absolute path.
+            Some(d) => std::path::absolute(d).map_err(|source| SessionError::WorkingDirectory {
+                path: d.clone(),
+                source,
+            })?,
             None => crate::tempdir::openjd_temp_dir(None)?,
         };
 
@@ -724,6 +782,7 @@ impl Session {
             _files_dir: Some(files_dir),
             environments: HashMap::new(),
             environments_entered: Vec::new(),
+            wrap_env_file_records: HashMap::new(),
             env_vars: HashMap::new(),
             process_env,
             created_env_vars: HashMap::new(),
@@ -744,6 +803,7 @@ impl Session {
             profile,
             debug_collect_stdout: config.debug_collect_stdout,
             echo_openjd_directives: config.echo_openjd_directives,
+            limits: config.limits,
         })
     }
 
@@ -1064,6 +1124,12 @@ impl Session {
 
     /// Enter an environment asynchronously (non-blocking).
     /// Returns the environment identifier on success.
+    ///
+    /// `resolved_symtab` is optional, and supplying it here is equivalent to
+    /// setting [`Environment::resolved_symtab`]: the argument is folded onto the
+    /// stored environment, so readers that run after this call returns — notably
+    /// the RFC 0008 wrap hooks — see it either way. If both are supplied, the
+    /// argument wins.
     pub async fn enter_environment(
         &mut self,
         env: &Environment,
@@ -1124,7 +1190,19 @@ impl Session {
             }
             None => format!("{}:{}", self.session_id, uuid::Uuid::new_v4().simple()),
         };
-        self.environments.insert(identifier.clone(), env.clone());
+        // A caller may supply an environment's resolved symbol table either on
+        // `Environment::resolved_symtab` or through the `resolved_symtab`
+        // argument. Both must survive for the lifetime of the environment,
+        // because RFC 0008 wrap hooks read the wrap environment's own scope off
+        // the *stored* `Environment` long after this call returns. Fold the
+        // argument onto our own copy so there is exactly one place to read
+        // from. The argument wins on conflict: it is the more specific input
+        // for this particular entry.
+        let mut stored_env = env.clone();
+        if let Some(st) = resolved_symtab {
+            stored_env.resolved_symtab = Some(st.clone());
+        }
+        self.environments.insert(identifier.clone(), stored_env);
         self.environments_entered.push(identifier.clone());
         self.created_env_vars
             .insert(identifier.clone(), HashMap::new());
@@ -1132,15 +1210,50 @@ impl Session {
         // Set static variables
         if let Some(vars) = &env.variables {
             for (key, fmt_str) in vars {
+                // Required string values (§4.4.2): a single whole-field
+                // expression resolves with target type `string`
+                // (Expression Language §1.3.2), so `null` and list values
+                // are errors rather than display renderings.
                 let value = fmt_str
-                    .resolve_string_with(
+                    .resolve_with(
                         &symtab,
-                        &openjd_expr::FormatStringOptions::new().with_library(self.lib()),
+                        &crate::limits::fs_options(self.lib(), &self.limits)
+                            .with_target_type(&openjd_expr::ExprType::STRING),
                     )
+                    .map(|v| match v {
+                        openjd_expr::ExprValue::String(s) => s,
+                        other => other.to_display_string(),
+                    })
                     .map_err(|e| SessionError::FormatString {
                         context: format!("env var '{key}'"),
                         reason: e.to_string(),
                     })?;
+                // A NUL in the resolved value would poison every subsequent
+                // Command::spawn in the session. Reject it here so the
+                // environment entry fails cleanly rather than bricking later
+                // actions — including the environment's own onExit teardown.
+                if value.contains('\0') {
+                    return Err(SessionError::FormatString {
+                        context: format!("env var '{key}'"),
+                        reason: "resolved value contains a NUL byte, which cannot be represented in a process environment.".to_string(),
+                    });
+                }
+                // Template Schemas §4.4.2: at most 2048 characters. This is
+                // the enforcement stage — template validation only catches
+                // statically knowable violations (an interpolation of an
+                // unresolved symbol contributes 0 to its lower bound), so a
+                // value that only becomes long here must be rejected here.
+                // Kept in sync with the model's
+                // EffectiveLimits::max_env_var_value_len.
+                let char_count = value.chars().count();
+                if char_count > ENV_VAR_VALUE_MAX_LEN {
+                    return Err(SessionError::FormatString {
+                        context: format!("env var '{key}'"),
+                        reason: format!(
+                            "resolved value is {char_count} characters, exceeding the maximum of {ENV_VAR_VALUE_MAX_LEN}."
+                        ),
+                    });
+                }
                 let norm_key = normalize_env_key(key);
                 self.env_vars.insert(norm_key.clone(), value.clone());
                 if let Some(changes) = self.created_env_vars.get_mut(&identifier) {
@@ -1194,11 +1307,9 @@ impl Session {
 
             let lib = self.library.clone();
             if let Some((wrap_env, _)) = wrap_action.as_ref() {
-                // The wrapped onEnter resolves against the INNER env's own
-                // scope (its embedded files and lets) — the same scope
-                // `runner.enter` would have built had the action run
-                // unwrapped. The hook itself resolves against the wrap
-                // env's scope built in seed_wrapped_action_symbols.
+                // Build inner_symtab BEFORE registering wrap env files so the
+                // inner scope is derived from a symtab that does NOT contain
+                // the wrapper's Env.File.* entries — preventing scope leak.
                 let inner_symtab = self
                     .build_wrapped_inner_scope(
                         EmbeddedFilesScope::Env,
@@ -1210,17 +1321,38 @@ impl Session {
                         Some(&lib),
                     )
                     .map_err(|e| self.fail_action_setup(e))?;
+
+                // Register wrap env's embedded file paths BEFORE seed so the
+                // wrap env's let bindings can reference Env.File.*.
+                let wrap_env_id = self.wrap_env_id_excluding(&identifier).cloned();
+                if let Some(ref wid) = wrap_env_id {
+                    let files = self
+                        .environments
+                        .get(wid)
+                        .and_then(|e| e.script.as_ref())
+                        .and_then(|s| s.embedded_files.clone());
+                    self.ensure_wrap_env_files(wid, files.as_deref(), &mut action_symtab)
+                        .map_err(|e| self.fail_action_setup(e))?;
+                }
                 seed_wrapped_action_symbols(
                     &mut action_symtab,
                     wrap_env,
                     &inner_symtab,
                     inner_on_enter,
                     WrappedContext::Env(&env.name),
-                    &self.env_vars,
+                    &self.live_session_env_vars(),
                     Some(&lib),
+                    &self.limits,
                     "onEnter",
                 )
                 .map_err(|e| self.fail_action_setup(e))?;
+
+                // Write wrap env file contents AFTER seed (so data resolves
+                // against the post-lets symbol table).
+                if let Some(ref wid) = wrap_env_id {
+                    self.write_wrap_env_file_contents(wid, &action_symtab, Some(&lib))
+                        .map_err(|e| self.fail_action_setup(e))?;
+                }
             }
 
             // The effective action is now resolved (wrap hook or the env's
@@ -1235,6 +1367,7 @@ impl Session {
                     .cancelation,
                 &action_symtab,
                 Some(&lib),
+                &self.limits,
                 Duration::from_secs(30),
             ));
 
@@ -1251,6 +1384,7 @@ impl Session {
             .with_redactions(self.redactions_enabled())
             .with_debug_collect_stdout(self.debug_collect_stdout)
             .with_echo_openjd_directives(self.echo_openjd_directives)
+            .with_limits(self.limits)
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
@@ -1397,6 +1531,14 @@ impl Session {
         })?;
         self.environments_entered.pop();
 
+        // Evict the wrap-env file cache unconditionally alongside other
+        // environment teardown. This runs before the exit script so the
+        // cache is cleared even when the exit script fails — a re-entered
+        // environment always gets fresh allocations.
+        if env_has_any_wrap_hook(&env) {
+            self.wrap_env_file_records.remove(identifier);
+        }
+
         let output = if env
             .script
             .as_ref()
@@ -1440,8 +1582,9 @@ impl Session {
 
             let lib = self.library.clone();
             if let Some((wrap_env, _)) = wrap_action.as_ref() {
-                // See the onEnter path: the wrapped onExit resolves against
-                // the INNER env's own scope.
+                // Build inner_symtab BEFORE registering wrap env files so the
+                // inner scope is derived from a symtab that does NOT contain
+                // the wrapper's Env.File.* entries — preventing scope leak.
                 let inner_symtab = self
                     .build_wrapped_inner_scope(
                         EmbeddedFilesScope::Env,
@@ -1453,17 +1596,38 @@ impl Session {
                         Some(&lib),
                     )
                     .map_err(|e| self.fail_action_setup(e))?;
+
+                // Register wrap env's embedded file paths BEFORE seed so the
+                // wrap env's let bindings can reference Env.File.*.
+                let wrap_env_id = self.active_wrap_env_id().cloned();
+                if let Some(ref wid) = wrap_env_id {
+                    let files = self
+                        .environments
+                        .get(wid)
+                        .and_then(|e| e.script.as_ref())
+                        .and_then(|s| s.embedded_files.clone());
+                    self.ensure_wrap_env_files(wid, files.as_deref(), &mut action_symtab)
+                        .map_err(|e| self.fail_action_setup(e))?;
+                }
                 seed_wrapped_action_symbols(
                     &mut action_symtab,
                     wrap_env,
                     &inner_symtab,
                     inner_on_exit,
                     WrappedContext::Env(&env.name),
-                    &self.env_vars,
+                    &self.live_session_env_vars(),
                     Some(&lib),
+                    &self.limits,
                     "onExit",
                 )
                 .map_err(|e| self.fail_action_setup(e))?;
+
+                // Write wrap env file contents AFTER seed (so data resolves
+                // against the post-lets symbol table).
+                if let Some(ref wid) = wrap_env_id {
+                    self.write_wrap_env_file_contents(wid, &action_symtab, Some(&lib))
+                        .map_err(|e| self.fail_action_setup(e))?;
+                }
             }
 
             // See the onEnter path: record the effective action's declared
@@ -1476,6 +1640,7 @@ impl Session {
                     .cancelation,
                 &action_symtab,
                 Some(&lib),
+                &self.limits,
                 Duration::from_secs(30),
             ));
 
@@ -1491,6 +1656,7 @@ impl Session {
             .with_redactions(self.redactions_enabled())
             .with_debug_collect_stdout(self.debug_collect_stdout)
             .with_echo_openjd_directives(self.echo_openjd_directives)
+            .with_limits(self.limits)
             .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
             .with_cancel_token(cancel_token)
             .with_cancel_request_rx(cancel_rx);
@@ -1632,15 +1798,46 @@ impl Session {
         // step script runs exactly as before — this keeps the non-WRAP_ACTIONS
         // path a zero-cost addition.
         //
-        // Scope note: this pass does NOT re-materialize the wrap environment's
-        // embedded files. Wrap actions that reference `{{Env.File.*}}` will
-        // see only the names registered when the wrap env was entered, which
-        // are not persisted across action runs. Inline wrap scripts
-        // (`command: bash, args: ["-c", "..."]`) work without this. Re-running
-        // `allocate_file_paths` against the wrap env's embedded_files at task
-        // dispatch time is the follow-up to enable `Env.File.*` inside wrap
-        // hooks end-to-end.
+        // Wrap environment embedded files: paths are allocated once per wrap
+        // env (on the first hook invocation that triggers a cache miss) and
+        // reused for every subsequent invocation. File contents are re-written
+        // per invocation so each hook execution starts from the authored data.
+        // Registration happens BEFORE seed_wrapped_action_symbols so the wrap
+        // env's let bindings can reference `{{Env.File.*}}`; writing happens
+        // AFTER so file data resolves against the post-lets symbol table.
         let lib = self.library.clone();
+
+        // Hoist wrap-env identity and embedded files BEFORE the closure that
+        // borrows `self` immutably, so we can call `&mut self` methods for
+        // the embedded-file cache.
+        let wrap_env_id_and_files: Option<(
+            EnvironmentIdentifier,
+            Option<Vec<openjd_model::job::EmbeddedFile>>,
+        )> = self.active_wrap_env_id().and_then(|id| {
+            let env = self.environments.get(id)?;
+            if env.script.as_ref()?.actions.on_wrap_task_run.is_some() {
+                let files = env.script.as_ref().and_then(|s| s.embedded_files.clone());
+                Some((id.clone(), files))
+            } else {
+                None
+            }
+        });
+
+        // Snapshot the symtab BEFORE registering wrap env files so that the
+        // inner scope (WrappedAction.* resolution) does not see the wrapper's
+        // Env.File.* entries — preventing scope leak. Only cloned when a wrap
+        // env is active; when `None` the original action_symtab is used
+        // directly at the call site, keeping the non-wrap path zero-cost.
+        let pre_registration_symtab = wrap_env_id_and_files
+            .as_ref()
+            .map(|_| action_symtab.clone());
+
+        // Register wrap env file paths BEFORE seed (so lets can reference Env.File.*).
+        if let Some((ref wrap_id, ref files)) = wrap_env_id_and_files {
+            self.ensure_wrap_env_files(wrap_id, files.as_deref(), &mut action_symtab)
+                .map_err(|e| self.fail_action_setup(e))?;
+        }
+
         let wrap_action: Option<openjd_model::job::Action> = self
             .active_wrap_env()
             .and_then(|wrap_env| {
@@ -1662,7 +1859,7 @@ impl Session {
                     EmbeddedFilesScope::Step,
                     script.let_bindings.as_deref(),
                     script.embedded_files.as_deref(),
-                    &action_symtab,
+                    pre_registration_symtab.as_ref().unwrap_or(&action_symtab),
                     Some(&lib),
                 )?;
                 seed_wrapped_action_symbols(
@@ -1671,14 +1868,21 @@ impl Session {
                     &inner_symtab,
                     &script.actions.on_run,
                     WrappedContext::Step(step_name),
-                    &self.env_vars,
+                    &self.live_session_env_vars(),
                     Some(&lib),
+                    &self.limits,
                     "task",
                 )?;
                 Ok::<_, SessionError>(action)
             })
             .transpose()
             .map_err(|e| self.fail_action_setup(e))?;
+
+        // Write wrap env file contents AFTER seed (so data resolves against post-lets symtab).
+        if let Some((ref wrap_id, _)) = wrap_env_id_and_files {
+            self.write_wrap_env_file_contents(wrap_id, &action_symtab, Some(&lib))
+                .map_err(|e| self.fail_action_setup(e))?;
+        }
 
         // Box large locals so they live on the heap instead of inflating
         // this async fn's state machine. Without this, the combined future
@@ -1696,6 +1900,7 @@ impl Session {
         .with_redactions(self.redactions_enabled())
         .with_debug_collect_stdout(self.debug_collect_stdout)
         .with_echo_openjd_directives(self.echo_openjd_directives)
+        .with_limits(self.limits)
         .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
         .with_cancel_token(cancel_token)
         .with_cancel_request_rx(cancel_rx);
@@ -1747,6 +1952,7 @@ impl Session {
             &effective_script.actions.on_run.cancelation,
             &action_symtab,
             Some(&lib),
+            &self.limits,
             Duration::from_secs(120),
         ));
 
@@ -2214,6 +2420,32 @@ impl Session {
         result
     }
 
+    /// Compute the live session-defined env vars — only variables from
+    /// environments that are still on the `environments_entered` stack.
+    ///
+    /// Unlike `evaluate_env_vars`, this excludes `process_env` (host-inherited)
+    /// and `extra` (caller-supplied overrides), producing only the session's own
+    /// `openjd_env` exports and declarative `variables:` maps. This is the
+    /// correct input for `WrappedAction.Environment` per RFC 0008.
+    fn live_session_env_vars(&self) -> HashMap<String, String> {
+        let mut result = HashMap::new();
+        for id in &self.environments_entered {
+            if let Some(changes) = self.created_env_vars.get(id) {
+                for (name, value) in changes {
+                    match value {
+                        Some(v) => {
+                            result.insert(name.clone(), v.clone());
+                        }
+                        None => {
+                            result.remove(name);
+                        }
+                    }
+                }
+            }
+        }
+        result
+    }
+
     /// Get the job parameter values.
     pub fn job_parameter_values(&self) -> &JobParameterValues {
         &self.job_parameter_values
@@ -2233,6 +2465,7 @@ impl Session {
     ) -> Result<SymbolTable, SessionError> {
         use openjd_model::types::TaskParameterType;
 
+        let host_path_format = openjd_expr::path_mapping::PathFormat::host();
         let mut symtab = if let Some(base) = base {
             // Deserialize with host path format — this is the template→session boundary.
             // Path values stored as Posix in template scope get normalized to host format.
@@ -2297,11 +2530,22 @@ impl Session {
         } else {
             let mut s = SymbolTable::new();
             for (name, param) in &self.job_parameter_values {
+                use openjd_model::types::JobParameterType;
+                // RawParam.* — coerced to declared type so expressions like
+                // {{ RawParam.N + 1 }} work correctly with typed arithmetic.
                 let raw_key = format!("RawParam.{name}");
-                s.set(&raw_key, param.value.clone())
+                let raw_value = match param.param_type {
+                    JobParameterType::Path | JobParameterType::ListPath => param.value.clone(),
+                    _ => Self::coerce_param_value(
+                        &param.value,
+                        &param.param_type.expr_type(),
+                        host_path_format,
+                        &raw_key,
+                    )?,
+                };
+                s.set(&raw_key, raw_value)
                     .map_err(|e| SessionError::Runtime(format!("Failed to set {raw_key}: {e}")))?;
                 let key = format!("Param.{name}");
-                use openjd_model::types::JobParameterType;
                 let mapped_value = match param.param_type {
                     JobParameterType::Path => {
                         let raw = match &param.value {
@@ -2332,7 +2576,12 @@ impl Session {
                         }
                         other => self.apply_path_mapping_to_value(other),
                     },
-                    _ => self.apply_path_mapping_to_value(&param.value),
+                    _ => Self::coerce_param_value(
+                        &param.value,
+                        &param.param_type.expr_type(),
+                        host_path_format,
+                        &key,
+                    )?,
                 };
                 s.set(&key, mapped_value)
                     .map_err(|e| SessionError::Runtime(format!("Failed to set {key}: {e}")))?;
@@ -2340,7 +2589,6 @@ impl Session {
             s
         };
 
-        let host_path_format = openjd_expr::path_mapping::PathFormat::host();
         symtab
             .set(
                 "Session.WorkingDirectory",
@@ -2353,10 +2601,21 @@ impl Session {
 
         if let Some(task_params) = task_parameter_values {
             for (name, tv) in task_params {
-                // Task.RawParam.* — raw string value
+                // Task.RawParam.* — coerced to declared type so expressions
+                // like {{ Task.RawParam.Frame + 1 }} work correctly.
                 let raw_key = format!("Task.RawParam.{name}");
+                let raw_value = match tv.param_type {
+                    TaskParameterType::Path => tv.value.clone(),
+                    TaskParameterType::ChunkInt => tv.value.clone(),
+                    _ => Self::coerce_param_value(
+                        &tv.value,
+                        &tv.param_type.expr_type(),
+                        host_path_format,
+                        &raw_key,
+                    )?,
+                };
                 symtab
-                    .set(&raw_key, tv.value.clone())
+                    .set(&raw_key, raw_value)
                     .map_err(|e| SessionError::Runtime(format!("Failed to set {raw_key}: {e}")))?;
 
                 // Task.Param.* — typed value with path mapping applied for PATH types
@@ -2374,7 +2633,13 @@ impl Session {
                             openjd_expr::path_mapping::PathFormat::host(),
                         )
                     }
-                    _ => tv.value.clone(),
+                    TaskParameterType::ChunkInt => tv.value.clone(),
+                    _ => Self::coerce_param_value(
+                        &tv.value,
+                        &tv.param_type.expr_type(),
+                        host_path_format,
+                        &key,
+                    )?,
                 };
                 symtab
                     .set(&key, param_value)
@@ -2383,6 +2648,22 @@ impl Session {
         }
 
         Ok(symtab)
+    }
+
+    /// Coerce a parameter value to its declared type using `ExprValue::coerce`.
+    ///
+    /// This ensures that string values arriving from the PyO3 boundary are
+    /// properly typed in the symbol table so that expression evaluation
+    /// (arithmetic, comparisons) works correctly on the Rust runtime.
+    fn coerce_param_value(
+        value: &openjd_expr::ExprValue,
+        target_type: &openjd_expr::ExprType,
+        path_format: openjd_expr::path_mapping::PathFormat,
+        param_key: &str,
+    ) -> Result<openjd_expr::ExprValue, SessionError> {
+        value.clone().coerce(target_type, path_format).map_err(|e| {
+            SessionError::Runtime(format!("Failed to coerce parameter '{param_key}': {e}"))
+        })
     }
 
     /// Apply path mapping rules to a string, returning the mapped result.
@@ -2454,7 +2735,8 @@ impl Session {
         let mut st = base.clone();
         let ef = if let Some(files) = embedded_files {
             let mut ef = EmbeddedFiles::new(scope, self.files_directory.clone(), &self.session_id)
-                .with_user(self.cross_user.user.clone());
+                .with_user(self.cross_user.user.clone())
+                .with_limits(self.limits);
             ef.allocate_file_paths(files, &mut st)?;
             Some(ef)
         } else {
@@ -2466,6 +2748,8 @@ impl Session {
                 &st,
                 lib,
                 openjd_expr::PathFormat::host(),
+                self.limits.max_eval_memory_bytes,
+                self.limits.max_eval_operations,
             )
             .map_err(|e| SessionError::FormatString {
                 context: "let bindings".into(),
@@ -2514,6 +2798,86 @@ impl Session {
             }
         }
         None
+    }
+
+    /// Like `wrap_env_excluding` but returns the identifier instead of a
+    /// reference to the environment, avoiding borrow conflicts when `&mut self`
+    /// is needed after the lookup.
+    fn wrap_env_id_excluding(&self, self_id: &str) -> Option<&EnvironmentIdentifier> {
+        for id in self.environments_entered.iter().rev() {
+            if id == self_id {
+                continue;
+            }
+            if let Some(env) = self.environments.get(id) {
+                if env_has_any_wrap_hook(env) {
+                    return Some(id);
+                }
+            }
+        }
+        None
+    }
+
+    /// Return the `EnvironmentIdentifier` of the active wrap environment, if
+    /// one exists. Like `active_wrap_env` but returns the id rather than a
+    /// reference, avoiding borrow conflicts when mutation is needed.
+    fn active_wrap_env_id(&self) -> Option<&EnvironmentIdentifier> {
+        for id in self.environments_entered.iter().rev() {
+            if let Some(env) = self.environments.get(id) {
+                if env_has_any_wrap_hook(env) {
+                    return Some(id);
+                }
+            }
+        }
+        None
+    }
+
+    /// Ensure the wrap environment's embedded file paths are allocated and
+    /// registered in `symtab`. On the first call for a given wrap env
+    /// (cache miss), allocates paths and creates the cache entry. On
+    /// subsequent calls (cache hit), re-registers the previously allocated
+    /// paths without allocating new ones.
+    ///
+    /// No-op when `files` is `None` or empty.
+    fn ensure_wrap_env_files(
+        &mut self,
+        wrap_env_id: &EnvironmentIdentifier,
+        files: Option<&[openjd_model::job::EmbeddedFile]>,
+        symtab: &mut SymbolTable,
+    ) -> Result<(), SessionError> {
+        let files = match files {
+            Some(f) if !f.is_empty() => f,
+            _ => return Ok(()),
+        };
+        if let Some(cached) = self.wrap_env_file_records.get(wrap_env_id) {
+            // Cache hit: re-register paths without allocating.
+            cached.register_file_paths(symtab)?;
+        } else {
+            // Cache miss: allocate paths and insert into cache.
+            let mut ef = EmbeddedFiles::new(
+                EmbeddedFilesScope::Env,
+                self.files_directory.clone(),
+                &self.session_id,
+            )
+            .with_user(self.cross_user.user.clone())
+            .with_limits(self.limits);
+            ef.allocate_file_paths(files, symtab)?;
+            self.wrap_env_file_records.insert(wrap_env_id.clone(), ef);
+        }
+        Ok(())
+    }
+
+    /// Write the cached wrap environment's embedded file contents into the
+    /// symtab's resolved scope. No-op if no cache entry exists for the id.
+    fn write_wrap_env_file_contents(
+        &self,
+        wrap_env_id: &EnvironmentIdentifier,
+        symtab: &SymbolTable,
+        lib: Option<&FunctionLibrary>,
+    ) -> Result<(), SessionError> {
+        if let Some(cached) = self.wrap_env_file_records.get(wrap_env_id) {
+            cached.write_file_contents(symtab, lib)?;
+        }
+        Ok(())
     }
 }
 
@@ -2585,10 +2949,12 @@ pub(crate) enum WrappedContext<'a> {
 /// `phase` names the wrapped lifecycle action for error messages
 /// ("onEnter", "onExit", or "task").
 ///
-/// `session_env_vars` MUST be the session's session-defined variables
-/// (`self.env_vars`): `openjd_env` exports plus entered environments'
-/// declarative `variables:` maps. Host-inherited variables are
-/// intentionally excluded per RFC 0008.
+/// `session_env_vars` MUST be the session's **live** session-defined variables
+/// — only `openjd_env` exports and declarative `variables:` maps from
+/// environments that are still on the `environments_entered` stack.
+/// Host-inherited variables and exited environments' variables are
+/// intentionally excluded per RFC 0008. Use `live_session_env_vars()`
+/// rather than the cumulative `self.env_vars`.
 #[allow(clippy::too_many_arguments)]
 fn seed_wrapped_action_symbols(
     action_symtab: &mut SymbolTable,
@@ -2598,6 +2964,7 @@ fn seed_wrapped_action_symbols(
     context: WrappedContext<'_>,
     session_env_vars: &HashMap<String, String>,
     lib: Option<&FunctionLibrary>,
+    limits: &crate::limits::SessionLimits,
     phase: &str,
 ) -> Result<(), SessionError> {
     // Layer the wrap env's frozen symtab on top of the hook's table so the
@@ -2630,6 +2997,8 @@ fn seed_wrapped_action_symbols(
             action_symtab,
             lib,
             openjd_expr::PathFormat::host(),
+            limits.max_eval_memory_bytes,
+            limits.max_eval_operations,
         )
         .map_err(|e| SessionError::FormatString {
             context: format!("wrap environment '{}' let bindings", wrap_env.name),
@@ -2640,11 +3009,13 @@ fn seed_wrapped_action_symbols(
 
     // Resolve the wrapped action's command/args against the INNER scope.
     // These seed WrappedAction.Command/Args.
-    let resolved_cmd = crate::runner::resolve_action_args(wrapped_action, inner_symtab, lib)
-        .map_err(|e| SessionError::FormatString {
-            context: format!("wrapped {phase} command"),
-            reason: e.to_string(),
-        })?;
+    let resolved_cmd =
+        crate::runner::resolve_action_args(wrapped_action, inner_symtab, lib, limits).map_err(
+            |e| SessionError::FormatString {
+                context: format!("wrapped {phase} command"),
+                reason: e.to_string(),
+            },
+        )?;
     let (cmd, args) = match resolved_cmd.split_first() {
         Some((head, tail)) => (head.clone(), tail.to_vec()),
         None => (String::new(), Vec::new()),
@@ -2658,7 +3029,7 @@ fn seed_wrapped_action_symbols(
     // action specified no timeout — int? per the EXPR optional-data
     // semantics, so whole-field forwarding drops the field.
     let wrapped_timeout_secs: Option<i64> =
-        crate::runner::resolve_action_timeout(wrapped_action, inner_symtab, lib, None)
+        crate::runner::resolve_action_timeout(wrapped_action, inner_symtab, lib, limits, None)
             .map_err(|e| SessionError::FormatString {
                 context: format!("wrapped {phase} timeout"),
                 reason: e.to_string(),
@@ -2685,6 +3056,7 @@ fn seed_wrapped_action_symbols(
             &wrapped_action.cancelation,
             inner_symtab,
             lib,
+            limits,
         )? {
             crate::runner::EffectiveCancelation::Undeclared => (None, None),
             crate::runner::EffectiveCancelation::Terminate => (Some("TERMINATE"), None),
@@ -3029,6 +3401,479 @@ mod wrap_actions_tests {
         assert_eq!(
             symtab.get_value("WrappedAction.Cancelation.NotifyPeriodInSeconds"),
             Some(&ExprValue::Null)
+        );
+    }
+}
+
+#[cfg(test)]
+mod typed_param_seeding_tests {
+    //! RED tests for Gap 11: parameter values arrive as strings across the PyO3
+    //! boundary and the session symbol table must coerce them to their declared
+    //! types before expression evaluation.
+    use super::*;
+    use openjd_expr::{ExprType, ExprValue, FormatString, FormatStringOptions};
+    use openjd_model::types::{
+        JobParameterType, JobParameterValue, TaskParameterType, TaskParameterValue,
+    };
+    use openjd_model::TaskParameterSet;
+    use std::path::PathBuf;
+
+    /// Helper: build a test Session with given job parameters and call
+    /// `build_symbol_table` (from-scratch branch, no base/resolved symtab).
+    fn build_symtab_from_scratch(
+        params: Vec<(&str, JobParameterType, ExprValue)>,
+    ) -> Result<openjd_model::symbol_table::SymbolTable, SessionError> {
+        let mut session = Session::new_for_test(PathBuf::from("/tmp/test"));
+        let mut job_params = HashMap::new();
+        for (name, ptype, value) in params {
+            job_params.insert(
+                name.to_string(),
+                JobParameterValue {
+                    param_type: ptype,
+                    value,
+                },
+            );
+        }
+        session.set_job_parameter_values_for_test(job_params);
+        session.build_symbol_table(None, None)
+    }
+
+    /// Helper: build a test Session with job parameters and task parameters,
+    /// then call `build_symbol_table` with the task parameters.
+    fn build_symtab_with_task_params(
+        job_params: Vec<(&str, JobParameterType, ExprValue)>,
+        task_params: Vec<(&str, TaskParameterType, ExprValue)>,
+    ) -> Result<openjd_model::symbol_table::SymbolTable, SessionError> {
+        let mut session = Session::new_for_test(PathBuf::from("/tmp/test"));
+        let mut jp = HashMap::new();
+        for (name, ptype, value) in job_params {
+            jp.insert(
+                name.to_string(),
+                JobParameterValue {
+                    param_type: ptype,
+                    value,
+                },
+            );
+        }
+        session.set_job_parameter_values_for_test(jp);
+
+        let mut tp: TaskParameterSet = TaskParameterSet::new();
+        for (name, ptype, value) in task_params {
+            tp.insert(
+                name.to_string(),
+                TaskParameterValue {
+                    param_type: ptype,
+                    value,
+                },
+            );
+        }
+        session.build_symbol_table(Some(&tp), None)
+    }
+
+    /// Helper: evaluate a format-string expression against a symbol table.
+    fn eval_expr(
+        symtab: &openjd_model::symbol_table::SymbolTable,
+        expr: &str,
+    ) -> Result<ExprValue, openjd_expr::ExpressionError> {
+        let fs = FormatString::new(expr).expect("invalid format string");
+        fs.resolve_with(symtab, &FormatStringOptions::default())
+    }
+
+    /// Helper: evaluate a format-string expression as a string.
+    fn eval_str(
+        symtab: &openjd_model::symbol_table::SymbolTable,
+        expr: &str,
+    ) -> Result<String, openjd_expr::ExpressionError> {
+        let fs = FormatString::new(expr).expect("invalid format string");
+        fs.resolve_string_with(symtab, &FormatStringOptions::default())
+    }
+
+    // ── Job parameter matrix (12 types) ──
+
+    #[test]
+    fn job_int_arithmetic() {
+        // INT "5" → {{ Param.N + 1 }} → 6
+        let symtab = build_symtab_from_scratch(vec![(
+            "N",
+            JobParameterType::Int,
+            ExprValue::String("5".into()),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Param.N + 1}}").unwrap();
+        assert_eq!(result, ExprValue::Int(6));
+    }
+
+    #[test]
+    fn job_int_equality_comparison() {
+        // INT "5" → {{ 'y' if Param.N == 5 else 'n' }} → "y" (silent-branch bug)
+        let symtab = build_symtab_from_scratch(vec![(
+            "N",
+            JobParameterType::Int,
+            ExprValue::String("5".into()),
+        )])
+        .unwrap();
+        let result = eval_str(&symtab, "{{'y' if Param.N == 5 else 'n'}}").unwrap();
+        assert_eq!(result, "y");
+    }
+
+    #[test]
+    fn job_float_arithmetic() {
+        // FLOAT "2.5" → {{ Param.Scale * 2 }} → 5.0 (NOT "2.52.5")
+        let symtab = build_symtab_from_scratch(vec![(
+            "Scale",
+            JobParameterType::Float,
+            ExprValue::String("2.5".into()),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Param.Scale * 2}}").unwrap();
+        // Result should be Float(5.0)
+        assert_eq!(
+            result,
+            ExprValue::Float(openjd_expr::value::Float64::new(5.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn job_bool_negation() {
+        // BOOL "true" → {{ not Param.B }} → false
+        let symtab = build_symtab_from_scratch(vec![(
+            "B",
+            JobParameterType::Bool,
+            ExprValue::String("true".into()),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{not Param.B}}").unwrap();
+        assert_eq!(result, ExprValue::Bool(false));
+    }
+
+    #[test]
+    fn job_string_unchanged() {
+        // STRING "hello" → stays string
+        let symtab = build_symtab_from_scratch(vec![(
+            "S",
+            JobParameterType::String,
+            ExprValue::String("hello".into()),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Param.S}}").unwrap();
+        assert_eq!(result, ExprValue::String("hello".into()));
+    }
+
+    #[test]
+    fn job_range_expr_coercion() {
+        // RANGE_EXPR "1-5" → coerces to RangeExpr type
+        let symtab = build_symtab_from_scratch(vec![(
+            "R",
+            JobParameterType::RangeExpr,
+            ExprValue::String("1-5".into()),
+        )])
+        .unwrap();
+        let val = symtab.get_value("Param.R").unwrap();
+        assert!(
+            matches!(val, ExprValue::RangeExpr(_)),
+            "expected RangeExpr, got {val:?}"
+        );
+    }
+
+    #[test]
+    fn job_list_string() {
+        // LIST[STRING] — stays as-is
+        let symtab = build_symtab_from_scratch(vec![(
+            "Tags",
+            JobParameterType::ListString,
+            ExprValue::ListString(vec!["a".into(), "b".into()], 2),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Param.Tags[0]}}").unwrap();
+        assert_eq!(result, ExprValue::String("a".into()));
+    }
+
+    #[test]
+    fn job_list_int_element_arithmetic() {
+        // LIST[INT] ["1","2","3"] → {{ Param.Tiles[0] + 1 }} → 2
+        let symtab = build_symtab_from_scratch(vec![(
+            "Tiles",
+            JobParameterType::ListInt,
+            ExprValue::ListString(vec!["1".into(), "2".into(), "3".into()], 3),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Param.Tiles[0] + 1}}").unwrap();
+        assert_eq!(result, ExprValue::Int(2));
+    }
+
+    #[test]
+    fn job_list_float_element() {
+        // LIST[FLOAT] ["1.5","2.5"] → elements are float
+        let symtab = build_symtab_from_scratch(vec![(
+            "Weights",
+            JobParameterType::ListFloat,
+            ExprValue::ListString(vec!["1.5".into(), "2.5".into()], 2),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Param.Weights[0] + 1}}").unwrap();
+        assert_eq!(
+            result,
+            ExprValue::Float(openjd_expr::value::Float64::new(2.5).unwrap())
+        );
+    }
+
+    #[test]
+    fn job_list_bool_element() {
+        // LIST[BOOL] ["true","false"] → elements are bool
+        let symtab = build_symtab_from_scratch(vec![(
+            "Flags",
+            JobParameterType::ListBool,
+            ExprValue::ListString(vec!["true".into(), "false".into()], 2),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{not Param.Flags[0]}}").unwrap();
+        assert_eq!(result, ExprValue::Bool(false));
+    }
+
+    #[test]
+    fn job_list_list_int_nested() {
+        // LIST[LIST[INT]] — nested coercion (recursive)
+        // Input: a ListList containing ListString elements that should become ListInt
+        let inner1 = ExprValue::ListString(vec!["10".into(), "20".into()], 2);
+        let inner2 = ExprValue::ListString(vec!["30".into(), "40".into()], 2);
+        let outer = ExprValue::ListList(vec![inner1, inner2], ExprType::list(ExprType::STRING), 0);
+        let symtab =
+            build_symtab_from_scratch(vec![("Grid", JobParameterType::ListListInt, outer)])
+                .unwrap();
+        let val = symtab.get_value("Param.Grid").unwrap();
+        // After coercion, should be a ListList of ListInt elements
+        if let ExprValue::ListList(elements, _, _) = val {
+            assert_eq!(elements.len(), 2);
+            assert!(
+                matches!(&elements[0], ExprValue::ListInt(v) if v == &[10, 20]),
+                "expected ListInt([10, 20]), got {:?}",
+                elements[0]
+            );
+        } else {
+            panic!("expected ListList, got {val:?}");
+        }
+    }
+
+    #[test]
+    fn job_path_unchanged() {
+        // PATH "C:/projects" → path-mapping applied, value stays path form
+        let symtab = build_symtab_from_scratch(vec![(
+            "P",
+            JobParameterType::Path,
+            ExprValue::String("C:/projects".into()),
+        )])
+        .unwrap();
+        let val = symtab.get_value("Param.P").unwrap();
+        assert!(
+            matches!(val, ExprValue::Path { .. }),
+            "expected Path, got {val:?}"
+        );
+    }
+
+    #[test]
+    fn job_list_path_unchanged() {
+        // LIST[PATH] — path mapping applied, stays list-path form
+        let symtab = build_symtab_from_scratch(vec![(
+            "Paths",
+            JobParameterType::ListPath,
+            ExprValue::ListString(vec!["/a".into(), "/b".into()], 2),
+        )])
+        .unwrap();
+        let val = symtab.get_value("Param.Paths").unwrap();
+        assert!(
+            matches!(val, ExprValue::ListPath(..)),
+            "expected ListPath, got {val:?}"
+        );
+    }
+
+    // ── Task parameter matrix (5 types) ──
+
+    #[test]
+    fn task_int_comparison_and_arithmetic() {
+        // Task INT "5" → {{ Task.Param.Frame > 3 }} → true; {{ Task.Param.Frame + 1 }} → 6
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "Frame",
+                TaskParameterType::Int,
+                ExprValue::String("5".into()),
+            )],
+        )
+        .unwrap();
+        let cmp = eval_expr(&symtab, "{{Task.Param.Frame > 3}}").unwrap();
+        assert_eq!(cmp, ExprValue::Bool(true));
+        let arith = eval_expr(&symtab, "{{Task.Param.Frame + 1}}").unwrap();
+        assert_eq!(arith, ExprValue::Int(6));
+    }
+
+    #[test]
+    fn task_float_arithmetic() {
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "Weight",
+                TaskParameterType::Float,
+                ExprValue::String("3.5".into()),
+            )],
+        )
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Task.Param.Weight * 2}}").unwrap();
+        assert_eq!(
+            result,
+            ExprValue::Float(openjd_expr::value::Float64::new(7.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn task_string_unchanged() {
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "Label",
+                TaskParameterType::String,
+                ExprValue::String("hello".into()),
+            )],
+        )
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Task.Param.Label}}").unwrap();
+        assert_eq!(result, ExprValue::String("hello".into()));
+    }
+
+    #[test]
+    fn task_path_unchanged() {
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "Out",
+                TaskParameterType::Path,
+                ExprValue::String("/output".into()),
+            )],
+        )
+        .unwrap();
+        let val = symtab.get_value("Task.Param.Out").unwrap();
+        assert!(
+            matches!(val, ExprValue::Path { .. }),
+            "expected Path, got {val:?}"
+        );
+    }
+
+    #[test]
+    fn task_chunk_int_stays_string() {
+        // CHUNK[INT] — exempt from coercion, stays as string (range expression string)
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "Chunk",
+                TaskParameterType::ChunkInt,
+                ExprValue::String("1-10".into()),
+            )],
+        )
+        .unwrap();
+        let val = symtab.get_value("Task.Param.Chunk").unwrap();
+        // ChunkInt maps to RANGE_EXPR via expr_type(), so coercion would parse it.
+        // But per the brief, ChunkInt is EXEMPT — stays as string.
+        // If the implementation coerces it, we'd get RangeExpr; if exempt, stays String.
+        assert_eq!(val, &ExprValue::String("1-10".into()));
+    }
+
+    // ── RawParam contract ──
+
+    #[test]
+    fn job_raw_param_int_arithmetic() {
+        // Job INT "21" → {{ RawParam.N + 1 }} → 22
+        let symtab = build_symtab_from_scratch(vec![(
+            "N",
+            JobParameterType::Int,
+            ExprValue::String("21".into()),
+        )])
+        .unwrap();
+        let result = eval_expr(&symtab, "{{RawParam.N + 1}}").unwrap();
+        assert_eq!(result, ExprValue::Int(22));
+    }
+
+    #[test]
+    fn task_raw_param_int_arithmetic() {
+        // Task INT "7" → {{ Task.RawParam.Frame + 1 }} → 8
+        let symtab = build_symtab_with_task_params(
+            vec![],
+            vec![(
+                "Frame",
+                TaskParameterType::Int,
+                ExprValue::String("7".into()),
+            )],
+        )
+        .unwrap();
+        let result = eval_expr(&symtab, "{{Task.RawParam.Frame + 1}}").unwrap();
+        assert_eq!(result, ExprValue::Int(8));
+    }
+
+    #[test]
+    fn float_display_compatibility() {
+        // A FLOAT coerced value used in string interpolation should render the
+        // original string form (Float64::with_str preserves it).
+        let symtab = build_symtab_from_scratch(vec![(
+            "V",
+            JobParameterType::Float,
+            ExprValue::String("2.500".into()),
+        )])
+        .unwrap();
+        let result = eval_str(&symtab, "value={{Param.V}}").unwrap();
+        // Float64::with_str preserves the original display string "2.500"
+        assert_eq!(result, "value=2.500");
+    }
+
+    // ── Bad values (must produce errors, not panics or silent passthrough) ──
+
+    #[test]
+    fn bad_int_value_errors() {
+        // INT "abc" → build_symbol_table returns Err
+        let result = build_symtab_from_scratch(vec![(
+            "N",
+            JobParameterType::Int,
+            ExprValue::String("abc".into()),
+        )]);
+        let msg = result
+            .expect_err("expected error for bad INT value, got Ok")
+            .to_string();
+        assert_eq!(
+            msg,
+            "Failed to coerce parameter 'RawParam.N': \
+             Cannot convert 'abc' to int: invalid digit found in string"
+        );
+    }
+
+    #[test]
+    fn bad_bool_value_errors() {
+        // BOOL "maybe" → build_symbol_table returns Err
+        let result = build_symtab_from_scratch(vec![(
+            "B",
+            JobParameterType::Bool,
+            ExprValue::String("maybe".into()),
+        )]);
+        let msg = result
+            .expect_err("expected error for bad BOOL value, got Ok")
+            .to_string();
+        assert_eq!(
+            msg,
+            "Failed to coerce parameter 'RawParam.B': Cannot convert 'maybe' to bool"
+        );
+    }
+
+    #[test]
+    fn bad_list_int_partial_errors() {
+        // LIST[INT] ["1","abc","3"] → whole-list Err (no partial coercion)
+        let result = build_symtab_from_scratch(vec![(
+            "Tiles",
+            JobParameterType::ListInt,
+            ExprValue::ListString(vec!["1".into(), "abc".into(), "3".into()], 3),
+        )]);
+        let msg = result
+            .expect_err("expected error for bad LIST[INT] element, got Ok")
+            .to_string();
+        assert_eq!(
+            msg,
+            "Failed to coerce parameter 'RawParam.Tiles': \
+             Cannot convert 'abc' to int: invalid digit found in string"
         );
     }
 }

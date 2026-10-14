@@ -230,6 +230,7 @@ pub const MAX_PARSE_INPUT_LEN: usize = 64 * 1024;
 Additional per-module caps (see each module section below):
 - `format_string::MAX_FORMAT_STRING_LEN` (1 MB)
 - `format_string::MAX_FORMAT_STRING_SEGMENTS` (1,000)
+- `format_string::MAX_STATIC_RESOLVED_VALUE_LEN` (10 MiB — caps the concatenated `resolved_value` returned by `validate_expressions`; not an error)
 - `range_expr::MAX_RANGE_EXPR_CHUNKS` (10,000)
 - `range_expr::MAX_RANGE_VALUE_MAGNITUDE` (2^62 — value-domain bound, not a heap cap)
 - `symbol_table::MAX_SYMBOL_TABLE_ENTRIES` (100,000 — transport-only)
@@ -533,6 +534,16 @@ impl ExprType {
     /// (no `any`, `union`, `unresolved`, type variable, or signature).
     pub fn is_concrete(&self) -> bool;
 
+    // ── Satisfaction (for target-type coercion) ──
+
+    /// True if a value of this type is already acceptable where `target`
+    /// is required, so no conversion is needed. **Directional**, unlike
+    /// [`match_type`]: `int` satisfies `any`, but `any` does not satisfy
+    /// `int`. Union targets need one member satisfied; union sources need
+    /// every member satisfied; `list[T]` is covariant in `T`.
+    /// See `specs/expr/type-system.md` § Satisfaction.
+    pub fn satisfies(&self, target: &ExprType) -> bool;
+
     // ── Signature access (debug-asserts on `code == Signature`) ──
     pub fn sig_params(&self) -> &[ExprType];
     pub fn sig_return(&self) -> &ExprType;
@@ -540,7 +551,9 @@ impl ExprType {
     // ── Type matching and substitution for generic dispatch ──
 
     /// Try to match a call's argument types against this signature.
-    /// Returns type-variable bindings on success.
+    /// Returns type-variable bindings on success. A variable repeated across
+    /// parameters must reconcile (same type, or a coercible pair such as
+    /// int/float, path/string, range_expr/list[int]); `[]` binds only weakly.
     pub fn match_call(
         &self, arg_types: &[ExprType],
     ) -> Option<HashMap<TypeCode, ExprType>>;
@@ -614,9 +627,12 @@ impl Float64 {
 
 impl std::fmt::Display for Float64 { /* ... */ }
 impl std::ops::Deref<Target = f64> for Float64 { /* ... */ }
+impl PartialEq for Float64 { /* value plus rendering: with_str(2.5,"2.50") != new(2.5) */ }
 impl PartialEq<f64> for Float64 { /* ... */ }
 impl PartialOrd<f64> for Float64 { /* ... */ }
-impl Hash for Float64 { /* uses to_bits() */ }
+impl Hash for Float64 { /* uses to_bits(); coarser than PartialEq, which also compares the rendering */ }
+impl Serialize for Float64 { /* `<float> | <floatstring>`: a number, or the preserved spelling as a string */ }
+impl<'de> Deserialize<'de> for Float64 { /* accepts either; routed through new/with_str */ }
 ```
 
 Accessible as `openjd_expr::value::Float64`. Not re-exported at the crate root.
@@ -672,13 +688,25 @@ impl ExprValue {
 
     /// Construct an `Unresolved(constraint)` value.
     pub fn unresolved(constraint: ExprType) -> Self;
+    /// True if this is an `Unresolved` value. A complete concreteness
+    /// check: unresolved values never nest inside lists — the evaluator
+    /// hoists list literals and comprehensions with any unresolved
+    /// element to a top-level `unresolved(list[T])`, and `make_list`
+    /// rejects unresolved elements — so `false` means fully concrete.
     pub fn is_unresolved(&self) -> bool;
 
     // ── List construction ──
 
     /// Build a typed list from elements, promoting element types where
-    /// needed (int+float → float, path+string → string). `hint_type`
-    /// determines the element type for an empty list.
+    /// needed (int+float → float, path+string → string, element-wise for
+    /// lists of lists). `hint_type` determines the element type for an
+    /// empty list. The element types must join under the list-literal
+    /// join (`list[nulltype]` compatible with every list type; e.g.
+    /// `list[int]` beside `list[string]` is an error); a list of lists
+    /// carries the joined element type. A `Null` or an `Unresolved`
+    /// element is rejected: a list cannot hold `null`, and `make_list`
+    /// constructs concrete lists (the
+    /// evaluator hoists unknown-element list expressions instead).
     pub fn make_list(
         elements: Vec<ExprValue>, hint_type: ExprType,
     ) -> Result<Self, ExpressionError>;
@@ -702,6 +730,17 @@ impl ExprValue {
 
     /// Coerce `self` toward `target`. Consuming call; errors pass the
     /// value back on failure via the error message, not as a type.
+    ///
+    /// Two steps: if the value's type already satisfies `target` (see
+    /// [`ExprType::satisfies`]) it is returned unchanged, so the result may
+    /// keep the *source* type — coercing a `list[int]` to `list[any]` yields
+    /// a `list[int]`. Otherwise the non-destructive conversion table is
+    /// applied toward each of the target's candidate destinations, non-list
+    /// before list. Targets that are not sets of runtime values (type
+    /// variables, `noreturn`, `unresolved[T]`, signatures) are rejected.
+    /// In an unresolved source constraint, unbound type variables read as
+    /// wildcards: `unresolved[list[T1]]` coerces as `unresolved[list[any]]`.
+    /// See `specs/expr/values.md` § Coercion.
     pub fn coerce(
         self, target: &ExprType, path_format: PathFormat,
     ) -> Result<Self, String>;
@@ -722,8 +761,11 @@ impl ExprValue {
     pub fn memory_size(&self) -> usize;
 
     /// Display / conversion.
-    pub fn repr_python(&self) -> String;       // matches Python repr
-    pub fn to_display_string(&self) -> String; // human-readable form
+    pub fn repr_python(&self) -> String;       // Rust-side debug form: `ExprValue('x')`.
+                                               // The embedded literal matches Python repr;
+                                               // the wrapper does not (see py_escape.rs)
+    pub fn to_display_string(&self) -> String; // human-readable form; lists render
+                                               // as JSON arrays (see values.md)
     pub fn as_str_repr(&self) -> std::borrow::Cow<'_, str>;
 
     // ── JSON transport (template-scope → session-scope boundary) ──
@@ -784,8 +826,8 @@ Accessible as `openjd_expr::value::ListIter` (not re-exported at the crate root)
 ```rust
 /// Format an `f64` in the canonical spec form used by
 /// `Float64::to_display_string`. Exponent notation outside the range
-/// `[1e-4, 1e16)`; "0.0" for zero; preserves exact decimal where
-/// possible.
+/// `[1e-4, 1e16)`, with an explicit sign and at least two exponent digits;
+/// "0.0" for zero; preserves exact decimal where possible.
 pub fn value::format_float(f: f64) -> String;
 ```
 
@@ -962,18 +1004,33 @@ impl FormatString {
 
     /// Resolve to a `String`. Single-expression forms that aren't
     /// naturally string-typed (int, float, list, path) are converted via
-    /// `ExprValue::to_display_string()`.
+    /// `ExprValue::to_display_string()`. The accumulated evaluated bytes
+    /// (expression-rendered content only; literals excluded) are charged
+    /// against the options' memory limit — the per-segment evaluator
+    /// limit does not compose across segments — so resolution is
+    /// memory-bounded end to end, in agreement with the identical charge
+    /// in `validate_expressions`.
     pub fn resolve_string_with(
         &self, symtab: &SymbolTable, opts: &FormatStringOptions<'_>,
     ) -> Result<String, ExpressionError>;
 
     /// Validate every interpolation against a type-checking symbol table
     /// (typically populated with `ExprValue::unresolved(T)` values).
-    /// Returns structured errors with the position of the first failing
-    /// interpolation so callers can produce diagnostics.
+    /// `opts` must be the same options the caller will later resolve
+    /// with, so validation observes exactly what resolution will produce:
+    /// the target type is applied (like `resolve_with`) only in the
+    /// single-expression typed-passthrough case, where the root value is
+    /// coerced toward it — a value that cannot coerce fails validation as
+    /// it would fail resolution — and the memory/operation limits bound
+    /// each segment's evaluation exactly as they do during resolution.
+    /// Returns structured errors with the position of the
+    /// first failing interpolation so callers can produce diagnostics.
+    /// On success, returns a `StaticResolution` describing what
+    /// evaluation determined statically (resolved-length lower bound;
+    /// exact value when fully static); pass/fail-only callers ignore it.
     pub fn validate_expressions(
-        &self, symtab: &SymbolTable, library: &FunctionLibrary,
-    ) -> Result<(), FormatStringValidationError>;
+        &self, symtab: &SymbolTable, opts: &FormatStringOptions<'_>,
+    ) -> Result<StaticResolution, FormatStringValidationError>;
 
     /// Validate that list-comprehension loop variables in this format
     /// string's interpolations don't shadow names from the enclosing
@@ -994,6 +1051,18 @@ impl FormatString {
     /// True iff this format string contains no `{{...}}` interpolations.
     pub fn is_literal(&self) -> bool;
 
+    /// Number of parsed segments — literal runs and `{{...}}` expressions.
+    /// A format string with more than one segment always concatenates to
+    /// a single string on resolution (only a whole-field single-expression
+    /// format string can resolve to `null` or to a list); `is_literal`
+    /// distinguishes the two single-segment cases.
+    pub fn segment_count(&self) -> usize;
+
+    /// The literal (non-expression) text runs, in order. Literal runs
+    /// appear verbatim in every possible resolution; expression source
+    /// text is not included (it never appears in a resolved value).
+    pub fn literal_segments(&self) -> impl Iterator<Item = &str>;
+
     /// All symbol names accessed across every interpolation.
     pub fn accessed_symbols(&self) -> std::collections::HashSet<String>;
 
@@ -1013,8 +1082,11 @@ impl<'de> serde::Deserialize<'de> for FormatString;  // accepts str/int/float/bo
 ```
 
 ```rust
-/// Options for `FormatString::resolve_with` / `resolve_string_with`.
-/// Builder-style; each `with_*` returns the modified options by value.
+/// Options for `FormatString::resolve_with` / `resolve_string_with` /
+/// `validate_expressions`. Builder-style; each `with_*` returns the
+/// modified options by value. Validation and resolution take the same
+/// options value so that validation observes exactly the resolution
+/// the caller will perform.
 #[derive(Clone)]
 pub struct FormatStringOptions<'a> { /* private fields */ }
 
@@ -1030,9 +1102,58 @@ impl<'a> FormatStringOptions<'a> {
 
     #[must_use] pub fn with_path_format(self, fmt: PathFormat) -> Self;
     #[must_use] pub fn with_target_type(self, t: &'a ExprType) -> Self;
+
+    /// Cap the memory used to evaluate each expression segment, in
+    /// bytes (default: `DEFAULT_MEMORY_LIMIT`). The Expression Language
+    /// spec's "Memory-bounded evaluation" budget; applies per segment in
+    /// both resolution and `validate_expressions`.
+    #[must_use] pub fn with_memory_limit(self, limit: usize) -> Self;
+    /// Cap the operations used to evaluate each expression segment
+    /// (default: `DEFAULT_OPERATION_LIMIT`). Applies per segment in both
+    /// resolution and `validate_expressions`.
+    #[must_use] pub fn with_operation_limit(self, limit: usize) -> Self;
 }
 
 impl<'a> Default for FormatStringOptions<'a> { /* ... */ }
+```
+
+```rust
+/// Outcome of statically evaluating a format string against a symbol
+/// table that may contain unresolved placeholders. Returned by
+/// `FormatString::validate_expressions`.
+#[derive(Debug, Clone)]
+pub struct StaticResolution {
+    /// Lower bound, in characters, on the length of any string this
+    /// format string can resolve to under the same `target_type` given
+    /// to `validate_expressions`: literals + concrete-segment display
+    /// lengths (`null` → 0); unresolved segments contribute 0. Exact when
+    /// `resolved_value` is `Some`. Accumulation saturates rather than
+    /// wraps (safe for a lower bound; relevant on 32-bit targets). For a
+    /// single-expression list value the
+    /// bound measures the interpolated display form (`[1, 2, 3]`), so it
+    /// only applies to fields consumed as strings.
+    pub min_resolved_string_len: usize,
+    /// The fully resolved value, present iff every expression segment
+    /// evaluated concrete and, in the concatenated case, the result is at
+    /// most `MAX_STATIC_RESOLVED_VALUE_LEN` bytes (past the cap this is `None`
+    /// while `min_resolved_string_len` keeps counting). Typed passthrough
+    /// for single-expression format strings, coerced toward the given
+    /// `target_type` (mirrors `resolve_with`; not subject to the cap);
+    /// concatenated string otherwise. `path()` values
+    /// are rendered with the validating host's `PathFormat`, not the
+    /// worker's.
+    pub resolved_value: Option<ExprValue>,
+    /// The static type the format string resolves to under the given
+    /// `target_type` — the type of the value resolution will produce.
+    /// Available even when a segment is unresolved: `unresolved[T]`
+    /// placeholders read through to `T` (the run-time value is never
+    /// unresolved). The single-expression passthrough value type after
+    /// target coercion (may be a union when the outcome depends on the
+    /// unknown payload, e.g. `string | list[string]`), or `string` for
+    /// any other shape. Lets a consumer tell a true string-length bound
+    /// from one that merely measures a typed value's display form.
+    pub resolved_type: ExprType,
+}
 ```
 
 ```rust
@@ -1057,6 +1178,13 @@ pub const format_string::MAX_FORMAT_STRING_LEN: usize = 1024 * 1024;
 
 /// Maximum number of `{{...}}` segments in one format string.
 pub const format_string::MAX_FORMAT_STRING_SEGMENTS: usize = 1_000;
+
+/// Maximum size (in bytes) of the concatenated string materialized as
+/// `StaticResolution::resolved_value`. The per-segment evaluation memory
+/// limit does not compose across segments; past this cap validation
+/// reports `resolved_value: None` while `min_resolved_string_len` keeps
+/// counting. Does not apply to the typed single-expression passthrough.
+pub const format_string::MAX_STATIC_RESOLVED_VALUE_LEN: usize = 10 * 1024 * 1024;
 
 /// Escape `{{` and `}}` in a string so the format-string parser treats
 /// them as literals — necessary when synthesizing format strings from
@@ -1246,7 +1374,9 @@ pub fn path_mapping::apply_rules_with_format(
     rules: &[PathMappingRule], path: &str, output_format: PathFormat,
 ) -> String;
 
-/// True iff `path` has a `scheme://` URI prefix.
+/// True iff `path` has a `scheme://` URI prefix, where the scheme matches
+/// `^[a-zA-Z][a-zA-Z0-9+.-]+://` (at least two characters, so `C://...` is a
+/// Windows drive path, not a URI). Delegates to `uri_path::is_uri`.
 pub fn path_mapping::is_uri(path: &str) -> bool;
 ```
 
@@ -1262,7 +1392,12 @@ pub struct uri_path::UriParts {
     pub path_parts: Vec<String>,
 }
 
+/// True iff `path` has a `scheme://` prefix with a scheme matching
+/// `^[a-zA-Z][a-zA-Z0-9+.-]+://`. The scheme must be at least two characters
+/// so that a Windows drive path with a doubled separator (`C://data/x`) is not
+/// mistaken for a URI with scheme `c`.
 pub fn uri_path::is_uri(path: &str) -> bool;
+/// Parse into authority + path parts; `None` if `is_uri` would be false.
 pub fn uri_path::parse(path: &str) -> Option<UriParts>;
 
 pub fn uri_path::name(path: &str) -> String;
@@ -1419,6 +1554,7 @@ pub use eval::{
 };
 pub use format_string::{
     escape_format_string, FormatString, FormatStringOptions, FormatStringValidationError,
+    StaticResolution,
 };
 pub use function_library::{EvalContext, FunctionLibrary};
 pub use path_mapping::{PathFormat, PathMappingRule};
@@ -1527,6 +1663,7 @@ minor-version change; lowering them is a breaking change):
   than crate convenience.
 - `MAX_EXPRESSION_DEPTH`, `MAX_PARSE_INPUT_LEN`,
   `MAX_FORMAT_STRING_LEN`, `MAX_FORMAT_STRING_SEGMENTS`,
+  `MAX_STATIC_RESOLVED_VALUE_LEN`,
   `MAX_RANGE_EXPR_CHUNKS`, `MAX_SYMBOL_TABLE_ENTRIES`: defensive caps.
   Values may rise to accommodate new legitimate use cases; values will
   not drop without a breaking-change bump.

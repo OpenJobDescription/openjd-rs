@@ -299,6 +299,44 @@ fn test_step_env_name_duplicates_job_env() {
     );
 }
 
+// Spec 2023-09 §3: stepEnvironments names are unique within the step's list and distinct
+// from jobEnvironments. Different steps may reuse a name; only one step's environments
+// are active in a session at a time. Matches openjd-model-for-python. See issue #380.
+#[test]
+fn test_step_envs_may_share_name_across_steps() {
+    decode_ok(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "jobEnvironments": [{"name": "JobEnv", "script": {"actions": {"onEnter": {"command": "foo"}}}}],
+        "steps": [
+            {"name": "A", "script": {"actions": {"onRun": {"command": "foo"}}},
+             "stepEnvironments": [{"name": "StepEnv", "script": {"actions": {"onEnter": {"command": "foo"}}}}]},
+            {"name": "B", "script": {"actions": {"onRun": {"command": "foo"}}},
+             "stepEnvironments": [{"name": "StepEnv", "script": {"actions": {"onEnter": {"command": "foo"}}}}]}
+        ]
+    }"#,
+    );
+}
+
+#[test]
+fn test_step_env_name_duplicates_within_same_step() {
+    check_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}},
+                   "stepEnvironments": [
+                       {"name": "Dup", "script": {"actions": {"onEnter": {"command": "foo"}}}},
+                       {"name": "Dup", "script": {"actions": {"onEnter": {"command": "foo"}}}}]}]
+    }"#,
+        &[
+            "steps[0] -> stepEnvironments[1]",
+            "duplicate environment name: 'Dup'",
+        ],
+    );
+}
+
 #[test]
 fn test_too_many_parameters() {
     let params: Vec<String> = (0..51)

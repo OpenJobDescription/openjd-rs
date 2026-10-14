@@ -59,7 +59,7 @@ The structural template types — `template::JobTemplate`,
 `template::StepActions`, `template::CancelationMode`,
 `template::HostRequirements`, `template::AmountRequirement`,
 `template::AttributeRequirement`, `template::StepDependency`,
-`template::SimpleAction`, `template::Description`,
+`template::SimpleAction`, `template::SimpleActionKind`, `template::Description`,
 `template::ExtensionName`, `template::TaskParameterDefinition`
 and its 5 per-variant inner struct types
 (`IntTaskParameterDefinition`, `FloatTaskParameterDefinition`,
@@ -90,6 +90,41 @@ instantiation — for example, the `openjd-python` bindings expose
 typed `template::*` pyclasses so Python tools can introspect job
 templates.
 
+`template::StepTemplate` additionally exposes the SimpleAction (§8,
+FEATURE_BUNDLE_1) surface:
+
+```rust
+impl StepTemplate {
+    /// Each SimpleAction field the step sets, with its kind, in
+    /// `SimpleActionKind::ALL` order.
+    pub fn simple_actions(&self) -> impl Iterator<Item = (SimpleActionKind, &SimpleAction)>;
+    pub fn simple_action(&self, kind: SimpleActionKind) -> Option<&SimpleAction>;
+    /// `script.clone()` when present, otherwise the first SimpleAction
+    /// desugared; `None` when the step has neither. Infallible —
+    /// `SimpleAction.script` is already a parsed `FormatString`.
+    pub fn resolve_syntax_sugar(&self) -> Option<StepScript>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SimpleActionKind { Python, Bash, Cmd, Powershell, Node }
+
+impl SimpleActionKind {
+    pub const ALL: [SimpleActionKind; 5];
+    pub fn field_name(self) -> &'static str;
+    pub fn file_extension(self) -> &'static str;
+    pub fn arg_prefix(self) -> &'static [&'static str];
+    pub fn synthetic_arg_count(self) -> usize;
+    pub fn desugar(self, step_name: &str, sa: &SimpleAction) -> StepScript;
+    /// Map a validation-error path on the desugared `StepScript` (relative
+    /// to its `script` node) back onto the authored sugar field.
+    pub fn remap_desugared_path(self, rel: &[PathElement]) -> Vec<PathElement>;
+}
+```
+
+See `specs/model/template-types.md` § SimpleAction for the desugaring
+rules and `specs/model/validation.md` § Reporting on desugared forms for
+the path table.
+
 ## Entry Points at the Crate Root
 
 ### Parsing + Validation
@@ -104,6 +139,7 @@ pub fn decode_job_template(
 pub fn decode_environment_template(
     template: serde_json::Value,
     supported_extensions: Option<&[&str]>,
+    caller_limits: &CallerLimits,
 ) -> Result<EnvironmentTemplate, ModelError>;
 
 pub fn decode_template(
@@ -117,9 +153,11 @@ Each function takes a generic JSON value (typically produced from YAML by
 [`parse::document_string_to_object`]) and returns the parsed template struct
 on success. `supported_extensions` is an allowlist of extension names the
 application is willing to honor — template extensions not in this list are
-rejected. `caller_limits` constrains document size beyond any spec-defined
-limits; it's an optional per-deployment policy hook, not something defined
-by the spec.
+rejected. `caller_limits` layers per-deployment policy on top of the
+spec-defined limits: document/segment size caps, the opt-in resolved-value
+caps (`max_resolved_arg_len`/`max_resolved_data_len`), and the expression
+evaluation budgets. None of it is defined by the spec, and none of it can
+loosen a spec limit.
 
 [`decode_template`] auto-detects the template kind from
 `specificationVersion` and dispatches to the matching decoder.
@@ -154,6 +192,8 @@ pub fn evaluate_let_bindings(
     base: &SymbolTable,
     library: Option<&openjd_expr::FunctionLibrary>,
     path_format: openjd_expr::path_mapping::PathFormat,
+    memory_limit: Option<usize>,
+    operation_limit: Option<usize>,
 ) -> Result<SymbolTable, ModelError>;
 
 pub fn convert_environment(env: &template::Environment) -> job::Environment;
@@ -165,11 +205,25 @@ pub fn convert_environment_with_symtab(
 ```
 
 [`create_job`] is the high-level entry point: it resolves the job name
-(template scope), instantiates every step, runs the final task-count
+(template scope), instantiates every step, runs the resolved-value
+checks on the carried-forward session/task-scope fields
+(action `command`/`args`/`timeout`/`cancelation`, environment
+`variables`, embedded-file `data`, and the `let` bindings feeding them
+— see the Resolved-Value Checks on Carried-Forward Fields section of
+[job-creation.md](job-creation.md); every such failure across the
+template is reported together in one `ModelError::ModelValidation`),
+runs the final task-count
 limit from [`CallerLimits`], and returns the complete [`job::Job`]. The
 `ctx` it takes is a full [`ValidationContext`] — i.e. revision +
 extensions + caller limits — and callers commonly get one from
-[`JobTemplate::default_validation_context`].
+[`JobTemplate::default_validation_context`]. The context's revision
+must match the template's and its extensions must cover every
+extension the template declares (enabling more is allowed);
+`create_job` returns a `Compatibility` error otherwise. An application
+that does not support an extension rejects such templates at decode
+via `supported_extensions` instead. Every expression
+evaluation it performs runs under the caller's evaluation budgets
+(`CallerLimits::max_eval_memory_bytes` / `max_eval_operations`).
 
 [`preprocess_job_parameters`] implements the parameter coercion and
 default-value pipeline from spec §2: type coercion, constraint checks,
@@ -592,7 +646,7 @@ pub struct job::StepParameterSpace {
 
 pub enum job::TaskParameter {
     Int { range: TaskParamRange<i64>, chunks: Option<ResolvedChunks> },
-    Float { range: Vec<f64> },
+    Float { range: Vec<Float64> },
     String { range: Vec<String> },
     Path { range: Vec<String> },
     ChunkInt { range: TaskParamRange<i64>, chunks: ResolvedChunks },
@@ -711,6 +765,34 @@ pub struct CallerLimits {
     pub max_step_script_size: Option<usize>,
     pub max_environment_size: Option<usize>,
     pub max_template_size: Option<usize>,
+    /// Cap on any resolved string destined for a process argument: the
+    /// action `command` (§5.1) and each argv entry an `args` element
+    /// produces (§5.2, after null-skip / list-flatten). The spec sets no
+    /// maximum but notes the OS imposes one. The cap counts characters,
+    /// while OS limits use other units (Linux `MAX_ARG_STRLEN` is
+    /// 131072 bytes; the Windows command line is 32767 UTF-16 units) —
+    /// pick a value with encoding headroom. Enforced at validation on
+    /// the guaranteed lower bound of every possible resolution, at job
+    /// creation on the bound recomputed with the job parameters bound
+    /// to real values, and at run time by `openjd-sessions` on the
+    /// final values.
+    pub max_resolved_arg_len: Option<usize>,
+    /// Cap on each resolved embedded-file `data` value (§6.1.2 sets no
+    /// spec limit). Same enforcement stages as
+    /// `max_resolved_arg_len`.
+    pub max_resolved_data_len: Option<usize>,
+    /// Evaluation memory budget in bytes for each format-string
+    /// expression (Expression Language "Memory-bounded evaluation").
+    /// `None` = the spec-recommended default
+    /// (`openjd_expr::DEFAULT_MEMORY_LIMIT`, 100 MB). Lowering it is
+    /// spec-sanctioned; applied to every evaluation at template
+    /// validation and at job creation, and at run time when mirrored
+    /// into `SessionLimits`.
+    pub max_eval_memory_bytes: Option<usize>,
+    /// Evaluation operation budget per expression. `None` = the
+    /// spec-recommended default (`openjd_expr::DEFAULT_OPERATION_LIMIT`,
+    /// 10 million).
+    pub max_eval_operations: Option<usize>,
 }
 
 /// The thing every validation and instantiation function takes — a
@@ -967,11 +1049,11 @@ are anchored and what sources are allowed.
 ```rust
 pub struct PathParameterOptions<'a> {
     /// Directory containing the job template. Relative PATH defaults
-    /// are joined to this.
+    /// (and relative `LIST[PATH]` default elements) are joined to this.
     pub job_template_dir: &'a str,
 
-    /// Current working directory. Relative PATH user values are joined
-    /// to this.
+    /// Current working directory. Relative PATH user values (and
+    /// relative `LIST[PATH]` user value elements) are joined to this.
     pub current_working_dir: &'a str,
 
     /// How path strings are interpreted. `PathFormat::host()` for
@@ -980,9 +1062,9 @@ pub struct PathParameterOptions<'a> {
     /// farms).
     pub path_format: openjd_expr::path_mapping::PathFormat,
 
-    /// If false, PATH defaults must be relative and within
-    /// `job_template_dir`. If true, absolute defaults and `..`
-    /// walk-up are permitted.
+    /// If false, PATH defaults (and `LIST[PATH]` default elements)
+    /// must be relative and within `job_template_dir`. If true,
+    /// absolute defaults and `..` walk-up are permitted.
     pub allow_template_dir_walk_up: bool,
 
     /// If true, URI values (`scheme://...`) in PATH parameters are
@@ -1077,17 +1159,27 @@ impl StepParameterSpaceIterator {
     pub fn len(&self) -> usize;
     pub fn is_empty(&self) -> bool;
 
-    /// Random access. Returns `None` for out-of-bounds and for
-    /// sequential-only spaces (adaptive chunking, contiguous chunking).
+    /// Random access. Returns `None` for out-of-bounds and for adaptive
+    /// chunking, the one case where chunk N is not a function of N.
+    /// A contiguous chunked space answers, though `Iterator::next` still
+    /// walks it sequentially — see parameter-space.md.
     pub fn get(&self, index: usize) -> Option<TaskParameterSet>;
 
     pub fn contains(&self, params: &TaskParameterSet) -> bool;
     pub fn validate_containment(&self, params: &TaskParameterSet) -> Result<(), String>;
 
-    /// Adaptive chunking (TASK_CHUNKING with `targetRuntimeSeconds`).
+    /// True only for adaptive chunking (TASK_CHUNKING with
+    /// `targetRuntimeSeconds`).
     pub fn chunks_adaptive(&self) -> bool;
+
+    /// The chunked parameter and its chunk size, for any chunked space —
+    /// adaptive or static, and reflecting a chunk override when one was
+    /// given. `None` when the space has no chunked parameter.
     pub fn chunks_parameter_name(&self) -> Option<&str>;
     pub fn chunks_default_task_count(&self) -> Option<usize>;
+
+    /// Adaptive-only: a static chunk size cannot change mid-walk, so this
+    /// is a no-op for a non-adaptive space.
     pub fn set_chunks_default_task_count(&mut self, value: usize);
 
     /// Rewind the iterator so a fresh `Iterator::next` walk yields the
@@ -1106,9 +1198,14 @@ impl Iterator for StepParameterSpaceIterator {
 Random-access indexing uses `O(1)` arithmetic on a product-of-factors
 representation — submitters that want to shard a large parameter
 space across workers can compute per-worker index slices without
-iterating the whole space. Adaptive chunking (TASK_CHUNKING §4 /
-RFC 0001) forces sequential iteration because chunk size depends on
-runtime feedback; for that case, callers mutate
+iterating the whole space. Contiguous chunking costs an additional
+walk over the range's intervals to locate the chunk's — O(R) in
+sub-ranges for step-1 sub-ranges, but O(N) where a range is stepped or
+heavily gapped, since each such value is its own interval.
+
+Adaptive chunking (TASK_CHUNKING §4 / RFC 0001) is the one case that
+forces sequential iteration, because chunk size depends on runtime
+feedback; for that case, callers mutate
 `set_chunks_default_task_count` while iterating to reshape chunks
 dynamically.
 
@@ -1193,6 +1290,17 @@ pub mod capabilities {
 
     /// Same, for attribute capability names.
     pub fn validate_attribute_capability_name(name: &str) -> Result<(), String>;
+
+    /// Check a single attribute capability *value* against §3.3.2.2 for the
+    /// named capability. A standard capability is checked against its allowed
+    /// set (case-insensitively) and nothing else; any other capability is
+    /// checked against the identifier pattern and the 100-character limit.
+    /// Pass the table from `standard_attribute_capabilities`.
+    pub fn validate_attribute_capability_value(
+        capability_name: &str,
+        value: &str,
+        standard_capabilities: &[(&str, &[&str])],
+    ) -> Result<(), String>;
 }
 ```
 

@@ -42,6 +42,8 @@ src/
 ├── path_mapping.rs         PathFormat, PathMappingRule
 ├── uri_path.rs             URI-aware path operations
 ├── error.rs                ExpressionError with caret formatting
+├── json_escape.rs          JSON string escaping shared by list display and repr_json
+├── py_escape.rs            Python literal rendering shared by repr_py and ExprValue::repr_python
 ├── edit_distance.rs        Levenshtein distance for "did you mean?" suggestions (see edit-distance.md)
 ├── profile.rs              ExprProfile, ExprRevision, ExprExtension, HostContext (see profile.md)
 ├── default_library.rs      Default FunctionLibrary construction
@@ -151,8 +153,8 @@ pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;  // 10M ops
 
 | Crate | Purpose | Source |
 |-------|---------|--------|
-| `ruff_python_parser` | Python expression parsing | crates.io (`rustpython-ruff_python_parser` v0.15.8) |
-| `ruff_python_ast` | Python AST types | crates.io (`rustpython-ruff_python_ast` v0.15.8) |
+| `ruff_python_parser` | Python expression parsing | crates.io (`rustpython-ruff_python_parser` =0.16.10, exact pin — see [parser.md](parser.md)) |
+| `ruff_python_ast` | Python AST types | crates.io (`rustpython-ruff_python_ast` =0.16.10, exact pin) |
 | `regex` | Regular expression evaluation | crates.io |
 | `xxhash-rust` | Fast hashing (internal) | crates.io |
 | `serde` | Serialization (FormatString, PathMappingRule) | crates.io |

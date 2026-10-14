@@ -44,7 +44,7 @@ pub use expr_parameters::{
     ListStringItemConstraints,
 };
 // step
-pub use step::{SimpleAction, StepDependency, StepScript, StepTemplate};
+pub use step::{SimpleAction, SimpleActionKind, StepDependency, StepScript, StepTemplate};
 // environment
 pub use environment::{EmbeddedFile, Environment, EnvironmentScript};
 // actions

@@ -315,13 +315,39 @@ impl ActionFilter {
             let (name, value) = decoded
                 .split_once('=')
                 .ok_or("Failed to parse environment variable assignment.")?;
+            // The JSON branch decodes after the regex match, so escapes like
+            // \u0000 bypass the regex. Validate the decoded name and value.
+            Self::reject_nul(name, value)?;
             return Ok((name.to_string(), value.to_string()));
         }
 
         let (name, value) = trimmed
             .split_once('=')
             .ok_or("Failed to parse environment variable assignment.")?;
+        Self::reject_nul(name, value)?;
         Ok((name.to_string(), value.to_string()))
+    }
+
+    /// Reject a NUL byte in an environment variable name or value.
+    ///
+    /// A NUL cannot be represented in a POSIX `execve` envp array or a Windows
+    /// environment block.  Accepting one silently poisons the session's
+    /// environment map and causes every subsequent `Command::spawn` to fail
+    /// with `"nul byte found in provided data"` — including the environment's
+    /// own `onExit` teardown, which is a denial-of-cleanup.
+    fn reject_nul(name: &str, value: &str) -> Result<(), String> {
+        if name.contains('\0') {
+            return Err(
+                "Environment variable name contains a NUL byte and cannot be set.".to_string(),
+            );
+        }
+        if value.contains('\0') {
+            return Err(format!(
+                "Environment variable '{}' value contains a NUL byte and cannot be set.",
+                name
+            ));
+        }
+        Ok(())
     }
 
     fn handle_env(&self, payload: &str) -> Result<FilterCallback, String> {
@@ -1656,5 +1682,113 @@ mod tests {
             "Subsequent occurrence of the secret must be redacted: {msg}"
         );
         assert!(msg.contains("********"));
+    }
+
+    // === NUL byte rejection ===
+
+    #[test]
+    fn test_env_nul_in_value_plain_is_rejected() {
+        // A raw NUL in the value of a plain `openjd_env` directive must be
+        // rejected and the action must be canceled.
+        let mut f = make_filter(false, false);
+        let (cbs, pass, msg) = f.filter_message("openjd_env: POISON=A\0B", "foo");
+        assert_eq!(cbs.len(), 1);
+        assert!(cbs[0].cancel, "NUL in value must cancel the action");
+        assert_eq!(cbs[0].kind, ActionMessageKind::Env);
+        assert!(pass, "Error-annotated directive lines pass through");
+        assert!(
+            msg.contains(
+                "Environment variable 'POISON' value contains a NUL byte and cannot be set."
+            ),
+            "Error message must name the variable: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_env_nul_in_value_json_is_rejected() {
+        // JSON-encoded `\u0000` is decoded AFTER the regex match, so
+        // the NUL must be caught in the post-decode validation.
+        let mut f = make_filter(false, false);
+        let (cbs, pass, msg) = f.filter_message(r#"openjd_env: "POISON=A\u0000B""#, "foo");
+        assert_eq!(cbs.len(), 1);
+        assert!(
+            cbs[0].cancel,
+            "JSON-decoded NUL in value must cancel the action"
+        );
+        assert_eq!(cbs[0].kind, ActionMessageKind::Env);
+        assert!(pass);
+        assert!(
+            msg.contains(
+                "Environment variable 'POISON' value contains a NUL byte and cannot be set."
+            ),
+            "Error message must name the variable: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_env_nul_in_name_json_is_rejected() {
+        // A NUL in the name: the JSON-encoded form `"P\u0000X=val"` is
+        // first matched by ENVVAR_SET_REGEX. After `"?` consumes the
+        // leading quote, the NUL breaks `[A-Za-z0-9_]*` so the regex
+        // fails — the parse error fires before JSON decoding is reached.
+        let mut f = make_filter(false, false);
+        let (cbs, _, msg) = f.filter_message(r#"openjd_env: "P\u0000X=val""#, "foo");
+        assert_eq!(cbs.len(), 1);
+        assert!(cbs[0].cancel);
+        assert!(
+            msg.contains("Failed to parse environment variable assignment."),
+            "NUL in name should fail the regex: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_redacted_env_nul_in_value_plain_is_rejected() {
+        // The redacted_env path also uses parse_env_variable, so a NUL
+        // must be rejected there too — preventing session poisoning.
+        let mut f = make_filter(false, false);
+        let (cbs, _, _) = f.filter_message("openjd_redacted_env: SECRET=A\0B", "foo");
+        // When redactions are not enabled, the error path emits cancel: true
+        let cancel_cbs: Vec<_> = cbs.iter().filter(|c| c.cancel).collect();
+        assert!(
+            !cancel_cbs.is_empty(),
+            "NUL in redacted_env value must cancel the action when redactions are off"
+        );
+    }
+
+    #[test]
+    fn test_redacted_env_nul_in_value_with_extension_is_rejected() {
+        // With the REDACTED_ENV_VARS extension enabled, malformed directives
+        // are warnings (no cancel), but the value is never set — the session
+        // env map is safe.
+        let mut f = make_filter(false, true);
+        let (cbs, _, _) = f.filter_message("openjd_redacted_env: SECRET=A\0B", "foo");
+        // No env var callback should be emitted
+        let env_cbs: Vec<_> = cbs
+            .iter()
+            .filter(|c| matches!(c.value, ActionMessageValue::EnvVar { .. }))
+            .collect();
+        assert!(
+            env_cbs.is_empty(),
+            "NUL in value must not produce an EnvVar callback: {env_cbs:?}"
+        );
+    }
+
+    #[test]
+    fn test_env_newline_in_value_is_accepted() {
+        // Negative control: a newline in the value is legal in POSIX env vars
+        // and must continue to be accepted.  This test ensures the NUL
+        // rejection does not over-reach.
+        let mut f = make_filter(false, false);
+        let (cbs, _, _) = f.filter_message(r#"openjd_env: "MULTI=line1\nline2""#, "foo");
+        assert_eq!(cbs.len(), 1);
+        assert!(!cbs[0].cancel, "Newline in value must not cancel");
+        assert_eq!(cbs[0].kind, ActionMessageKind::Env);
+        assert_eq!(
+            cbs[0].value,
+            ActionMessageValue::EnvVar {
+                name: "MULTI".into(),
+                value: "line1\nline2".into(),
+            }
+        );
     }
 }

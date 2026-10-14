@@ -66,6 +66,13 @@ impl EnvironmentScriptRunner {
         self
     }
 
+    /// Caller-policy caps and evaluation budgets enforced during action
+    /// resolution. See [`crate::session::SessionConfig::limits`].
+    pub fn with_limits(mut self, limits: crate::limits::SessionLimits) -> Self {
+        self.base.limits = limits;
+        self
+    }
+
     pub fn with_initial_redacted_values(mut self, values: Vec<String>) -> Self {
         self.base.initial_redacted_values = values;
         self
@@ -232,24 +239,36 @@ impl EnvironmentScriptRunner {
                     self.base.files_directory.clone(),
                     &self.base.session_id,
                 )
-                .with_user(self.base.user.clone());
+                .with_user(self.base.user.clone())
+                .with_limits(self.base.limits);
                 ef.allocate_file_paths(files, &mut st)?;
-                let st =
-                    evaluate_let_bindings(bindings, &st, library, openjd_expr::PathFormat::host())
-                        .map_err(|e| SessionError::FormatString {
-                            context: "let bindings".into(),
-                            reason: e.to_string(),
-                        })?;
+                let st = evaluate_let_bindings(
+                    bindings,
+                    &st,
+                    library,
+                    openjd_expr::PathFormat::host(),
+                    self.base.limits.max_eval_memory_bytes,
+                    self.base.limits.max_eval_operations,
+                )
+                .map_err(|e| SessionError::FormatString {
+                    context: "let bindings".into(),
+                    reason: e.to_string(),
+                })?;
                 ef.write_file_contents(&st, library)?;
                 st
             }
-            (Some(bindings), None) => {
-                evaluate_let_bindings(bindings, symtab, library, openjd_expr::PathFormat::host())
-                    .map_err(|e| SessionError::FormatString {
-                        context: "let bindings".into(),
-                        reason: e.to_string(),
-                    })?
-            }
+            (Some(bindings), None) => evaluate_let_bindings(
+                bindings,
+                symtab,
+                library,
+                openjd_expr::PathFormat::host(),
+                self.base.limits.max_eval_memory_bytes,
+                self.base.limits.max_eval_operations,
+            )
+            .map_err(|e| SessionError::FormatString {
+                context: "let bindings".into(),
+                reason: e.to_string(),
+            })?,
             (None, Some(files)) => {
                 let mut st = symtab.clone();
                 let mut ef = EmbeddedFiles::new(
@@ -257,7 +276,8 @@ impl EnvironmentScriptRunner {
                     self.base.files_directory.clone(),
                     &self.base.session_id,
                 )
-                .with_user(self.base.user.clone());
+                .with_user(self.base.user.clone())
+                .with_limits(self.base.limits);
                 ef.allocate_file_paths(files, &mut st)?;
                 ef.write_file_contents(&st, library)?;
                 st

@@ -251,6 +251,11 @@ fn list_path_rawparam_in_job_name() {
 
 #[test]
 fn list_path_rawparam_in_parameter_space_range() {
+    // A range element is a list item, so its whole-field expression
+    // targets `string? | list[string]` (Expression Language §1.3.2, the
+    // same rule as `args` items): a LIST[*] parameter reference flattens
+    // into one range element per list element at job creation. Validation
+    // accepts it; see test_create_job for the flatten behavior.
     check_ok_ext(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",

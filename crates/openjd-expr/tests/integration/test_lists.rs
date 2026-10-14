@@ -53,6 +53,24 @@ fn assert_err(expr: &str, expected: &[&str]) {
 
 // === TestListLiteralTypeInference ===
 #[test]
+fn comp_null_body_is_rejected() {
+    // A comprehension body of `null` (alone or beside other elements)
+    // cannot build a list; `make_list` rejects it before the element join.
+    for expr in [
+        "[None for x in [1, 2]]",
+        "[x if x > 1 else None for x in [1, 2]]",
+    ] {
+        assert_err(
+            expr,
+            &[
+                "Cannot create list from null elements\n",
+                &format!("  {expr}\n"),
+                &format!("  ^{}", "~".repeat(expr.len() - 1)),
+            ],
+        );
+    }
+}
+#[test]
 fn list_all_int() {
     assert_eq!(eval("[1, 2, 3]").expr_type().to_string(), "list[int]");
 }
@@ -259,6 +277,25 @@ fn range_negative_step() {
     assert_eq!(
         eval("range(5, 0, -1)").to_display_string(),
         "[5, 4, 3, 2, 1]"
+    );
+}
+
+#[test]
+fn range_step_overflow_near_i64_max_terminates() {
+    // Regression: `v += step` overflowed i64 when the next value passed i64::MAX
+    // (debug panic "attempt to add with overflow"). Overflow implies the range ended.
+    assert_eq!(
+        eval("range(9223372036854775806, 9223372036854775807, 2)").to_display_string(),
+        "[9223372036854775806]"
+    );
+}
+
+#[test]
+fn range_step_underflow_near_i64_min_terminates() {
+    // Same defect, negative-step branch: underflow past i64::MIN implies the range ended.
+    assert_eq!(
+        eval("range(-9223372036854775807, -9223372036854775808, -2)").to_display_string(),
+        "[-9223372036854775807]"
     );
 }
 
@@ -1713,4 +1750,126 @@ fn empty_listcomp_type_is_nulltype() {
             .to_string(),
         "list[nulltype]"
     );
+}
+
+#[test]
+fn flatten_empty_comprehension_has_nulltype() {
+    // Regression: flatten over an empty comprehension result must yield list[nulltype],
+    // not list[int], so that functions like repr_sh (which has a list[nulltype] overload)
+    // accept the result.
+    let mut st = SymbolTable::new();
+    st.set(
+        "Env",
+        ExprValue::make_list(vec![], ExprType::STRING).unwrap(),
+    )
+    .unwrap();
+    let parsed =
+        openjd_expr::ParsedExpression::new("repr_sh(flatten([[\"-e\", e] for e in Env]))").unwrap();
+    let result = parsed.evaluate(&st).unwrap();
+    // repr_sh of an empty list produces an empty string
+    assert_eq!(result.to_display_string(), "");
+}
+
+#[test]
+fn flatten_nonempty_comprehension_has_string_type() {
+    // Non-empty case: flatten over a string comprehension must still yield list[string].
+    let mut st = SymbolTable::new();
+    st.set(
+        "Env",
+        ExprValue::make_list(vec![ExprValue::String("A=1".to_string())], ExprType::STRING).unwrap(),
+    )
+    .unwrap();
+    let parsed =
+        openjd_expr::ParsedExpression::new("repr_sh(flatten([[\"-e\", e] for e in Env]))").unwrap();
+    let result = parsed.evaluate(&st).unwrap();
+    // repr_sh on a list of strings should produce shell-escaped space-separated values
+    assert!(
+        result.to_display_string().contains("-e"),
+        "expected repr_sh output to contain -e, got: {}",
+        result.to_display_string()
+    );
+}
+
+// ── Shared list-element join (resolved-value-limits item 24) ──
+//
+// Concrete list literals and comprehensions use the same join as the
+// validation-time hoisting: list types join element-wise with the same
+// promotions as scalars, so `list[int]` beside `list[string]` is an error
+// (RFC 0005 §"List Literal Type Inference" rule 7) rather than a mixed
+// list typed by its first element.
+
+#[test]
+fn nested_list_int_beside_string_fails() {
+    assert_err(
+        "[[1], ['a']]",
+        &[
+            "List literal contains incompatible types: list[int] and list[string]\n",
+            "  [[1], ['a']]\n",
+            "  ^~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn nested_list_int_beside_bool_fails() {
+    assert_err(
+        "[[1], [True]]",
+        &[
+            "List literal contains incompatible types: list[int] and list[bool]\n",
+            "  [[1], [True]]\n",
+            "  ^~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn int_float_string_path_fails_pairwise() {
+    // The int/float and path/string pairs do not make all four mutually
+    // compatible. This previously passed the check and panicked in
+    // make_list.
+    assert_err(
+        "[1, 2.0, 'a', path('b')]",
+        &[
+            "List literal contains incompatible types: int, float, string, and path\n",
+            "  [1, 2.0, 'a', path('b')]\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn comprehension_int_float_string_fails_without_panic() {
+    // A comprehension builds through make_list directly; an int, a float
+    // and a string body result previously panicked in its promotion.
+    assert_err(
+        "[1 if x == 1 else (2.5 if x == 2 else 'a') for x in [1, 2, 3]]",
+        &[
+            "make_list expected float element, got string\n",
+            "  [1 if x == 1 else (2.5 if x == 2 else 'a') for x in [1, 2, 3]]\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn comprehension_nested_int_beside_string_fails() {
+    // Previously built a `list[list[string]]` holding `[2]` and `[3]`.
+    assert_err(
+        "[[x] if x > 1 else ['a'] for x in [1, 2, 3]]",
+        &[
+            "make_list expected list[string] element, got list[int]\n",
+            "  [[x] if x > 1 else ['a'] for x in [1, 2, 3]]\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn comprehension_empty_sublist_yields_to_typed_sibling() {
+    let r = eval("[[] if x < 3 else [x] for x in [1, 2, 3]]");
+    assert_eq!(r.expr_type().to_string(), "list[list[int]]");
+    assert_eq!(r.to_display_string(), "[[], [], [3]]");
+    let r = eval("[[x] if x < 2 else [x * 0.5] for x in [1, 2, 3]]");
+    assert_eq!(r.expr_type().to_string(), "list[list[float]]");
+    assert_eq!(r.to_display_string(), "[[1.0], [1.0], [1.5]]");
 }

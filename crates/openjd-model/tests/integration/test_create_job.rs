@@ -316,8 +316,10 @@ fn test_path_user_value_joined_to_cwd() {
     )
     .unwrap();
     if let openjd_expr::ExprValue::String(ref s) = result["DataDir"].value {
+        // Joined and lexically normalized (§2.2), so separators are native.
         let exp = std::path::Path::new(td.cwd())
-            .join("my/output")
+            .join("my")
+            .join("output")
             .to_string_lossy()
             .to_string();
         assert_eq!(s, &exp);
@@ -542,7 +544,7 @@ fn test_merge_env_and_job_same_param() {
     let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val =
         minimal_env_template(r#"{"name": "Foo", "type": "STRING", "default": "env_default"}"#);
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let merged = merge_job_parameter_definitions(&jt, &[et]).unwrap();
     assert_eq!(merged.len(), 1);
     // Job template is processed last, so its default wins
@@ -554,7 +556,7 @@ fn test_merge_type_conflict() {
     let jt_val = minimal_job_template(r#"{"name": "Foo", "type": "STRING"}"#);
     let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     assert!(merge_job_parameter_definitions(&jt, &[et]).is_err());
 }
 
@@ -569,7 +571,7 @@ fn test_merge_env_only_param() {
     );
     let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "EnvParam", "type": "INT", "default": "5"}"#);
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let merged = merge_job_parameter_definitions(&jt, &[et]).unwrap();
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].name, "EnvParam");
@@ -782,6 +784,74 @@ fn test_uri_default_rejected_when_not_allowed() {
 }
 
 #[test]
+fn test_drive_letter_double_slash_is_not_a_uri_under_expr() {
+    // `C://data/file.txt` is a Windows absolute path with a doubled separator, not a URI
+    // with scheme `c`. With EXPR and allow_uri_path_values=false it must NOT be rejected
+    // as a URI. Under Windows format it is absolute, so like any absolute submitted
+    // value it is kept as given (host-format separator conversion happens when the
+    // session sets `Param.*`).
+    let jt_val = expr_job_template_with_path_param("Scene", None);
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Scene".into(),
+        openjd_expr::ExprValue::String("C://data/file.txt".into()),
+    );
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: r"C:\tmpl",
+            current_working_dir: r"C:\work",
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::Windows,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap();
+    match &result["Scene"].value {
+        openjd_expr::ExprValue::String(s) => {
+            assert_eq!(s, "C://data/file.txt");
+        }
+        other => panic!("Expected String, got {:?}", other),
+    }
+}
+
+#[test]
+fn test_drive_letter_double_slash_is_relative_under_posix_format() {
+    // Under POSIX format `C://data/file.txt` is a relative path (`C:` is an ordinary
+    // component), so with EXPR it is joined with cwd and normalized like any other
+    // relative value — not passed through untouched as a URI would be.
+    let jt_val = expr_job_template_with_path_param("Scene", None);
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Scene".into(),
+        openjd_expr::ExprValue::String("C://data/file.txt".into()),
+    );
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: "/tmpl",
+            current_working_dir: "/work",
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::Posix,
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    match &result["Scene"].value {
+        openjd_expr::ExprValue::String(s) => {
+            assert_eq!(s, "/work/C:/data/file.txt");
+        }
+        other => panic!("Expected String, got {:?}", other),
+    }
+}
+
+#[test]
 fn test_posix_absolute_path_recognized_with_posix_format() {
     // /foo/bar is absolute under PathFormat::Posix — should not be joined with cwd
     let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);
@@ -835,8 +905,8 @@ fn test_posix_path_is_relative_under_windows_format() {
     .unwrap();
     match &result["Dir"].value {
         openjd_expr::ExprValue::String(s) => {
-            // Root-relative: drive from cwd + the /foo/bar path
-            assert_eq!(s, "C:/foo/bar");
+            // Root-relative: drive from cwd + the /foo/bar path, then normalized (§2.2)
+            assert_eq!(s, "C:\\foo\\bar");
         }
         other => panic!("Expected String, got {:?}", other),
     }
@@ -961,7 +1031,8 @@ fn test_relative_path_still_joined_with_expr() {
     match &result["LocalFile"].value {
         openjd_expr::ExprValue::String(s) => {
             let exp = std::path::Path::new(td.cwd())
-                .join("subdir/file.txt")
+                .join("subdir")
+                .join("file.txt")
                 .to_string_lossy()
                 .to_string();
             assert_eq!(s, &exp);
@@ -1897,10 +1968,40 @@ fn test_path_task_param_empty_value() {
     }"#,
         &[],
     );
-    assert!(
-        err.contains("must not be empty"),
-        "Expected empty path error, got: {err}"
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'Val' range[0]: value must not resolve to an empty string"
     );
+}
+
+#[test]
+fn test_string_task_param_empty_value_accepted() {
+    // §3.4.2 sets a minimum length of 1 on <TaskParameterStringValue>, but
+    // the reference implementation enforces it only for PATH — a STRING
+    // range may contain empty elements, literal or resolved, and the job
+    // is created successfully.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{"name": "E", "type": "STRING", "default": ""}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [{"name": "Val", "type": "STRING", "range": ["", "{{Param.E}}", "x"]}]
+            },
+            "script": {"actions": {"onRun": {"command": "run"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    match &ps.task_parameter_definitions["Val"] {
+        job::TaskParameter::String { range } => {
+            assert_eq!(range, &["".to_string(), "".to_string(), "x".to_string()]);
+        }
+        other => panic!("Expected STRING task parameter, got {other:?}"),
+    }
 }
 
 #[test]
@@ -2138,6 +2239,118 @@ fn test_create_job_v2023_09_task_chunking() {
     }
 }
 
+// ══════════════════════════════════════════════════════════════
+// Resolved chunks.defaultTaskCount / .targetRuntimeSeconds bounds
+//
+// Both fields may be format strings, so their §3.4.1.5 minimums
+// have an unknown value at decode (`validate_v2023_09::
+// task_chunking` reads `as_i64()`, which is `None` for a format
+// string) and are applied on the resolved value at job creation.
+//
+// A resolved out-of-range value is REJECTED, not clamped: the
+// clamp silently ran the job with a chunk shape the author never
+// asked for.
+// ══════════════════════════════════════════════════════════════
+
+/// A TASK_CHUNKING job template with one `CHUNK[INT]` task parameter whose
+/// `chunks` block is `chunks_json`, and two unconstrained STRING parameters,
+/// `Count` and `Seconds`, for use as resolved format strings.
+fn chunk_bounds_job(chunks_json: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {{"name": "Count", "type": "STRING"}},
+            {{"name": "Seconds", "type": "STRING"}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "parameterSpace": {{
+                "taskParameterDefinitions": [{{
+                    "name": "P",
+                    "type": "CHUNK[INT]",
+                    "range": "1-10",
+                    "chunks": {chunks_json}
+                }}],
+                "combination": "P"
+            }},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#
+    )
+}
+
+/// The resolved `chunks` block of the job's only chunked task parameter.
+fn chunks_of(job: &job::Job) -> &job::ResolvedChunks {
+    match &job.steps[0]
+        .parameter_space
+        .as_ref()
+        .unwrap()
+        .task_parameter_definitions["P"]
+    {
+        job::TaskParameter::ChunkInt { chunks, .. } => chunks,
+        other => panic!("Expected ChunkInt, got {other:?}"),
+    }
+}
+
+/// `defaultTaskCount` has a minimum of 1. The old code clamped with `.max(1)`,
+/// so a resolved `0` silently became a 1-task chunk.
+#[test]
+fn test_resolved_chunk_default_task_count_zero_rejected() {
+    let msg = parse_and_create_err(
+        &chunk_bounds_job(
+            r#"{"defaultTaskCount": "{{Param.Count}}", "rangeConstraint": "CONTIGUOUS"}"#,
+        ),
+        &[("Count", "0"), ("Seconds", "1")],
+    );
+    assert!(
+        msg.contains("chunks.defaultTaskCount: resolved to 0, but must be >= 1"),
+        "Missing bound rejection in error output:\nGot:\n{msg}"
+    );
+}
+
+/// The boundary value is accepted, and it is carried through as 1 rather than
+/// coming out of a clamp that would produce 1 for any value <= 1.
+#[test]
+fn test_resolved_chunk_default_task_count_one_accepted() {
+    let job = parse_and_create(
+        &chunk_bounds_job(
+            r#"{"defaultTaskCount": "{{Param.Count}}", "rangeConstraint": "CONTIGUOUS"}"#,
+        ),
+        &[("Count", "1"), ("Seconds", "1")],
+    );
+    assert_eq!(chunks_of(&job).default_task_count, 1);
+}
+
+#[test]
+fn test_resolved_chunk_target_runtime_seconds_negative_rejected() {
+    let msg = parse_and_create_err(
+        &chunk_bounds_job(
+            r#"{"defaultTaskCount": 2, "targetRuntimeSeconds": "{{Param.Seconds}}", "rangeConstraint": "CONTIGUOUS"}"#,
+        ),
+        &[("Count", "2"), ("Seconds", "-1")],
+    );
+    assert!(
+        msg.contains("chunks.targetRuntimeSeconds: resolved to -1, but must be >= 0"),
+        "Missing bound rejection in error output:\nGot:\n{msg}"
+    );
+}
+
+/// `targetRuntimeSeconds` bottoms out at 0, not 1, so `0` is in range and must
+/// survive as 0.
+#[test]
+fn test_resolved_chunk_target_runtime_seconds_zero_accepted() {
+    let job = parse_and_create(
+        &chunk_bounds_job(
+            r#"{"defaultTaskCount": 2, "targetRuntimeSeconds": "{{Param.Seconds}}", "rangeConstraint": "CONTIGUOUS"}"#,
+        ),
+        &[("Count", "2"), ("Seconds", "0")],
+    );
+    assert_eq!(chunks_of(&job).target_runtime_seconds, Some(0));
+}
+
 // === Tests ported from Python test_create_job.py ===
 
 #[test]
@@ -2262,6 +2475,37 @@ fn test_create_job_fails_to_instantiate_name_too_long() {
     );
 }
 
+#[test]
+fn test_create_job_resolved_name_with_control_chars_rejected() {
+    // §1.1.1 forbids control (Cc) characters in the *resolved* job name.
+    // Template validation checks this only when the name is fully static;
+    // an interpolated name is only known at job creation.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "render-{{ Param.Suffix }}",
+        "parameterDefinitions": [{"name": "Suffix", "type": "STRING"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#;
+    let err = parse_and_create_err(template, &[("Suffix", "a\nb")]);
+    assert_eq!(
+        err,
+        "Validation error: Job name must not contain control characters"
+    );
+}
+
+#[test]
+fn test_create_job_resolved_name_without_control_chars_ok() {
+    // Passing control for the job-creation control-character check.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "render-{{ Param.Suffix }}",
+        "parameterDefinitions": [{"name": "Suffix", "type": "STRING"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#;
+    let job = parse_and_create(template, &[("Suffix", "final")]);
+    assert_eq!(job.name, "render-final");
+}
+
 // === Tests ported from Python _internal/test_create_job.py ===
 // The _internal tests test instantiate_model internals. Most are Python-specific
 // (Pydantic model construction). The key behavioral tests are already covered above.
@@ -2285,7 +2529,7 @@ fn test_preprocess_reports_extra_with_environments() {
         "environment": {"name": "env", "script": {"actions": {"onEnter": {"command": "do thing"}}}}
     }"#,
     );
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "ThisIsUnknown".into(),
@@ -2326,7 +2570,7 @@ fn test_preprocess_reports_missing_with_environments() {
         "environment": {"name": "env", "script": {"actions": {"onEnter": {"command": "do thing"}}}}
     }"#,
     );
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let input = JobParameterInputValues::new();
     let err = preprocess_job_parameters(
         &jt,
@@ -2365,7 +2609,7 @@ fn test_preprocess_collects_defaults_with_environments() {
         "environment": {"name": "env", "script": {"actions": {"onEnter": {"command": "do thing"}}}}
     }"#,
     );
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let input = JobParameterInputValues::new();
     let result = preprocess_job_parameters(
         &jt,
@@ -2400,7 +2644,7 @@ fn test_preprocess_checks_constraints_with_environments() {
         "environment": {"name": "env", "script": {"actions": {"onEnter": {"command": "do thing"}}}}
     }"#,
     );
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert("Foo".into(), openjd_expr::ExprValue::String("two".into()));
     input.insert("Bar".into(), openjd_expr::ExprValue::String("one".into()));
@@ -2593,7 +2837,7 @@ fn test_preprocess_float_to_int_coercion_whole() {
     );
     let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Foo".into(),
@@ -2631,7 +2875,7 @@ fn test_preprocess_float_to_int_coercion_fractional_falls_through() {
     );
     let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     input.insert(
         "Foo".into(),
@@ -2898,6 +3142,7 @@ fn test_preprocess_list_int_json_coercion() {
     let et = decode_environment_template(
         expr_env_template(r#"{"name": "Foo", "type": "LIST[INT]"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let mut input = JobParameterInputValues::new();
@@ -2932,6 +3177,7 @@ fn test_preprocess_list_string_json_coercion() {
     let et = decode_environment_template(
         expr_env_template(r#"{"name": "Foo", "type": "LIST[STRING]"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let mut input = JobParameterInputValues::new();
@@ -2966,6 +3212,7 @@ fn test_preprocess_list_bool_json_coercion() {
     let et = decode_environment_template(
         expr_env_template(r#"{"name": "Foo", "type": "LIST[BOOL]"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let mut input = JobParameterInputValues::new();
@@ -3001,6 +3248,7 @@ fn test_preprocess_list_invalid_json_stays_string() {
     let et = decode_environment_template(
         expr_env_template(r#"{"name": "Foo", "type": "LIST[INT]"}"#),
         Some(&["EXPR"]),
+        &CallerLimits::default(),
     )
     .unwrap();
     let mut input = JobParameterInputValues::new();
@@ -3444,7 +3692,7 @@ fn test_create_job_float_range_expr_list() {
     match &ps.task_parameter_definitions["Weight"] {
         openjd_model::job::TaskParameter::Float { range } => {
             assert_eq!(range.len(), 3);
-            assert!((range[0] - 1.0).abs() < f64::EPSILON);
+            assert!((range[0].value() - 1.0).abs() < f64::EPSILON);
         }
         other => panic!("Expected Float, got {:?}", other),
     }
@@ -3471,10 +3719,96 @@ fn test_create_job_float_range_expr_int_promotion() {
     match &ps.task_parameter_definitions["Weight"] {
         openjd_model::job::TaskParameter::Float { range } => {
             assert_eq!(range.len(), 3);
-            assert!((range[0] - 1.0).abs() < f64::EPSILON);
+            assert!((range[0].value() - 1.0).abs() < f64::EPSILON);
         }
         other => panic!("Expected Float, got {:?}", other),
     }
+}
+
+#[test]
+fn test_create_job_float_range_string_non_finite() {
+    for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
+        let template = format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Test",
+            "steps": [{{
+                "name": "S",
+                "parameterSpace": {{
+                    "taskParameterDefinitions": [{{"name": "Weight", "type": "FLOAT", "range": ["{value}"]}}]
+                }},
+                "script": {{"actions": {{"onRun": {{"command": "render"}}}}}}
+            }}]
+        }}"#
+        );
+        let err = parse_and_create_err(&template, &[]);
+        assert_eq!(
+            err,
+            format!(
+                "Expression error: FLOAT parameter 'Weight' range value '{value}' is not finite"
+            )
+        );
+    }
+}
+
+#[test]
+fn test_create_job_float_range_resolved_string_non_finite() {
+    for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
+        let err = parse_and_create_err(
+            r#"{
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Test",
+            "parameterDefinitions": [{"name": "Value", "type": "STRING"}],
+            "steps": [{
+                "name": "S",
+                "parameterSpace": {
+                    "taskParameterDefinitions": [{"name": "Weight", "type": "FLOAT", "range": ["{{Param.Value}}"]}]
+                },
+                "script": {"actions": {"onRun": {"command": "render"}}}
+            }]
+        }"#,
+            &[("Value", value)],
+        );
+        assert_eq!(
+            err,
+            format!(
+                "Expression error: FLOAT parameter 'Weight' range value '{value}' is not finite"
+            )
+        );
+    }
+}
+
+#[test]
+fn test_create_job_float_range_string_trims_whitespace() {
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [{"name": "Weight", "type": "FLOAT", "range": [" 2.5 "]}]
+            },
+            "script": {"actions": {"onRun": {"command": "render"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let range = match &job.steps[0]
+        .parameter_space
+        .as_ref()
+        .unwrap()
+        .task_parameter_definitions["Weight"]
+    {
+        openjd_model::job::TaskParameter::Float { range } => range,
+        other => panic!("Expected Float, got {other:?}"),
+    };
+    // The surrounding whitespace is trimmed off the preserved rendering too, so
+    // it cannot reach a command line.
+    assert_eq!(
+        range,
+        &[openjd_expr::value::Float64::with_str(2.5, "2.5".into()).unwrap()]
+    );
 }
 
 #[test]
@@ -3671,7 +4005,8 @@ fn test_build_symbol_table_list_path() {
 fn test_evaluate_let_bindings_basic() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = 1 + 2".to_string()];
-    let result = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap();
+    let result =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap();
     assert!(matches!(
         result.get_value("x").unwrap(),
         openjd_expr::ExprValue::Int(3)
@@ -3679,10 +4014,35 @@ fn test_evaluate_let_bindings_basic() {
 }
 
 #[test]
+fn test_evaluate_let_bindings_respects_memory_budget() {
+    // The caller's evaluation budgets bound each binding's expression —
+    // a lowered budget must reject the blowup the budgets exist for.
+    let symtab = openjd_expr::symbol_table::SymbolTable::new();
+    let bindings = vec!["x = 'a' * 100000".to_string()];
+    let err = evaluate_let_bindings(
+        &bindings,
+        &symtab,
+        None,
+        PathFormat::Posix,
+        Some(1000),
+        None,
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("let binding 'x'") && msg.contains("exceeded limit (1000 bytes)"),
+        "got: {msg}"
+    );
+    // Default budgets accept the same binding.
+    assert!(evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).is_ok());
+}
+
+#[test]
 fn test_evaluate_let_bindings_chained() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = 10".to_string(), "y = x * 2".to_string()];
-    let result = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap();
+    let result =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap();
     assert!(matches!(
         result.get_value("y").unwrap(),
         openjd_expr::ExprValue::Int(20)
@@ -3694,7 +4054,15 @@ fn test_evaluate_let_bindings_with_library() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let lib = openjd_expr::FunctionLibrary::for_profile(&openjd_expr::ExprProfile::current());
     let bindings = vec!["x = len('hello')".to_string()];
-    let result = evaluate_let_bindings(&bindings, &symtab, Some(&lib), PathFormat::Posix).unwrap();
+    let result = evaluate_let_bindings(
+        &bindings,
+        &symtab,
+        Some(&lib),
+        PathFormat::Posix,
+        None,
+        None,
+    )
+    .unwrap();
     assert!(matches!(
         result.get_value("x").unwrap(),
         openjd_expr::ExprValue::Int(5)
@@ -3705,7 +4073,8 @@ fn test_evaluate_let_bindings_with_library() {
 fn test_evaluate_let_bindings_missing_equals() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x 42".to_string()];
-    let err = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap_err();
+    let err =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap_err();
     assert!(err.to_string().contains("Missing '='"), "got: {err}");
 }
 
@@ -3713,7 +4082,8 @@ fn test_evaluate_let_bindings_missing_equals() {
 fn test_evaluate_let_bindings_syntax_error() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = @@@".to_string()];
-    let err = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap_err();
+    let err =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap_err();
     assert!(
         err.to_string().contains("Error evaluating let binding"),
         "got: {err}"
@@ -3724,7 +4094,8 @@ fn test_evaluate_let_bindings_syntax_error() {
 fn test_evaluate_let_bindings_eval_error() {
     let symtab = openjd_expr::symbol_table::SymbolTable::new();
     let bindings = vec!["x = undefined_var".to_string()];
-    let err = evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix).unwrap_err();
+    let err =
+        evaluate_let_bindings(&bindings, &symtab, None, PathFormat::Posix, None, None).unwrap_err();
     assert!(
         err.to_string().contains("Error evaluating let binding"),
         "got: {err}"
@@ -3756,7 +4127,72 @@ fn test_create_job_host_req_amount_non_numeric() {
     }"#,
         &[("Mem", "notanumber")],
     );
-    assert!(err.contains("not a valid number"), "got: {err}");
+    // float? target: a non-numeric string fails coercion with the
+    // resolution diagnostic (union targets report the type pair).
+    assert_eq!(
+        err,
+        "Format string error: hostRequirements amount min: \
+         Cannot coerce string to float?\n  Param.Mem\n  ~~~~~~^~~"
+    );
+}
+
+#[test]
+fn test_create_job_host_req_amount_non_finite_string_fails_coercion() {
+    // Under the float? target, whole-field expressions producing
+    // "nan"/"inf" strings fail at coercion — Float64 permits only finite
+    // values — so none of these reach the multi-segment parse path.
+    for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
+        let err = parse_and_create_err(
+            r#"{
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["FEATURE_BUNDLE_1"],
+            "name": "Test",
+            "parameterDefinitions": [{"name": "Mem", "type": "STRING"}],
+            "steps": [{
+                "name": "S",
+                "hostRequirements": {
+                    "amounts": [{"name": "amount.worker.memory", "min": "{{Param.Mem}}"}]
+                },
+                "script": {"actions": {"onRun": {"command": "foo"}}}
+            }]
+        }"#,
+            &[("Mem", value)],
+        );
+        assert_eq!(
+            err,
+            "Format string error: hostRequirements amount min: \
+             Cannot coerce string to float?\n  Param.Mem\n  ~~~~~~^~~",
+            "value {value}"
+        );
+    }
+}
+
+#[test]
+fn test_create_job_host_req_amount_multi_segment_non_finite() {
+    // A multi-segment format string concatenates to text and parses
+    // rather than coercing, so it is the one path that can produce a
+    // non-finite f64 ("1e999" parses to inf). The error reports the
+    // resolved text the author can act on, not the parsed value.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Exp", "type": "STRING"}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.memory", "min": "1e{{Param.Exp}}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "foo"}}}
+        }]
+    }"#,
+        &[("Exp", "999")],
+    );
+    assert_eq!(
+        err,
+        "Expression error: hostRequirements amount min: '1e999' is not a finite number"
+    );
 }
 
 #[test]
@@ -4199,7 +4635,7 @@ fn test_preprocess_float_to_int_overflow_rejected() {
     );
     let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
     let et_val = minimal_env_template(r#"{"name": "Foo", "type": "INT"}"#);
-    let et = decode_environment_template(et_val, None).unwrap();
+    let et = decode_environment_template(et_val, None, &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     // 1e19 has fract() == 0.0 but exceeds i64::MAX
     input.insert(
@@ -5212,4 +5648,1543 @@ fn plain_int_list_value_beyond_range_bound_still_accepted() {
         &[],
     );
     assert_eq!(job.steps.len(), 1);
+}
+
+// === LIST[BOOL] values that need element coercion, through to the symbol table ===
+//
+// Covers the conformance fixture 2023-09/EXPR/job_templates/2.15--list-bool-param, which declares
+// LIST[BOOL] parameters written in the other spellings the spec's BOOL coercion admits.
+//
+// These drive *supplied values*, not defaults, and the distinction matters. A LIST[BOOL] default
+// is deserialized through `BoolValue` at decode (template/expr_parameters.rs) and re-serialized as
+// `Vec<bool>`, so by preprocess it is already "[true,false]" and never reaches the element
+// coercion at all. A supplied value arrives as an `ExprValue::String` holding raw JSON and routes
+// through coerce_to_job_parameter_type -> coerce_from_str -> coerce_json_to_job_parameter_type. That is the
+// path a service takes, since the API carries parameter values as strings, so it is the one worth
+// asserting on: a test written against defaults exercises none of this.
+//
+// Each element must reach build_symbol_table already at its declared type. An element left as an
+// Int under a LIST[BOOL] gets "Cannot coerce int to bool" there -- the expression engine correctly
+// refusing a lossy conversion -- which surfaces long after the template validated.
+
+/// One LIST[BOOL] parameter per accepted spelling, no defaults: the value is supplied.
+fn list_bool_value_params() -> &'static str {
+    r#"
+    {"name": "Bools", "type": "LIST[BOOL]"},
+    {"name": "IntValues", "type": "LIST[BOOL]"},
+    {"name": "FloatValues", "type": "LIST[BOOL]"},
+    {"name": "StringTrueFalse", "type": "LIST[BOOL]"},
+    {"name": "StringYesNo", "type": "LIST[BOOL]"},
+    {"name": "StringOnOff", "type": "LIST[BOOL]"},
+    {"name": "String10", "type": "LIST[BOOL]"},
+    {"name": "MixedCase", "type": "LIST[BOOL]"},
+    {"name": "MixedTypes", "type": "LIST[BOOL]"}
+    "#
+}
+
+/// The raw JSON each parameter is given, paired with the truth values it must produce.
+fn list_bool_value_cases() -> Vec<(&'static str, &'static str, Vec<bool>)> {
+    vec![
+        ("Bools", "[true, false]", vec![true, false]),
+        ("IntValues", "[1, 0, 1, 0]", vec![true, false, true, false]),
+        ("FloatValues", "[1.0, 0.0]", vec![true, false]),
+        ("StringTrueFalse", r#"["true", "false"]"#, vec![true, false]),
+        ("StringYesNo", r#"["yes", "no"]"#, vec![true, false]),
+        ("StringOnOff", r#"["on", "off"]"#, vec![true, false]),
+        ("String10", r#"["1", "0"]"#, vec![true, false]),
+        (
+            "MixedCase",
+            r#"["TRUE", "False", "YES", "no", "On", "OFF"]"#,
+            vec![true, false, true, false, true, false],
+        ),
+        (
+            "MixedTypes",
+            r#"[true, 1, "yes", 0.0, "off"]"#,
+            vec![true, true, true, false, false],
+        ),
+    ]
+}
+
+fn preprocess_supplied(
+    params: &str,
+    values: &[(&str, &str)],
+) -> Result<openjd_model::JobParameterValues, openjd_model::ModelError> {
+    let td = TestDirs::new();
+    let jt_val = expr_list_job_template(params);
+    let jt = decode_job_template(jt_val, Some(&["EXPR"]), &CallerLimits::default())
+        .expect("LIST[BOOL] template must decode");
+    let mut input = JobParameterInputValues::new();
+    for (name, json) in values {
+        // A service hands parameter values over as strings; this is that shape.
+        input.insert(
+            (*name).into(),
+            openjd_expr::ExprValue::String((*json).to_string()),
+        );
+    }
+    preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+}
+
+#[test]
+fn test_supplied_list_bool_values_arrive_as_bools() {
+    let values: Vec<(&str, &str)> = list_bool_value_cases()
+        .iter()
+        .map(|(name, json, _)| (*name, *json))
+        .collect();
+    let result = preprocess_supplied(list_bool_value_params(), &values)
+        .expect("coercible LIST[BOOL] values must preprocess");
+
+    // Every spelling must land as a ListBool, not as a ListInt or ListFloat that merely
+    // happens to hold the right numbers.
+    for (name, json, _) in list_bool_value_cases() {
+        match &result[name].value {
+            openjd_expr::ExprValue::ListBool(_) => {}
+            other => panic!("{name} = {json} arrived as {other:?}, expected ListBool"),
+        }
+    }
+}
+
+#[test]
+fn test_supplied_list_bool_values_keep_their_truth_values() {
+    let values: Vec<(&str, &str)> = list_bool_value_cases()
+        .iter()
+        .map(|(name, json, _)| (*name, *json))
+        .collect();
+    let result = preprocess_supplied(list_bool_value_params(), &values)
+        .expect("coercible LIST[BOOL] values must preprocess");
+
+    // Coercing the type must not flatten the values.
+    for (name, json, expected) in list_bool_value_cases() {
+        match &result[name].value {
+            openjd_expr::ExprValue::ListBool(items) => {
+                assert_eq!(
+                    *items, expected,
+                    "{name} = {json} coerced to the wrong values"
+                )
+            }
+            other => panic!("{name} = {json} arrived as {other:?}, expected ListBool"),
+        }
+    }
+}
+
+#[test]
+fn test_supplied_list_bool_values_build_a_symbol_table() {
+    // The failure this regression test exists for. build_symbol_table has to produce a typed
+    // symbol per parameter, and it refused int-to-bool -- correctly, since the value should
+    // not have been an int by then.
+    let values: Vec<(&str, &str)> = list_bool_value_cases()
+        .iter()
+        .map(|(name, json, _)| (*name, *json))
+        .collect();
+    let result = preprocess_supplied(list_bool_value_params(), &values)
+        .expect("coercible LIST[BOOL] values must preprocess");
+
+    let symtab = build_symbol_table(&result)
+        .expect("a symbol table must build from coercible LIST[BOOL] values");
+    for (name, _, _) in list_bool_value_cases() {
+        assert!(
+            symtab.contains(&format!("Param.{name}")),
+            "Param.{name} missing from the symbol table"
+        );
+    }
+}
+
+#[test]
+fn test_supplied_list_bool_value_still_rejects_a_non_boolean_element() {
+    // The coercion must not have become a blanket accept: an element that is not a boolean in
+    // any accepted spelling is still refused, and at preprocess rather than later.
+    let err = preprocess_supplied(
+        r#"{"name": "Bad", "type": "LIST[BOOL]"}"#,
+        &[("Bad", r#"["maybe"]"#)],
+    )
+    .expect_err("\"maybe\" is not a boolean and must be refused");
+    // The scalar diagnostic is what the element gets, unchanged.
+    let message = err.to_string();
+    assert!(
+        message.contains("not a valid boolean"),
+        "expected the scalar boolean diagnostic, got: {message}"
+    );
+}
+
+#[test]
+fn test_supplied_list_int_and_list_float_values_coerce_their_elements() {
+    // The fix is type-driven rather than bool-specific, so the other element types get the
+    // same treatment: LIST[INT] accepts int strings because scalar INT does.
+    let result = preprocess_supplied(
+        r#"{"name": "Ints", "type": "LIST[INT]"},
+           {"name": "Floats", "type": "LIST[FLOAT]"},
+           {"name": "Nested", "type": "LIST[LIST[INT]]"}"#,
+        &[
+            ("Ints", r#"["1", "2", 3]"#),
+            ("Floats", r#"[1, "2.5", 3.5]"#),
+            ("Nested", r#"[["1", 2], [3]]"#),
+        ],
+    )
+    .expect("coercible list values must preprocess");
+
+    assert!(
+        matches!(&result["Ints"].value, openjd_expr::ExprValue::ListInt(v) if *v == vec![1, 2, 3]),
+        "Ints arrived as {:?}",
+        result["Ints"].value
+    );
+    match &result["Floats"].value {
+        openjd_expr::ExprValue::ListFloat(v) => {
+            let got: Vec<f64> = v.iter().map(|f| f.value()).collect();
+            assert_eq!(got, vec![1.0, 2.5, 3.5]);
+        }
+        other => panic!("Floats arrived as {other:?}, expected ListFloat"),
+    }
+    // LIST[LIST[INT]] recurses twice and reaches the Int arm at the leaves.
+    match &result["Nested"].value {
+        openjd_expr::ExprValue::ListList(rows, _, _) => {
+            assert_eq!(rows.len(), 2, "expected two rows, got {rows:?}");
+            assert!(
+                matches!(&rows[0], openjd_expr::ExprValue::ListInt(v) if *v == vec![1, 2]),
+                "row 0 arrived as {:?}",
+                rows[0]
+            );
+            assert!(
+                matches!(&rows[1], openjd_expr::ExprValue::ListInt(v) if *v == vec![3]),
+                "row 1 arrived as {:?}",
+                rows[1]
+            );
+        }
+        other => panic!("Nested arrived as {other:?}, expected ListList"),
+    }
+}
+
+#[test]
+fn test_supplied_scalar_bool_accepts_numeric_forms() {
+    // The numeric arms are in coerce_to_job_parameter_type, which scalar parameters use too, so scalar BOOL
+    // widens along with LIST[BOOL]: the float 1.0 was refused before because Float64 keeps the
+    // original literal and "1.0" is not in the string bool table. Int 1 already worked.
+    let td = TestDirs::new();
+    let jt = decode_job_template(
+        expr_list_job_template(
+            r#"{"name": "FromInt", "type": "BOOL"},
+               {"name": "FromFloat", "type": "BOOL"}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("scalar BOOL template must decode");
+
+    let mut input = JobParameterInputValues::new();
+    input.insert("FromInt".into(), openjd_expr::ExprValue::Int(1));
+    input.insert(
+        "FromFloat".into(),
+        openjd_expr::ExprValue::Float(openjd_expr::value::Float64::new(1.0).unwrap()),
+    );
+
+    let result = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.template(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: false,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .expect("numeric 1 must be accepted for a scalar BOOL in either form");
+
+    assert_eq!(
+        result["FromInt"].value,
+        openjd_expr::ExprValue::Bool(true),
+        "FromInt arrived as {:?}",
+        result["FromInt"].value
+    );
+    assert_eq!(
+        result["FromFloat"].value,
+        openjd_expr::ExprValue::Bool(true),
+        "FromFloat arrived as {:?}",
+        result["FromFloat"].value
+    );
+}
+
+#[test]
+fn test_supplied_empty_list_value_keeps_its_declared_element_type() {
+    // An empty list has no elements to infer from, so the declared element type is the only
+    // thing that can type it. Getting this wrong makes LIST[BOOL] of [] a ListList.
+    let result = preprocess_supplied(
+        r#"{"name": "Bools", "type": "LIST[BOOL]"},
+           {"name": "Ints", "type": "LIST[INT]"},
+           {"name": "Floats", "type": "LIST[FLOAT]"},
+           {"name": "Strings", "type": "LIST[STRING]"}"#,
+        &[
+            ("Bools", "[]"),
+            ("Ints", "[]"),
+            ("Floats", "[]"),
+            ("Strings", "[]"),
+        ],
+    )
+    .expect("an empty list must preprocess for every list type");
+
+    assert!(
+        matches!(
+            &result["Bools"].value,
+            openjd_expr::ExprValue::ListBool(v) if v.is_empty()
+        ),
+        "Bools arrived as {:?}, expected an empty ListBool",
+        result["Bools"].value
+    );
+    assert!(
+        matches!(
+            &result["Ints"].value,
+            openjd_expr::ExprValue::ListInt(v) if v.is_empty()
+        ),
+        "Ints arrived as {:?}, expected an empty ListInt",
+        result["Ints"].value
+    );
+    assert!(
+        matches!(
+            &result["Floats"].value,
+            openjd_expr::ExprValue::ListFloat(v) if v.is_empty()
+        ),
+        "Floats arrived as {:?}, expected an empty ListFloat",
+        result["Floats"].value
+    );
+    assert!(
+        matches!(
+            &result["Strings"].value,
+            openjd_expr::ExprValue::ListString(v, _) if v.is_empty()
+        ),
+        "Strings arrived as {:?}, expected an empty ListString",
+        result["Strings"].value
+    );
+}
+
+#[test]
+fn test_create_job_range_element_limit_counts_characters_not_bytes() {
+    // Spec limits are stated in characters, and the reference
+    // implementation's len() counts characters. 600 two-byte characters
+    // (1,200 bytes) is well under the 1,024-character element limit and
+    // must be accepted; a byte-based check would falsely reject it.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": ["{{ 'é' * 600 }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let step = &job.steps[0];
+    let space = step.parameter_space.as_ref().expect("parameter space");
+    match &space.task_parameter_definitions["P"] {
+        job::TaskParameter::String { range } => {
+            assert_eq!(range.len(), 1);
+            assert_eq!(range[0].chars().count(), 600);
+        }
+        other => panic!("expected STRING task parameter, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_create_job_amount_with_all_bounds_resolving_null_rejected() {
+    // `min` is present as a field, so the decode-time "at least one of
+    // min or max" check passes — but under `float?` targeting the
+    // whole-field null resolves to "bound unset". Both bounds unset is a
+    // shape the schema forbids; the resolved-value re-check must reject
+    // it rather than emit a vacuous host requirement that matches every
+    // worker.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.memory", "min": "{{ null }}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "foo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert!(
+        err.contains("steps[0] -> hostRequirements -> amounts[0]:")
+            && err.contains("must have at least one of min or max after resolution."),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn test_create_job_amount_with_both_bounds_resolving_null_rejected() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.memory", "min": "{{ null }}", "max": "{{ null }}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "foo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert!(
+        err.contains("must have at least one of min or max after resolution."),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn test_create_job_amount_with_one_null_and_one_concrete_bound_ok() {
+    // A null min alongside a concrete max is fine: one bound remains.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.memory", "min": "{{ null }}", "max": "{{ 4.0 }}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "foo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+    let amt = &hr.amounts.as_ref().expect("amounts")[0];
+    assert_eq!(amt.min, None);
+    assert_eq!(amt.max, Some(4.0));
+}
+
+#[test]
+fn test_create_job_range_element_list_param_flattens() {
+    // A range element is a list item (Expression Language §1.3.2, the
+    // same rule as `args` items): a LIST[*] parameter reference expands
+    // to one range element per list element, and literal elements can be
+    // mixed with expansions.
+    let td = TestDirs::new();
+    let jt = decode_job_template(
+        yaml_val(
+            r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Paths", "type": "LIST[PATH]", "default": ["a", "b"]}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": ["first", "{{RawParam.Paths}}", "last"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let processed = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions::new(td.template(), td.cwd()),
+    )
+    .unwrap();
+    let job = create_job(&jt, &processed, &jt.default_validation_context()).unwrap();
+    let joined = |n: &str| {
+        std::path::Path::new(td.template())
+            .join(n)
+            .to_string_lossy()
+            .to_string()
+    };
+    let space = job.steps[0].parameter_space.as_ref().expect("space");
+    match &space.task_parameter_definitions["P"] {
+        job::TaskParameter::String { range } => {
+            // The relative defaults are joined with the template dir (§2.12).
+            assert_eq!(
+                range,
+                &[
+                    "first".to_string(),
+                    joined("a"),
+                    joined("b"),
+                    "last".to_string()
+                ]
+            );
+        }
+        other => panic!("expected STRING task parameter, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_create_job_range_all_elements_null_rejected() {
+    // Null skips a range element; a range whose every element skips away
+    // is empty, which the schema's at-least-one-element rule forbids.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": ["{{ null }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'P' range has no elements after resolution"
+    );
+}
+
+#[test]
+fn test_create_job_attr_all_values_null_rejected() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.custom.tag", "anyOf": ["{{ null }}"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[0] -> hostRequirements -> attributes[0] -> anyOf: has no elements after resolution"
+    );
+}
+
+#[test]
+fn test_create_job_attr_value_list_flattens() {
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.custom.tag", "anyOf": ["{{ ['tag_a', 'tag_b'] }}", "tag_c"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+    let attr = &hr.attributes.as_ref().expect("attributes")[0];
+    assert_eq!(
+        attr.any_of.as_ref().expect("anyOf"),
+        &["tag_a", "tag_b", "tag_c"]
+    );
+}
+
+#[test]
+fn test_create_job_range_element_too_long_reports_characters() {
+    // The limit comparison and the count in the diagnostic must agree:
+    // 1,200 two-byte characters is 2,400 bytes, and the message reports
+    // 1200 — the character count the limit is stated in.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "V", "type": "STRING"}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": ["{{Param.V * 2}}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[("V", &"é".repeat(600))],
+    );
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'P' range[0]: resolved value exceeds 1024 characters (1200 chars)"
+    );
+}
+
+#[test]
+fn test_create_job_single_valued_attr_flatten_past_one_rejected() {
+    // Decode's single-valued rule counts template elements, but a
+    // flattening expression makes the resolved count unrelated to the
+    // decode-time count: allOf with one template element resolving to two
+    // values must be rejected after resolution.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Arches", "type": "LIST[STRING]", "default": ["x86_64", "arm64"]}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.worker.cpu.arch", "allOf": ["{{ RawParam.Arches }}"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[0] -> hostRequirements -> attributes[0] -> allOf: single-valued attribute cannot have more than 1 element after resolution"
+    );
+}
+
+#[test]
+fn test_create_job_attr_flatten_past_50_elements_rejected() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.custom.tag", "anyOf": ["{{ ['v'] * 51 }}"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[0] -> hostRequirements -> attributes[0] -> anyOf: exceeds 50 elements after resolution"
+    );
+}
+
+#[test]
+fn test_create_job_attr_flatten_within_counts_ok() {
+    // Exactly 50 elements passes, and a single-valued anyOf may flatten
+    // to several candidates (only allOf is restricted to one).
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Arches", "type": "LIST[STRING]", "default": ["x86_64", "arm64"]}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [
+                {"name": "attr.custom.tag", "anyOf": ["{{ ['v'] * 50 }}"]},
+                {"name": "attr.worker.cpu.arch", "anyOf": ["{{ RawParam.Arches }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+    let attrs = hr.attributes.as_ref().expect("attributes");
+    assert_eq!(attrs[0].any_of.as_ref().expect("anyOf").len(), 50);
+    assert_eq!(
+        attrs[1].any_of.as_ref().expect("anyOf"),
+        &["x86_64", "arm64"]
+    );
+}
+
+#[test]
+fn test_create_job_range_conditional_elements_skip_down() {
+    // The skip direction also shrinks lists: three template elements
+    // where the conditionals resolve one branch to null yield two range
+    // elements, selected by the parameter.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "BoolValue", "type": "BOOL"}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "P", "type": "STRING", "range": [
+                    "first",
+                    "{{ 'second' if Param.BoolValue else null }}",
+                    "{{ 'third' if not Param.BoolValue else null }}"
+                ]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    for (value, expected) in [
+        ("true", vec!["first", "second"]),
+        ("false", vec!["first", "third"]),
+    ] {
+        let job = parse_and_create(template, &[("BoolValue", value)]);
+        let space = job.steps[0].parameter_space.as_ref().expect("space");
+        match &space.task_parameter_definitions["P"] {
+            job::TaskParameter::String { range } => {
+                assert_eq!(range, &expected, "BoolValue={value}");
+            }
+            other => panic!("expected STRING task parameter, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn test_create_job_single_valued_attr_conditional_collapse_ok() {
+    // Two template elements whose conditionals are complementary always
+    // resolve to exactly one — decode defers the single-valued count to
+    // job creation for expression-bearing lists, and the resolved count
+    // here is 1.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "B", "type": "BOOL"}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.worker.cpu.arch", "allOf": [
+                "{{ 'x86_64' if Param.B else null }}",
+                "{{ 'arm64' if not Param.B else null }}"
+            ]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    for (value, expected) in [("true", "x86_64"), ("false", "arm64")] {
+        let job = parse_and_create(template, &[("B", value)]);
+        let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+        let attr = &hr.attributes.as_ref().expect("attributes")[0];
+        assert_eq!(
+            attr.all_of.as_ref().expect("allOf"),
+            &[expected],
+            "B={value}"
+        );
+    }
+}
+
+#[test]
+fn test_create_job_single_valued_attr_both_elements_survive_rejected() {
+    // Same shape, but both conditionals resolve non-null: the resolved
+    // count is 2 and the post-resolution re-check rejects it.
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "B", "type": "BOOL"}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.worker.cpu.arch", "allOf": [
+                "{{ 'x86_64' if Param.B else null }}",
+                "{{ 'arm64' if Param.B else null }}"
+            ]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[("B", "true")],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[0] -> hostRequirements -> attributes[0] -> allOf: single-valued attribute cannot have more than 1 element after resolution"
+    );
+}
+
+#[test]
+fn test_single_valued_attr_deferred_count_still_capped_at_50_at_decode() {
+    // Deferring the single-valued "> 1" count for expression-bearing
+    // lists does not unbound the template: the generic 50-element cap
+    // applies to the template element count regardless of expressions.
+    let elems: Vec<String> = (0..51)
+        .map(|_| r#""{{ 'x86_64' if Param.B else null }}""#.to_string())
+        .collect();
+    let tmpl = format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "B", "type": "BOOL"}}],
+        "steps": [{{
+            "name": "S",
+            "hostRequirements": {{"attributes": [{{"name": "attr.worker.cpu.arch", "allOf": [{}]}}]}},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#,
+        elems.join(", ")
+    );
+    let v: serde_json::Value = serde_saphyr::from_str(&tmpl).unwrap();
+    let err = openjd_model::decode_job_template(
+        v,
+        Some(&["EXPR"]),
+        &openjd_model::CallerLimits::default(),
+    )
+    .expect_err("expected decode rejection");
+    assert!(
+        err.to_string().contains(
+            "steps[0] -> hostRequirements -> attributes[0] -> allOf:\n\texceeds 50 elements."
+        ),
+        "got: {err}"
+    );
+}
+
+// === preprocess_job_parameters round trip ===
+//
+// This function both consumes and produces `JobParameterValues`, and both are public,
+// so a caller can hand its output straight back to it. `create_job` does something
+// adjacent already: it re-runs `check_constraints` over every value it is given
+// (create_job/mod.rs:54-60). "Every value it emits, it accepts" is therefore a
+// requirement, and LIST[PATH] is where it first failed.
+//
+// A goal rather than an invariant: scalar PATH violates it, see issue #388 and
+// "Round trip" in specs/model/job-creation.md.
+
+/// A minimal job template declaring EXPR, which the LIST[*] parameter types require.
+fn minimal_expr_job_template(params: &str) -> serde_json::Value {
+    yaml_val(&format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "test",
+        "parameterDefinitions": [{params}],
+        "steps": [{{"name": "step", "script": {{"actions": {{"onRun": {{"command": "do thing"}}}}}}}}]
+    }}"#
+    ))
+}
+
+/// The no-default parameter every round-trip template carries, and its value.
+///
+/// It makes the resubmission in [`preprocess_again`] load-bearing: a parameter with a
+/// default is re-filled on any pass, so a second pass that ignored its input would
+/// still succeed. One with no default can only come from the values carried over.
+const CARRIED: &str = "Carried";
+const CARRIED_VALUE: &str = "carried-through";
+
+/// Decode a template and fill its parameter defaults, supplying the one parameter that
+/// has none. Paired with [`preprocess_again`]; kept as two functions so each test body
+/// shows that it runs both passes.
+fn preprocess_defaults(
+    template_json: &str,
+    td: &TestDirs,
+) -> (
+    openjd_model::template::JobTemplate,
+    openjd_model::JobParameterValues,
+) {
+    let jt = decode_job_template(
+        minimal_expr_job_template(&format!(
+            r#"{template_json},
+               {{"name": "{CARRIED}", "type": "STRING"}}"#
+        )),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("template decodes");
+    let mut initial = JobParameterInputValues::new();
+    initial.insert(
+        CARRIED.into(),
+        openjd_expr::ExprValue::String(CARRIED_VALUE.into()),
+    );
+    let filled = preprocess_job_parameters(&jt, &initial, &[], &round_trip_options(td))
+        .expect("first pass fills defaults");
+    (jt, filled)
+}
+
+/// Assert the no-default parameter came back with the value the first pass carried.
+/// The `.expect` on [`preprocess_again`] catches a second pass that ignores its input;
+/// this adds the narrower claim that the value survived unaltered.
+fn assert_carried_through(result: &openjd_model::JobParameterValues) {
+    let carried = result
+        .get(CARRIED)
+        .expect("the no-default parameter must survive the round trip");
+    assert!(
+        matches!(&carried.value, openjd_expr::ExprValue::String(s) if s == CARRIED_VALUE),
+        "{CARRIED} arrived as {:?}, expected the value carried from the first pass",
+        carried.value
+    );
+}
+
+/// Feed a previous pass's output back in as submitted input values.
+fn preprocess_again(
+    jt: &openjd_model::template::JobTemplate,
+    values: &openjd_model::JobParameterValues,
+    td: &TestDirs,
+) -> Result<openjd_model::JobParameterValues, openjd_model::ModelError> {
+    let mut resubmitted = JobParameterInputValues::new();
+    for (name, jpv) in values {
+        resubmitted.insert(name.clone(), jpv.value.clone());
+    }
+    preprocess_job_parameters(jt, &resubmitted, &[], &round_trip_options(td))
+}
+
+fn round_trip_options<'a>(td: &'a TestDirs) -> openjd_model::PathParameterOptions<'a> {
+    openjd_model::PathParameterOptions {
+        job_template_dir: td.template(),
+        current_working_dir: td.cwd(),
+        allow_template_dir_walk_up: false,
+        path_format: PathFormat::host(),
+        allow_uri_path_values: true,
+    }
+}
+
+#[test]
+fn preprocess_accepts_its_own_empty_list_path_output() {
+    // A LIST[PATH] is a ListString at every length. An empty default used to come out a
+    // ListPath, which the second pass then refused with "Cannot coerce list to LIST[PATH]".
+    let td = TestDirs::new();
+    let (jt, filled) = preprocess_defaults(
+        r#"{"name": "Empty", "type": "LIST[PATH]", "default": []}"#,
+        &td,
+    );
+    // The variant on the way out, so a fix that only taught the second pass to accept a
+    // ListPath would fail here rather than pass.
+    assert!(
+        matches!(
+            &filled["Empty"].value,
+            openjd_expr::ExprValue::ListString(v, _) if v.is_empty()
+        ),
+        "the first pass emitted {:?}, expected an empty ListString",
+        filled["Empty"].value
+    );
+    let result = preprocess_again(&jt, &filled, &td)
+        .expect("an empty LIST[PATH] this function produced must be a value it accepts");
+    assert_carried_through(&result);
+    assert!(
+        matches!(
+            &result["Empty"].value,
+            openjd_expr::ExprValue::ListString(v, _) if v.is_empty()
+        ),
+        "Empty arrived as {:?}, expected an empty ListString",
+        result["Empty"].value
+    );
+}
+
+#[test]
+fn preprocess_accepts_its_own_non_empty_list_path_output() {
+    // Control: this half already worked, since make_list promotes String elements to a
+    // ListString. A fix that only moved the failure would show up here.
+    //
+    // The first pass joins the relative defaults with the template dir (§2.12); the
+    // second pass receives them as absolute submitted values and leaves them alone.
+    let td = TestDirs::new();
+    let (jt, filled) = preprocess_defaults(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["a.exr", "b.exr"]}"#,
+        &td,
+    );
+    let result = preprocess_again(&jt, &filled, &td).expect("a non-empty LIST[PATH] round trips");
+    assert_carried_through(&result);
+    let expected: Vec<String> = ["a.exr", "b.exr"]
+        .iter()
+        .map(|n| {
+            std::path::Path::new(td.template())
+                .join(n)
+                .to_string_lossy()
+                .to_string()
+        })
+        .collect();
+    assert!(
+        matches!(
+            &result["Paths"].value,
+            openjd_expr::ExprValue::ListString(v, _) if v == &expected
+        ),
+        "Paths arrived as {:?}, expected ListString of both paths",
+        result["Paths"].value
+    );
+}
+
+#[test]
+fn preprocess_accepts_its_own_output_for_every_list_type() {
+    // The requirement is not specific to LIST[PATH]: the function's output type is a
+    // subset of its input type. Empty defaults so the variant comes from the declared
+    // type rather than from elements -- except LIST[PATH], whose elements are Strings.
+    let td = TestDirs::new();
+    let (jt, filled) = preprocess_defaults(
+        r#"{"name": "Bools", "type": "LIST[BOOL]", "default": []},
+           {"name": "Ints", "type": "LIST[INT]", "default": []},
+           {"name": "Floats", "type": "LIST[FLOAT]", "default": []},
+           {"name": "Strings", "type": "LIST[STRING]", "default": []},
+           {"name": "Paths", "type": "LIST[PATH]", "default": []},
+           {"name": "IntLists", "type": "LIST[LIST[INT]]", "default": []}"#,
+        &td,
+    );
+    let result = preprocess_again(&jt, &filled, &td)
+        .expect("every empty list value this function produced must be one it accepts");
+    assert_carried_through(&result);
+    // Assert the variant, not the length: `list_len()` answers `Some(0)` for every
+    // empty list variant, so a length-only assertion would accept a value that had
+    // discarded its declared element type.
+    for (name, ok) in [
+        (
+            "Bools",
+            matches!(&result["Bools"].value, openjd_expr::ExprValue::ListBool(v) if v.is_empty()),
+        ),
+        (
+            "Ints",
+            matches!(&result["Ints"].value, openjd_expr::ExprValue::ListInt(v) if v.is_empty()),
+        ),
+        (
+            "Floats",
+            matches!(&result["Floats"].value, openjd_expr::ExprValue::ListFloat(v) if v.is_empty()),
+        ),
+        (
+            "Strings",
+            matches!(&result["Strings"].value, openjd_expr::ExprValue::ListString(v, _) if v.is_empty()),
+        ),
+        (
+            "Paths",
+            matches!(&result["Paths"].value, openjd_expr::ExprValue::ListString(v, _) if v.is_empty()),
+        ),
+        (
+            "IntLists",
+            matches!(&result["IntLists"].value, openjd_expr::ExprValue::ListList(v, _, _) if v.is_empty()),
+        ),
+    ] {
+        assert!(
+            ok,
+            "{name} arrived as {:?}, which is not an empty list of its declared element type",
+            result[name].value
+        );
+    }
+}
+
+#[test]
+fn a_list_path_value_is_still_refused_for_a_list_string_parameter() {
+    // Guard against widening the fix: a PATH-typed value must not satisfy a
+    // STRING-typed parameter, since session-time path mapping treats them differently.
+    let td = TestDirs::new();
+    let jt = decode_job_template(
+        minimal_expr_job_template(r#"{"name": "Strings", "type": "LIST[STRING]"}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("template decodes");
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Strings".into(),
+        openjd_expr::ExprValue::make_list(vec![], openjd_expr::ExprType::PATH)
+            .expect("an empty ListPath"),
+    );
+    let err = preprocess_job_parameters(&jt, &input, &[], &round_trip_options(&td))
+        .expect_err("a LIST[PATH] value must not satisfy a LIST[STRING] parameter");
+    let msg = err.to_string();
+    // The whole diagnostic, not two substrings: a degraded message naming both would
+    // satisfy a substring pair.
+    assert!(
+        msg.contains("Parameter 'Strings': Cannot coerce list to LIST[STRING]"),
+        "unexpected diagnostic: {msg}"
+    );
+}
+
+#[test]
+fn a_submitted_list_path_value_is_refused_at_any_length() {
+    // A stored LIST[PATH] is a ListString, because a job parameter holds a path as a
+    // string until there is a host context to interpret it in. ListPath carries a
+    // PathFormat, so it is refused at both lengths, not just the one the fix touched.
+    //
+    // Through make_list rather than the variant directly: ListPath's third field is a
+    // cached heap size make_list computes, so a hand-built 0 is a shape the crate never
+    // produces. PathFormat::Windows on purpose -- it is exactly the format that has no
+    // meaning at job creation, and nothing here would check it.
+    let td = TestDirs::new();
+    let jt = decode_job_template(
+        minimal_expr_job_template(r#"{"name": "Paths", "type": "LIST[PATH]"}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("template decodes");
+    for (label, elements) in [
+        ("empty", vec![]),
+        (
+            "non-empty",
+            vec![
+                openjd_expr::ExprValue::new_path("/a/b.exr", PathFormat::Windows),
+                openjd_expr::ExprValue::new_path("/a/c.exr", PathFormat::Windows),
+            ],
+        ),
+    ] {
+        let mut input = JobParameterInputValues::new();
+        input.insert(
+            "Paths".into(),
+            openjd_expr::ExprValue::make_list(elements, openjd_expr::ExprType::PATH)
+                .expect("a ListPath"),
+        );
+        let err = preprocess_job_parameters(&jt, &input, &[], &round_trip_options(&td))
+            .expect_err("a ListPath must not be accepted verbatim");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Parameter 'Paths': Cannot coerce list to LIST[PATH]"),
+            "unexpected diagnostic for the {label} case: {msg}"
+        );
+    }
+}
+
+#[test]
+fn an_empty_list_path_still_meets_its_length_constraints() {
+    // An empty LIST[PATH] reaches check_constraints rather than failing coercion, so the
+    // diagnostic names the length rule. ListString because that is how a job parameter
+    // stores a path -- an empty ListPath is refused a step earlier, by design.
+    //
+    // Submitted rather than defaulted: decode refuses an empty `default` under
+    // `minLength: 1` outright, so submitting is the only way to reach the constraint
+    // check with an empty list.
+    let td = TestDirs::new();
+    let jt = decode_job_template(
+        minimal_expr_job_template(r#"{"name": "Paths", "type": "LIST[PATH]", "minLength": 1}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("template decodes");
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Paths".into(),
+        openjd_expr::ExprValue::make_list(vec![], openjd_expr::ExprType::STRING)
+            .expect("an empty ListString"),
+    );
+    let err = preprocess_job_parameters(&jt, &input, &[], &round_trip_options(&td))
+        .expect_err("an empty list cannot satisfy minLength: 1");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Parameter 'Paths': list length 0 is less than minimum 1"),
+        "expected the list-length rule rather than a coercion failure, got: {msg}"
+    );
+}
+
+#[test]
+fn preprocess_accepts_its_own_nested_list_output() {
+    // The all-list-types test uses an empty outer list, so the inner variant is never
+    // built. One empty and one non-empty inner list exercises both, and pins that they
+    // come back as ListInt rather than something the outer variant merely tolerates.
+    let td = TestDirs::new();
+    let (jt, filled) = preprocess_defaults(
+        r#"{"name": "IntLists", "type": "LIST[LIST[INT]]", "default": [[], [1, 2]]}"#,
+        &td,
+    );
+    let result = preprocess_again(&jt, &filled, &td)
+        .expect("a nested list this function produced must be one it accepts");
+    assert_carried_through(&result);
+    let openjd_expr::ExprValue::ListList(ref outer, _, _) = result["IntLists"].value else {
+        panic!(
+            "IntLists arrived as {:?}, expected a ListList",
+            result["IntLists"].value
+        )
+    };
+    assert_eq!(outer.len(), 2, "expected two inner lists");
+    assert!(
+        matches!(&outer[0], openjd_expr::ExprValue::ListInt(v) if v.is_empty()),
+        "inner[0] arrived as {:?}, expected an empty ListInt",
+        outer[0]
+    );
+    assert!(
+        matches!(&outer[1], openjd_expr::ExprValue::ListInt(v) if v == &[1, 2]),
+        "inner[1] arrived as {:?}, expected ListInt([1, 2])",
+        outer[1]
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// LIST[PATH] elements follow the PATH value rules (§2.2, §2.12)
+// ══════════════════════════════════════════════════════════════
+
+fn posix_path_options(
+    walk_up: bool,
+    allow_uri: bool,
+) -> openjd_model::PathParameterOptions<'static> {
+    openjd_model::PathParameterOptions {
+        job_template_dir: "/a/job1",
+        current_working_dir: "/tmp/cwd",
+        path_format: PathFormat::Posix,
+        allow_template_dir_walk_up: walk_up,
+        allow_uri_path_values: allow_uri,
+    }
+}
+
+fn list_path_strings(v: &openjd_expr::ExprValue) -> Vec<String> {
+    match v {
+        openjd_expr::ExprValue::ListString(items, _) => items.clone(),
+        other => panic!("expected ListString, got {other:?}"),
+    }
+}
+
+fn preprocess_expr_params(
+    params: &str,
+    input: &JobParameterInputValues,
+    options: &openjd_model::PathParameterOptions<'_>,
+) -> Result<openjd_model::JobParameterValues, openjd_model::ModelError> {
+    let jt = decode_job_template(
+        minimal_expr_job_template(params),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("template decodes");
+    preprocess_job_parameters(&jt, input, &[], options)
+}
+
+#[test]
+fn list_path_default_elements_joined_and_normalized() {
+    let params = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["./output", "sub/dir", "sub/../other", "."]}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap();
+    assert_eq!(
+        list_path_strings(&params["Paths"].value),
+        [
+            "/a/job1/output",
+            "/a/job1/sub/dir",
+            "/a/job1/other",
+            "/a/job1"
+        ]
+    );
+}
+
+#[test]
+fn list_path_default_absolute_element_rejected() {
+    // The bad element is second so a check of only the first element would miss it.
+    let err = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["a.exr", "/abs/b.exr"]}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of LIST[PATH] parameter Paths at item[1] is an absolute path. Default paths must be relative, and are joined to the job template's directory."
+    );
+}
+
+#[test]
+fn list_path_default_absolute_element_rejected_windows() {
+    let jt = decode_job_template(
+        minimal_expr_job_template(
+            r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["renders\\a.exr", "D:\\renders\\b.exr"]}"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let err = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: r"C:\templates\job1",
+            current_working_dir: r"C:\cwd",
+            path_format: PathFormat::Windows,
+            allow_template_dir_walk_up: false,
+            allow_uri_path_values: false,
+        },
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of LIST[PATH] parameter Paths at item[1] is an absolute path. Default paths must be relative, and are joined to the job template's directory."
+    );
+}
+
+#[test]
+fn list_path_default_escaping_element_rejected() {
+    let err = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["inside/a.exr", "../outside/b.exr"]}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of LIST[PATH] parameter Paths at item[1] references a path outside of the template directory. Walking up from the template directory is not permitted."
+    );
+}
+
+#[test]
+fn list_path_default_reports_every_bad_element() {
+    let err = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["/x", "ok", "a/../../y"]}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of LIST[PATH] parameter Paths at item[0] is an absolute path. Default paths must be relative, and are joined to the job template's directory.\n\
+         The default value of LIST[PATH] parameter Paths at item[2] references a path outside of the template directory. Walking up from the template directory is not permitted."
+    );
+}
+
+#[test]
+fn list_path_default_walk_up_allowed() {
+    // allow_template_dir_walk_up accepts absolute and escaping elements, as for PATH.
+    let params = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["/abs/a.exr", "../up/b.exr"]}"#,
+        &Default::default(),
+        &posix_path_options(true, false),
+    )
+    .unwrap();
+    assert_eq!(
+        list_path_strings(&params["Paths"].value),
+        ["/abs/a.exr", "/a/up/b.exr"]
+    );
+}
+
+#[test]
+fn list_path_default_uri_elements() {
+    let def = r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["a.exr", "s3://bucket/key"]}"#;
+    let params =
+        preprocess_expr_params(def, &Default::default(), &posix_path_options(false, true)).unwrap();
+    assert_eq!(
+        list_path_strings(&params["Paths"].value),
+        ["/a/job1/a.exr", "s3://bucket/key"]
+    );
+    let err = preprocess_expr_params(def, &Default::default(), &posix_path_options(false, false))
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Paths': URI path values are not permitted in defaults. Got 's3://bucket/key' at item[1]"
+    );
+}
+
+#[test]
+fn list_path_submitted_elements_joined_with_cwd() {
+    // Relative elements are joined with the cwd and normalized; absolute ones are kept.
+    // Submitted values may walk up: only defaults are confined to the template dir.
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Paths".into(),
+        openjd_expr::ExprValue::String(r#"["rel/a.exr", "./b.exr", "/abs/c.exr", "../up"]"#.into()),
+    );
+    let params = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]"}"#,
+        &input,
+        &posix_path_options(false, false),
+    )
+    .unwrap();
+    assert_eq!(
+        list_path_strings(&params["Paths"].value),
+        [
+            "/tmp/cwd/rel/a.exr",
+            "/tmp/cwd/b.exr",
+            "/abs/c.exr",
+            "/tmp/up"
+        ]
+    );
+}
+
+#[test]
+fn list_path_submitted_uri_element_rejected_when_not_allowed() {
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Paths".into(),
+        openjd_expr::ExprValue::String(r#"["a.exr", "s3://bucket/key"]"#.into()),
+    );
+    let err = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]"}"#,
+        &input,
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Paths': URI path values are not permitted. Got 's3://bucket/key' at item[1]"
+    );
+}
+
+#[test]
+fn path_submitted_relative_value_normalized() {
+    let mut input = JobParameterInputValues::new();
+    input.insert("Dot".into(), openjd_expr::ExprValue::String(".".into()));
+    input.insert(
+        "DotRelative".into(),
+        openjd_expr::ExprValue::String("./b.exr".into()),
+    );
+    input.insert(
+        "Interior".into(),
+        openjd_expr::ExprValue::String("sub/../other".into()),
+    );
+    let jt = decode_job_template(
+        minimal_job_template(
+            r#"{"name": "Dot", "type": "PATH"},
+               {"name": "DotRelative", "type": "PATH"},
+               {"name": "Interior", "type": "PATH"}"#,
+        ),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let params =
+        preprocess_job_parameters(&jt, &input, &[], &posix_path_options(false, false)).unwrap();
+    assert_eq!(params["Dot"].value.to_display_string(), "/tmp/cwd");
+    assert_eq!(
+        params["DotRelative"].value.to_display_string(),
+        "/tmp/cwd/b.exr"
+    );
+    assert_eq!(
+        params["Interior"].value.to_display_string(),
+        "/tmp/cwd/other"
+    );
+}
+
+#[test]
+fn list_path_item_allowed_values_checked_after_join() {
+    // The template is valid (the literal default is in allowedValues), but the joined
+    // default is not, so job parameter preprocessing fails.
+    let err = preprocess_expr_params(
+        r#"{"name": "Scenes", "type": "LIST[PATH]", "default": ["assets/a.blend"],
+            "item": {"allowedValues": ["assets/a.blend", "assets/b.blend"]}}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Scenes': item[0] value '/a/job1/assets/a.blend' is not in allowed values"
+    );
+}
+
+#[test]
+fn path_default_max_length_checked_after_join() {
+    let err = preprocess_expr_params(
+        r#"{"name": "Short", "type": "PATH", "default": "a", "maxLength": 3}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'Short': value length 9 exceeds maximum 3"
+    );
+}
+
+#[test]
+fn env_template_path_defaults_checked_after_join() {
+    // create_job only re-checks job-template parameters, so preprocessing is the only
+    // place an environment template's defaults are constraint-checked.
+    let jt = decode_job_template(
+        minimal_expr_job_template(r#"{"name": "Unused", "type": "STRING", "default": "x"}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let et = decode_environment_template(
+        yaml_val(
+            r#"{
+            "specificationVersion": "environment-2023-09",
+            "extensions": ["EXPR"],
+            "parameterDefinitions": [
+                {"name": "EnvScalar", "type": "PATH", "default": "cfg/a", "allowedValues": ["cfg/a"]},
+                {"name": "EnvPaths", "type": "LIST[PATH]", "default": ["env/a"],
+                 "item": {"allowedValues": ["env/a"]}}
+            ],
+            "environment": {"name": "Env", "script": {"actions": {"onEnter": {"command": "echo"}}}}
+        }"#,
+        ),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let err = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[et],
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'EnvScalar': value '/a/job1/cfg/a' is not in allowed values\n\
+         Parameter 'EnvPaths': item[0] value '/a/job1/env/a' is not in allowed values"
+    );
+}
+
+#[test]
+fn path_default_walk_up_edge_cases() {
+    // Mirrors the conformance walk-up cases: escapes that do not start with "../",
+    // and look-alikes that must be accepted.
+    let options = posix_path_options(false, false);
+    for (default, expected) in [
+        ("a/..", "/a/job1"),
+        ("a/../b", "/a/job1/b"),
+        ("./a/./../b/.", "/a/job1/b"),
+        ("..name", "/a/job1/..name"),
+        ("...", "/a/job1/..."),
+        ("a/b/c/../../../d", "/a/job1/d"),
+    ] {
+        let params = preprocess_expr_params(
+            &format!(r#"{{"name": "P", "type": "PATH", "default": "{default}"}}"#),
+            &Default::default(),
+            &options,
+        )
+        .unwrap_or_else(|e| panic!("{default} should be accepted: {e}"));
+        assert_eq!(params["P"].value.to_display_string(), expected, "{default}");
+    }
+    for default in [
+        "..",
+        "a/../../b",
+        "./../b",
+        "a/../..",
+        "a/b/c/../../../../d",
+    ] {
+        let err = preprocess_expr_params(
+            &format!(r#"{{"name": "P", "type": "PATH", "default": "{default}"}}"#),
+            &Default::default(),
+            &options,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Validation error: The default value of PATH parameter P references a path outside of the template directory. Walking up from the template directory is not permitted.",
+            "{default}"
+        );
+    }
+}
+
+#[test]
+fn path_default_walk_up_mixed_separators_windows() {
+    let jt = decode_job_template(
+        minimal_job_template(
+            r#"{"name": "A", "type": "PATH", "default": "a\\..\\..\\b"},
+               {"name": "B", "type": "PATH", "default": "a/..\\../b"},
+               {"name": "C", "type": "PATH", "default": "a\\../b"}"#,
+        ),
+        None,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let options = openjd_model::PathParameterOptions {
+        job_template_dir: r"C:\templates\job1",
+        current_working_dir: r"C:\cwd",
+        path_format: PathFormat::Windows,
+        allow_template_dir_walk_up: false,
+        allow_uri_path_values: false,
+    };
+    let err = preprocess_job_parameters(&jt, &Default::default(), &[], &options).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of PATH parameter A references a path outside of the template directory. Walking up from the template directory is not permitted.\n\
+         The default value of PATH parameter B references a path outside of the template directory. Walking up from the template directory is not permitted."
+    );
+}
+
+#[test]
+fn list_path_default_interior_walk_up_rejected_after_valid_elements() {
+    let err = preprocess_expr_params(
+        r#"{"name": "Paths", "type": "LIST[PATH]", "default": ["a/..", "..name", "a/../../b"]}"#,
+        &Default::default(),
+        &posix_path_options(false, false),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: The default value of LIST[PATH] parameter Paths at item[2] references a path outside of the template directory. Walking up from the template directory is not permitted."
+    );
 }

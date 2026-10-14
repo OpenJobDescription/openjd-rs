@@ -23,6 +23,15 @@ use crate::error::{path_field, path_index, PathElement, ValidationErrors};
 use crate::template::*;
 use crate::types::{ModelExtension, ValidationContext};
 
+use super::helpers;
+
+/// Maximum length of a `let` binding's `<UserIdentifier>` (§3.6.1).
+///
+/// Flat, so not `EffectiveLimits::max_identifier_len`: that is the §7.1 cap, 64
+/// without `FEATURE_BUNDLE_1`, and a 512-character name must be accepted with
+/// EXPR alone.
+const MAX_LET_IDENTIFIER_LEN: usize = 512;
+
 /// Build a symbol table containing Param/RawParam entries from job parameter definitions.
 /// RawParam.* is always STRING for PATH types and LIST_STRING for LIST_PATH types,
 /// matching Python behavior where RawParam holds the raw unprocessed value.
@@ -229,13 +238,7 @@ fn build_task_scope_symtab(
     // so the runtime allocates embedded file paths — defining Task.File.* —
     // before evaluating `let`, mirroring the environment runner's Env.File.*
     // ordering.
-    if let Some(script) = step
-        .resolve_syntax_sugar()
-        .ok()
-        .flatten()
-        .as_ref()
-        .or(step.script.as_ref())
-    {
+    if let Some(script) = step.resolve_syntax_sugar() {
         if let Some(files) = &script.embedded_files {
             for f in files {
                 symtab
@@ -259,83 +262,1353 @@ fn build_task_scope_symtab(
     symtab
 }
 
-/// Validate a format string against a symbol table, reporting errors at the given path.
-fn validate_fs(
-    fs: &FormatString,
-    symtab: &SymbolTable,
-    lib: &FunctionLibrary,
+/// Soft cap, in characters, on the resolved length of a numeric
+/// (`<posintstring>` / `<intstring>` / float-string) format-string field.
+///
+/// There is no exact maximum: leading zeros are permitted and values are
+/// trimmed, so a conforming integer string can be padded arbitrarily. Any
+/// resolution longer than this is unreasonable for a numeric field, though —
+/// an i64 needs at most 20 characters — so a lower bound past it is reported
+/// at template validation time rather than failing later at job creation or
+/// on the worker.
+const MAX_RESOLVED_NUMERIC_LEN: usize = 100;
+
+/// Longest valid resolved cancelation `mode` value.
+const MODE_MAX_LEN: usize = "NOTIFY_THEN_TERMINATE".len();
+
+/// §5 action `timeout` (`<posintstring>` with FEATURE_BUNDLE_1): the
+/// resolved value must be a positive integer; whole-field `null` is unset.
+const TIMEOUT_CONSTRAINT: ResolvedConstraint<'static> = ResolvedConstraint::Int {
+    min: 1,
+    min_msg: "timeout must be > 0.",
+    max: None,
+    parse_msg: "timeout must be a positive integer.",
+    nullable: true,
+};
+
+/// §5.3.2 `notifyPeriodInSeconds`: positive integer with a spec-mandated
+/// maximum of 600; whole-field `null` is unset.
+const NOTIFY_PERIOD_CONSTRAINT: ResolvedConstraint<'static> = ResolvedConstraint::Int {
+    min: 1,
+    min_msg: "notifyPeriodInSeconds must be > 0.",
+    max: Some((600, "notifyPeriodInSeconds must not exceed 600.")),
+    parse_msg: "notifyPeriodInSeconds must be a positive integer.",
+    nullable: true,
+};
+
+/// A spec-mandated constraint on the value a format string resolves to
+/// — a constraint the spec applies to the value the format string
+/// resolves to, "after the format string has been resolved" in the
+/// spec's wording. Enforcing it here makes template validation the
+/// earliest of the spec's three processing stages (Template Schemas
+/// §7.4: template validation, job creation, task execution on the
+/// worker host) to catch a violation that is already knowable.
+///
+/// Applied to the [`openjd_expr::StaticResolution`] that
+/// `validate_expressions` returns, in two stages:
+///
+/// 1. **Lower bound** — if `min_resolved_string_len` already exceeds the
+///    field's limit, no run-time resolution can conform, so validation
+///    fails without knowing the unresolved parts. Numeric fields use the
+///    soft [`MAX_RESOLVED_NUMERIC_LEN`] (no exact maximum exists — leading
+///    zeros); the cancelation mode uses the longest valid enum literal.
+/// 2. **Full value check** — when `resolved_value` is present the field is
+///    fully static, and the same check job creation or the worker would
+///    run on the resolved value runs here.
+///
+/// Target types match resolution: every constrained field resolves its
+/// single whole-field expressions with the schema-derived target type
+/// from Expression Language §1.3.2 ([`Self::target_type`]), and job
+/// creation and the session runtime resolve with the same targets.
+/// Multi-segment strings concatenate
+/// to a string regardless, and the stage-2 checks mirror the downstream
+/// `display → trim → parse` handling for that case exactly.
+///
+/// Literal (non-interpolated) fields are excluded for the spec-mandated
+/// constraints: the raw-text passes (structure/limits) already check
+/// those, and for literals raw text and resolved value coincide. The
+/// opt-in caps ([`Self::ResolvedString`] / [`Self::ArgListItem`]) have no
+/// raw-text pass, so `validate_fs_with` checks a literal field's exact
+/// raw length against them instead.
+enum ResolvedConstraint<'a> {
+    /// A string field with a maximum resolved length in characters.
+    /// `forbid_control_chars` and `forbid_empty` add the §1.1.1 checks
+    /// for the job name when the value is fully static (environment
+    /// variable values set neither: §4.4.2's minimum length is 0 and any
+    /// character is allowed).
+    Text {
+        max_len: usize,
+        forbid_control_chars: bool,
+        forbid_empty: bool,
+    },
+    /// A list-item string field (task-parameter range elements,
+    /// Template Schemas §3.4.2). Per Expression Language §1.3.2 a
+    /// whole-field expression targets `string? | list[string]`: `null`
+    /// skips the element, a list flattens inline, and `max_len` applies
+    /// to each resulting element. `forbid_empty` applies §3.4.2's
+    /// minimum length of 1 — set for PATH elements only, matching the
+    /// reference implementation, which accepts empty STRING elements
+    /// (see `resolve_string_range` in create_job/ranges.rs).
+    TextListItem { max_len: usize, forbid_empty: bool },
+    /// A `hostRequirements` attribute value (§3.3.2.2): 100-char
+    /// identifier-like values, or membership in the allowed set for a
+    /// standard capability. Also a list item, with the same
+    /// `string? | list[string]` skip/flatten semantics as
+    /// [`Self::TextListItem`]; the §3.3.2.2 checks apply to each
+    /// resulting element.
+    AttributeValue {
+        capability_name: &'a str,
+        standard: &'static [(&'static str, &'static [&'static str])],
+    },
+    /// A `hostRequirements` amount or attribute `name` (§3.3.1.1 /
+    /// §3.3.2.1): at most 100 characters, and when fully static, the
+    /// capability name pattern for `kind` and the reserved scopes, checked
+    /// by [`helpers::check_capability_name`] exactly as for a literal name
+    /// and the resolved name at job creation. `standard` holds the
+    /// standard capability names for `kind`.
+    CapabilityName {
+        kind: helpers::CapabilityKind,
+        standard: &'a [&'a str],
+    },
+    /// An integer field (`<posintstring>` / `<intstring>`), resolved
+    /// with target `int` — or `int?` when `nullable`, where a
+    /// whole-field `null` resolution means the field is unset (schema
+    /// defaults apply) — so a static `{{ 120.0 }}` coerces to the int it
+    /// denotes. The messages match the raw-text checks for the literal
+    /// forms of the same fields.
+    Int {
+        min: i64,
+        min_msg: &'static str,
+        max: Option<(i64, &'static str)>,
+        parse_msg: &'static str,
+        nullable: bool,
+    },
+    /// An amount capability bound (`min`/`max`): non-negative or
+    /// strictly-positive finite float.
+    Float { positive: bool, msg: &'static str },
+    /// The cancelation `mode` enum (FEATURE_BUNDLE_1 deferred form):
+    /// resolves to `TERMINATE`, `NOTIFY_THEN_TERMINATE`, or `null`.
+    CancelationMode,
+    /// A field consumed as one whole string with an opt-in caller cap:
+    /// an action `command` (§5.1, `CallerLimits::max_resolved_arg_len`)
+    /// or an embedded-file `data` value (§6.1.2,
+    /// `CallerLimits::max_resolved_data_len`). The spec sets no maximum
+    /// of its own. Resolution is `resolve_string_with` with **no**
+    /// target type — every value renders inline into a single string —
+    /// so the length bound applies unconditionally and there are no
+    /// skip/flatten semantics.
+    ResolvedString { max_len: usize },
+    /// An action `args` element (§5.2) under the opt-in
+    /// `CallerLimits::max_resolved_arg_len` cap. The session runtime
+    /// (`resolve_action_args`) resolves each element with `resolve_with`
+    /// and **no** target type: `null` skips the element, a list flattens
+    /// into one argv entry per element, and anything else becomes one
+    /// argv entry via its display form — so the cap applies to each
+    /// resulting entry, with the same certainly-a-string gating as
+    /// [`Self::TextListItem`].
+    ArgListItem { max_len: usize },
+}
+
+impl ResolvedConstraint<'_> {
+    /// The target type the field's resolution uses, per Expression
+    /// Language §1.3.2 (single whole-field expressions only —
+    /// multi-segment strings concatenate regardless, exactly as in
+    /// resolution): `string` for the required scalar string fields,
+    /// `string? | list[string]` for list items (range elements,
+    /// attribute values — `null` skips, a list flattens), `float?`
+    /// for the optional amount bounds, `int?` for `timeout` and
+    /// `notifyPeriodInSeconds` (§5/§5.3.2 — `null` means "not
+    /// provided"), plain `int` for the required `defaultTaskCount`, and
+    /// `string?` for the deferred cancelation `mode`. Job creation and
+    /// the session runtime resolve with the same targets — a field's
+    /// validation-time target must always equal its resolution-time
+    /// target. `None` for the fields whose resolution passes no target
+    /// type at all (action `command`/`args`, embedded-file `data` —
+    /// see `resolve_action_args` and embedded-file materialization in
+    /// `openjd-sessions`).
+    fn target_type(&self) -> Option<ExprType> {
+        match self {
+            Self::Text { .. } | Self::CapabilityName { .. } => Some(ExprType::STRING),
+            Self::TextListItem { .. } | Self::AttributeValue { .. } => Some(ExprType::union(vec![
+                ExprType::NULLTYPE,
+                ExprType::STRING,
+                ExprType::list(ExprType::STRING),
+            ])),
+            Self::Float { .. } => Some(ExprType::union(vec![ExprType::FLOAT, ExprType::NULLTYPE])),
+            Self::Int { nullable, .. } => {
+                if *nullable {
+                    Some(ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]))
+                } else {
+                    Some(ExprType::INT)
+                }
+            }
+            Self::CancelationMode => {
+                Some(ExprType::union(vec![ExprType::STRING, ExprType::NULLTYPE]))
+            }
+            Self::ResolvedString { .. } | Self::ArgListItem { .. } => None,
+        }
+    }
+}
+
+/// Apply a [`ResolvedConstraint`] to what static evaluation determined.
+fn check_resolved_constraint(
+    sr: &openjd_expr::StaticResolution,
+    constraint: &ResolvedConstraint<'_>,
     path: &[PathElement],
     errors: &mut ValidationErrors,
 ) {
-    if fs.is_literal() {
-        return;
-    }
-    if let Err(e) = fs.validate_expressions(symtab, lib) {
-        let mut spans = Vec::new();
-        if let Some(ref expr_err) = e.expression_error {
-            if !expr_err.sub_errors().is_empty() {
-                // Compound error (e.g., if/else both branches fail) — one span per sub-error
-                for sub in expr_err.sub_errors() {
-                    if let (Some(expr), Some(col), Some(end_col)) =
-                        (sub.expr(), sub.col_offset(), sub.end_col_offset())
-                    {
-                        spans.push(crate::error::DiagnosticSpan {
-                            summary: sub.message(),
-                            source: expr.to_string(),
-                            start: col,
-                            end: end_col,
-                            caret: sub.caret_offset().unwrap_or(0),
-                        });
+    // The fully-static resolved text, exactly as job creation's
+    // `resolve_string_with` would produce it: the display form, with a
+    // whole-field `null` interpolating as unset (`None` here).
+    let static_text = || -> Option<String> {
+        match &sr.resolved_value {
+            None | Some(ExprValue::Null) => None,
+            Some(v) => Some(v.to_display_string()),
+        }
+    };
+
+    match constraint {
+        ResolvedConstraint::Text {
+            max_len,
+            forbid_control_chars,
+            forbid_empty,
+        } => {
+            // The bound is exact when the value is fully static, so this
+            // one check covers both the bound-only and static cases.
+            if sr.min_resolved_string_len > *max_len {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, exceeding the maximum of {}.",
+                        sr.min_resolved_string_len, max_len
+                    ),
+                );
+            }
+            if let Some(s) = static_text() {
+                // §1.1.1 minimum length 1: a fully static empty
+                // resolution can never conform. (Partially unresolved
+                // strings may still resolve empty; job creation
+                // re-checks the resolved value.)
+                if *forbid_empty && s.is_empty() {
+                    errors.add(path, "must not resolve to an empty string.");
+                }
+                if *forbid_control_chars && s.chars().any(char::is_control) {
+                    errors.add(path, "contains control characters.");
+                }
+            }
+        }
+        ResolvedConstraint::TextListItem {
+            max_len,
+            forbid_empty,
+        } => {
+            // The length bound is only sound when the resolution is
+            // certainly a string: a list-valued resolution distributes
+            // its characters across elements, so the display-form length
+            // says nothing about any single element. Multi-segment
+            // strings are always strings, and a fully static string is
+            // exact — return so the per-element check below does not
+            // report the same violation twice (as in AttributeValue).
+            if sr.resolved_type == ExprType::STRING && sr.min_resolved_string_len > *max_len {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, exceeding the maximum of {}.",
+                        sr.min_resolved_string_len, max_len
+                    ),
+                );
+                return;
+            }
+            // §3.4.2 constrains each element to at most 1024 characters,
+            // and (for PATH only — see the variant doc) to at least 1. A
+            // fully static list flattens into one element per member
+            // (Expression Language §1.3.2): the limits apply to each.
+            if let Some(v) = &sr.resolved_value {
+                let elements = v.list_elements().unwrap_or_else(|| vec![(*v).clone()]);
+                let is_list = v.is_list();
+                for (i, elem) in elements.iter().enumerate() {
+                    if matches!(elem, ExprValue::Null) {
+                        continue;
+                    }
+                    let n = elem.to_display_string().chars().count();
+                    let element_label = if is_list {
+                        format!("list element {i} ")
+                    } else {
+                        String::new()
+                    };
+                    if n > *max_len {
+                        errors.add(
+                            path,
+                            format!(
+                                "{element_label}resolves to {n} characters, exceeding the maximum of {max_len}."
+                            ),
+                        );
+                    } else if n == 0 && *forbid_empty {
+                        errors.add(
+                            path,
+                            format!("{element_label}must not resolve to an empty string."),
+                        );
+                    }
+                }
+            }
+            // A fully static `null` skips the element: valid here; job
+            // creation re-checks that the list is non-empty after all
+            // skips are applied.
+        }
+        ResolvedConstraint::ResolvedString { max_len } => {
+            // `resolve_string_with` renders every value inline into one
+            // string, so the display-form bound is a true lower bound on
+            // the final string whatever the segment types — no gating
+            // needed. Exact when fully static.
+            if sr.min_resolved_string_len > *max_len {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, exceeding the maximum of {}.",
+                        sr.min_resolved_string_len, max_len
+                    ),
+                );
+            }
+        }
+        ResolvedConstraint::ArgListItem { max_len } => {
+            // Same shape as TextListItem: the whole-string bound is only
+            // sound when the resolution is certainly one string — a
+            // list-valued resolution flattens into one argv entry per
+            // element, distributing its characters. Return on the bound
+            // error so the per-element check cannot report the same
+            // violation twice.
+            if sr.resolved_type == ExprType::STRING && sr.min_resolved_string_len > *max_len {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, exceeding the maximum of {}.",
+                        sr.min_resolved_string_len, max_len
+                    ),
+                );
+                return;
+            }
+            // Fully static: the cap applies to each argv entry the
+            // element produces — one per list member after flattening,
+            // one for any other value via its display form. A static
+            // `null` produces no entry.
+            if let Some(v) = &sr.resolved_value {
+                let elements = v.list_elements().unwrap_or_else(|| vec![(*v).clone()]);
+                let is_list = v.is_list();
+                for (i, elem) in elements.iter().enumerate() {
+                    if matches!(elem, ExprValue::Null) {
+                        continue;
+                    }
+                    let n = elem.to_display_string().chars().count();
+                    if n > *max_len {
+                        let element_label = if is_list {
+                            format!("list element {i} ")
+                        } else {
+                            String::new()
+                        };
+                        errors.add(
+                            path,
+                            format!(
+                                "{element_label}resolves to {n} characters, exceeding the maximum of {max_len}."
+                            ),
+                        );
                     }
                 }
             }
         }
-        // Fallback: single span covering the whole interpolation
-        if spans.is_empty() {
-            spans.push(crate::error::DiagnosticSpan {
-                summary: e.message.clone(),
-                source: e.input.clone(),
-                start: e.start,
-                end: e.end,
-                caret: 0,
-            });
+        ResolvedConstraint::AttributeValue {
+            capability_name,
+            standard,
+        } => {
+            let lower = capability_name.to_lowercase();
+            let allowed = standard
+                .iter()
+                .find(|(n, _)| *n == lower)
+                .map(|(_, vals)| *vals);
+            // Length bounds gated on a certainly-string resolution, as in
+            // TextListItem: list-valued resolutions are checked
+            // per-element below.
+            if sr.resolved_type == ExprType::STRING {
+                match allowed {
+                    // Standard capability: values come from a fixed set,
+                    // so no resolution longer than the longest member can
+                    // conform.
+                    Some(vals) => {
+                        let longest = vals.iter().map(|v| v.chars().count()).max().unwrap_or(0);
+                        if sr.min_resolved_string_len > longest {
+                            errors.add(
+                                path,
+                                format!(
+                                    "resolves to at least {} characters; no valid value for {} is longer than {} characters.",
+                                    sr.min_resolved_string_len, lower, longest
+                                ),
+                            );
+                            return;
+                        }
+                    }
+                    // Identifier-like capability: §3.3.2.2 max of 100.
+                    None => {
+                        if sr.min_resolved_string_len > 100 {
+                            errors.add(
+                                path,
+                                format!(
+                                    "resolves to at least {} characters, exceeding the maximum of 100.",
+                                    sr.min_resolved_string_len
+                                ),
+                            );
+                            return;
+                        }
+                    }
+                }
+            }
+            // Fully static: the §3.3.2.2 check runs on the value — or on
+            // each element when the item flattens (Expression Language
+            // §1.3.2). A static `null` skips the element; job creation
+            // re-checks non-emptiness after skips.
+            match &sr.resolved_value {
+                None | Some(ExprValue::Null) => {}
+                Some(v) => {
+                    let elements = v.list_elements().unwrap_or_else(|| vec![(*v).clone()]);
+                    for elem in &elements {
+                        if let Err(message) =
+                            crate::capabilities::validate_attribute_capability_value(
+                                capability_name,
+                                &elem.to_display_string(),
+                                standard,
+                            )
+                        {
+                            errors.add(path, message);
+                        }
+                    }
+                }
+            }
         }
-        let summary = if let Some(ref expr_err) = e.expression_error {
-            expr_err.message()
+        ResolvedConstraint::CapabilityName { kind, standard } => {
+            // Fully static: run the check job creation runs on the resolved
+            // name. It includes the length, so the bound below would only
+            // report the same violation twice.
+            if let Some(name) = static_text() {
+                helpers::check_capability_name(&name, *kind, standard, path, errors);
+                return;
+            }
+            // The target type is `string`, so the resolution is certainly a
+            // string and the bound applies. The pattern and reserved-scope
+            // checks need the whole name, so job creation applies them.
+            if sr.min_resolved_string_len > 100 {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, exceeding the maximum of 100.",
+                        sr.min_resolved_string_len
+                    ),
+                );
+            }
+        }
+        ResolvedConstraint::Int {
+            min,
+            min_msg,
+            max,
+            parse_msg,
+            nullable,
+        } => {
+            // Stage 1: soft character bound. No exact maximum exists
+            // (leading zeros, trimming), but a resolution this long
+            // cannot be a reasonable integer.
+            if sr.min_resolved_string_len > MAX_RESOLVED_NUMERIC_LEN {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, which cannot be a reasonable integer value.",
+                        sr.min_resolved_string_len
+                    ),
+                );
+                return;
+            }
+            // Stage 2: exact value check when fully static, mirroring the
+            // downstream handling: a whole-field expression is already
+            // the coerced int (or null); a multi-segment string resolves
+            // to text and parses with surrounding whitespace tolerated,
+            // matching job creation and the session runtime.
+            let value = match &sr.resolved_value {
+                None => return,
+                Some(ExprValue::Null) => {
+                    if !nullable {
+                        errors.add(path, *parse_msg);
+                    }
+                    return;
+                }
+                Some(ExprValue::Int(v)) => *v,
+                Some(other) => {
+                    let s = other.to_display_string();
+                    // Multi-segment strings parse like Python's int():
+                    // surrounding whitespace is tolerated, matching the
+                    // downstream handling at job creation and in the session runtime.
+                    match s.trim().parse::<i64>() {
+                        Ok(v) => v,
+                        Err(_) => {
+                            errors.add(path, *parse_msg);
+                            return;
+                        }
+                    }
+                }
+            };
+            if value < *min {
+                errors.add(path, *min_msg);
+            } else if let Some((max_v, max_msg)) = max {
+                if value > *max_v {
+                    errors.add(path, *max_msg);
+                }
+            }
+        }
+        ResolvedConstraint::Float { positive, msg } => {
+            if sr.min_resolved_string_len > MAX_RESOLVED_NUMERIC_LEN {
+                errors.add(
+                    path,
+                    format!(
+                        "resolves to at least {} characters, which cannot be a reasonable number.",
+                        sr.min_resolved_string_len
+                    ),
+                );
+                return;
+            }
+            if let Some(s) = static_text() {
+                match s.trim().parse::<f64>() {
+                    Ok(v) if !v.is_finite() => errors.add(path, "must be a finite number."),
+                    Ok(v) if (*positive && v <= 0.0) || (!*positive && v < 0.0) => {
+                        errors.add(path, *msg);
+                    }
+                    Ok(_) => {}
+                    Err(_) => errors.add(path, "must be a finite number."),
+                }
+            }
+        }
+        ResolvedConstraint::CancelationMode => {
+            if sr.min_resolved_string_len > MODE_MAX_LEN {
+                errors.add(
+                    path,
+                    format!(
+                        "mode resolves to at least {} characters; valid values are TERMINATE and NOTIFY_THEN_TERMINATE.",
+                        sr.min_resolved_string_len
+                    ),
+                );
+                return;
+            }
+            // Whole-field null: cancelation treated as not provided.
+            if let Some(s) = static_text() {
+                if s != "TERMINATE" && s != "NOTIFY_THEN_TERMINATE" {
+                    errors.add(
+                        path,
+                        format!(
+                            "mode must resolve to TERMINATE or NOTIFY_THEN_TERMINATE, got '{s}'."
+                        ),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Function library plus caller evaluation budgets for one validation
+/// scope. Pass 8 and the job-creation re-checks both evaluate every
+/// format-string expression; the budgets
+/// (`CallerLimits::max_eval_memory_bytes` / `max_eval_operations`) bound
+/// each of those evaluations exactly as they bound resolution at job
+/// creation and run time, so a lowered budget fails at the earliest
+/// stage that can detect it. Evaluation/parse errors are always
+/// reported: `create_job` requires a context that enables the
+/// template's declared extensions (see `create_job`'s `ctx` docs), so
+/// an error at either stage is a template defect or a deterministic
+/// value-dependent failure that every session would hit.
+///
+/// Every evaluation runs under `PathFormat::Posix`: template validation
+/// and job creation happen outside host context, where the model keeps
+/// all paths POSIX (only `openjd-sessions` evaluates under
+/// `PathFormat::host()` — see `preprocess_job_parameters` in
+/// `specs/model/job-creation.md`, which explains why paths stay POSIX
+/// until template evaluation on the host). This keeps the two stages consistent
+/// with each other and with the POSIX-format values `create_job` seeds
+/// into its check symbol tables, and makes validation outcomes
+/// independent of the OS running them.
+struct FsEval<'a> {
+    lib: &'a FunctionLibrary,
+    memory_limit: Option<usize>,
+    operation_limit: Option<usize>,
+}
+
+impl<'a> FsEval<'a> {
+    fn new(lib: &'a FunctionLibrary, caller_limits: &crate::types::CallerLimits) -> Self {
+        Self {
+            lib,
+            memory_limit: caller_limits.max_eval_memory_bytes,
+            operation_limit: caller_limits.max_eval_operations,
+        }
+    }
+
+    /// Evaluation options matching how the field will later resolve,
+    /// with this scope's library and the caller budgets applied.
+    fn options(
+        &self,
+        target: Option<&'a openjd_expr::ExprType>,
+    ) -> openjd_expr::FormatStringOptions<'a> {
+        let mut opts = openjd_expr::FormatStringOptions::new()
+            .with_library(self.lib)
+            .with_path_format(PathFormat::Posix);
+        if let Some(t) = target {
+            opts = opts.with_target_type(t);
+        }
+        if let Some(m) = self.memory_limit {
+            opts = opts.with_memory_limit(m);
+        }
+        if let Some(o) = self.operation_limit {
+            opts = opts.with_operation_limit(o);
+        }
+        opts
+    }
+
+    /// Apply the caller budgets and the POSIX path format (see the
+    /// struct docs) to a raw [`openjd_expr::EvalBuilder`] — for the
+    /// evaluation sites (let bindings) that parse expressions
+    /// directly rather than resolving a `FormatString`.
+    fn budgeted<'b>(
+        &self,
+        mut builder: openjd_expr::EvalBuilder<'b>,
+    ) -> openjd_expr::EvalBuilder<'b> {
+        builder = builder.with_path_format(PathFormat::Posix);
+        if let Some(m) = self.memory_limit {
+            builder = builder.with_memory_limit(m);
+        }
+        if let Some(o) = self.operation_limit {
+            builder = builder.with_operation_limit(o);
+        }
+        builder
+    }
+}
+
+/// Validate a format string against a symbol table, reporting errors at the given path.
+fn validate_fs(
+    fs: &FormatString,
+    symtab: &SymbolTable,
+    ev: &FsEval<'_>,
+    path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    validate_fs_with(fs, symtab, ev, path, None, errors);
+}
+
+/// A `hostRequirements` capability name whose value template validation
+/// knows: a literal, or a format string that is fully static.
+struct KnownCapabilityName {
+    name: String,
+    /// Structure already checked a literal name, including its uniqueness
+    /// against the other literal names.
+    literal: bool,
+}
+
+/// The value of a capability name, when template validation knows it. `sr`
+/// is what [`validate_fs_with`] returned for the name.
+fn known_capability_name(
+    name: &FormatString,
+    sr: Option<&openjd_expr::StaticResolution>,
+) -> Option<KnownCapabilityName> {
+    if name.is_literal() {
+        return Some(KnownCapabilityName {
+            name: name.raw().to_string(),
+            literal: true,
+        });
+    }
+    match sr?.resolved_value.as_ref()? {
+        ExprValue::Null => None,
+        v => Some(KnownCapabilityName {
+            name: v.to_display_string(),
+            literal: false,
+        }),
+    }
+}
+
+/// Check the §3.3 constraint that no two amounts, and no two attributes,
+/// have the same resolved name, for the names template validation knows.
+///
+/// Structure reports duplicates between literal names, so a pair is only
+/// reported here when at least one of its names is fully static. A name
+/// that is not known yet is compared at job creation. Comparison is
+/// case-insensitive, and the message matches the one for literal names.
+fn check_known_names_unique(
+    known: &[Option<KnownCapabilityName>],
+    kind: helpers::CapabilityKind,
+    list_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let mut seen: Vec<(String, bool)> = Vec::new();
+    for (index, k) in known.iter().enumerate() {
+        let Some(k) = k else { continue };
+        let lower = k.name.to_lowercase();
+        if seen
+            .iter()
+            .any(|(name, literal)| *name == lower && !(*literal && k.literal))
+        {
+            errors.add(
+                &path_index(list_path, index),
+                format!("duplicate {} name '{}'.", kind.noun(), k.name),
+            );
+        }
+        seen.push((lower, k.literal));
+    }
+}
+
+/// Apply the standard-capability checks on an attribute's literal values
+/// when its name is fully static.
+///
+/// Structure applies these for a literal name and cannot see a static one,
+/// and the `AttributeValue` constraint skips literal values. The checks are
+/// the ones job creation runs on the resolved values: membership in the
+/// standard capability's allowed values, and the single-valued `allOf`
+/// rule. A static name that is not a standard capability needs nothing
+/// here, since structure already checked the literal values' pattern.
+fn check_values_for_static_name(
+    capability_name: &str,
+    attr: &AttributeRequirement,
+    standard: &[(&str, &[&str])],
+    attr_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let lower = capability_name.to_lowercase();
+    if !standard.iter().any(|(name, _)| *name == lower) {
+        return;
+    }
+    for (field, vals) in [("anyOf", &attr.any_of), ("allOf", &attr.all_of)] {
+        for (k, v) in vals.iter().flatten().enumerate() {
+            if !v.is_literal() {
+                continue;
+            }
+            if let Err(message) = crate::capabilities::validate_attribute_capability_value(
+                capability_name,
+                v.raw(),
+                standard,
+            ) {
+                errors.add(&path_index(&path_field(attr_path, field), k), message);
+            }
+        }
+    }
+    helpers::check_single_valued_all_of(capability_name, attr.all_of.as_deref(), attr_path, errors);
+}
+
+/// [`validate_fs`] plus a spec-mandated resolved-value constraint
+/// (see the Spec-Mandated Resolved-Value Constraints section of
+/// `specs/model/validation.md`), applied to the
+/// [`openjd_expr::StaticResolution`] the validation already computes.
+///
+/// Returns that resolution, so a caller can apply checks that span more
+/// than one field — such as the uniqueness of `hostRequirements` names —
+/// to the values that are fully static. `None` for a literal (its raw text
+/// is its value) or when the expressions fail to validate.
+fn validate_fs_with(
+    fs: &FormatString,
+    symtab: &SymbolTable,
+    ev: &FsEval<'_>,
+    path: &[PathElement],
+    constraint: Option<&ResolvedConstraint<'_>>,
+    errors: &mut ValidationErrors,
+) -> Option<openjd_expr::StaticResolution> {
+    if fs.is_literal() {
+        // Spec-mandated constraints are covered for literal fields by the
+        // raw-text passes (structure/limits) — raw text and resolved value
+        // coincide, so re-checking here would double-report. The opt-in
+        // caps have no raw-text pass, and a literal is the one case where
+        // the resolved value is known exactly: one argv entry / one data
+        // blob of exactly the raw text.
+        if let Some(
+            ResolvedConstraint::ResolvedString { max_len }
+            | ResolvedConstraint::ArgListItem { max_len },
+        ) = constraint
+        {
+            let n = fs.raw().chars().count();
+            if n > *max_len {
+                errors.add(
+                    path,
+                    format!("is {n} characters, exceeding the maximum of {max_len}."),
+                );
+            }
+        }
+        return None;
+    }
+    let target = constraint.and_then(ResolvedConstraint::target_type);
+    match fs.validate_expressions(symtab, &ev.options(target.as_ref())) {
+        Ok(sr) => {
+            if let Some(c) = constraint {
+                check_resolved_constraint(&sr, c, path, errors);
+            }
+            Some(sr)
+        }
+        Err(e) => {
+            let mut spans = Vec::new();
+            if let Some(ref expr_err) = e.expression_error {
+                if !expr_err.sub_errors().is_empty() {
+                    // Compound error (e.g., if/else both branches fail) — one span per sub-error
+                    for sub in expr_err.sub_errors() {
+                        if let (Some(expr), Some(col), Some(end_col)) =
+                            (sub.expr(), sub.col_offset(), sub.end_col_offset())
+                        {
+                            spans.push(crate::error::DiagnosticSpan {
+                                summary: sub.message(),
+                                source: expr.to_string(),
+                                start: col,
+                                end: end_col,
+                                caret: sub.caret_offset().unwrap_or(0),
+                            });
+                        }
+                    }
+                }
+            }
+            // Fallback: single span covering the whole interpolation
+            if spans.is_empty() {
+                spans.push(crate::error::DiagnosticSpan {
+                    summary: e.message.clone(),
+                    source: e.input.clone(),
+                    start: e.start,
+                    end: e.end,
+                    caret: 0,
+                });
+            }
+            let summary = if let Some(ref expr_err) = e.expression_error {
+                expr_err.message()
+            } else {
+                e.message.clone()
+            };
+            let detail = crate::error::ErrorDetail { summary, spans };
+            errors.add_with_detail(
+                path,
+                format!(
+                    "Failed to parse interpolation expression at [{}, {}]. {}",
+                    e.start, e.end, e.message
+                ),
+                detail,
+            );
+            None
+        }
+    }
+}
+
+/// Pass-8 checks for one step script (§3.5), rooted at `script_path`:
+/// script-level `let` bindings (evaluated into `task_symtab`), the
+/// EXPR-gated complex-expression rejection, the `onRun` action's
+/// `command`/`args` (task scope), `timeout`/`cancelation` (template scope),
+/// each embedded file's `data` (task scope), and comprehension-variable
+/// rules against the step + script `let` names.
+///
+/// Shared by the authored `script` field and the desugared SimpleAction
+/// forms (§8); the latter run it into a scratch collection rooted at `[]`
+/// and re-root the paths onto the sugar field via
+/// [`SimpleActionKind::remap_desugared_path`].
+#[allow(clippy::too_many_arguments)]
+fn validate_step_script_format_strings(
+    script: &StepScript,
+    script_path: &[PathElement],
+    step: &StepTemplate,
+    task_symtab: &mut SymbolTable,
+    step_template_symtab: &SymbolTable,
+    host_ev: &FsEval<'_>,
+    host_profile: &openjd_expr::ExprProfile,
+    template_ev: &FsEval<'_>,
+    ctx: &ValidationContext,
+    expr_active: bool,
+    errors: &mut ValidationErrors,
+) {
+    // Script-level let bindings (TASK scope — host_lib). Task.File.*
+    // is in scope: file paths are allocated before `let` evaluation
+    // at runtime (filenames are plain strings, so allocation cannot
+    // depend on `let` values).
+    if let Some(bindings) = &script.let_bindings {
+        let let_path = path_field(script_path, "let");
+        if !expr_active {
+            errors.add(&let_path, "'let' requires the EXPR extension.");
         } else {
-            e.message.clone()
-        };
-        let detail = crate::error::ErrorDetail { summary, spans };
-        errors.add_with_detail(
-            path,
-            format!(
-                "Failed to parse interpolation expression at [{}, {}]. {}",
-                e.start, e.end, e.message
-            ),
-            detail,
+            let enclosing: HashSet<String> = step
+                .let_bindings
+                .as_ref()
+                .map(|bs| {
+                    bs.iter()
+                        .filter_map(|b| b.find('=').map(|eq| b[..eq].trim().to_string()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut script_let_names = HashSet::new();
+            validate_let_bindings(
+                bindings,
+                &let_path,
+                &enclosing,
+                &mut script_let_names,
+                task_symtab,
+                host_ev,
+                host_profile,
+                errors,
+            );
+        }
+    }
+
+    // Complex expressions: reject if not EXPR
+    if !expr_active {
+        let action_path = path_field(&path_field(script_path, "actions"), "onRun");
+        if script.actions.on_run.command.has_complex_expressions() {
+            errors.add(
+                &path_field(&action_path, "command"),
+                "complex expressions require the EXPR extension.",
+            );
+        }
+        if let Some(args) = &script.actions.on_run.args {
+            let args_path = path_field(&action_path, "args");
+            for (j, arg) in args.iter().enumerate() {
+                if arg.has_complex_expressions() {
+                    errors.add(
+                        &path_index(&args_path, j),
+                        "complex expressions require the EXPR extension.",
+                    );
+                }
+            }
+        }
+    }
+
+    // Validate all format string references (both base and EXPR)
+    let action_path = path_field(&path_field(script_path, "actions"), "onRun");
+    validate_action_fs(
+        &script.actions.on_run,
+        task_symtab,
+        host_ev,
+        &action_path,
+        ctx.caller_limits.max_resolved_arg_len,
+        errors,
+    );
+
+    // Timeout and notifyPeriodInSeconds are plain @fmtstring
+    // (resolved at job creation, before any session exists), so
+    // they validate against the template-scope symtab: no
+    // Session.*, no Task.*, no Env.File.*, no host functions.
+    validate_action_timing_fs(
+        &script.actions.on_run,
+        step_template_symtab,
+        template_ev,
+        &action_path,
+        errors,
+    );
+
+    // Embedded files
+    if let Some(files) = &script.embedded_files {
+        let files_path = path_field(script_path, "embeddedFiles");
+        let data_constraint = ctx
+            .caller_limits
+            .max_resolved_data_len
+            .map(|max_len| ResolvedConstraint::ResolvedString { max_len });
+        for (j, f) in files.iter().enumerate() {
+            let f_path = path_index(&files_path, j);
+            if let Some(data) = &f.data {
+                validate_fs_with(
+                    data,
+                    task_symtab,
+                    host_ev,
+                    &path_field(&f_path, "data"),
+                    data_constraint.as_ref(),
+                    errors,
+                );
+            }
+            // `filename` is a plain string per the 2023-09 schema
+            // (not @fmtstring) — no format-string validation.
+        }
+    }
+
+    // EXPR-only: comprehension variable validation
+    if expr_active {
+        let mut all_let_names: HashSet<String> = HashSet::new();
+        if let Some(bindings) = &step.let_bindings {
+            for b in bindings {
+                if let Some(eq) = b.find('=') {
+                    all_let_names.insert(b[..eq].trim().to_string());
+                }
+            }
+        }
+        if let Some(bindings) = &script.let_bindings {
+            for b in bindings {
+                if let Some(eq) = b.find('=') {
+                    all_let_names.insert(b[..eq].trim().to_string());
+                }
+            }
+        }
+        if !all_let_names.is_empty() {
+            if let Err(e) = script
+                .actions
+                .on_run
+                .command
+                .validate_comprehension_vars(&all_let_names)
+            {
+                errors.add(&path_field(&action_path, "command"), e.to_string());
+            }
+            if let Some(args) = &script.actions.on_run.args {
+                let args_path = path_field(&action_path, "args");
+                for (j, arg) in args.iter().enumerate() {
+                    if let Err(e) = arg.validate_comprehension_vars(&all_let_names) {
+                        errors.add(&path_index(&args_path, j), e.to_string());
+                    }
+                }
+            }
+            // Embedded-file `data` sees the same `let` names as `args`
+            // (a SimpleAction's `script` desugars to it).
+            if let Some(files) = &script.embedded_files {
+                let files_path = path_field(script_path, "embeddedFiles");
+                for (j, f) in files.iter().enumerate() {
+                    if let Some(data) = &f.data {
+                        if let Err(e) = data.validate_comprehension_vars(&all_let_names) {
+                            errors.add(
+                                &path_field(&path_index(&files_path, j), "data"),
+                                e.to_string(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Validate an action's template-scope numeric/enum fields: `timeout`
+/// against [`TIMEOUT_CONSTRAINT`], and the cancelation's deferred `mode`
+/// ([`ResolvedConstraint::CancelationMode`]) and `notifyPeriodInSeconds`
+/// ([`NOTIFY_PERIOD_CONSTRAINT`]) — the latter two reported at the
+/// `cancelation` path. `symtab`/`ev` are the template scope (plus the
+/// unresolved `WrappedAction.*` scope for an RFC 0008 wrap hook).
+///
+/// Shared by pass 8 and the job-creation re-check, so the constraints,
+/// target types, paths, and messages cannot drift between the stages.
+fn validate_action_timing_fs(
+    action: &Action,
+    symtab: &SymbolTable,
+    ev: &FsEval<'_>,
+    action_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    if let Some(timeout) = &action.timeout {
+        validate_fs_with(
+            timeout,
+            symtab,
+            ev,
+            &path_field(action_path, "timeout"),
+            Some(&TIMEOUT_CONSTRAINT),
+            errors,
+        );
+    }
+    let (mode_fs, notify_fs) = match &action.cancelation {
+        Some(CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds,
+        }) => (None, notify_period_in_seconds.as_ref()),
+        Some(CancelationMode::DeferredMode {
+            mode,
+            notify_period_in_seconds,
+        }) => (Some(mode), notify_period_in_seconds.as_ref()),
+        _ => (None, None),
+    };
+    if let Some(mode) = mode_fs {
+        validate_fs_with(
+            mode,
+            symtab,
+            ev,
+            &path_field(action_path, "cancelation"),
+            Some(&ResolvedConstraint::CancelationMode),
+            errors,
+        );
+    }
+    if let Some(notify) = notify_fs {
+        validate_fs_with(
+            notify,
+            symtab,
+            ev,
+            &path_field(action_path, "cancelation"),
+            Some(&NOTIFY_PERIOD_CONSTRAINT),
+            errors,
         );
     }
 }
 
-/// Validate a format string in an action (command + args).
+/// [`validate_action_timing_fs`] for every action of an environment
+/// script. On the plain lifecycle actions (`onEnter`/`onExit`) these
+/// fields resolve at job creation, before any session exists, so they
+/// validate against the template-scope `template_symtab`. On the RFC 0008
+/// wrap hooks they resolve at run time with the `WrappedAction.*`
+/// variables seeded — that is what makes round-trip forwarding
+/// (`timeout: "{{WrappedAction.Timeout}}"`,
+/// `mode: "{{WrappedAction.Cancelation.Mode}}"`) possible — so they see
+/// that scope too, unresolved.
+fn validate_env_actions_timing_fs(
+    script: &EnvironmentScript,
+    template_symtab: &SymbolTable,
+    template_ev: &FsEval<'_>,
+    actions_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let wrap_hook_names: [&str; 3] = ["onWrapEnvEnter", "onWrapTaskRun", "onWrapEnvExit"];
+    for (name, action) in script.actions.iter_named() {
+        let action_path = path_field(actions_path, name);
+        let scoped_symtab: SymbolTable;
+        let field_symtab: &SymbolTable = if wrap_hook_names.contains(&name) {
+            let mut st = template_symtab.clone();
+            add_wrapped_action_scope(&mut st);
+            scoped_symtab = st;
+            &scoped_symtab
+        } else {
+            template_symtab
+        };
+        validate_action_timing_fs(action, field_symtab, template_ev, &action_path, errors);
+    }
+}
+
+/// Validate a format string in an action (command + args). When the
+/// caller opted into `CallerLimits::max_resolved_arg_len`, the resolved
+/// command string and each argv entry the args produce are bounded by it
+/// (§5.1/§5.2 set no spec maximum — see the `ResolvedString` /
+/// `ArgListItem` constraint docs).
 fn validate_action_fs(
     action: &Action,
     symtab: &SymbolTable,
-    lib: &FunctionLibrary,
+    ev: &FsEval<'_>,
     action_path: &[PathElement],
+    max_resolved_arg_len: Option<usize>,
     errors: &mut ValidationErrors,
 ) {
-    validate_fs(
+    let command_constraint =
+        max_resolved_arg_len.map(|max_len| ResolvedConstraint::ResolvedString { max_len });
+    let arg_constraint =
+        max_resolved_arg_len.map(|max_len| ResolvedConstraint::ArgListItem { max_len });
+    validate_fs_with(
         &action.command,
         symtab,
-        lib,
+        ev,
         &path_field(action_path, "command"),
+        command_constraint.as_ref(),
         errors,
     );
     if let Some(args) = &action.args {
         let args_path = path_field(action_path, "args");
         for (j, arg) in args.iter().enumerate() {
-            validate_fs(arg, symtab, lib, &path_index(&args_path, j), errors);
+            validate_fs_with(
+                arg,
+                symtab,
+                ev,
+                &path_index(&args_path, j),
+                arg_constraint.as_ref(),
+                errors,
+            );
+        }
+    }
+}
+
+// ── Job-creation resolved-value checks ──────────────────────────────
+//
+// `create_job` carries the session/task-scope format strings — action
+// `command`/`args`, environment `variables` values, embedded-file
+// `data` — forward unresolved (only a worker host can bind `Session.*`
+// / `Task.*` / `Env.File.*`), along with action `timeout` /
+// `cancelation`, which are template scope but also resolve on the
+// worker. Of the spec's three processing stages
+// (Template Schemas §7.4: template validation, job creation, task
+// execution on the worker host), job creation is the first at which
+// `Param.*` / `RawParam.*` have real values. The functions below
+// re-run exactly the resolved-value checks pass 8 applies to those
+// fields (and to the `let` bindings feeding them), against symbol
+// tables with the parameters bound: a violation
+// pass 8 could only lower-bound becomes decidable at job creation, and
+// fails at submission instead of on every worker.
+//
+// Both walk the *template* types (the fields are carried forward
+// as-is), report at the same field paths as pass 8, and evaluate under
+// the same caller budgets (`FsEval`).
+
+/// Job-creation resolved-value checks for a step script: the `onRun` action's
+/// `command`/`args` against `CallerLimits::max_resolved_arg_len`, its
+/// `timeout` / `cancelation` (deferred `mode`, `notifyPeriodInSeconds`)
+/// against the spec-mandated `Int`/`CancelationMode` constraints, and
+/// each embedded file's `data` against
+/// `CallerLimits::max_resolved_data_len` (the two caps are opt-in,
+/// `None` = no check beyond evaluation itself) — in pass 8's order.
+///
+/// `symtab` is the task-scope check table: concrete `Param.*` /
+/// `RawParam.*` / `Job.Name` / `Step.Name` / `let` bindings, with
+/// `Unresolved` placeholders for `Session.*`, `Task.*`, and PATH
+/// `Param.*`. `template_symtab` is the step's template-scope table
+/// (concrete `Param.*` minus PATH, `RawParam.*`, `Job.Name`,
+/// `Step.Name`, step-level `let` bindings) that `timeout` /
+/// `cancelation` resolve against, as at pass 8.
+pub(crate) fn check_carried_forward_step_script(
+    script: &StepScript,
+    symtab: &SymbolTable,
+    template_symtab: &SymbolTable,
+    ctx: &ValidationContext,
+    script_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let host_profile = ctx
+        .profile
+        .to_expr_profile(openjd_expr::HostContext::Unresolved);
+    let host_lib = FunctionLibrary::for_profile(&host_profile);
+    let ev = FsEval::new(&host_lib, &ctx.caller_limits);
+    let template_profile = ctx.profile.to_expr_profile(openjd_expr::HostContext::None);
+    let template_lib = FunctionLibrary::for_profile(&template_profile);
+    let template_ev = FsEval::new(&template_lib, &ctx.caller_limits);
+    let action_path = path_field(&path_field(script_path, "actions"), "onRun");
+    validate_action_fs(
+        &script.actions.on_run,
+        symtab,
+        &ev,
+        &action_path,
+        ctx.caller_limits.max_resolved_arg_len,
+        errors,
+    );
+    validate_action_timing_fs(
+        &script.actions.on_run,
+        template_symtab,
+        &template_ev,
+        &action_path,
+        errors,
+    );
+    check_embedded_files_data(
+        script.embedded_files.as_deref(),
+        symtab,
+        &ev,
+        ctx.caller_limits.max_resolved_data_len,
+        script_path,
+        errors,
+    );
+}
+
+/// Job-creation resolved-value checks for an environment (job-level or
+/// step-level): each `variables` value against §4.4.2's
+/// `max_env_var_value_len` (spec-mandated, always on), every action's
+/// `command`/`args` against `CallerLimits::max_resolved_arg_len`, every
+/// action's `timeout` / `cancelation` against the spec-mandated
+/// `Int`/`CancelationMode` constraints, and each embedded file's `data`
+/// against `CallerLimits::max_resolved_data_len` — in pass 8's order.
+///
+/// `symtab` is the session-scope check table: concrete `Param.*` /
+/// `RawParam.*` / `Job.Name` (and `Step.Name` for step environments) /
+/// `let` bindings, with `Unresolved` placeholders for `Session.*`,
+/// `Env.File.*`, and PATH `Param.*`. The RFC 0008 wrap hooks
+/// additionally see their `WrappedAction.*` / `WrappedEnv.Name` /
+/// `WrappedStep.Name` scopes, unresolved, exactly as in pass 8.
+/// `template_symtab` is the template-scope table `timeout` /
+/// `cancelation` resolve against (the job's table for a job
+/// environment, the step's for a step environment), as at pass 8.
+pub(crate) fn check_carried_forward_environment(
+    env: &Environment,
+    symtab: &SymbolTable,
+    template_symtab: &SymbolTable,
+    ctx: &ValidationContext,
+    max_env_var_value_len: usize,
+    path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let host_profile = ctx
+        .profile
+        .to_expr_profile(openjd_expr::HostContext::Unresolved);
+    let host_lib = FunctionLibrary::for_profile(&host_profile);
+    let ev = FsEval::new(&host_lib, &ctx.caller_limits);
+    if let Some(vars) = &env.variables {
+        let vars_path = path_field(path, "variables");
+        for (name, value) in vars {
+            validate_fs_with(
+                value,
+                symtab,
+                &ev,
+                &path_field(&vars_path, name),
+                Some(&ResolvedConstraint::Text {
+                    max_len: max_env_var_value_len,
+                    forbid_control_chars: false,
+                    forbid_empty: false,
+                }),
+                errors,
+            );
+        }
+    }
+    if let Some(script) = &env.script {
+        let script_path = path_field(path, "script");
+        let actions_path = path_field(&script_path, "actions");
+        if let Some(action) = &script.actions.on_enter {
+            validate_action_fs(
+                action,
+                symtab,
+                &ev,
+                &path_field(&actions_path, "onEnter"),
+                ctx.caller_limits.max_resolved_arg_len,
+                errors,
+            );
+        }
+        for (hook_name, action_opt, extra) in script.actions.wrap_hooks() {
+            if let Some(action) = action_opt {
+                let mut st = symtab.clone();
+                add_wrapped_action_scope(&mut st);
+                match extra {
+                    WrapHookScope::EnvName => add_wrapped_env_name_scope(&mut st),
+                    WrapHookScope::StepName => add_wrapped_step_name_scope(&mut st),
+                }
+                validate_action_fs(
+                    action,
+                    &st,
+                    &ev,
+                    &path_field(&actions_path, hook_name),
+                    ctx.caller_limits.max_resolved_arg_len,
+                    errors,
+                );
+            }
+        }
+        if let Some(action) = &script.actions.on_exit {
+            validate_action_fs(
+                action,
+                symtab,
+                &ev,
+                &path_field(&actions_path, "onExit"),
+                ctx.caller_limits.max_resolved_arg_len,
+                errors,
+            );
+        }
+        let template_profile = ctx.profile.to_expr_profile(openjd_expr::HostContext::None);
+        let template_lib = FunctionLibrary::for_profile(&template_profile);
+        let template_ev = FsEval::new(&template_lib, &ctx.caller_limits);
+        validate_env_actions_timing_fs(
+            script,
+            template_symtab,
+            &template_ev,
+            &actions_path,
+            errors,
+        );
+        check_embedded_files_data(
+            script.embedded_files.as_deref(),
+            symtab,
+            &ev,
+            ctx.caller_limits.max_resolved_data_len,
+            &script_path,
+            errors,
+        );
+    }
+}
+
+/// Shared embedded-file `data` walk for the two job-creation checks above:
+/// each `data` value against the opt-in
+/// `CallerLimits::max_resolved_data_len` cap (`filename` is a plain
+/// string per the 2023-09 schema — no format-string check).
+fn check_embedded_files_data(
+    files: Option<&[EmbeddedFile]>,
+    symtab: &SymbolTable,
+    ev: &FsEval<'_>,
+    max_resolved_data_len: Option<usize>,
+    script_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    let Some(files) = files else { return };
+    let files_path = path_field(script_path, "embeddedFiles");
+    let data_constraint =
+        max_resolved_data_len.map(|max_len| ResolvedConstraint::ResolvedString { max_len });
+    for (j, f) in files.iter().enumerate() {
+        if let Some(data) = &f.data {
+            validate_fs_with(
+                data,
+                symtab,
+                ev,
+                &path_field(&path_index(&files_path, j), "data"),
+                data_constraint.as_ref(),
+                errors,
+            );
         }
     }
 }
@@ -346,6 +1619,7 @@ pub fn validate_format_strings(
     errors: &mut ValidationErrors,
 ) {
     let expr_active = ctx.profile.has_extension(ModelExtension::Expr);
+    let fb1_active = ctx.profile.has_extension(ModelExtension::FeatureBundle1);
     // Template/task-range validation uses HostContext::None (host functions
     // are not available in those scopes). Session/task scopes use
     // HostContext::Unresolved so apply_path_mapping type-checks.
@@ -355,14 +1629,37 @@ pub fn validate_format_strings(
         .to_expr_profile(openjd_expr::HostContext::Unresolved);
     let template_lib = openjd_expr::FunctionLibrary::for_profile(&template_profile);
     let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
+    let template_ev = FsEval::new(&template_lib, &ctx.caller_limits);
+    let host_ev = FsEval::new(&host_lib, &ctx.caller_limits);
+    let limits = super::EffectiveLimits::from_context(ctx);
+    // Standard attribute capability table for resolved-value checks
+    // (§3.3.2.2). Only errs for an unsupported revision, which cannot
+    // reach v2023-09 validation.
+    let standard_attrs: &'static [(&'static str, &'static [&'static str])] =
+        crate::capabilities::standard_attribute_capabilities(
+            ctx.profile.revision(),
+            ctx.profile.extensions(),
+        )
+        .unwrap_or(&[]);
+    let standard_attr_names: Vec<&str> = standard_attrs.iter().map(|(name, _)| *name).collect();
+    let standard_amounts: &[&str] = crate::capabilities::standard_amount_capability_names(
+        ctx.profile.revision(),
+        ctx.profile.extensions(),
+    )
+    .unwrap_or(&[]);
 
     // ── Job name: template scope (Param/RawParam only) ──
     let template_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
-    validate_fs(
+    validate_fs_with(
         &jt.name,
         &template_symtab,
-        &template_lib,
+        &template_ev,
         &path_field(&[], "name"),
+        Some(&ResolvedConstraint::Text {
+            max_len: limits.max_job_name_len,
+            forbid_control_chars: true,
+            forbid_empty: true,
+        }),
         errors,
     );
 
@@ -388,62 +1685,139 @@ pub fn validate_format_strings(
                         &HashSet::new(),
                         &mut hr_let_names,
                         &mut hr_symtab,
-                        &template_lib,
+                        &template_ev,
                         &template_profile,
                         errors,
                     );
                 }
             }
             let hr_path = path_field(&step_path, "hostRequirements");
+            // §3.3.1.1 / §3.3.2.1: a capability name is `@fmtstring`, and its
+            // constraints apply to the resolved name. The name's
+            // expressions are checked against the symbols available when it
+            // is resolved at job creation, and the `CapabilityName`
+            // constraint runs the full name check when the name is fully
+            // static. Structure checks literal names, and job creation
+            // checks the resolved name.
             if let Some(amounts) = &hr.amounts {
+                let amounts_path = path_field(&hr_path, "amounts");
+                let name_constraint = ResolvedConstraint::CapabilityName {
+                    kind: helpers::CapabilityKind::Amount,
+                    standard: standard_amounts,
+                };
+                let mut known_names = Vec::with_capacity(amounts.len());
                 for (j, amt) in amounts.iter().enumerate() {
-                    let amt_path = path_index(&path_field(&hr_path, "amounts"), j);
+                    let amt_path = path_index(&amounts_path, j);
+                    let sr = validate_fs_with(
+                        &amt.name,
+                        &hr_symtab,
+                        &template_ev,
+                        &path_field(&amt_path, "name"),
+                        Some(&name_constraint),
+                        errors,
+                    );
+                    known_names.push(known_capability_name(&amt.name, sr.as_ref()));
                     if let Some(min) = &amt.min {
-                        validate_fs(
+                        validate_fs_with(
                             min,
                             &hr_symtab,
-                            &template_lib,
+                            &template_ev,
                             &path_field(&amt_path, "min"),
+                            Some(&ResolvedConstraint::Float {
+                                positive: false,
+                                msg: "must be non-negative.",
+                            }),
                             errors,
                         );
                     }
                     if let Some(max) = &amt.max {
-                        validate_fs(
+                        validate_fs_with(
                             max,
                             &hr_symtab,
-                            &template_lib,
+                            &template_ev,
                             &path_field(&amt_path, "max"),
+                            Some(&ResolvedConstraint::Float {
+                                positive: true,
+                                msg: "must be positive.",
+                            }),
                             errors,
                         );
                     }
                 }
+                check_known_names_unique(
+                    &known_names,
+                    helpers::CapabilityKind::Amount,
+                    &amounts_path,
+                    errors,
+                );
             }
             if let Some(attrs) = &hr.attributes {
+                let attrs_path = path_field(&hr_path, "attributes");
+                let name_constraint = ResolvedConstraint::CapabilityName {
+                    kind: helpers::CapabilityKind::Attribute,
+                    standard: &standard_attr_names,
+                };
+                let mut known_names = Vec::with_capacity(attrs.len());
                 for (j, attr) in attrs.iter().enumerate() {
-                    let attr_path = path_index(&path_field(&hr_path, "attributes"), j);
+                    let attr_path = path_index(&attrs_path, j);
+                    let sr = validate_fs_with(
+                        &attr.name,
+                        &hr_symtab,
+                        &template_ev,
+                        &path_field(&attr_path, "name"),
+                        Some(&name_constraint),
+                        errors,
+                    );
+                    let known = known_capability_name(&attr.name, sr.as_ref());
+                    // The values are checked against the name when it is
+                    // known here, and against the resolved name at job
+                    // creation otherwise.
+                    let capability_name = known.as_ref().map_or("", |k| k.name.as_str());
+                    if let Some(k) = known.as_ref().filter(|k| !k.literal) {
+                        check_values_for_static_name(
+                            &k.name,
+                            attr,
+                            standard_attrs,
+                            &attr_path,
+                            errors,
+                        );
+                    }
+                    let attr_constraint = ResolvedConstraint::AttributeValue {
+                        capability_name,
+                        standard: standard_attrs,
+                    };
                     if let Some(any_of) = &attr.any_of {
                         for (k, v) in any_of.iter().enumerate() {
-                            validate_fs(
+                            validate_fs_with(
                                 v,
                                 &hr_symtab,
-                                &template_lib,
+                                &template_ev,
                                 &path_index(&path_field(&attr_path, "anyOf"), k),
+                                Some(&attr_constraint),
                                 errors,
                             );
                         }
                     }
                     if let Some(all_of) = &attr.all_of {
                         for (k, v) in all_of.iter().enumerate() {
-                            validate_fs(
+                            validate_fs_with(
                                 v,
                                 &hr_symtab,
-                                &template_lib,
+                                &template_ev,
                                 &path_index(&path_field(&attr_path, "allOf"), k),
+                                Some(&attr_constraint),
                                 errors,
                             );
                         }
                     }
+                    known_names.push(known);
                 }
+                check_known_names_unique(
+                    &known_names,
+                    helpers::CapabilityKind::Attribute,
+                    &attrs_path,
+                    errors,
+                );
             }
         }
     }
@@ -485,7 +1859,7 @@ pub fn validate_format_strings(
                             &HashSet::new(),
                             &mut env_let_names,
                             &mut env_symtab,
-                            &host_lib,
+                            &host_ev,
                             &host_profile,
                             errors,
                         );
@@ -495,11 +1869,14 @@ pub fn validate_format_strings(
             validate_env_format_strings(
                 env,
                 &env_symtab,
-                &host_lib,
+                &host_ev,
                 &env_template_symtab,
-                &template_lib,
+                &template_ev,
                 &path_index(&envs_path, i),
                 expr_active,
+                limits.max_env_var_value_len,
+                ctx.caller_limits.max_resolved_arg_len,
+                ctx.caller_limits.max_resolved_data_len,
                 errors,
             );
         }
@@ -534,9 +1911,8 @@ pub fn validate_format_strings(
                                     &template_profile,
                                 ) {
                                     Ok(parsed) => {
-                                        match parsed
-                                            .with_path_format(PathFormat::Posix)
-                                            .with_library(&template_lib)
+                                        match template_ev
+                                            .budgeted(parsed.with_library(template_ev.lib))
                                             .evaluate(&[&range_symtab as &SymbolTable])
                                         {
                                             Ok(val) => {
@@ -562,13 +1938,27 @@ pub fn validate_format_strings(
             }
             for (j, tp) in ps.task_parameter_definitions.iter().enumerate() {
                 let p_path = path_index(&tpd_path, j);
+                // §3.4.2: a STRING/PATH range element may be at most 1024
+                // characters after the format string has been resolved. As
+                // a list item it may also resolve to `null` (skipped) or a
+                // list (flattened) per Expression Language §1.3.2. The
+                // §3.4.2 minimum of 1 is enforced for PATH only, matching
+                // the reference implementation (see the TextListItem doc).
+                let string_range_item_constraint = ResolvedConstraint::TextListItem {
+                    max_len: limits.max_task_param_string_len,
+                    forbid_empty: false,
+                };
+                let path_range_item_constraint = ResolvedConstraint::TextListItem {
+                    max_len: limits.max_task_param_string_len,
+                    forbid_empty: true,
+                };
                 match tp {
                     TaskParameterDefinition::INT(t) => {
                         if let crate::template::IntRange::Expression(expr) = &t.range {
                             validate_fs(
                                 expr,
                                 &range_symtab,
-                                &template_lib,
+                                &template_ev,
                                 &path_field(&p_path, "range"),
                                 errors,
                             );
@@ -577,11 +1967,12 @@ pub fn validate_format_strings(
                     TaskParameterDefinition::STRING(t) => {
                         if let crate::template::StringRange::List(items) = &t.range {
                             for (k, item) in items.iter().enumerate() {
-                                validate_fs(
+                                validate_fs_with(
                                     item,
                                     &range_symtab,
-                                    &template_lib,
+                                    &template_ev,
                                     &path_index(&path_field(&p_path, "range"), k),
+                                    Some(&string_range_item_constraint),
                                     errors,
                                 );
                             }
@@ -590,11 +1981,12 @@ pub fn validate_format_strings(
                     TaskParameterDefinition::PATH(t) => {
                         if let crate::template::StringRange::List(items) = &t.range {
                             for (k, item) in items.iter().enumerate() {
-                                validate_fs(
+                                validate_fs_with(
                                     item,
                                     &range_symtab,
-                                    &template_lib,
+                                    &template_ev,
                                     &path_index(&path_field(&p_path, "range"), k),
+                                    Some(&path_range_item_constraint),
                                     errors,
                                 );
                             }
@@ -605,8 +1997,49 @@ pub fn validate_format_strings(
                             validate_fs(
                                 expr,
                                 &range_symtab,
-                                &template_lib,
+                                &template_ev,
                                 &path_field(&p_path, "range"),
+                                errors,
+                            );
+                        }
+                        // TASK_CHUNKING chunks fields are `<intstring>`
+                        // format strings resolved at job creation; their
+                        // literal forms are checked in the task-chunking
+                        // pass, the format-string forms here.
+                        let chunks_path = path_field(&p_path, "chunks");
+                        if let crate::template::IntOrFormatString::FormatString(fs) =
+                            &t.chunks.default_task_count
+                        {
+                            validate_fs_with(
+                                fs,
+                                &range_symtab,
+                                &template_ev,
+                                &path_field(&chunks_path, "defaultTaskCount"),
+                                Some(&ResolvedConstraint::Int {
+                                    min: 1,
+                                    min_msg: "defaultTaskCount must be >= 1.",
+                                    max: None,
+                                    parse_msg: "defaultTaskCount must be an integer.",
+                                    nullable: false,
+                                }),
+                                errors,
+                            );
+                        }
+                        if let Some(crate::template::IntOrFormatString::FormatString(fs)) =
+                            &t.chunks.target_runtime_seconds
+                        {
+                            validate_fs_with(
+                                fs,
+                                &range_symtab,
+                                &template_ev,
+                                &path_field(&chunks_path, "targetRuntimeSeconds"),
+                                Some(&ResolvedConstraint::Int {
+                                    min: 0,
+                                    min_msg: "targetRuntimeSeconds must be >= 0.",
+                                    max: None,
+                                    parse_msg: "targetRuntimeSeconds must be an integer.",
+                                    nullable: true,
+                                }),
                                 errors,
                             );
                         }
@@ -650,7 +2083,7 @@ pub fn validate_format_strings(
                     &HashSet::new(),
                     &mut step_let_names,
                     &mut step_template_symtab,
-                    &template_lib,
+                    &template_ev,
                     &template_profile,
                     errors,
                 );
@@ -664,168 +2097,56 @@ pub fn validate_format_strings(
         }
 
         if let Some(script) = &step.script {
-            let script_path = path_field(&step_path, "script");
-
-            // Script-level let bindings (TASK scope — host_lib). Task.File.*
-            // is in scope: file paths are allocated before `let` evaluation
-            // at runtime (filenames are plain strings, so allocation cannot
-            // depend on `let` values).
-            if let Some(bindings) = &script.let_bindings {
-                let let_path = path_field(&script_path, "let");
-                if !expr_active {
-                    errors.add(&let_path, "'let' requires the EXPR extension.");
-                } else {
-                    let enclosing: HashSet<String> = step
-                        .let_bindings
-                        .as_ref()
-                        .map(|bs| {
-                            bs.iter()
-                                .filter_map(|b| b.find('=').map(|eq| b[..eq].trim().to_string()))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let mut script_let_names = HashSet::new();
-                    validate_let_bindings(
-                        bindings,
-                        &let_path,
-                        &enclosing,
-                        &mut script_let_names,
-                        &mut task_symtab,
-                        &host_lib,
-                        &host_profile,
-                        errors,
-                    );
-                }
-            }
-
-            // Complex expressions: reject if not EXPR
-            if !expr_active {
-                let action_path = path_field(&path_field(&script_path, "actions"), "onRun");
-                if script.actions.on_run.command.has_complex_expressions() {
-                    errors.add(
-                        &path_field(&action_path, "command"),
-                        "complex expressions require the EXPR extension.",
-                    );
-                }
-                if let Some(args) = &script.actions.on_run.args {
-                    let args_path = path_field(&action_path, "args");
-                    for (j, arg) in args.iter().enumerate() {
-                        if arg.has_complex_expressions() {
-                            errors.add(
-                                &path_index(&args_path, j),
-                                "complex expressions require the EXPR extension.",
-                            );
-                        }
-                    }
-                }
-            }
-
-            // Validate all format string references (both base and EXPR)
-            let action_path = path_field(&path_field(&script_path, "actions"), "onRun");
-            validate_action_fs(
-                &script.actions.on_run,
-                &task_symtab,
-                &host_lib,
-                &action_path,
+            validate_step_script_format_strings(
+                script,
+                &path_field(&step_path, "script"),
+                step,
+                &mut task_symtab,
+                &step_template_symtab,
+                &host_ev,
+                &host_profile,
+                &template_ev,
+                ctx,
+                expr_active,
                 errors,
             );
+        }
 
-            // Timeout and notifyPeriodInSeconds are plain @fmtstring
-            // (resolved at job creation, before any session exists), so
-            // they validate against the template-scope symtab: no
-            // Session.*, no Task.*, no Env.File.*, no host functions.
-            if let Some(timeout) = &script.actions.on_run.timeout {
-                validate_fs(
-                    timeout,
+        // SimpleAction fields (§8, FEATURE_BUNDLE_1): validate the desugared
+        // script with exactly the same code, into a scratch collection
+        // rooted at the synthesized `script` node, then re-root every error
+        // onto the field the author wrote (`steps[i] -> bash -> script`,
+        // `-> args[k]`, `-> timeout`, ...). Each field gets its own copy of
+        // the task symtab so its `let` bindings do not leak into a sibling.
+        // Skipped when the extension is off (pass 7 rejects the field) and
+        // when the step also has `script` (pass 7 rejects the combination,
+        // and the task symtab's `Task.File.*` were seeded from the authored
+        // script — validating the sugar against it would report the
+        // generated file reference as undefined, naming a node the author
+        // never wrote).
+        if fb1_active && step.script.is_none() {
+            for (kind, sa) in step.simple_actions() {
+                let sa_path = path_field(&step_path, kind.field_name());
+                let mut sa_symtab = task_symtab.clone();
+                let mut scratch = ValidationErrors::default();
+                validate_step_script_format_strings(
+                    &kind.desugar(&step.name, sa),
+                    &[],
+                    step,
+                    &mut sa_symtab,
                     &step_template_symtab,
-                    &template_lib,
-                    &path_field(&action_path, "timeout"),
-                    errors,
+                    &host_ev,
+                    &host_profile,
+                    &template_ev,
+                    ctx,
+                    expr_active,
+                    &mut scratch,
                 );
-            }
-            let (mode_fs, notify_fs) = match &script.actions.on_run.cancelation {
-                Some(CancelationMode::NotifyThenTerminate {
-                    notify_period_in_seconds,
-                }) => (None, notify_period_in_seconds.as_ref()),
-                Some(CancelationMode::DeferredMode {
-                    mode,
-                    notify_period_in_seconds,
-                }) => (Some(mode), notify_period_in_seconds.as_ref()),
-                _ => (None, None),
-            };
-            if let Some(mode) = mode_fs {
-                validate_fs(
-                    mode,
-                    &step_template_symtab,
-                    &template_lib,
-                    &path_field(&action_path, "cancelation"),
-                    errors,
-                );
-            }
-            if let Some(notify) = notify_fs {
-                validate_fs(
-                    notify,
-                    &step_template_symtab,
-                    &template_lib,
-                    &path_field(&action_path, "cancelation"),
-                    errors,
-                );
-            }
-
-            // Embedded files
-            if let Some(files) = &script.embedded_files {
-                let files_path = path_field(&script_path, "embeddedFiles");
-                for (j, f) in files.iter().enumerate() {
-                    let f_path = path_index(&files_path, j);
-                    if let Some(data) = &f.data {
-                        validate_fs(
-                            data,
-                            &task_symtab,
-                            &host_lib,
-                            &path_field(&f_path, "data"),
-                            errors,
-                        );
-                    }
-                    // `filename` is a plain string per the 2023-09 schema
-                    // (not @fmtstring) — no format-string validation.
-                }
-            }
-
-            // EXPR-only: comprehension variable validation
-            if expr_active {
-                let mut all_let_names: HashSet<String> = HashSet::new();
-                if let Some(bindings) = &step.let_bindings {
-                    for b in bindings {
-                        if let Some(eq) = b.find('=') {
-                            all_let_names.insert(b[..eq].trim().to_string());
-                        }
-                    }
-                }
-                if let Some(bindings) = &script.let_bindings {
-                    for b in bindings {
-                        if let Some(eq) = b.find('=') {
-                            all_let_names.insert(b[..eq].trim().to_string());
-                        }
-                    }
-                }
-                if !all_let_names.is_empty() {
-                    if let Err(e) = script
-                        .actions
-                        .on_run
-                        .command
-                        .validate_comprehension_vars(&all_let_names)
-                    {
-                        errors.add(&path_field(&action_path, "command"), e.to_string());
-                    }
-                    if let Some(args) = &script.actions.on_run.args {
-                        let args_path = path_field(&action_path, "args");
-                        for (j, arg) in args.iter().enumerate() {
-                            if let Err(e) = arg.validate_comprehension_vars(&all_let_names) {
-                                errors.add(&path_index(&args_path, j), e.to_string());
-                            }
-                        }
-                    }
-                }
+                errors.extend_remapped(scratch, |rel| {
+                    let mut p = sa_path.clone();
+                    p.extend(kind.remap_desugared_path(rel));
+                    p
+                });
             }
         }
 
@@ -885,7 +2206,7 @@ pub fn validate_format_strings(
                                 &enclosing,
                                 &mut env_let_names,
                                 &mut env_symtab,
-                                &host_lib,
+                                &host_ev,
                                 &host_profile,
                                 errors,
                             );
@@ -898,82 +2219,16 @@ pub fn validate_format_strings(
                 validate_env_format_strings(
                     env,
                     &env_symtab,
-                    &host_lib,
+                    &host_ev,
                     &step_template_symtab,
-                    &template_lib,
+                    &template_ev,
                     &path_index(&envs_path, j),
                     expr_active,
+                    limits.max_env_var_value_len,
+                    ctx.caller_limits.max_resolved_arg_len,
+                    ctx.caller_limits.max_resolved_data_len,
                     errors,
                 );
-            }
-        }
-
-        // SimpleAction let bindings (requires both FB1 and EXPR)
-        if expr_active {
-            for sa in [
-                &step.bash,
-                &step.python,
-                &step.cmd,
-                &step.powershell,
-                &step.node,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                let mut sa_let_names: HashSet<String> = HashSet::new();
-                if let Some(bindings) = &step.let_bindings {
-                    for b in bindings {
-                        if let Some(eq) = b.find('=') {
-                            sa_let_names.insert(b[..eq].trim().to_string());
-                        }
-                    }
-                }
-                if let Some(let_bindings) = &sa.let_bindings {
-                    if ctx.profile.has_extension(ModelExtension::FeatureBundle1) {
-                        let enclosing: HashSet<String> = step
-                            .let_bindings
-                            .as_ref()
-                            .map(|bs| {
-                                bs.iter()
-                                    .filter_map(|b| {
-                                        b.find('=').map(|eq| b[..eq].trim().to_string())
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        let mut new_names = HashSet::new();
-                        validate_let_bindings(
-                            let_bindings,
-                            &step_path,
-                            &enclosing,
-                            &mut new_names,
-                            &mut task_symtab,
-                            &host_lib,
-                            &host_profile,
-                            errors,
-                        );
-                        sa_let_names.extend(new_names);
-                    }
-                }
-                if !sa_let_names.is_empty() {
-                    match FormatString::new(&sa.script) {
-                        Ok(fs) => {
-                            if let Err(e) = fs.validate_comprehension_vars(&sa_let_names) {
-                                errors.add(&step_path, e.to_string());
-                            }
-                        }
-                        Err(e) => {
-                            errors.add(&step_path, format!("SimpleAction script: {e}"));
-                        }
-                    }
-                    if let Some(args) = &sa.args {
-                        for arg in args {
-                            if let Err(e) = arg.validate_comprehension_vars(&sa_let_names) {
-                                errors.add(&step_path, e.to_string());
-                            }
-                        }
-                    }
-                }
             }
         }
     }
@@ -1012,6 +2267,8 @@ pub fn validate_format_strings_environment_template(
     let host_lib = openjd_expr::FunctionLibrary::for_profile(&host_profile);
     let template_profile = ctx.profile.to_expr_profile(openjd_expr::HostContext::None);
     let template_lib = openjd_expr::FunctionLibrary::for_profile(&template_profile);
+    let host_ev = FsEval::new(&host_lib, &ctx.caller_limits);
+    let template_ev = FsEval::new(&template_lib, &ctx.caller_limits);
 
     let env = &et.environment;
     let env_path = vec![PathElement::Field("environment".into())];
@@ -1040,7 +2297,7 @@ pub fn validate_format_strings_environment_template(
                     &HashSet::new(),
                     &mut env_let_names,
                     &mut env_symtab,
-                    &host_lib,
+                    &host_ev,
                     &host_profile,
                     errors,
                 );
@@ -1051,11 +2308,14 @@ pub fn validate_format_strings_environment_template(
     validate_env_format_strings(
         env,
         &env_symtab,
-        &host_lib,
+        &host_ev,
         &env_template_symtab,
-        &template_lib,
+        &template_ev,
         &env_path,
         expr_active,
+        super::EffectiveLimits::from_context(ctx).max_env_var_value_len,
+        ctx.caller_limits.max_resolved_arg_len,
+        ctx.caller_limits.max_resolved_data_len,
         errors,
     );
 
@@ -1072,19 +2332,22 @@ pub fn validate_format_strings_environment_template(
 ///
 /// Two symbol tables are needed because an environment mixes resolution
 /// stages: `command`/`args`/`variables`/embedded-file fields are
-/// `@fmtstring[host]` (session scope — `symtab`/`lib`), while `timeout` and
+/// `@fmtstring[host]` (session scope — `symtab`/`ev`), while `timeout` and
 /// `notifyPeriodInSeconds` are plain `@fmtstring` (job-creation scope —
-/// `template_symtab`/`template_lib`, no Session.*, no Env.File.*, no host
+/// `template_symtab`/`template_ev`, no Session.*, no Env.File.*, no host
 /// functions).
 #[allow(clippy::too_many_arguments)]
 fn validate_env_format_strings(
     env: &Environment,
     symtab: &SymbolTable,
-    lib: &FunctionLibrary,
+    ev: &FsEval<'_>,
     template_symtab: &SymbolTable,
-    template_lib: &FunctionLibrary,
+    template_ev: &FsEval<'_>,
     path: &[PathElement],
     expr_active: bool,
+    max_env_var_value_len: usize,
+    max_resolved_arg_len: Option<usize>,
+    max_resolved_data_len: Option<usize>,
     errors: &mut ValidationErrors,
 ) {
     if let Some(vars) = &env.variables {
@@ -1094,7 +2357,24 @@ fn validate_env_format_strings(
             if !expr_active && value.has_complex_expressions() {
                 errors.add(&var_path, "complex expressions require the EXPR extension.");
             }
-            validate_fs(value, symtab, lib, &var_path, errors);
+            // §4.4.2: an environment variable value is at most
+            // `max_env_var_value_len` (2048) characters. The value is
+            // `@fmtstring[host]`, so the limit describes the resolved
+            // value; the raw-text pass checks literal values against the
+            // same EffectiveLimits field, this checks what interpolated
+            // values can resolve to.
+            validate_fs_with(
+                value,
+                symtab,
+                ev,
+                &var_path,
+                Some(&ResolvedConstraint::Text {
+                    max_len: max_env_var_value_len,
+                    forbid_control_chars: false,
+                    forbid_empty: false,
+                }),
+                errors,
+            );
         }
     }
     if let Some(script) = &env.script {
@@ -1126,8 +2406,9 @@ fn validate_env_format_strings(
             validate_action_fs(
                 action,
                 symtab,
-                lib,
+                ev,
                 &path_field(&actions_path, "onEnter"),
+                max_resolved_arg_len,
                 errors,
             );
         }
@@ -1146,8 +2427,9 @@ fn validate_env_format_strings(
                 validate_action_fs(
                     action,
                     &st,
-                    lib,
+                    ev,
                     &path_field(&actions_path, hook_name),
+                    max_resolved_arg_len,
                     errors,
                 );
             }
@@ -1156,70 +2438,17 @@ fn validate_env_format_strings(
             validate_action_fs(
                 action,
                 symtab,
-                lib,
+                ev,
                 &path_field(&actions_path, "onExit"),
+                max_resolved_arg_len,
                 errors,
             );
         }
         // Timeout, cancelation mode (DeferredMode), and
-        // notifyPeriodInSeconds on env actions are @fmtstring fields. On
-        // the plain lifecycle actions they resolve at job creation, before
-        // any session exists, so they validate against the template-scope
-        // symtab. On the RFC 0008 wrap hooks they resolve at run time with
-        // the `WrappedAction.*` variables seeded — that is what makes
-        // round-trip forwarding (`timeout: "{{WrappedAction.Timeout}}"`,
-        // `mode: "{{WrappedAction.Cancelation.Mode}}"`) possible — so they
-        // validate against the wrapped-action scope.
-        let wrap_hook_names: [&str; 3] = ["onWrapEnvEnter", "onWrapTaskRun", "onWrapEnvExit"];
-        for (name, action) in script.actions.iter_named() {
-            let action_path = path_field(&actions_path, name);
-            let scoped_symtab: SymbolTable;
-            let field_symtab: &SymbolTable = if wrap_hook_names.contains(&name) {
-                let mut st = template_symtab.clone();
-                add_wrapped_action_scope(&mut st);
-                scoped_symtab = st;
-                &scoped_symtab
-            } else {
-                template_symtab
-            };
-            if let Some(timeout) = &action.timeout {
-                validate_fs(
-                    timeout,
-                    field_symtab,
-                    template_lib,
-                    &path_field(&action_path, "timeout"),
-                    errors,
-                );
-            }
-            let (mode_fs, notify_fs) = match &action.cancelation {
-                Some(CancelationMode::NotifyThenTerminate {
-                    notify_period_in_seconds,
-                }) => (None, notify_period_in_seconds.as_ref()),
-                Some(CancelationMode::DeferredMode {
-                    mode,
-                    notify_period_in_seconds,
-                }) => (Some(mode), notify_period_in_seconds.as_ref()),
-                _ => (None, None),
-            };
-            if let Some(mode) = mode_fs {
-                validate_fs(
-                    mode,
-                    field_symtab,
-                    template_lib,
-                    &path_field(&action_path, "cancelation"),
-                    errors,
-                );
-            }
-            if let Some(notify) = notify_fs {
-                validate_fs(
-                    notify,
-                    field_symtab,
-                    template_lib,
-                    &path_field(&action_path, "cancelation"),
-                    errors,
-                );
-            }
-        }
+        // notifyPeriodInSeconds on env actions are @fmtstring fields,
+        // validated in template scope (wrap hooks: plus the
+        // wrapped-action scope) — see validate_env_actions_timing_fs.
+        validate_env_actions_timing_fs(script, template_symtab, template_ev, &actions_path, errors);
         if let Some(files) = &script.embedded_files {
             let files_path = path_field(&script_path, "embeddedFiles");
             for (j, f) in files.iter().enumerate() {
@@ -1232,7 +2461,16 @@ fn validate_env_format_strings(
                             "complex expressions require the EXPR extension.",
                         );
                     }
-                    validate_fs(data, symtab, lib, &data_path, errors);
+                    let data_constraint = max_resolved_data_len
+                        .map(|max_len| ResolvedConstraint::ResolvedString { max_len });
+                    validate_fs_with(
+                        data,
+                        symtab,
+                        ev,
+                        &data_path,
+                        data_constraint.as_ref(),
+                        errors,
+                    );
                 }
                 // `filename` is a plain string per the 2023-09 schema
                 // (not @fmtstring) — no format-string validation.
@@ -1341,7 +2579,7 @@ fn validate_let_bindings(
     enclosing_names: &HashSet<String>,
     out_names: &mut HashSet<String>,
     symtab: &mut SymbolTable,
-    lib: &FunctionLibrary,
+    ev: &FsEval<'_>,
     profile: &openjd_expr::ExprProfile,
     errors: &mut ValidationErrors,
 ) {
@@ -1385,6 +2623,15 @@ fn validate_let_bindings(
                 format!("name '{name}' contains invalid characters."),
             );
         }
+        // Characters, not bytes: §3.6.1 caps characters, and the charset check
+        // above does not `continue`, so a multi-byte name would otherwise draw a
+        // spurious length error alongside the real one.
+        if name.chars().count() > MAX_LET_IDENTIFIER_LEN {
+            errors.add(
+                &b_path,
+                format!("name '{name}' exceeds {MAX_LET_IDENTIFIER_LEN} characters."),
+            );
+        }
         if !names.insert(name.to_string()) {
             errors.add(&b_path, format!("duplicate name '{name}'."));
         }
@@ -1393,48 +2640,123 @@ fn validate_let_bindings(
         }
         out_names.insert(name.to_string());
 
-        // Evaluate the expression for type checking (Phase 1: static type check).
-        // The prefix is included in error messages so caret positions align with
-        // the full binding string, matching Python's behavior.
-        let expr_start =
-            eq_pos + 1 + binding[eq_pos + 1..].len() - binding[eq_pos + 1..].trim_start().len();
-        let prefix = &binding[..expr_start];
-        match ParsedExpression::with_profile(expr, profile) {
-            Ok(parsed) => {
-                // Check self-reference using the parsed AST's accessed symbols
-                // rather than heuristic regex matching on the raw expression string.
-                if parsed.accessed_symbols().contains(name) {
-                    errors.add(&b_path, format!("'{name}' references itself."));
-                }
-                match parsed.with_library(lib).evaluate(&[symtab as &SymbolTable]) {
-                    Ok(result) => {
-                        // Set the binding in the symtab with its inferred value/type
-                        // so subsequent bindings and format strings see the correct type.
-                        let _ = symtab.set(name, result);
-                    }
-                    Err(e) => {
-                        errors.add(
-                            &b_path,
-                            format!(
-                                "Invalid expression in let binding '{name}': {}",
-                                e.message_with_expr_prefix(prefix)
-                            ),
-                        );
-                        // Still add as unresolved(ANY) so later bindings don't cascade errors
-                        let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
-                    }
-                }
+        evaluate_let_binding(binding, eq_pos, &b_path, true, symtab, ev, profile, errors);
+    }
+}
+
+/// Parse and evaluate one well-formed `name = expr` binding (`eq_pos` is
+/// the `=`) into `symtab`, reporting a failure at `b_path` as
+/// `Invalid expression in let binding '<name>': <error>` with the caret
+/// aligned to the full binding string (matching Python and the run-time
+/// `evaluate_let_bindings`). A failed binding is bound as
+/// `Unresolved(ANY)` so later bindings and format strings in the scope
+/// still evaluate instead of cascading "Undefined variable" errors.
+///
+/// `check_self_reference` adds pass 8's structural self-reference check
+/// (the job-creation re-check leaves structure to template validation).
+#[allow(clippy::too_many_arguments)]
+fn evaluate_let_binding(
+    binding: &str,
+    eq_pos: usize,
+    b_path: &[PathElement],
+    check_self_reference: bool,
+    symtab: &mut SymbolTable,
+    ev: &FsEval<'_>,
+    profile: &openjd_expr::ExprProfile,
+    errors: &mut ValidationErrors,
+) {
+    let name = binding[..eq_pos].trim();
+    let expr = binding[eq_pos + 1..].trim();
+    // The prefix is included in error messages so caret positions align with
+    // the full binding string, matching Python's behavior.
+    let expr_start =
+        eq_pos + 1 + binding[eq_pos + 1..].len() - binding[eq_pos + 1..].trim_start().len();
+    let prefix = &binding[..expr_start];
+    let report = |e: &openjd_expr::ExpressionError, errors: &mut ValidationErrors| {
+        errors.add(
+            b_path,
+            format!(
+                "Invalid expression in let binding '{name}': {}",
+                e.message_with_expr_prefix(prefix)
+            ),
+        );
+    };
+    match ParsedExpression::with_profile(expr, profile) {
+        Ok(parsed) => {
+            // Check self-reference using the parsed AST's accessed symbols
+            // rather than heuristic regex matching on the raw expression string.
+            if check_self_reference && parsed.accessed_symbols().contains(name) {
+                errors.add(b_path, format!("'{name}' references itself."));
             }
-            Err(e) => {
-                errors.add(
-                    &b_path,
-                    format!(
-                        "Invalid expression in let binding '{name}': {}",
-                        e.message_with_expr_prefix(prefix)
-                    ),
-                );
-                let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
+            match ev
+                .budgeted(parsed.with_library(ev.lib))
+                .evaluate(&[symtab as &SymbolTable])
+            {
+                Ok(result) => {
+                    // Set the binding in the symtab with its inferred value/type
+                    // so subsequent bindings and format strings see the correct type.
+                    // `set` only fails when the key path collides with an existing
+                    // scalar; binding names are validated to start lowercase or `_`
+                    // (above, at template validation), so they can never collide with
+                    // the uppercase-rooted scopes, and ignoring the result is safe.
+                    let _ = symtab.set(name, result);
+                }
+                Err(e) => {
+                    report(&e, errors);
+                    // Still add as unresolved(ANY) so later bindings don't cascade errors
+                    let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
+                }
             }
         }
+        Err(e) => {
+            report(&e, errors);
+            let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
+        }
+    }
+}
+
+/// Job-creation evaluation of a `let` block into a check symbol table
+/// (step-level bindings with `host_context = None`, script-level ones in
+/// step scripts and environments with `Unresolved`): each binding is
+/// parsed under the context's profile for `host_context` — the profile
+/// pass 8 parsed it with — and evaluated under `PathFormat::Posix` with
+/// the caller's budgets, through the same [`evaluate_let_binding`] pass 8
+/// uses. A failure is reported at `let_path[j]` with pass 8's message
+/// and caret, and the name is bound `Unresolved(ANY)` so the scope's
+/// remaining bindings and checks still run (pass 8's continuation
+/// policy).
+///
+/// Structural checks (names, duplicates, shadowing, count) are template
+/// validation's job and are not repeated; a structurally malformed
+/// binding — no `=`, empty name or expression, which decode rejects — is
+/// skipped.
+pub(crate) fn check_carried_forward_let_bindings(
+    bindings: &[String],
+    let_path: &[PathElement],
+    symtab: &mut SymbolTable,
+    ctx: &ValidationContext,
+    host_context: openjd_expr::HostContext,
+    errors: &mut ValidationErrors,
+) {
+    let profile = ctx.profile.to_expr_profile(host_context);
+    let lib = FunctionLibrary::for_profile(&profile);
+    let ev = FsEval::new(&lib, &ctx.caller_limits);
+    for (j, binding) in bindings.iter().enumerate() {
+        let Some(eq_pos) = binding.find('=') else {
+            continue;
+        };
+        if binding[..eq_pos].trim().is_empty() || binding[eq_pos + 1..].trim().is_empty() {
+            continue;
+        }
+        evaluate_let_binding(
+            binding,
+            eq_pos,
+            &path_index(let_path, j),
+            false,
+            symtab,
+            &ev,
+            &profile,
+            errors,
+        );
     }
 }

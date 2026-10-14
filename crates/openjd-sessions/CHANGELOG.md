@@ -5,6 +5,138 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.7.3...openjd-sessions-v0.8.0) - 2026-10-07
+
+### Bug fixes
+
+- [**breaking**] Update ruff parser to 0.16.10, pin exact version, raise MSRV to 1.97 ([#429](https://github.com/OpenJobDescription/openjd-rs/pull/429)) ([#429](https://github.com/OpenJobDescription/openjd-rs/pull/429))
+
+
+## [0.7.3](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.7.2...openjd-sessions-v0.7.3) - 2026-10-02
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-model
+
+
+## [0.7.2](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.7.1...openjd-sessions-v0.7.2) - 2026-09-30
+
+### Bug fixes
+
+- Close the resolved-value follow-ups from the #404 and #407 reviews ([#410](https://github.com/OpenJobDescription/openjd-rs/pull/410))
+
+
+## [0.7.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.7.0...openjd-sessions-v0.7.1) - 2026-09-28
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-expr, openjd-model
+
+
+## [0.7.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.6.0...openjd-sessions-v0.7.0) - 2026-09-18
+
+### Features
+
+- [**breaking**] Opt-in resolved-value caps and evaluation-budget plumbing ([#399](https://github.com/OpenJobDescription/openjd-rs/pull/399))
+
+
+### Miscellaneous
+
+- [**breaking**] Raise MSRV to 1.96.0; dep sweep (ruff 0.16, rusqlite 0.40) ([#403](https://github.com/OpenJobDescription/openjd-rs/pull/403))
+
+
+## [0.6.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.8...openjd-sessions-v0.6.0) - 2026-09-15
+
+### Bug fixes
+
+- Reject embedded filenames that aren't a safe single path component ([#359](https://github.com/OpenJobDescription/openjd-rs/pull/359))
+
+
+### Features
+
+- [**breaking**] Enforce resolved-value constraints at template validation ([#383](https://github.com/OpenJobDescription/openjd-rs/pull/383))
+
+
+## [0.5.8](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.7...openjd-sessions-v0.5.8) - 2026-09-11
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-model
+
+
+## [0.5.7](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.6...openjd-sessions-v0.5.7) - 2026-09-10
+
+### Bug fixes
+
+- Bound child output reading in Windows helper runner ([#369](https://github.com/OpenJobDescription/openjd-rs/pull/369))
+
+
+## [0.5.6](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.5...openjd-sessions-v0.5.6) - 2026-09-09
+
+### Bug fixes
+
+- Bound cross-user helper output reading ([#366](https://github.com/OpenJobDescription/openjd-rs/pull/366))
+
+- Reject NUL bytes in environment variable values ([#360](https://github.com/OpenJobDescription/openjd-rs/pull/360))
+
+- Prune exited environment variables from WrappedAction.Environment ([#362](https://github.com/OpenJobDescription/openjd-rs/pull/362))
+
+
+## [0.5.5](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.4...openjd-sessions-v0.5.5) - 2026-09-03
+
+### Bug fixes
+
+- Persist a resolved symbol table supplied by argument ([#361](https://github.com/OpenJobDescription/openjd-rs/pull/361))
+
+
+## [0.5.4](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.3...openjd-sessions-v0.5.4) - 2026-09-01
+
+### Bug fixes
+
+- Prevent PID-reuse from terminating unrelated processes on Windows ([#348](https://github.com/OpenJobDescription/openjd-rs/pull/348))
+
+
+## [0.5.3](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.2...openjd-sessions-v0.5.3) - 2026-08-25
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-expr, openjd-model
+
+
+## [0.5.2](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.1...openjd-sessions-v0.5.2) - 2026-08-21
+
+### Bug fixes
+
+- Coerce parameter values to their declared types when seeding the symbol table ([#330](https://github.com/OpenJobDescription/openjd-rs/pull/330))
+
+
+## [0.5.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.5.0...openjd-sessions-v0.5.1) - 2026-08-14
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-model
+
+
+## [0.5.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.4.0...openjd-sessions-v0.5.0) - 2026-08-13
+
+### Bug fixes
+
+- Resolve Env.File.* inside wrap action hooks ([#315](https://github.com/OpenJobDescription/openjd-rs/pull/315))
+
+- Escape undecodable subprocess output bytes ([#298](https://github.com/OpenJobDescription/openjd-rs/pull/298))
+
+- PATHEXT-aware Windows executable resolution on both spawn paths ([#286](https://github.com/OpenJobDescription/openjd-rs/pull/286))
+
+- [**breaking**] Enforce memory and operation limits before building large string outputs ([#284](https://github.com/OpenJobDescription/openjd-rs/pull/284))
+
+- Close remaining RFC 0008 wrap-action gaps in hook scoping, cleanup, and preflight
+
+
+### Refactor
+
+- Simplify run lifecycle and wrap dispatch ([#280](https://github.com/OpenJobDescription/openjd-rs/pull/280))
+
+
 ## [0.4.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.3.2...openjd-sessions-v0.4.0) - 2026-07-22
 
 ### Bug fixes

@@ -51,6 +51,185 @@ fn posix_to_windows_basic() {
     assert!(r.to_display_string().contains("shared") && r.to_display_string().contains("project"));
 }
 
+// Regression: split_path_parts drops the leading separator, so a relative
+// input matched an absolute rule (and vice versa). Python's pathlib
+// is_relative_to never matches across the absolute/relative boundary.
+#[test]
+fn relative_path_does_not_match_absolute_rule() {
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "/home/user".to_string(),
+        destination_path: "/mnt/x".to_string(),
+    };
+    assert_eq!(
+        rule.apply_with_format("home/user/f", PathFormat::Posix),
+        None
+    );
+}
+
+#[test]
+fn absolute_path_does_not_match_relative_rule() {
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "home/user".to_string(),
+        destination_path: "mapped".to_string(),
+    };
+    assert_eq!(
+        rule.apply_with_format("/home/user/f", PathFormat::Posix),
+        None
+    );
+}
+
+#[test]
+fn relative_path_does_not_match_windows_rooted_rule() {
+    // Pins the Windows backslash-root arm of the rootedness check: without
+    // it, segments ["projects"] vs ["projects", "file.txt"] would match.
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Windows,
+        source_path: "\\projects".to_string(),
+        destination_path: "D:\\work".to_string(),
+    };
+    assert_eq!(
+        rule.apply_with_format("projects\\file.txt", PathFormat::Windows),
+        None
+    );
+}
+
+#[test]
+fn relative_path_does_not_match_windows_drive_rule() {
+    // Drive anchors need no rootedness special case: "C:" stays a path
+    // segment, so it can never equal "projects" (matches PureWindowsPath).
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Windows,
+        source_path: "C:\\projects".to_string(),
+        destination_path: "D:\\work".to_string(),
+    };
+    assert_eq!(
+        rule.apply_with_format("projects\\file.txt", PathFormat::Windows),
+        None
+    );
+    assert_eq!(
+        rule.apply_with_format("C:projects\\file.txt", PathFormat::Windows),
+        None
+    );
+}
+
+#[test]
+fn relative_rule_still_matches_relative_path() {
+    // Negative control: same-rootedness matching must keep working.
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "home/user".to_string(),
+        destination_path: "/mnt/x".to_string(),
+    };
+    let mapped = rule.apply_with_format("home/user/f", PathFormat::Posix);
+    assert_eq!(mapped.as_deref(), Some("/mnt/x/f"));
+}
+
+// Regression: split_path_parts split on `\` for every format, but under POSIX a
+// backslash is an ordinary filename character. A POSIX rule for "/home/user"
+// therefore matched the input "/home\user/f", remapping a path it has no claim
+// on. Python agrees it must not match:
+//   PurePosixPath("/home\\user/f").parts        == ('/', 'home\\user', 'f')
+//   ....is_relative_to("/home/user")            == False
+#[test]
+fn posix_rule_does_not_match_backslash_as_separator() {
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "/home/user".to_string(),
+        destination_path: "/mnt/x".to_string(),
+    };
+    assert_eq!(
+        rule.apply_with_format("/home\\user/f", PathFormat::Posix),
+        None
+    );
+    // The whole tail as one component: "home\user\f" is a single segment.
+    assert_eq!(
+        rule.apply_with_format("/home\\user\\f", PathFormat::Posix),
+        None
+    );
+}
+
+#[test]
+fn posix_rule_with_backslash_in_source_needs_literal_match() {
+    // The same rule in reverse: a POSIX rule whose own source_path contains a
+    // backslash treats it as part of the component name, so only a literally
+    // matching input maps. Mirrors PurePosixPath("/home\\user/f")
+    // .is_relative_to("/home\\user") == True.
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "/home\\user".to_string(),
+        destination_path: "/mnt/x".to_string(),
+    };
+    assert_eq!(
+        rule.apply_with_format("/home\\user/f", PathFormat::Posix)
+            .as_deref(),
+        Some("/mnt/x/f")
+    );
+    // ...and the slash-separated spelling is now a different path entirely.
+    assert_eq!(
+        rule.apply_with_format("/home/user/f", PathFormat::Posix),
+        None
+    );
+}
+
+#[test]
+fn windows_rule_still_treats_backslash_as_separator() {
+    // Negative control for the separator split: Windows must keep accepting
+    // both separators, interchangeably, in rule and input.
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Windows,
+        source_path: "C:\\Users\\bob".to_string(),
+        destination_path: "D:\\mapped".to_string(),
+    };
+    assert_eq!(
+        rule.apply_with_format("C:\\Users\\bob\\f.txt", PathFormat::Windows)
+            .as_deref(),
+        Some("D:\\mapped\\f.txt")
+    );
+    assert_eq!(
+        rule.apply_with_format("C:/Users/bob/f.txt", PathFormat::Windows)
+            .as_deref(),
+        Some("D:\\mapped\\f.txt")
+    );
+    // And a forward-slash rule must still match a backslash input.
+    let fwd_rule = PathMappingRule {
+        source_path_format: PathFormat::Windows,
+        source_path: "C:/Users/bob".to_string(),
+        destination_path: "D:\\mapped".to_string(),
+    };
+    assert_eq!(
+        fwd_rule
+            .apply_with_format("C:\\Users\\bob\\f.txt", PathFormat::Windows)
+            .as_deref(),
+        Some("D:\\mapped\\f.txt")
+    );
+}
+
+#[test]
+fn posix_rule_still_matches_ordinary_paths() {
+    // Negative control: the common case must be untouched by the split change.
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "/home/user".to_string(),
+        destination_path: "/mnt/x".to_string(),
+    };
+    assert_eq!(
+        rule.apply_with_format("/home/user/f", PathFormat::Posix)
+            .as_deref(),
+        Some("/mnt/x/f")
+    );
+    assert_eq!(
+        rule.apply_with_format("/home/user", PathFormat::Posix)
+            .as_deref(),
+        Some("/mnt/x")
+    );
+    assert_eq!(
+        rule.apply_with_format("/home/other/f", PathFormat::Posix),
+        None
+    );
+}
+
 // === TestPathMappingRuleValidation ===
 #[test]
 fn path_mapping_preserves_type() {

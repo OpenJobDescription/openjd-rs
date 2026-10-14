@@ -48,6 +48,119 @@ fn make_list_rejects_listlist_element() {
     );
 }
 
+// === make_list rejects unresolved elements ===
+//
+// make_list constructs concrete lists: an Unresolved element is rejected
+// uniformly rather than silently nesting inside a ListList (which would
+// break the invariant that a top-level is_unresolved() check is a
+// complete concreteness test — validate_expressions relies on it for
+// `resolved_value` soundness). Validation-time list expressions with
+// unknown elements are the evaluator's job: list literals and
+// comprehensions hoist to a top-level unresolved(list[T]).
+
+#[test]
+fn make_list_rejects_unresolved_scalar_element() {
+    let err = ExprValue::make_list(
+        vec![ExprValue::Int(1), ExprValue::unresolved(ExprType::INT)],
+        ExprType::NULLTYPE,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("make_list expected concrete elements, got unresolved"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn make_list_rejects_unresolved_list_element() {
+    // Previously this silently built a ListList holding an Unresolved — a
+    // nested shape whose top-level is_unresolved() was false.
+    let inner = ExprValue::make_list(vec![ExprValue::Int(1)], ExprType::INT).unwrap();
+    let err = ExprValue::make_list(
+        vec![inner, ExprValue::unresolved(ExprType::list(ExprType::INT))],
+        ExprType::NULLTYPE,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("make_list expected concrete elements, got unresolved"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn make_list_rejects_lone_unresolved_element() {
+    let err = ExprValue::make_list(
+        vec![ExprValue::unresolved(ExprType::STRING)],
+        ExprType::NULLTYPE,
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("make_list expected concrete elements, got unresolved"),
+        "got: {err}"
+    );
+}
+
+// === Evaluator hoists unresolved list elements ===
+
+fn eval_with_unresolved(expr: &str) -> Result<ExprValue, String> {
+    let mut st = SymbolTable::new();
+    st.set("Param.X", ExprValue::unresolved(ExprType::INT))
+        .unwrap();
+    st.set(
+        "Param.Y",
+        ExprValue::unresolved(ExprType::list(ExprType::INT)),
+    )
+    .unwrap();
+    ParsedExpression::new(expr)
+        .and_then(|p| p.evaluate(&st))
+        .map_err(|e| e.to_string())
+}
+
+#[test]
+fn list_literal_with_unresolved_element_hoists() {
+    let val = eval_with_unresolved("[Param.X, 1]").unwrap();
+    assert!(matches!(
+        val,
+        ExprValue::Unresolved(ref t) if *t == ExprType::list(ExprType::INT)
+    ));
+}
+
+#[test]
+fn list_literal_with_unresolved_list_element_hoists() {
+    let val = eval_with_unresolved("[[1], Param.Y]").unwrap();
+    assert!(matches!(
+        val,
+        ExprValue::Unresolved(ref t) if *t == ExprType::list(ExprType::list(ExprType::INT))
+    ));
+}
+
+#[test]
+fn comprehension_with_unresolved_body_hoists() {
+    // The iterable is concrete but the body references an unresolved
+    // symbol, so every element is unresolved. This must hoist like a list
+    // literal — it previously failed validation because the unresolved
+    // elements reached make_list.
+    let val = eval_with_unresolved("[Param.X + i for i in [1, 2]]").unwrap();
+    assert!(matches!(
+        val,
+        ExprValue::Unresolved(ref t) if *t == ExprType::list(ExprType::INT)
+    ));
+}
+
+#[test]
+fn comprehension_with_partially_unresolved_body_hoists() {
+    // Only some elements are unresolved (the body is conditional on the
+    // loop variable): still hoists, with the promoted element type.
+    let val = eval_with_unresolved("[Param.X + i if i > 1 else i for i in [1, 2]]").unwrap();
+    assert!(matches!(
+        val,
+        ExprValue::Unresolved(ref t) if *t == ExprType::list(ExprType::INT)
+    ));
+}
+
 // === make_list type mismatch errors ===
 
 #[test]
@@ -127,4 +240,47 @@ fn make_list_incompatible_types_error() {
     // Null + Int has no promotion rule — must error, not fall back to ListString
     let result = ExprValue::make_list(vec![ExprValue::Null, ExprValue::Int(1)], ExprType::NULLTYPE);
     assert!(result.is_err(), "incompatible types must error");
+}
+
+// === make_list uses the shared list-element join ===
+
+#[test]
+fn make_list_rejects_list_int_beside_list_string() {
+    // Previously built a ListList typed by its first element.
+    let ints = ExprValue::make_list(vec![ExprValue::Int(1)], ExprType::INT).unwrap();
+    let strs = ExprValue::make_list(vec![ExprValue::String("a".into())], ExprType::STRING).unwrap();
+    let err = ExprValue::make_list(vec![ints, strs], ExprType::NULLTYPE)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "make_list expected list[int] element, got list[string]"
+    );
+}
+
+#[test]
+fn make_list_rejects_int_float_string_without_panic() {
+    use openjd_expr::value::Float64;
+    let err = ExprValue::make_list(
+        vec![
+            ExprValue::Int(1),
+            ExprValue::Float(Float64::new(2.0).unwrap()),
+            ExprValue::String("a".into()),
+        ],
+        ExprType::NULLTYPE,
+    )
+    .unwrap_err()
+    .to_string();
+    assert_eq!(err, "make_list expected float element, got string");
+}
+
+#[test]
+fn make_list_list_of_lists_carries_joined_element_type() {
+    // An untyped empty list first, an empty `list[int]` second: no
+    // non-empty sibling to convert the empty list to, but the result is
+    // typed by the join (`list[int]`), not by the first element.
+    let empty = ExprValue::make_list(vec![], ExprType::NULLTYPE).unwrap();
+    let empty_ints = ExprValue::ListInt(vec![]);
+    let list = ExprValue::make_list(vec![empty, empty_ints], ExprType::NULLTYPE).unwrap();
+    assert_eq!(list.expr_type().to_string(), "list[list[int]]");
 }

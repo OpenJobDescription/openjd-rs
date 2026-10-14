@@ -41,7 +41,7 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
     let template_value = parse::document_string_to_object(
         &content,
         crate::common::document_type(path),
-        &openjd_model::CallerLimits::default(),
+        &crate::common::caller_limits(),
     )?;
 
     let exts = crate::common::parse_extensions(&args.extensions)?;
@@ -50,7 +50,7 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
     let job_template = parse::decode_job_template(
         template_value,
         Some(&supported_exts),
-        &openjd_model::CallerLimits::default(),
+        &crate::common::caller_limits(),
     )?;
 
     // Preserve template parameter definition order
@@ -72,11 +72,12 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
         let env_value = parse::document_string_to_object(
             &env_content,
             crate::common::document_type(env_path),
-            &openjd_model::CallerLimits::default(),
+            &crate::common::caller_limits(),
         )?;
         env_templates.push(parse::decode_environment_template(
             env_value,
             Some(&supported_exts),
+            &crate::common::caller_limits(),
         )?);
     }
 
@@ -101,20 +102,13 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
         },
     )?;
 
-    let ctx = {
-        let mut exts = std::collections::HashSet::new();
-        if let Some(ext_list) = &job_template.extensions {
-            exts.extend(
-                ext_list
-                    .iter()
-                    .filter_map(|e| e.as_str().parse::<openjd_model::ModelExtension>().ok()),
-            );
-        }
-        openjd_model::ValidationContext::with_extensions(
-            openjd_model::SpecificationRevision::V2023_09,
-            exts,
-        )
-    };
+    // Derive the context from the template itself — `create_job`
+    // requires the context's revision/extensions to cover the
+    // template's — and carry the CLI's caller limits so job creation
+    // enforces the same caps the decode ran under.
+    let ctx = job_template
+        .default_validation_context()
+        .with_caller_limits(crate::common::caller_limits());
 
     let the_job = openjd_model::create_job(&job_template, &param_values, &ctx)?;
 

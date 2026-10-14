@@ -1,6 +1,6 @@
 [package]
 name = "openjd-expr"
-version = "0.2.1"
+version = "0.11.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -27,6 +27,13 @@ serde_json = { workspace = true }
 # Published to crates.io by the RustPython project under the `rustpython-` prefix
 # (https://github.com/RustPython/RustPython/pull/7532).
 # See specs/expr/parser.md for the full evaluation.
-ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "0.15.8" }
-ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "0.15.8" }
-ruff_text_size = { package = "rustpython-ruff_text_size", version = "0.15.8" }
+#
+# These are pinned to an exact version (`=`) on purpose. The ruff crates do not
+# follow semver for 0.x patch releases: 0.16.10 replaced `ExprCompare::left` and
+# the `comparators` field with `operands`/`runtime_comparators`, which broke any
+# build resolving `^0.16.5` without our Cargo.lock (including downstream users and
+# cargo-semver-checks in the release-plz workflow). Bump all three together and
+# review the upstream AST changes when updating.
+ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "=0.16.10" }
+ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "=0.16.10" }
+ruff_text_size = { package = "rustpython-ruff_text_size", version = "=0.16.10" }

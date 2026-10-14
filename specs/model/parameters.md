@@ -130,19 +130,26 @@ pub type Extensions = HashSet<KnownExtension>;                    // Enabled ext
 
 PATH parameters have special handling throughout the pipeline:
 
-1. **Raw form and RawParam**: PATH values are stored as `ExprValue::String` in their raw
-   form and in `RawParam.X`, preserving the original path string as provided.
+1. **Stored form and RawParam**: PATH values are stored as `ExprValue::String`, and `RawParam.X`
+   holds that string: the value after relative path resolution (item 3), with no path mapping
+   applied. Absolute values and URIs are kept as written.
 
 2. **Session/task scope**: In the session and task template contexts, `Param.X` for PATH
    types becomes `ExprValue::Path` (which carries the host path format) after the session
    applies path mapping rules. The `apply_path_mapping` expression function also produces
    `ExprValue::Path`.
 
-3. **Relative path resolution**: User-provided relative paths are joined to `current_working_dir`;
-   default relative paths are joined to `job_template_dir`. URI paths (`s3://`, `https://`)
-   are preserved as-is when the EXPR extension is enabled.
+3. **Relative path resolution** (Template Schemas §2.2): User-provided relative paths are joined
+   to `current_working_dir`; default relative paths are joined to `job_template_dir`, and an
+   absolute default or one that resolves outside `job_template_dir` is an error (unless
+   `allow_template_dir_walk_up`). Joined paths are lexically normalized. URI paths (`s3://`,
+   `https://`) are never joined, and are preserved as-is when the EXPR extension is enabled and
+   `allow_uri_path_values` is set. Length and `allowedValues` constraints are checked against a
+   default as written at template validation, and against the joined value at job creation. See
+   [job-creation.md](job-creation.md) for details.
 
-4. **LIST[PATH]**: `RawParam.X` for `LIST[PATH]` is `list(STRING)`, not `list(PATH)`.
+4. **LIST[PATH]**: Each element is resolved as in item 3 (§2.12). `RawParam.X` for `LIST[PATH]`
+   is `list(STRING)` holding the resolved elements, not `list(PATH)`.
 
 ## Value Coercion
 
@@ -152,7 +159,7 @@ two input modes:
 - **CLI input** (string values): Parsed via `coerce_from_str` — handles numeric parsing,
   boolean aliases (`yes`/`no`/`on`/`off`/`1`/`0`), JSON list parsing for list types.
 
-- **Library input** (typed ExprValue): Validated via `coerce_to_type` — checks type
+- **Library input** (typed ExprValue): Validated via `coerce_to_job_parameter_type` — checks type
   compatibility, performs numeric widening (int → float), validates list element types.
 
 ## Validation Context and Extension Effects
@@ -186,6 +193,12 @@ Numeric limits derived from context. FEATURE_BUNDLE_1 raises many limits:
 | `max_job_param_string_len` | 1024 | 1024 |
 | `max_command_len` | 1024 | 1024 |
 | `max_description_len` | 2048 | 2048 |
+
+`max_task_param_range_len` applies to the **list** forms of a task parameter
+range only — `<IntRangeList>` (§3.4.1.1), `<FloatRangeList>` (§3.4.1.2) and
+`<StringRangeList>` (§3.4.1.3). §3.4.1.1.1 `<IntRangeExpr>` states no element
+cap, so an expression's expansion is unbounded here; a host that needs to bound
+fan-out uses `CallerLimits::max_task_count`.
 
 ### EffectiveRules
 

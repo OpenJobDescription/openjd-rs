@@ -173,23 +173,36 @@ impl ExprType {
 
     /// Try to match a call's argument types against this signature.
     /// Returns type variable bindings if successful, None if no match.
+    ///
+    /// A type variable that appears in more than one parameter must bind
+    /// consistently across them. Two bindings are consistent when they are
+    /// the same type or an implicitly coercible pair (`int`/`float`,
+    /// `path`/`string`, `range_expr`/`list[int]`).
+    ///
+    /// A `list[<var>]` parameter matched by the empty list literal
+    /// (`list[nulltype]`) binds the variable only *weakly*: if any other
+    /// parameter binds it, that binding wins outright (`1 in []` binds
+    /// `T = int`); if nothing else does, the variable is `nulltype` as before
+    /// (`sorted([])` still returns `list[nulltype]`).
     pub fn match_call(&self, arg_types: &[ExprType]) -> Option<HashMap<TypeCode, ExprType>> {
         let sig_params = self.sig_params();
         if sig_params.len() != arg_types.len() {
             return None;
         }
         let mut bindings = HashMap::new();
+        let mut weak = HashMap::new();
         for (sig_p, arg_t) in sig_params.iter().zip(arg_types.iter()) {
             let sub = sig_p.match_type(arg_t)?;
+            let target = if is_empty_list_against_list_var(sig_p, arg_t) {
+                &mut weak
+            } else {
+                &mut bindings
+            };
             for (k, v) in sub {
-                if let Some(existing) = bindings.get(&k) {
-                    if *existing != v {
-                        return None;
-                    }
-                }
-                bindings.insert(k, v);
+                merge_binding(target, k, v)?;
             }
         }
+        apply_weak_bindings(&mut bindings, weak);
         Some(bindings)
     }
 
@@ -199,6 +212,281 @@ impl ExprType {
         let bindings = self.match_call(arg_types)?;
         Some(self.sig_return().substitute(&bindings))
     }
+}
+
+// ── Type variable unification ──
+
+/// True when `param` is `list[<type variable>]` and `arg` is the empty list
+/// literal's type `list[nulltype]`. Such a match binds the variable weakly;
+/// see [`ExprType::match_call`].
+pub(crate) fn is_empty_list_against_list_var(param: &ExprType, arg: &ExprType) -> bool {
+    param.code == TypeCode::List
+        && arg.code == TypeCode::List
+        && matches!(arg.params.as_slice(), [elem] if elem.code == TypeCode::NullType)
+        && matches!(
+            param.params.as_slice(),
+            [v] if matches!(
+                v.code,
+                TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3
+            )
+        )
+}
+
+/// Fold weak (empty-list) bindings into `bindings` for any variable that
+/// nothing bound strongly.
+pub(crate) fn apply_weak_bindings(
+    bindings: &mut HashMap<TypeCode, ExprType>,
+    weak: HashMap<TypeCode, ExprType>,
+) {
+    for (k, v) in weak {
+        bindings.entry(k).or_insert(v);
+    }
+}
+
+/// Record a binding for type variable `var`, reconciling it with any
+/// binding the same variable already has. Returns `None` on conflict.
+pub(crate) fn merge_binding(
+    bindings: &mut HashMap<TypeCode, ExprType>,
+    var: TypeCode,
+    new: ExprType,
+) -> Option<()> {
+    let merged = match bindings.get(&var) {
+        Some(existing) => unify_binding(existing, &new)?,
+        None => new,
+    };
+    bindings.insert(var, merged);
+    Some(())
+}
+
+/// Reconcile two candidate bindings for one type variable.
+///
+/// The bindings agree when they are the same type, or when one implicitly
+/// coerces to the other under the language's non-destructive rules
+/// (`int` → `float`, `path` → `string`, `range_expr` → `list[int]`), in
+/// which case the wider type is kept. Lists reconcile element-wise, where a
+/// `nulltype` element (the empty list literal `[]`) yields to the other
+/// element type because `list[nulltype]` is compatible with every `list[T]`.
+/// A union agrees if any member does, and `any` agrees with everything.
+/// Anything else is a conflict, including a bare `nulltype` against a scalar:
+/// `null` is not an `int`.
+///
+/// This is what lets `__contains__(list[T], T)` accept `1 in [1.0, 2.0]`,
+/// `path([...]) in ["/a"]` and `[] in [[1]]` while refusing `"a" in [1, 2]`
+/// and `null in [1, 2]`.
+pub(crate) fn unify_binding(a: &ExprType, b: &ExprType) -> Option<ExprType> {
+    unify_inner(a, b, false)
+}
+
+fn unify_inner(a: &ExprType, b: &ExprType, as_list_element: bool) -> Option<ExprType> {
+    if a == b {
+        return Some(a.clone());
+    }
+    match (a.code, b.code) {
+        // `any` is the type of a value whose type is unknown (a `let` binding
+        // that already failed is rebound as `unresolved[any]` so later
+        // bindings do not cascade). It matches everything in `match_type` and
+        // must not manufacture a conflict here either.
+        (TypeCode::Any, _) => Some(b.clone()),
+        (_, TypeCode::Any) => Some(a.clone()),
+        (TypeCode::NullType, _) if as_list_element => Some(b.clone()),
+        (_, TypeCode::NullType) if as_list_element => Some(a.clone()),
+        (TypeCode::Int, TypeCode::Float) | (TypeCode::Float, TypeCode::Int) => {
+            Some(ExprType::FLOAT)
+        }
+        (TypeCode::Path, TypeCode::String) | (TypeCode::String, TypeCode::Path) => {
+            Some(ExprType::STRING)
+        }
+        // A `List` with no params is constructible through `ExprType::new`
+        // and is malformed; it unifies with nothing rather than panicking.
+        (TypeCode::RangeExpr, TypeCode::List) if matches!(b.params.first(), Some(e) if e.code == TypeCode::Int) => {
+            Some(b.clone())
+        }
+        (TypeCode::List, TypeCode::RangeExpr) if matches!(a.params.first(), Some(e) if e.code == TypeCode::Int) => {
+            Some(a.clone())
+        }
+        (TypeCode::List, TypeCode::List) => match (a.params.as_slice(), b.params.as_slice()) {
+            ([ea], [eb]) => Some(ExprType::list(unify_inner(ea, eb, true)?)),
+            _ => None,
+        },
+        (TypeCode::Union, _) => a
+            .params
+            .iter()
+            .find_map(|m| unify_inner(m, b, as_list_element))
+            .map(|_| a.clone()),
+        (_, TypeCode::Union) => b
+            .params
+            .iter()
+            .find_map(|m| unify_inner(a, m, as_list_element))
+            .map(|_| b.clone()),
+        _ => None,
+    }
+}
+
+// ── List element join ──
+
+/// Join the types of two list elements into the element type of a list
+/// holding both — the list-literal type inference of RFC 0005 §"List
+/// Literal Type Inference", as a type-level operation. Returns `None` when
+/// the two cannot share a list.
+///
+/// This is the single join used by concrete list construction
+/// (`ExprValue::make_list`, `eval_list`'s homogeneity check) and by the
+/// validation-time hoisting of list literals and comprehensions with an
+/// `Unresolved` element, so that every evaluation stage accepts and
+/// rejects the same combinations. Rules:
+///
+/// - Identical types join to themselves.
+/// - `int` and `float` join to `float`; `path` and `string` to `string`.
+/// - `list[A]` and `list[B]` join to `list[A ⊔ B]`, where inside a list a
+///   `nulltype` element yields to anything (`list[nulltype]` is the empty
+///   list, compatible with every list type).
+/// - A union joins with a type if any member does; the result is the union
+///   of the members' joins. A value of the union type that is an
+///   incompatible member fails at run time, so only the compatible members
+///   describe a list that is actually built.
+/// - `unresolved[T]` joins as `T`; `any` (a failed binding's placeholder)
+///   yields to the other type.
+/// - Each side is first reduced to its [`list_element_contribution`]: a
+///   top-level `nulltype` union member is dropped (a `null` element always
+///   fails), so `int?` joins as `int` and `int?` against `string?` is a
+///   conflict.
+/// - Everything else is a conflict — notably `bool` against `int`, a scalar
+///   against a list, `range_expr` against `list[int]`, a top-level
+///   `nulltype` (a list literal cannot hold `null`), and an unbound type
+///   variable against anything but itself.
+pub(crate) fn join_list_element(a: &ExprType, b: &ExprType) -> Option<ExprType> {
+    let a = list_element_contribution(a)?;
+    let b = list_element_contribution(b)?;
+    join_element_inner(&a, &b, false)
+}
+
+/// The type an element of type `t` contributes to a list built from it:
+/// `t` without the members whose values can never be part of a built list,
+/// or `None` when no value of `t` can be.
+///
+/// - `unresolved[T]` contributes as `T`.
+/// - A top-level `nulltype` contributes nothing — a list literal cannot
+///   hold `null` (`[None]` fails), so a `nulltype` element never builds a
+///   list. A union drops its `nulltype` member: `int | nulltype`
+///   contributes `int`.
+///
+/// A `list[nulltype]` union member is kept here: it still joins with any
+/// list (`[([] if c else [1]), ['a']]` builds when `c` holds), so
+/// dropping it before the join would reject a list that can be built.
+/// [`simplify_joined_list_element`] removes it from the joined result.
+pub(crate) fn list_element_contribution(t: &ExprType) -> Option<ExprType> {
+    let t = match (t.code, t.params.as_slice()) {
+        (TypeCode::Unresolved, [inner]) => inner,
+        _ => t,
+    };
+    match t.code {
+        TypeCode::NullType => None,
+        TypeCode::Union => {
+            let members: Vec<ExprType> = t
+                .params
+                .iter()
+                .filter(|m| m.code != TypeCode::NullType)
+                .cloned()
+                .collect();
+            if members.is_empty() {
+                None
+            } else {
+                Some(ExprType::union(members))
+            }
+        }
+        _ => Some(t.clone()),
+    }
+}
+
+/// Simplify a joined list element type: a union holding a typed list
+/// member drops its `list[nulltype]` member. The empty list fits any list
+/// type (`[[], [1]]` is `list[list[int]]`), so `list[int] | list[nulltype]`
+/// as an element type is `list[int]`. Applied to the result of a join
+/// (never to its inputs, where the empty-list member must stay joinable).
+pub(crate) fn simplify_joined_list_element(t: ExprType) -> ExprType {
+    if t.code != TypeCode::Union {
+        return t;
+    }
+    let empty_list = ExprType::list(ExprType::NULLTYPE);
+    let has_typed_list = t.params.iter().any(|m| m.is_list() && *m != empty_list);
+    if !has_typed_list || !t.params.contains(&empty_list) {
+        return t;
+    }
+    ExprType::union(t.params.into_iter().filter(|m| *m != empty_list).collect())
+}
+
+fn join_element_inner(a: &ExprType, b: &ExprType, nested: bool) -> Option<ExprType> {
+    if let (TypeCode::Unresolved, [inner]) = (a.code, a.params.as_slice()) {
+        return join_element_inner(inner, b, nested);
+    }
+    if let (TypeCode::Unresolved, [inner]) = (b.code, b.params.as_slice()) {
+        return join_element_inner(a, inner, nested);
+    }
+    if a == b {
+        return Some(a.clone());
+    }
+    match (a.code, b.code) {
+        (TypeCode::Any, _) => Some(b.clone()),
+        (_, TypeCode::Any) => Some(a.clone()),
+        (TypeCode::NullType, _) if nested => Some(b.clone()),
+        (_, TypeCode::NullType) if nested => Some(a.clone()),
+        (TypeCode::Union, _) => join_union_members(&a.params, b, nested),
+        (_, TypeCode::Union) => join_union_members(&b.params, a, nested),
+        (TypeCode::Int, TypeCode::Float) | (TypeCode::Float, TypeCode::Int) => {
+            Some(ExprType::FLOAT)
+        }
+        (TypeCode::Path, TypeCode::String) | (TypeCode::String, TypeCode::Path) => {
+            Some(ExprType::STRING)
+        }
+        (TypeCode::List, TypeCode::List) => match (a.params.as_slice(), b.params.as_slice()) {
+            ([ea], [eb]) => Some(ExprType::list(join_element_inner(ea, eb, true)?)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The union of each member's join with `other`, or `None` if no member
+/// joins. The join is commutative, so the member side does not matter.
+fn join_union_members(members: &[ExprType], other: &ExprType, nested: bool) -> Option<ExprType> {
+    let joined: Vec<ExprType> = members
+        .iter()
+        .filter_map(|m| join_element_inner(m, other, nested))
+        .collect();
+    if joined.is_empty() {
+        None
+    } else {
+        Some(ExprType::union(joined))
+    }
+}
+
+/// Fold [`join_list_element`] over a list's element types.
+///
+/// Returns `Ok(None)` for no elements, `Ok(Some(t))` with the joined
+/// element type, or `Err((joined_so_far, offending))` at the first element
+/// that cannot join the elements before it. Every element, including a
+/// lone one, is reduced to its [`list_element_contribution`]; a first
+/// element that contributes nothing (`nulltype`) fails as
+/// `Err((t, t))`. The joined type is finished with
+/// [`simplify_joined_list_element`].
+pub(crate) fn join_list_element_types<I>(types: I) -> Result<Option<ExprType>, (ExprType, ExprType)>
+where
+    I: IntoIterator<Item = ExprType>,
+{
+    let mut acc: Option<ExprType> = None;
+    for t in types {
+        acc = Some(match acc {
+            None => match list_element_contribution(&t) {
+                Some(c) => c,
+                None => return Err((t.clone(), t)),
+            },
+            Some(prev) => match join_list_element(&prev, &t) {
+                Some(j) => j,
+                None => return Err((prev, t)),
+            },
+        });
+    }
+    Ok(acc.map(simplify_joined_list_element))
 }
 
 // ── Normalization ──
@@ -279,6 +567,108 @@ impl ExprType {
             return false;
         }
         self.params.iter().all(|p| p.is_concrete())
+    }
+
+    /// Returns `true` if a value of this type is already acceptable where
+    /// `target` is required, so that no conversion is needed.
+    ///
+    /// The relation is **directional**: `int` satisfies `any`, but `any` does
+    /// not satisfy `int`. See [`match_type`](Self::match_type) for the
+    /// related but different symmetric operation.
+    ///
+    /// The rules:
+    ///
+    /// - An `any` target accepts every type — RFC 0005 lists it as
+    ///   "matches anything".
+    /// - A union target is satisfied when **any** member is satisfied, so
+    ///   `int` satisfies `int | string`.
+    /// - A union source satisfies a target only when **every** member does,
+    ///   since any one of them could be the runtime type.
+    /// - `list[T]` is covariant in its element type: `list[int]` satisfies
+    ///   `list[any]` and `list[int | string]`.
+    /// - Nothing satisfies a type variable, `noreturn`, `unresolved[T]`, or a
+    ///   signature. None of those denote a set of runtime values that a value
+    ///   could belong to. Type variables in particular are bound by signature
+    ///   matching before any value is coerced, so encountering one here means
+    ///   it was never bound — see `specs/expr/values.md`.
+    /// - Otherwise the two types must be equal.
+    pub fn satisfies(&self, target: &ExprType) -> bool {
+        if !target.denotes_runtime_values() {
+            return false;
+        }
+        match (self.code, target.code) {
+            // An `any` target accepts every type (RFC 0005: "matches
+            // anything").
+            (_, TypeCode::Any) => true,
+            // An unresolved source delegates to its constraint: the
+            // constraint is what the resolved value's type will be.
+            // `ExprType::new` can build a param-less `unresolved`, which
+            // constrains nothing, so index safely.
+            (TypeCode::Unresolved, _) => self.params.first().is_some_and(|c| c.satisfies(target)),
+            // A union source must satisfy via **every** member, since any of
+            // them could be the runtime type; a union target via at least
+            // one. Source before target: the (union, union) case has to
+            // decompose the source, because no multi-member union fits
+            // inside a single member — not even its own.
+            (TypeCode::Union, _) => self.params.iter().all(|m| m.satisfies(target)),
+            (_, TypeCode::Union) => target.params.iter().any(|m| self.satisfies(m)),
+            // A source of unknown type is not *known* to belong to any
+            // narrower target. (Unbound type variables fall out below:
+            // symbolic sources never equal a value-denoting target.)
+            (TypeCode::Any, _) => false,
+            // `list[T]` is covariant in its element type.
+            (TypeCode::List, TypeCode::List)
+                if self.params.len() == 1 && target.params.len() == 1 =>
+            {
+                self.params[0].satisfies(&target.params[0])
+            }
+            _ => !self.is_symbolic() && self == target,
+        }
+    }
+
+    /// Returns `true` if this type denotes a set of runtime values.
+    ///
+    /// Type variables, `noreturn`, `unresolved[T]`, and signatures do not:
+    /// no value can ever *be* one of those, so nothing satisfies them and
+    /// coercion rejects them as targets outright.
+    ///
+    /// The check is recursive, because those codes can appear nested where
+    /// they are just as unusable: `list[T1]` cannot be built without a
+    /// binding for `T1` any more than `T1` can. A union is the one case that
+    /// tolerates an unusable part — it denotes values when **any** member
+    /// does, since a value only has to land in one of them, and
+    /// [`Self::satisfies`] and the coercion destination list both consider
+    /// members individually.
+    pub(crate) fn denotes_runtime_values(&self) -> bool {
+        match self.code {
+            TypeCode::TypeVarT
+            | TypeCode::TypeVarT1
+            | TypeCode::TypeVarT2
+            | TypeCode::TypeVarT3
+            | TypeCode::NoReturn
+            | TypeCode::Unresolved
+            | TypeCode::Signature => false,
+            TypeCode::Union => self.params.iter().any(|p| p.denotes_runtime_values()),
+            _ => self.params.iter().all(|p| p.denotes_runtime_values()),
+        }
+    }
+
+    /// Replace every type variable with `any`, recursively.
+    ///
+    /// This is the value-set reading of an unbound variable: the concrete
+    /// value it stands for has *some* type, unknown here, which is exactly
+    /// the set of possibilities `any` denotes. The shape around the
+    /// variable is preserved — `list[T1]` becomes `list[any]`. Unions
+    /// re-normalize, so `int | T1` collapses to `any` (a union with an
+    /// `any` member accepts everything).
+    pub(crate) fn erase_type_vars(&self) -> ExprType {
+        let bindings = HashMap::from([
+            (TypeCode::TypeVarT, ExprType::ANY),
+            (TypeCode::TypeVarT1, ExprType::ANY),
+            (TypeCode::TypeVarT2, ExprType::ANY),
+            (TypeCode::TypeVarT3, ExprType::ANY),
+        ]);
+        self.substitute(&bindings)
     }
 
     /// Substitute type variables with concrete types.
@@ -363,12 +753,7 @@ impl ExprType {
         for (sp, cp) in self.params.iter().zip(other.params.iter()) {
             let sub = sp.match_type(cp)?;
             for (k, v) in sub {
-                if let Some(existing) = bindings.get(&k) {
-                    if *existing != v {
-                        return None;
-                    }
-                }
-                bindings.insert(k, v);
+                merge_binding(&mut bindings, k, v)?;
             }
         }
         Some(bindings)
@@ -994,5 +1379,376 @@ mod tests {
         let mut bindings = HashMap::new();
         bindings.insert(TypeCode::TypeVarT1, ExprType::INT);
         assert_eq!(list_t1.substitute(&bindings), ExprType::list(ExprType::INT));
+    }
+
+    // === unify_binding: one type variable bound from two parameters ===
+
+    #[test]
+    fn unify_identical_types() {
+        assert_eq!(
+            unify_binding(&ExprType::INT, &ExprType::INT),
+            Some(ExprType::INT)
+        );
+    }
+
+    #[test]
+    fn unify_coercible_pairs_keep_the_wider_type() {
+        assert_eq!(
+            unify_binding(&ExprType::INT, &ExprType::FLOAT),
+            Some(ExprType::FLOAT)
+        );
+        assert_eq!(
+            unify_binding(&ExprType::FLOAT, &ExprType::INT),
+            Some(ExprType::FLOAT)
+        );
+        assert_eq!(
+            unify_binding(&ExprType::PATH, &ExprType::STRING),
+            Some(ExprType::STRING)
+        );
+        assert_eq!(
+            unify_binding(&ExprType::STRING, &ExprType::PATH),
+            Some(ExprType::STRING)
+        );
+        let list_int = ExprType::list(ExprType::INT);
+        assert_eq!(
+            unify_binding(&ExprType::RANGE_EXPR, &list_int),
+            Some(list_int.clone())
+        );
+        assert_eq!(
+            unify_binding(&list_int, &ExprType::RANGE_EXPR),
+            Some(list_int)
+        );
+    }
+
+    #[test]
+    fn unify_range_expr_only_with_list_int() {
+        assert_eq!(
+            unify_binding(&ExprType::RANGE_EXPR, &ExprType::list(ExprType::FLOAT)),
+            None
+        );
+        assert_eq!(
+            unify_binding(&ExprType::RANGE_EXPR, &ExprType::list(ExprType::STRING)),
+            None
+        );
+    }
+
+    #[test]
+    fn unify_incompatible_pairs_conflict() {
+        for (a, b) in [
+            (ExprType::INT, ExprType::STRING),
+            (ExprType::STRING, ExprType::INT),
+            (ExprType::BOOL, ExprType::INT),
+            (ExprType::BOOL, ExprType::FLOAT),
+            (ExprType::BOOL, ExprType::STRING),
+            (ExprType::PATH, ExprType::INT),
+            (ExprType::INT, ExprType::list(ExprType::INT)),
+        ] {
+            assert_eq!(unify_binding(&a, &b), None, "{a} vs {b}");
+        }
+    }
+
+    #[test]
+    fn unify_nulltype_is_a_scalar_at_top_level() {
+        // `null in [1, 2]`: the item is nulltype and the element type int.
+        // nulltype yields only as a list *element* (the empty list), not as
+        // a value standing on its own.
+        assert_eq!(unify_binding(&ExprType::NULLTYPE, &ExprType::INT), None);
+        assert_eq!(unify_binding(&ExprType::INT, &ExprType::NULLTYPE), None);
+    }
+
+    #[test]
+    fn unify_lists_element_wise_and_empty_list_yields() {
+        let list_int = ExprType::list(ExprType::INT);
+        let list_float = ExprType::list(ExprType::FLOAT);
+        let list_null = ExprType::list(ExprType::NULLTYPE);
+        assert_eq!(
+            unify_binding(&list_int, &list_float),
+            Some(list_float.clone())
+        );
+        assert_eq!(unify_binding(&list_int, &list_null), Some(list_int.clone()));
+        assert_eq!(unify_binding(&list_null, &list_int), Some(list_int.clone()));
+        assert_eq!(
+            unify_binding(
+                &ExprType::list(list_int.clone()),
+                &ExprType::list(list_null)
+            ),
+            Some(ExprType::list(list_int))
+        );
+        assert_eq!(
+            unify_binding(
+                &ExprType::list(ExprType::INT),
+                &ExprType::list(ExprType::STRING)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn unify_union_agrees_if_any_member_does() {
+        let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
+        assert_eq!(unify_binding(&u, &ExprType::INT), Some(u.clone()));
+        assert_eq!(unify_binding(&ExprType::FLOAT, &u), Some(u.clone()));
+        assert_eq!(unify_binding(&u, &ExprType::BOOL), None);
+    }
+
+    #[test]
+    fn match_call_reconciles_repeated_type_variable() {
+        let sig = ExprType::parse("(list[T], T) -> bool").unwrap();
+        let list_int = ExprType::list(ExprType::INT);
+        // Same type binds.
+        assert!(sig.match_call(&[list_int.clone(), ExprType::INT]).is_some());
+        // Coercible pair binds to the wider type.
+        let b = sig
+            .match_call(&[ExprType::list(ExprType::FLOAT), ExprType::INT])
+            .unwrap();
+        assert_eq!(b[&TypeCode::TypeVarT], ExprType::FLOAT);
+        // Incompatible pair does not match.
+        assert!(sig
+            .match_call(&[list_int.clone(), ExprType::STRING])
+            .is_none());
+        assert!(sig
+            .match_call(&[list_int.clone(), ExprType::NULLTYPE])
+            .is_none());
+        // The empty list binds only weakly, so the item's type wins.
+        let b = sig
+            .match_call(&[ExprType::list(ExprType::NULLTYPE), ExprType::STRING])
+            .unwrap();
+        assert_eq!(b[&TypeCode::TypeVarT], ExprType::STRING);
+    }
+
+    #[test]
+    fn empty_list_binds_weakly_but_still_binds_when_alone() {
+        // Review finding on #396: a fast path that made `list[<var>]` vs
+        // `list[nulltype]` bind nothing leaked the variable into the return
+        // type of the one-parameter list generics. `sorted([])` must still
+        // resolve to `list[nulltype]`, and so must `[] * 3`.
+        let sorted = ExprType::parse("(list[T1]) -> list[T1]").unwrap();
+        assert_eq!(
+            sorted.resolve_call(&[ExprType::list(ExprType::NULLTYPE)]),
+            Some(ExprType::list(ExprType::NULLTYPE))
+        );
+        let mul = ExprType::parse("(list[T], int) -> list[T]").unwrap();
+        assert_eq!(
+            mul.resolve_call(&[ExprType::list(ExprType::NULLTYPE), ExprType::INT]),
+            Some(ExprType::list(ExprType::NULLTYPE))
+        );
+        // And with a sibling that binds the variable, the sibling wins.
+        let contains = ExprType::parse("(list[T], T) -> bool").unwrap();
+        let b = contains
+            .match_call(&[ExprType::list(ExprType::NULLTYPE), ExprType::INT])
+            .unwrap();
+        assert_eq!(b[&TypeCode::TypeVarT], ExprType::INT);
+        // A weak binding never conflicts with a strong one, in either order.
+        let rev = ExprType::parse("(T, list[T]) -> bool").unwrap();
+        let b = rev
+            .match_call(&[ExprType::STRING, ExprType::list(ExprType::NULLTYPE)])
+            .unwrap();
+        assert_eq!(b[&TypeCode::TypeVarT], ExprType::STRING);
+    }
+
+    #[test]
+    fn unify_any_never_conflicts() {
+        // Review finding on #396: openjd-model rebinds a failed `let` as
+        // `unresolved[any]` so later bindings do not cascade errors; a
+        // conflict here would report `Cannot use 'in' operator with list[int]
+        // and any` on top of the real error.
+        assert_eq!(
+            unify_binding(&ExprType::INT, &ExprType::ANY),
+            Some(ExprType::INT)
+        );
+        assert_eq!(
+            unify_binding(&ExprType::ANY, &ExprType::INT),
+            Some(ExprType::INT)
+        );
+        assert_eq!(
+            unify_binding(
+                &ExprType::list(ExprType::INT),
+                &ExprType::list(ExprType::ANY)
+            ),
+            Some(ExprType::list(ExprType::INT))
+        );
+        let sig = ExprType::parse("(list[T], T) -> bool").unwrap();
+        assert!(sig
+            .match_call(&[ExprType::list(ExprType::INT), ExprType::ANY])
+            .is_some());
+    }
+
+    #[test]
+    fn unify_malformed_list_yields_none_not_panic() {
+        // Review finding on #396: `ExprType::new(TypeCode::List, vec![])` is
+        // constructible and the repo treats it as a real input elsewhere
+        // (test_target_type_union::malformed_list_source_is_rejected).
+        let bad = ExprType::new(TypeCode::List, vec![]);
+        assert_eq!(unify_binding(&bad, &ExprType::list(ExprType::INT)), None);
+        assert_eq!(unify_binding(&ExprType::list(ExprType::INT), &bad), None);
+        assert_eq!(unify_binding(&bad, &ExprType::RANGE_EXPR), None);
+        assert_eq!(unify_binding(&ExprType::RANGE_EXPR, &bad), None);
+        let sig = ExprType::parse("(list[T], T) -> bool").unwrap();
+        assert!(sig
+            .match_call(&[ExprType::list(ExprType::list(ExprType::INT)), bad])
+            .is_none());
+    }
+
+    // ── List element join (resolved-value-limits item 24) ──
+
+    fn join(a: &str, b: &str) -> Option<String> {
+        let (a, b) = (ExprType::parse(a).unwrap(), ExprType::parse(b).unwrap());
+        let ab = join_list_element(&a, &b).map(|t| t.to_string());
+        let ba = join_list_element(&b, &a).map(|t| t.to_string());
+        assert_eq!(ab, ba, "join must be commutative for {a} and {b}");
+        ab
+    }
+
+    #[test]
+    fn join_list_element_scalars() {
+        assert_eq!(join("int", "int").as_deref(), Some("int"));
+        assert_eq!(join("int", "float").as_deref(), Some("float"));
+        assert_eq!(join("path", "string").as_deref(), Some("string"));
+        assert_eq!(join("int", "string"), None);
+        assert_eq!(join("bool", "int"), None);
+        assert_eq!(join("bool", "float"), None);
+        assert_eq!(join("path", "int"), None);
+        // A list literal cannot hold null, so a top-level nulltype never
+        // yields.
+        assert_eq!(join("nulltype", "int"), None);
+        // `range_expr` is not a list literal element beside `list[int]`.
+        assert_eq!(join("range_expr", "list[int]"), None);
+        assert_eq!(join("int", "list[int]"), None);
+    }
+
+    #[test]
+    fn join_list_element_lists() {
+        assert_eq!(
+            join("list[int]", "list[float]").as_deref(),
+            Some("list[float]")
+        );
+        assert_eq!(
+            join("list[path]", "list[string]").as_deref(),
+            Some("list[string]")
+        );
+        assert_eq!(
+            join("list[nulltype]", "list[int]").as_deref(),
+            Some("list[int]")
+        );
+        assert_eq!(
+            join("list[nulltype]", "list[nulltype]").as_deref(),
+            Some("list[nulltype]")
+        );
+        assert_eq!(join("list[int]", "list[string]"), None);
+        assert_eq!(join("list[int]", "list[bool]"), None);
+        // Unbound type variables are not joined (item 26 binds them).
+        assert_eq!(join("list[int]", "list[T3]"), None);
+    }
+
+    #[test]
+    fn join_list_element_unions() {
+        assert_eq!(join("float | int", "int").as_deref(), Some("float | int"));
+        assert_eq!(join("float | int", "float").as_deref(), Some("float"));
+        assert_eq!(join("int | string", "int").as_deref(), Some("int"));
+        assert_eq!(join("int?", "int").as_deref(), Some("int"));
+        assert_eq!(join("int | string", "bool"), None);
+        assert_eq!(
+            join("list[int] | list[nulltype]", "list[int]").as_deref(),
+            Some("list[int]")
+        );
+        assert_eq!(
+            join("list[float] | list[int]", "list[float]").as_deref(),
+            Some("list[float]")
+        );
+        // Auditor finding B1: a union's `nulltype` member never survives
+        // at the top level — a `null` element always fails — so two
+        // optionals of incompatible types are a conflict, not `nulltype`.
+        assert_eq!(join("int?", "string?"), None);
+        assert_eq!(join("int?", "float?").as_deref(), Some("float"));
+        assert_eq!(join("nulltype", "nulltype"), None);
+        // Auditor iteration-2 finding B1: the union's empty-list member
+        // joins with `list[string]` even though `list[int]` does not.
+        assert_eq!(
+            join("list[int] | list[nulltype]", "list[string]").as_deref(),
+            Some("list[string]")
+        );
+        assert_eq!(join("list[int] | list[nulltype]", "int"), None);
+        assert_eq!(
+            join("list[int] | nulltype", "list[string] | nulltype"),
+            None,
+            "list[int] | nulltype against list[string] | nulltype"
+        );
+    }
+
+    #[test]
+    fn simplify_joined_list_element_drops_empty_list_beside_typed_list() {
+        let s = |t: &str| simplify_joined_list_element(ExprType::parse(t).unwrap()).to_string();
+        assert_eq!(s("list[int] | list[nulltype]"), "list[int]");
+        assert_eq!(
+            s("list[int] | list[nulltype] | list[string]"),
+            "list[int] | list[string]"
+        );
+        assert_eq!(s("list[nulltype]"), "list[nulltype]");
+        assert_eq!(s("int | list[nulltype]"), "int | list[nulltype]");
+    }
+
+    #[test]
+    fn list_element_contribution_drops_unbuildable_members() {
+        let c = |s: &str| {
+            list_element_contribution(&ExprType::parse(s).unwrap()).map(|t| t.to_string())
+        };
+        assert_eq!(c("int").as_deref(), Some("int"));
+        assert_eq!(c("int?").as_deref(), Some("int"));
+        assert_eq!(c("unresolved[string?]").as_deref(), Some("string"));
+        assert_eq!(c("nulltype"), None);
+        // The empty-list member stays: it still joins with other lists
+        // (auditor iteration-2 finding B1). The join's result drops it.
+        assert_eq!(
+            c("list[int] | list[nulltype]").as_deref(),
+            Some("list[int] | list[nulltype]")
+        );
+        assert_eq!(
+            c("list[nulltype] | nulltype").as_deref(),
+            Some("list[nulltype]")
+        );
+        assert_eq!(
+            c("int | list[nulltype]").as_deref(),
+            Some("int | list[nulltype]")
+        );
+    }
+
+    #[test]
+    fn join_list_element_unresolved_and_any() {
+        assert_eq!(join("unresolved[int]", "float").as_deref(), Some("float"));
+        assert_eq!(
+            join("unresolved[list[nulltype]]", "list[int]").as_deref(),
+            Some("list[int]")
+        );
+        assert_eq!(join("any", "list[int]").as_deref(), Some("list[int]"));
+    }
+
+    #[test]
+    fn join_list_element_types_folds() {
+        let ts = |s: &[&str]| {
+            s.iter()
+                .map(|t| ExprType::parse(t).unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(join_list_element_types(ts(&[])), Ok(None));
+        assert_eq!(
+            join_list_element_types(ts(&["list[nulltype]", "list[int]", "list[float]"])),
+            Ok(Some(ExprType::parse("list[float]").unwrap()))
+        );
+        // Pairwise, not set-wise: int/float and path/string pairs do not
+        // make int, float, string, path mutually compatible.
+        assert_eq!(
+            join_list_element_types(ts(&["int", "float", "string", "path"])),
+            Err((ExprType::FLOAT, ExprType::STRING))
+        );
+        // A lone element contributes its buildable members; a lone
+        // `nulltype` contributes nothing.
+        assert_eq!(
+            join_list_element_types(ts(&["int?"])),
+            Ok(Some(ExprType::INT))
+        );
+        assert_eq!(
+            join_list_element_types(ts(&["nulltype"])),
+            Err((ExprType::NULLTYPE, ExprType::NULLTYPE))
+        );
     }
 }

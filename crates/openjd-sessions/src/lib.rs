@@ -14,6 +14,7 @@ pub mod embedded_files;
 pub mod error;
 pub(crate) mod helper_binary;
 pub mod let_bindings;
+pub mod limits;
 pub mod logging;
 pub mod runner;
 pub mod session;
@@ -32,12 +33,22 @@ pub(crate) mod win32_permissions;
 #[cfg(all(windows, feature = "test-utils"))]
 pub mod win32_permissions;
 
+// The bounded line framer lives in the helper's source tree (std-only) and
+// compiles into both runners. Included here under test so this crate can
+// unit-test it and pin its `decode_backslashreplace` byte-for-byte to
+// `subprocess::decode_backslashreplace`. Same `#[path]` technique as
+// win32_locate.rs: the helper is a nested crate, not a shared dependency.
+#[cfg(test)]
+#[path = "helper/src/framer.rs"]
+mod helper_framer;
+
 // Re-export path mapping from openjd-expr (mirrors Python where sessions re-exports from expr)
 pub use openjd_expr::path_mapping;
 
 pub use action::{ActionMessage, ActionResult, ActionState};
 pub use action_status::ActionStatus;
 pub use error::SessionError;
+pub use limits::SessionLimits;
 pub use logging::LogContent;
 pub use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
 pub use runner::{CancelMethod, ScriptRunnerState};

@@ -123,6 +123,13 @@ the session runtime, but validation restricts them to template-scope symbols (th
 plain `@fmtstring` in the spec — job-creation stage), so no `Session.*`, `Task.*`, or
 `Env.File.*` references can appear in them.
 
+`let_bindings` deserializes from the `let` wire key, matching the template side and the
+OpenJD wire format, and serializes back out as `let`. The legacy `letBindings` spelling
+is accepted as an alias on input for backward compatibility. `EnvironmentScript` (below)
+carries `let_bindings` with the same wire behavior. Both `StepScript` and
+`EnvironmentScript` reject unknown fields on input, so a misspelled or unrecognized
+script key fails loudly instead of being silently dropped.
+
 ### Environment, EnvironmentScript, EnvironmentActions
 
 ```rust
@@ -211,7 +218,7 @@ Fully resolved task parameter with concrete range values:
 ```rust
 pub enum TaskParameter {
     Int { range: TaskParamRange<i64>, chunks: Option<ResolvedChunks> },
-    Float { range: Vec<f64> },
+    Float { range: Vec<Float64> },
     String { range: Vec<String> },
     Path { range: Vec<String> },
     ChunkInt { range: TaskParamRange<i64>, chunks: ResolvedChunks },
@@ -222,6 +229,24 @@ pub enum TaskParameter {
 `openjd-expr`) for compact representation of large integer sequences. `Float`, `String`,
 and `Path` ranges are always materialized lists because they don't have a compact
 representation.
+
+### Float range elements
+
+A `<FloatRangeList>` element is an `openjd_expr::value::Float64`, not a bare `f64`. Template
+Schemas §7.5 keeps the decimal places a `<floatstring>` was written with, and `2.50_f64`
+cannot carry them; `Float64` already pairs a value with an optional preserved spelling for
+exactly this purpose, so the range reuses it rather than defining a parallel type.
+
+`resolve_float_range` builds each element: a `<float>` literal or an expression result
+through `Float64::new`, which renders via `format_float`, and a `<floatstring>` through
+`Float64::with_str` after trimming, stripping redundant leading zeros (§7.5 rule 1) and
+checking the text against `max_task_param_string_len`. Over that cap the element keeps only
+its value, which is how it rendered before the text was carried at all.
+
+`TaskParameter`'s `Hash` hashes each element's rendering as well as its value, because
+`Float64::hash` takes only the value while its `PartialEq` compares both: two ranges holding
+the same number but spelling it differently produce different command lines and are not the
+same job.
 
 ### TaskParamRange, ResolvedChunks
 

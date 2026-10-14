@@ -227,6 +227,35 @@ fn max_env_count_counts_job_and_step_envs_together() {
     assert!(result.is_ok(), "Exactly at limit: {:?}", result.err());
 }
 
+#[test]
+fn max_env_count_counts_same_named_step_envs_separately() {
+    let limits = CallerLimits {
+        max_env_count: Some(2),
+        ..Default::default()
+    };
+    // 1 job env + 2 steps each with a step env named "StepEnv" = 3 environments, 2 distinct names.
+    // The limit is on environments, not on distinct names (issue #380).
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "jobEnvironments": [{"name": "JobEnv", "script": {"actions": {"onEnter": {"command": "foo"}}}}],
+        "steps": [
+            {"name": "A", "script": {"actions": {"onRun": {"command": "foo"}}},
+             "stepEnvironments": [{"name": "StepEnv", "script": {"actions": {"onEnter": {"command": "foo"}}}}]},
+            {"name": "B", "script": {"actions": {"onRun": {"command": "foo"}}},
+             "stepEnvironments": [{"name": "StepEnv", "script": {"actions": {"onEnter": {"command": "foo"}}}}]}
+        ]
+    }"#,
+    );
+    let err = decode_job_template(v, None, &limits).unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("total environments (3) exceeds caller limit of 2"),
+        "Expected env count error, got: {msg}"
+    );
+}
+
 // ══════════════════════════════════════════════════════════════
 // max_task_count (checked in create_job)
 // ══════════════════════════════════════════════════════════════

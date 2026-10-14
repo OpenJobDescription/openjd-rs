@@ -9,21 +9,25 @@ Parsing is the entry point to the crate — all other operations work on the par
 pub fn decode_job_template(
     template: serde_yaml::Value,
     supported_extensions: Option<&[&str]>,
+    caller_limits: &CallerLimits,
 ) -> Result<JobTemplate, ModelError>
 
 pub fn decode_environment_template(
     template: serde_yaml::Value,
     supported_extensions: Option<&[&str]>,
+    caller_limits: &CallerLimits,
 ) -> Result<EnvironmentTemplate, ModelError>
 
 pub fn decode_template(
     template: serde_yaml::Value,
     supported_extensions: Option<&[&str]>,
+    caller_limits: &CallerLimits,
 ) -> Result<DecodedTemplate, ModelError>
 
 pub fn document_string_to_object(
     document: &str,
     doc_type: DocumentType,
+    caller_limits: &CallerLimits,
 ) -> Result<serde_yaml::Value, ModelError>
 ```
 

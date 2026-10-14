@@ -180,12 +180,32 @@ pub fn truediv_float(_: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Float(Float64::new(l / r)?))
 }
 
+// Matches CPython's finite-float divmod algorithm.
+fn float_divmod(l: f64, r: f64) -> (f64, f64) {
+    let mut rem = l % r;
+    let mut div = (l - rem) / r;
+    if rem != 0.0 {
+        if rem.is_sign_negative() != r.is_sign_negative() {
+            rem += r;
+            div -= 1.0;
+        }
+    } else {
+        rem = 0.0_f64.copysign(r);
+    }
+
+    let mut quotient = div.floor();
+    if div - quotient > 0.5 {
+        quotient += 1.0;
+    }
+    (quotient, rem)
+}
+
 pub fn floordiv_float(_: Ctx, a: &[ExprValue]) -> R {
     let (l, r) = get_two_floats(a)?;
     if r == 0.0 {
         return Err(ExpressionError::division_by_zero("Division"));
     }
-    let v = (l / r).floor();
+    let (v, _) = float_divmod(l, r);
     if !float_fits_i64(v) {
         return Err(ExpressionError::integer_overflow());
     }
@@ -197,8 +217,8 @@ pub fn mod_float(_: Ctx, a: &[ExprValue]) -> R {
     if r == 0.0 {
         return Err(ExpressionError::division_by_zero("Modulo"));
     }
-    // Python uses floored modulo: l - r * floor(l / r)
-    Ok(ExprValue::Float(Float64::new(l - r * (l / r).floor())?))
+    let (_, rem) = float_divmod(l, r);
+    Ok(ExprValue::Float(Float64::new(rem)?))
 }
 
 pub fn pow_float(_: Ctx, a: &[ExprValue]) -> R {

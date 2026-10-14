@@ -93,6 +93,14 @@ fn float_precision_display() {
 }
 
 #[test]
+fn computed_float_display_pads_negative_exponents() {
+    assert_eq!(eval("1e-7 + 0.0").to_display_string(), "1e-07");
+    assert_eq!(eval("1e-8 + 0.0").to_display_string(), "1e-08");
+    assert_eq!(eval("-1e-7 + 0.0").to_display_string(), "-1e-07");
+    assert_eq!(eval("1e16 + 0.0").to_display_string(), "1e+16");
+}
+
+#[test]
 fn float_passthrough_preserves_original() {
     let mut st = SymbolTable::new();
     st.set(
@@ -153,6 +161,22 @@ fn floordiv_float_truncates_positive() {
 #[test]
 fn floordiv_float_truncates_negative() {
     assert_eq!(eval("-7.5 // 2.0").to_display_string(), "-4");
+}
+
+#[test]
+fn floordiv_float_accounts_for_rounded_quotients() {
+    assert_eq!(eval("205.0 // 0.1").to_display_string(), "2049");
+    assert_eq!(eval("-205.0 // 0.1").to_display_string(), "-2050");
+    assert_eq!(eval("205.0 // (-0.1)").to_display_string(), "-2050");
+    assert_eq!(eval("-205.0 // (-0.1)").to_display_string(), "2049");
+    assert_eq!(
+        eval("4.485645604145502e-49 // -4.340298580774782e-64").to_display_string(),
+        "-1033487793677267"
+    );
+    assert_eq!(
+        eval("-1.609523844009722e-76 // -5.270510475043238e-92").to_display_string(),
+        "3053829134067924"
+    );
 }
 
 #[test]
@@ -611,6 +635,41 @@ fn negative_zero_normalized() {
     assert_eq!(eval("-0.0").to_display_string(), "0.0");
 }
 
+/// `round(v, n)` builds its display text with `{:.n$}`, so it renders to the
+/// requested number of places: `round(1.5, 2)` is `1.50`. Zero is not an
+/// exception to that, and the sign it does not have must not cost it the places.
+#[test]
+fn round_to_places_keeps_them_at_zero() {
+    assert_eq!(eval("round(1.5, 2)").to_display_string(), "1.50");
+    assert_eq!(eval("round(0.0004, 2)").to_display_string(), "0.00");
+    assert_eq!(eval("round(-0.0004, 2)").to_display_string(), "0.00");
+    assert_eq!(eval("round(0.0, 3)").to_display_string(), "0.000");
+}
+
+/// A signed zero loses its sign but keeps everything else, and text that reaches
+/// zero only by underflow is not the value's rendering at all.
+#[test]
+fn with_str_zero_text_matches_the_value() {
+    use openjd_expr::value::Float64;
+    let disp = |v: f64, s: &str| {
+        ExprValue::Float(Float64::with_str(v, s.to_string()).unwrap()).to_display_string()
+    };
+    assert_eq!(disp(0.0, "0.00"), "0.00");
+    assert_eq!(disp(-0.0, "-0.0"), "0.0");
+    assert_eq!(disp(-0.0, "-0.00"), "0.00");
+    // An all-zero mantissa spells zero whatever the exponent, so the notation
+    // survives here just as `1E+2` does for a non-zero value.
+    assert_eq!(disp(0.0, "0e5"), "0e5");
+    assert_eq!(disp(-0.0, "-0.0E+2"), "0.0E+2");
+    // Underflow is not zero being spelled: the digits are the author's request,
+    // and dropping them would render a different number.
+    assert_eq!(disp(0.0, "1e-400"), "1e-400");
+    assert_eq!(
+        disp(0.0, "0.0000000000000000000000000000000001"),
+        "0.0000000000000000000000000000000001"
+    );
+}
+
 #[test]
 fn negative_zero_from_arithmetic() {
     assert_eq!(eval("-1.0 * 0.0").to_display_string(), "0.0");
@@ -847,6 +906,26 @@ fn mod_float_exact_negative() {
 fn mod_float_small_negative() {
     // Python: -0.5 % 1.0 == 0.5
     assert_eq!(eval("-0.5 % 1.0").to_display_string(), "0.5");
+}
+
+#[test]
+fn mod_float_large_quotient_preserves_remainder() {
+    assert_eq!(
+        eval("9.2e18 % 0.1").to_display_string(),
+        "0.09740867242801976"
+    );
+    assert_eq!(
+        eval("-9.2e18 % 0.1").to_display_string(),
+        "0.0025913275719802453"
+    );
+    assert_eq!(
+        eval("9.2e18 % (-0.1)").to_display_string(),
+        "-0.0025913275719802453"
+    );
+    assert_eq!(
+        eval("-9.2e18 % (-0.1)").to_display_string(),
+        "-0.09740867242801976"
+    );
 }
 
 // Floored division/modulo invariant: a == (a // b) * b + (a % b)

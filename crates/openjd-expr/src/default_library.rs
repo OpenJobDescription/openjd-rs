@@ -299,22 +299,33 @@ fn comparison() -> FunctionLibrary {
         .expect("bad builtin signature");
     lib.register_sig("__ge__", "(T1, T2) -> bool", ge_generic)
         .expect("bad builtin signature");
-    // Containment — container first, item second
-    lib.register_sig("__contains__", "(list[T1], T2) -> bool", contains_list)
+    // Containment — container first, item second.
+    //
+    // The spec gives the list overload one type variable, `(list[T], T)`,
+    // not `(list[T1], T2)`: the item must be the list's element type or
+    // implicitly coercible to it (see `types::unify_binding`). A mismatch
+    // such as `"a" in [1, 2]` is then a signature error at validation time
+    // rather than a `false` computed by a loop over `==`, which the spec
+    // makes total across types and so can never reject.
+    lib.register_sig("__contains__", "(list[T], T) -> bool", contains_list)
         .expect("bad builtin signature");
-    lib.register_sig("__contains__", "(range_expr, T1) -> bool", contains_range)
-        .expect("bad builtin signature");
+    lib.register_sig(
+        "__contains__",
+        "(range_expr, int | float) -> bool",
+        contains_range,
+    )
+    .expect("bad builtin signature");
     lib.register_sig("__contains__", "(string, string) -> bool", contains_string)
         .expect("bad builtin signature");
     lib.register_sig(
         "__not_contains__",
-        "(list[T1], T2) -> bool",
+        "(list[T], T) -> bool",
         not_contains_list,
     )
     .expect("bad builtin signature");
     lib.register_sig(
         "__not_contains__",
-        "(range_expr, T1) -> bool",
+        "(range_expr, int | float) -> bool",
         not_contains_range,
     )
     .expect("bad builtin signature");
