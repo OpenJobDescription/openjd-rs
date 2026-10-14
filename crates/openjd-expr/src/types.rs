@@ -8,6 +8,11 @@
 //! Supports primitive types, list types, union types, type variables,
 //! unresolved types, and normalization rules.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use std::collections::HashMap;
 use std::fmt;
 

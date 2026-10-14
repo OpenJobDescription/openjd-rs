@@ -6,6 +6,11 @@
 //!
 //! These types are only available when the EXPR extension is enabled.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use super::constrained_strings::{Description, Identifier};
 use super::parameters::{validate_ui_label, FileFilter, FlexFloat, FlexInt};
 use crate::types::{DataFlow, ObjectType};

@@ -7,7 +7,7 @@
 > [snapshot_overview.md](snapshot_overview.md#status) for on-disk format
 > status (v2023 stable, v2025 experimental draft).
 
-This document is the authoritative reference for the `openjd-snapshots` crate's public API. All public types, functions, traits, and constants are listed here with their signatures.
+This document is the reference for the `openjd-snapshots` crate's public API. All public types, functions, traits, and constants are listed here with their signatures. The generated, CI-checked [`public-api.txt`](public-api.txt) is the authority on which items are public and on their exact signatures; where the two disagree, this document is wrong.
 
 Items are organized by where they are re-exported. Most items are re-exported at the crate root (e.g., `openjd_snapshots::FileEntry`). Items only accessible via module paths are noted with their full path.
 

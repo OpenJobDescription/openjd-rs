@@ -77,15 +77,23 @@ This skill applies the criteria with these settings:
 - **Criteria**: all of Q1–Q8. For Q9, check only what step 6 below runs
   (build, test, and warnings).
 - **Verification** (quality-criteria §6): subagents are REQUIRED. Use all
-  four angles, give each a disjoint slice, and run mutation subagents one at
-  a time. Every subagent runs the "Verifier capability" probe first. If the
+  four angles and give each a disjoint slice. Each mutation subagent works in
+  its own worktree, as §6 "Mutation testing" describes, so they may run in
+  parallel. Every subagent runs the "Verifier capability" probe first. If the
   probe fails, either for this run's own agent before step 6 or for any
   verifier, stop. Write the report with the `ENVIRONMENT FAILURE` diagnosis as
   its Executive Summary, list every unfinished section in the summary's
   `sections_incomplete`, and do not present unverified findings as
-  `CONFIRMED`. Follow "Mutation hygiene" exactly. In particular, failing tests
-  written in step 7 are uncommitted work, so `git checkout --` must not be
-  used to undo a mutation of a file that holds them.
+  `CONFIRMED`. Follow "Mutation testing" exactly. In particular, never mutate
+  the shared working tree: the failing tests written in step 7 and the report
+  are uncommitted work there. Scope `cargo mutants` with `-f` to the slice
+  under review, because a whole crate takes hours.
+- **Q2 inputs**: `specs/<crate>/public-api.txt` (or `public-api.<os>.txt`) is
+  the generated, CI-checked list of public items and signatures. Review
+  `public-api.md` against it rather than re-deriving the API from source.
+  Report the crate's `allow(missing_docs, reason = "missing-docs burn-down ...")`
+  attributes as a single finding that gives their count, not one finding per
+  undocumented item.
 - **Output**: each finding is tagged with its label, severity, and criterion
   ID, for example `[CONFIRMED · medium · Q4]`.
 

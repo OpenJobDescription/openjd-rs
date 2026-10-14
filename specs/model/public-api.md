@@ -2,9 +2,11 @@
 
 [README](README.md) · Public API
 
-This document is the authoritative reference for the `openjd-model` crate's public
-API. All public types, functions, and re-exports are listed here with their
-signatures, organized by where they are visible from.
+This document is the reference for the `openjd-model` crate's public API. All
+public types, functions, and re-exports are listed here with their signatures,
+organized by where they are visible from. The generated, CI-checked
+[`public-api.txt`](public-api.txt) is the authority on which items are public
+and on their exact signatures; where the two disagree, this document is wrong.
 
 The crate implements the [2023-09 Template Schemas][spec-2023-09] specification,
 a data-interchange format for describing renderable jobs in a

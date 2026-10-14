@@ -2,18 +2,29 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
+/// CACHE_SYNC: copy a manifest's data from one data cache to another.
 pub mod cache_sync;
+/// COLLECT: walk the filesystem into an absolute snapshot.
 pub mod collect;
+/// COMPOSE: layer snapshot diffs onto a base snapshot, or onto each other.
 pub mod compose;
+/// DIFF: compute the changes between two snapshots.
 pub mod diff;
+/// DOWNLOAD: write a manifest's files to disk from a data cache.
 pub mod download;
+/// FILTER: keep only the manifest entries that match a predicate.
 pub mod filter;
+/// HASH: compute content hashes for a manifest's files.
 pub mod hash_op;
+/// HASH_UPLOAD: hash a manifest's files and upload them in one pipelined pass.
 pub mod hash_upload;
+/// JOIN: prepend a root path to a manifest's paths.
 pub mod join;
 pub(crate) mod memory_pool;
+/// PARTITION: split a snapshot by root directory.
 pub mod partition;
 mod rate;
+/// SUBTREE: extract a subdirectory of a snapshot and rebase its paths.
 pub mod subtree;
 
 /// Progress callback type used across operations.

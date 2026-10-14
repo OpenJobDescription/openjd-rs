@@ -4,6 +4,11 @@
 
 //! Comparison, containment, and slice operator implementations.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use crate::budgeted_vec::BudgetedVec;
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;

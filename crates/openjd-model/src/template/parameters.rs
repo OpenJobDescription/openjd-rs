@@ -4,6 +4,11 @@
 
 //! Job parameter definitions per spec §2.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use super::constrained_strings::{Description, Identifier};
 use crate::types::{DataFlow, ObjectType};
 use serde::Deserialize;

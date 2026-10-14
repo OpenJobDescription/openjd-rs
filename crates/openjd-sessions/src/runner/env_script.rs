@@ -4,6 +4,11 @@
 
 //! Environment script runner — handles enter/exit actions.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;

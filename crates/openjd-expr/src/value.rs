@@ -4,6 +4,11 @@
 
 //! Runtime values for expression evaluation.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use crate::path_mapping::PathFormat;
 use crate::py_escape::py_string_literal;
 use crate::range_expr::RangeExpr;

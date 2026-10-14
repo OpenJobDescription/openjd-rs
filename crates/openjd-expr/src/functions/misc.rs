@@ -4,6 +4,11 @@
 
 //! Miscellaneous function implementations (fail).
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use std::borrow::Cow;
 
 use crate::error::ExpressionError;

@@ -3,6 +3,10 @@
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 #![cfg_attr(not(feature = "bench"), allow(unused))]
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 
 use clap::Parser;
 use openjd_snapshots::*;

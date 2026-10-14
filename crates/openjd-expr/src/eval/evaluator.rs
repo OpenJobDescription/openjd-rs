@@ -8,6 +8,11 @@
 //! against a symbol table, mirroring the Python `Evaluator` class in
 //! `openjd.expr._eval._evaluator`.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use ruff_python_ast as ast;
 
 use crate::error::{write_caret_line, ExpressionError, ExpressionErrorKind};

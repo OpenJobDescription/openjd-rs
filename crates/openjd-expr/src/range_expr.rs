@@ -7,6 +7,11 @@
 //! Mirrors Python `openjd.expr._range_expr`. Parses expressions like
 //! `"1-10"`, `"1-10:2"`, `"1-5,10-15"` into sorted, non-overlapping ranges.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use crate::error::ExpressionError;
 use std::fmt;
 

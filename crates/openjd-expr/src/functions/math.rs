@@ -4,6 +4,11 @@
 
 //! Math function implementations (min, max, floor, ceil, round, sum).
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
 use crate::value::{float_fits_i64, ExprValue, Float64};

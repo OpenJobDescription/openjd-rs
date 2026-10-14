@@ -7,6 +7,11 @@
 //! Mirrors Python `_types.py`: SpecificationRevision, ParameterValueType,
 //! ParameterValue, TemplateSpecificationVersion, etc.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use std::collections::HashMap;
 use std::fmt;
 

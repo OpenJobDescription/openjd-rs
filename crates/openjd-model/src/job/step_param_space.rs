@@ -14,6 +14,11 @@
 //! - `AssociationNode`: lockstep indexing
 //! - `StaticChunkNode`: pre-computed chunk boundaries
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;

@@ -4,6 +4,11 @@
 
 //! Action types per spec §5.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use crate::format_string::FormatString;
 use serde::Deserialize;
 

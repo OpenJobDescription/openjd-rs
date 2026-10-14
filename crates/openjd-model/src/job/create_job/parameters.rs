@@ -7,6 +7,11 @@
 //! Mirrors Python `_merge_job_parameter.py` and the parameter preprocessing
 //! portion of `_create_job.py`.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use indexmap::IndexMap;
 use openjd_expr::symbol_table::SymbolTable;
 

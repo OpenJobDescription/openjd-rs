@@ -6,6 +6,11 @@
 //!
 //! Mirrors Python `_embedded_files.py`.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;

@@ -4,6 +4,11 @@
 
 //! Task parameter definitions per spec §3.4.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use super::constrained_strings::Identifier;
 use super::parameters::FlexInt;
 use crate::format_string::FormatString;

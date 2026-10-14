@@ -9,6 +9,11 @@
 //! only EXCEPTION_INFO | PROCESS_CONTROL | HOST_INFO go to the worker log;
 //! all records go to CloudWatch via the session log stream.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use bitflags::bitflags;
 
 bitflags! {

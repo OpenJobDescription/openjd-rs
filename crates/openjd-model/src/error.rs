@@ -7,6 +7,11 @@
 //! The primary error type is [`ModelError`], which covers all failure modes
 //! during template parsing, validation, and job creation.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum ModelError {

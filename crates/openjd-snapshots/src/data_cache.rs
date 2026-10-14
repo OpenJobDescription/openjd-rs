@@ -2,6 +2,11 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use crate::hash::DEFAULT_S3_MULTIPART_PART_SIZE;
 use crate::s3_check_cache::S3CheckCache;
 use std::any::Any;

@@ -7,6 +7,11 @@
 //! Uses `path_parse` for format-aware path manipulation instead of
 //! `std::path::Path` which only understands the host OS's path format.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
 use crate::path_mapping::PathFormat;

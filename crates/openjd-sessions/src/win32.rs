@@ -6,6 +6,11 @@
 //!
 //! Mirrors Python `_win32/_helpers.py` and `_win32/_api.py`.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use std::collections::HashMap;
 
 use windows::core::{PCWSTR, PWSTR};

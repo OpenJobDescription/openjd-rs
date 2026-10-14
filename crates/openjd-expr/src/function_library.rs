@@ -4,6 +4,11 @@
 
 //! Function library: signature-based multiple dispatch for expression evaluation.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use crate::error::{ExpressionError, ExpressionErrorKind};
 
 fn friendly_op_name(name: &str) -> Option<&'static str> {

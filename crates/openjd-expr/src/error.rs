@@ -4,6 +4,11 @@
 
 //! Expression language error types.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use std::fmt;
 
 /// Structured error kinds for expression evaluation.

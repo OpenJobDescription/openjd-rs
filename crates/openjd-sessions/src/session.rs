@@ -25,6 +25,11 @@
 //! The rule's heuristic assumes web-application session cookies, which is not
 //! the concept modeled here.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

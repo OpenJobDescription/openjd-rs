@@ -4,6 +4,11 @@
 
 //! Job template per spec §1.1.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use super::constrained_strings::{Description, ExtensionName};
 use super::environment::Environment;
 use super::parameters::JobParameterDefinition;

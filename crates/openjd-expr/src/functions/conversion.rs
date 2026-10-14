@@ -4,6 +4,11 @@
 
 //! Type conversion function implementations.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
 use crate::value::{ExprValue, Float64};

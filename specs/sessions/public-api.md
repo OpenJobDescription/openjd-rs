@@ -2,9 +2,13 @@
 
 [README](README.md) · Public API
 
-This document is the authoritative reference for the `openjd-sessions` crate's
-public API. All public types, functions, traits, and constants are listed here
-with their signatures, organized by module role.
+This document is the reference for the `openjd-sessions` crate's public API.
+All public types, functions, traits, and constants are listed here with their
+signatures, organized by module role. The generated, CI-checked listings
+[`public-api.txt`](public-api.txt) (Unix) and
+[`public-api.windows.txt`](public-api.windows.txt) (Windows) are the authority
+on which items are public and on their exact signatures; where they disagree
+with this document, this document is wrong.
 
 The crate is the Rust-side runtime for executing OpenJD sessions as defined in
 the [How Jobs Are Run][spec-how-run] specification: a session is a worker-host

@@ -6,6 +6,11 @@
 //!
 //! Mirrors Python `openjd.expr._path_mapping`.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use serde::{Deserialize, Serialize};
 
 /// Path format (POSIX, Windows, or URI).

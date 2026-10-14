@@ -3,6 +3,11 @@
 
 //! ECMAScript error types wrapping OpenJD errors.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use openjd_model::ModelError;
 use wasm_bindgen::prelude::*;
 

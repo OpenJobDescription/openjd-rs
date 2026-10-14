@@ -4,6 +4,11 @@
 
 //! List function implementations (sorted, reversed, unique, flatten, range).
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use super::StringOutputBudget;
 use crate::budgeted_vec::BudgetedVec;
 use crate::error::ExpressionError;

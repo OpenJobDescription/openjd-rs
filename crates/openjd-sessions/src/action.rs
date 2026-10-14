@@ -4,6 +4,11 @@
 
 //! Action state and result types.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 /// State of an action execution.
 ///
 /// ```

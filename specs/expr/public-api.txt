@@ -1,0 +1,1443 @@
+pub mod openjd_expr
+pub mod openjd_expr::default_library
+pub fn openjd_expr::default_library::register_host_context_functions(&mut openjd_expr::function_library::FunctionLibrary, alloc::sync::Arc<alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>>)
+pub fn openjd_expr::default_library::register_unresolved_host_context_functions(&mut openjd_expr::function_library::FunctionLibrary)
+pub mod openjd_expr::error
+#[non_exhaustive] pub enum openjd_expr::error::ExpressionErrorKind
+pub openjd_expr::error::ExpressionErrorKind::DivisionByZero
+pub openjd_expr::error::ExpressionErrorKind::DivisionByZero::op: &'static str
+pub openjd_expr::error::ExpressionErrorKind::ExplicitFail(alloc::string::String)
+pub openjd_expr::error::ExpressionErrorKind::ExpressionTooDeep
+pub openjd_expr::error::ExpressionErrorKind::ExpressionTooDeep::depth: usize
+pub openjd_expr::error::ExpressionErrorKind::ExpressionTooDeep::limit: usize
+pub openjd_expr::error::ExpressionErrorKind::FloatError
+pub openjd_expr::error::ExpressionErrorKind::FloatError::message: alloc::string::String
+pub openjd_expr::error::ExpressionErrorKind::IndexOutOfBounds
+pub openjd_expr::error::ExpressionErrorKind::IndexOutOfBounds::message: alloc::string::String
+pub openjd_expr::error::ExpressionErrorKind::IntegerOverflow
+pub openjd_expr::error::ExpressionErrorKind::MemoryLimitExceeded
+pub openjd_expr::error::ExpressionErrorKind::MemoryLimitExceeded::limit: usize
+pub openjd_expr::error::ExpressionErrorKind::MemoryLimitExceeded::used: usize
+pub openjd_expr::error::ExpressionErrorKind::OperationLimitExceeded
+pub openjd_expr::error::ExpressionErrorKind::OperationLimitExceeded::count: usize
+pub openjd_expr::error::ExpressionErrorKind::OperationLimitExceeded::limit: usize
+pub openjd_expr::error::ExpressionErrorKind::Other(alloc::string::String)
+pub openjd_expr::error::ExpressionErrorKind::ParseError(alloc::string::String)
+pub openjd_expr::error::ExpressionErrorKind::TypeError
+pub openjd_expr::error::ExpressionErrorKind::TypeError::message: alloc::string::String
+pub openjd_expr::error::ExpressionErrorKind::UndefinedVariable
+pub openjd_expr::error::ExpressionErrorKind::UndefinedVariable::name: alloc::string::String
+pub openjd_expr::error::ExpressionErrorKind::UndefinedVariable::suggestion: alloc::string::String
+pub openjd_expr::error::ExpressionErrorKind::UnknownFunction
+pub openjd_expr::error::ExpressionErrorKind::UnknownFunction::name: alloc::string::String
+pub openjd_expr::error::ExpressionErrorKind::UnsupportedSyntax
+pub openjd_expr::error::ExpressionErrorKind::UnsupportedSyntax::feature: alloc::string::String
+impl core::clone::Clone for openjd_expr::error::ExpressionErrorKind
+pub fn openjd_expr::error::ExpressionErrorKind::clone(&self) -> openjd_expr::error::ExpressionErrorKind
+impl core::error::Error for openjd_expr::error::ExpressionErrorKind
+impl core::fmt::Debug for openjd_expr::error::ExpressionErrorKind
+pub fn openjd_expr::error::ExpressionErrorKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::error::ExpressionErrorKind
+pub fn openjd_expr::error::ExpressionErrorKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::error::ExpressionError
+impl openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::caret_offset(&self) -> core::option::Option<usize>
+pub fn openjd_expr::error::ExpressionError::col_offset(&self) -> core::option::Option<usize>
+pub fn openjd_expr::error::ExpressionError::division_by_zero(&'static str) -> Self
+pub fn openjd_expr::error::ExpressionError::end_col_offset(&self) -> core::option::Option<usize>
+pub fn openjd_expr::error::ExpressionError::explicit_fail(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::expr(&self) -> core::option::Option<&str>
+pub fn openjd_expr::error::ExpressionError::expression_too_deep(usize, usize) -> Self
+pub fn openjd_expr::error::ExpressionError::float_error(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::from_kind(openjd_expr::error::ExpressionErrorKind) -> Self
+pub fn openjd_expr::error::ExpressionError::index_out_of_bounds(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::integer_overflow() -> Self
+pub fn openjd_expr::error::ExpressionError::kind(&self) -> &openjd_expr::error::ExpressionErrorKind
+pub fn openjd_expr::error::ExpressionError::message(&self) -> alloc::string::String
+pub fn openjd_expr::error::ExpressionError::message_with_expr_prefix(&self, &str) -> alloc::string::String
+pub fn openjd_expr::error::ExpressionError::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::parse_error(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::set_source_span(&mut self, &str, usize, usize, usize)
+pub fn openjd_expr::error::ExpressionError::sub_errors(&self) -> &[openjd_expr::error::ExpressionError]
+pub fn openjd_expr::error::ExpressionError::type_error(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::unsupported(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::with_node(self, &str, &ruff_python_ast::generated::Expr) -> Self
+pub fn openjd_expr::error::ExpressionError::with_span(self, &str, usize, usize) -> Self
+pub fn openjd_expr::error::ExpressionError::with_sub_errors(self, alloc::vec::Vec<openjd_expr::error::ExpressionError>) -> Self
+impl core::clone::Clone for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::clone(&self) -> openjd_expr::error::ExpressionError
+impl core::convert::From<openjd_expr::range_expr::RangeExprError> for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::from(openjd_expr::range_expr::RangeExprError) -> Self
+impl core::convert::From<openjd_expr::symbol_table::SymbolTableError> for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::from(openjd_expr::symbol_table::SymbolTableError) -> Self
+impl core::error::Error for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod openjd_expr::eval
+pub struct openjd_expr::eval::EvalBuilder<'a>
+impl<'a> openjd_expr::EvalBuilder<'a>
+pub fn openjd_expr::EvalBuilder<'a>::evaluate(self, &'a [&'a openjd_expr::symbol_table::SymbolTable]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::EvalBuilder<'a>::evaluate_with_metrics(self, &'a [&'a openjd_expr::symbol_table::SymbolTable]) -> core::result::Result<openjd_expr::EvalResult, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::EvalBuilder<'a>::with_library(self, &'a openjd_expr::function_library::FunctionLibrary) -> Self
+pub fn openjd_expr::EvalBuilder<'a>::with_memory_limit(self, usize) -> Self
+pub fn openjd_expr::EvalBuilder<'a>::with_operation_limit(self, usize) -> Self
+pub fn openjd_expr::EvalBuilder<'a>::with_path_format(self, openjd_expr::path_mapping::PathFormat) -> Self
+pub fn openjd_expr::EvalBuilder<'a>::with_target_type(self, &'a openjd_expr::types::ExprType) -> Self
+pub struct openjd_expr::eval::EvalResult
+pub openjd_expr::eval::EvalResult::operation_count: usize
+pub openjd_expr::eval::EvalResult::peak_memory: usize
+pub openjd_expr::eval::EvalResult::value: openjd_expr::value::ExprValue
+impl core::fmt::Debug for openjd_expr::EvalResult
+pub fn openjd_expr::EvalResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::eval::ParsedExpression
+impl openjd_expr::ParsedExpression
+pub fn openjd_expr::ParsedExpression::accessed_symbols(&self) -> &std::collections::hash::set::HashSet<alloc::string::String>
+pub fn openjd_expr::ParsedExpression::called_functions(&self) -> &std::collections::hash::set::HashSet<alloc::string::String>
+pub fn openjd_expr::ParsedExpression::expression(&self) -> &str
+pub fn openjd_expr::ParsedExpression::local_bindings(&self) -> &std::collections::hash::set::HashSet<alloc::string::String>
+impl openjd_expr::ParsedExpression
+pub fn openjd_expr::ParsedExpression::as_name_lookup(&self) -> core::option::Option<&str>
+pub fn openjd_expr::ParsedExpression::evaluate(&self, &openjd_expr::symbol_table::SymbolTable) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::ParsedExpression::evaluate_with_metrics(&self, &[&openjd_expr::symbol_table::SymbolTable]) -> core::result::Result<openjd_expr::EvalResult, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::ParsedExpression::new(&str) -> core::result::Result<openjd_expr::ParsedExpression, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::ParsedExpression::with_library<'a>(&'a self, &'a openjd_expr::function_library::FunctionLibrary) -> openjd_expr::EvalBuilder<'a>
+pub fn openjd_expr::ParsedExpression::with_memory_limit(&self, usize) -> openjd_expr::EvalBuilder<'_>
+pub fn openjd_expr::ParsedExpression::with_operation_limit(&self, usize) -> openjd_expr::EvalBuilder<'_>
+pub fn openjd_expr::ParsedExpression::with_path_format(&self, openjd_expr::path_mapping::PathFormat) -> openjd_expr::EvalBuilder<'_>
+pub fn openjd_expr::ParsedExpression::with_profile(&str, &openjd_expr::profile::ExprProfile) -> core::result::Result<openjd_expr::ParsedExpression, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::ParsedExpression::with_target_type<'a>(&'a self, &'a openjd_expr::types::ExprType) -> openjd_expr::EvalBuilder<'a>
+impl core::clone::Clone for openjd_expr::ParsedExpression
+pub fn openjd_expr::ParsedExpression::clone(&self) -> openjd_expr::ParsedExpression
+impl core::fmt::Debug for openjd_expr::ParsedExpression
+pub fn openjd_expr::ParsedExpression::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const openjd_expr::eval::DEFAULT_MEMORY_LIMIT: usize
+pub const openjd_expr::eval::DEFAULT_OPERATION_LIMIT: usize
+pub const openjd_expr::eval::MAX_EXPRESSION_DEPTH: usize
+pub const openjd_expr::eval::MAX_PARSE_INPUT_LEN: usize
+pub mod openjd_expr::format_string
+pub struct openjd_expr::format_string::FormatString
+impl openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::accessed_symbols(&self) -> std::collections::hash::set::HashSet<alloc::string::String>
+pub fn openjd_expr::format_string::FormatString::copy_used_symtab_values(&self, &openjd_expr::symbol_table::SymbolTable, &mut openjd_expr::symbol_table::SymbolTable)
+pub fn openjd_expr::format_string::FormatString::expression_names(&self) -> alloc::vec::Vec<&str>
+pub fn openjd_expr::format_string::FormatString::has_complex_expressions(&self) -> bool
+pub fn openjd_expr::format_string::FormatString::is_literal(&self) -> bool
+pub fn openjd_expr::format_string::FormatString::literal_segments(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn openjd_expr::format_string::FormatString::new(&str) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::format_string::FormatString::raw(&self) -> &str
+pub fn openjd_expr::format_string::FormatString::resolve_string_with(&self, &openjd_expr::symbol_table::SymbolTable, &openjd_expr::format_string::FormatStringOptions<'_>) -> core::result::Result<alloc::string::String, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::format_string::FormatString::resolve_with(&self, &openjd_expr::symbol_table::SymbolTable, &openjd_expr::format_string::FormatStringOptions<'_>) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::format_string::FormatString::segment_count(&self) -> usize
+pub fn openjd_expr::format_string::FormatString::validate_comprehension_vars(&self, &std::collections::hash::set::HashSet<alloc::string::String>) -> core::result::Result<(), openjd_expr::error::ExpressionError>
+pub fn openjd_expr::format_string::FormatString::validate_expressions(&self, &openjd_expr::symbol_table::SymbolTable, &openjd_expr::format_string::FormatStringOptions<'_>) -> core::result::Result<openjd_expr::format_string::StaticResolution, openjd_expr::format_string::FormatStringValidationError>
+pub fn openjd_expr::format_string::FormatString::with_profile(&str, &openjd_expr::profile::ExprProfile) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+impl core::clone::Clone for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::clone(&self) -> openjd_expr::format_string::FormatString
+impl core::cmp::Eq for openjd_expr::format_string::FormatString
+impl core::cmp::PartialEq for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::eq(&self, &Self) -> bool
+impl core::fmt::Debug for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::hash<H: core::hash::Hasher>(&self, &mut H)
+impl serde_core::ser::Serialize for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct openjd_expr::format_string::FormatStringOptions<'a>
+impl<'a> openjd_expr::format_string::FormatStringOptions<'a>
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::new() -> Self
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::with_library(self, impl core::convert::Into<core::option::Option<&'a openjd_expr::function_library::FunctionLibrary>>) -> Self
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::with_memory_limit(self, usize) -> Self
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::with_operation_limit(self, usize) -> Self
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::with_path_format(self, openjd_expr::path_mapping::PathFormat) -> Self
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::with_target_type(self, &'a openjd_expr::types::ExprType) -> Self
+impl<'a> core::clone::Clone for openjd_expr::format_string::FormatStringOptions<'a>
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::clone(&self) -> openjd_expr::format_string::FormatStringOptions<'a>
+impl<'a> core::default::Default for openjd_expr::format_string::FormatStringOptions<'a>
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::default() -> Self
+pub struct openjd_expr::format_string::FormatStringValidationError
+pub openjd_expr::format_string::FormatStringValidationError::end: usize
+pub openjd_expr::format_string::FormatStringValidationError::expression_error: core::option::Option<alloc::boxed::Box<openjd_expr::error::ExpressionError>>
+pub openjd_expr::format_string::FormatStringValidationError::input: alloc::string::String
+pub openjd_expr::format_string::FormatStringValidationError::message: alloc::string::String
+pub openjd_expr::format_string::FormatStringValidationError::start: usize
+impl core::clone::Clone for openjd_expr::format_string::FormatStringValidationError
+pub fn openjd_expr::format_string::FormatStringValidationError::clone(&self) -> openjd_expr::format_string::FormatStringValidationError
+impl core::error::Error for openjd_expr::format_string::FormatStringValidationError
+impl core::fmt::Debug for openjd_expr::format_string::FormatStringValidationError
+pub fn openjd_expr::format_string::FormatStringValidationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::format_string::FormatStringValidationError
+pub fn openjd_expr::format_string::FormatStringValidationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::format_string::StaticResolution
+pub openjd_expr::format_string::StaticResolution::min_resolved_string_len: usize
+pub openjd_expr::format_string::StaticResolution::resolved_type: openjd_expr::types::ExprType
+pub openjd_expr::format_string::StaticResolution::resolved_value: core::option::Option<openjd_expr::value::ExprValue>
+impl core::clone::Clone for openjd_expr::format_string::StaticResolution
+pub fn openjd_expr::format_string::StaticResolution::clone(&self) -> openjd_expr::format_string::StaticResolution
+impl core::fmt::Debug for openjd_expr::format_string::StaticResolution
+pub fn openjd_expr::format_string::StaticResolution::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const openjd_expr::format_string::MAX_FORMAT_STRING_LEN: usize
+pub const openjd_expr::format_string::MAX_FORMAT_STRING_SEGMENTS: usize
+pub const openjd_expr::format_string::MAX_STATIC_RESOLVED_VALUE_LEN: usize
+pub fn openjd_expr::format_string::copy_symbol_value(&str, &openjd_expr::symbol_table::SymbolTable, &mut openjd_expr::symbol_table::SymbolTable)
+pub fn openjd_expr::format_string::escape_format_string(&str) -> alloc::string::String
+pub mod openjd_expr::function_library
+pub struct openjd_expr::function_library::FunctionEntry
+pub openjd_expr::function_library::FunctionEntry::implementation: openjd_expr::function_library::FunctionImpl
+pub openjd_expr::function_library::FunctionEntry::signature: openjd_expr::types::ExprType
+impl core::clone::Clone for openjd_expr::function_library::FunctionEntry
+pub fn openjd_expr::function_library::FunctionEntry::clone(&self) -> openjd_expr::function_library::FunctionEntry
+pub struct openjd_expr::function_library::FunctionLibrary
+impl openjd_expr::function_library::FunctionLibrary
+pub fn openjd_expr::function_library::FunctionLibrary::call(&self, &str, &[openjd_expr::value::ExprValue], &mut dyn openjd_expr::function_library::EvalContext) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::function_library::FunctionLibrary::call_method(&self, &str, &[openjd_expr::value::ExprValue], &mut dyn openjd_expr::function_library::EvalContext) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::function_library::FunctionLibrary::derive_return_type(&self, &str, &[openjd_expr::types::ExprType]) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::function_library::FunctionLibrary::function_names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn openjd_expr::function_library::FunctionLibrary::get_property_type(&self, &openjd_expr::types::ExprType, &str) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::function_library::FunctionLibrary::get_signatures(&self, &str) -> &[openjd_expr::function_library::FunctionEntry]
+pub fn openjd_expr::function_library::FunctionLibrary::merge(self, openjd_expr::function_library::FunctionLibrary) -> Self
+pub fn openjd_expr::function_library::FunctionLibrary::new() -> Self
+pub fn openjd_expr::function_library::FunctionLibrary::register<F>(&mut self, &str, openjd_expr::types::ExprType, F) where F: core::ops::function::Fn(&mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError> + core::marker::Send + core::marker::Sync + 'static
+pub fn openjd_expr::function_library::FunctionLibrary::register_sig<F>(&mut self, &str, &str, F) -> core::result::Result<(), alloc::string::String> where F: core::ops::function::Fn(&mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError> + core::marker::Send + core::marker::Sync + 'static
+impl openjd_expr::function_library::FunctionLibrary
+pub fn openjd_expr::function_library::FunctionLibrary::for_profile(&openjd_expr::profile::ExprProfile) -> alloc::sync::Arc<openjd_expr::function_library::FunctionLibrary>
+impl core::clone::Clone for openjd_expr::function_library::FunctionLibrary
+pub fn openjd_expr::function_library::FunctionLibrary::clone(&self) -> openjd_expr::function_library::FunctionLibrary
+impl core::default::Default for openjd_expr::function_library::FunctionLibrary
+pub fn openjd_expr::function_library::FunctionLibrary::default() -> openjd_expr::function_library::FunctionLibrary
+pub trait openjd_expr::function_library::EvalContext
+pub fn openjd_expr::function_library::EvalContext::check_memory(&self, usize) -> core::result::Result<(), openjd_expr::error::ExpressionError>
+pub fn openjd_expr::function_library::EvalContext::count_op(&mut self) -> core::result::Result<(), openjd_expr::error::ExpressionError>
+pub fn openjd_expr::function_library::EvalContext::count_ops(&mut self, usize) -> core::result::Result<(), openjd_expr::error::ExpressionError>
+pub fn openjd_expr::function_library::EvalContext::count_string_ops(&mut self, usize) -> core::result::Result<(), openjd_expr::error::ExpressionError>
+pub fn openjd_expr::function_library::EvalContext::get_or_compile_regex(&mut self, &str) -> core::result::Result<regex::regex::string::Regex, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::function_library::EvalContext::path_format(&self) -> openjd_expr::path_mapping::PathFormat
+pub type openjd_expr::function_library::FunctionImpl = alloc::sync::Arc<(dyn core::ops::function::Fn(&mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError> + core::marker::Send + core::marker::Sync)>
+pub mod openjd_expr::functions
+pub mod openjd_expr::functions::arithmetic
+pub fn openjd_expr::functions::arithmetic::add_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::add_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::add_list_list(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::add_list_range(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::add_path_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::add_range_list(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::add_range_range(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::add_range_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::add_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::add_string_range(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::floordiv_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::floordiv_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::mod_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::mod_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::mul_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::mul_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::mul_list(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::mul_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::neg_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::neg_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::not_bool(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::path_div(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::pos_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::pos_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::pow_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::pow_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::sub_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::sub_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::truediv_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::arithmetic::truediv_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub mod openjd_expr::functions::comparison
+pub fn openjd_expr::functions::comparison::contains_list(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::contains_range(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::contains_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::eq_generic(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::ge_generic(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::gt_generic(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::le_generic(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::lt_generic(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::ne_generic(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::not_contains_list(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::not_contains_range(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::not_contains_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::slice_list(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::slice_range(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::comparison::slice_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub mod openjd_expr::functions::conversion
+pub fn openjd_expr::functions::conversion::bool_from_bool(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::bool_from_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::bool_from_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::bool_from_list(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::bool_from_null(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::bool_from_path(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::bool_from_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::float_from_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::float_from_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::float_from_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::int_from_bool(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::int_from_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::int_from_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::int_from_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::conversion::string_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub mod openjd_expr::functions::list
+pub fn openjd_expr::functions::list::flatten_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::list::join_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::list::list_from_range(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::list::range_expr_from_empty_list(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::list::range_expr_from_list(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::list::range_expr_from_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::list::range_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::list::reversed_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::list::sorted_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::list::unique_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub mod openjd_expr::functions::math
+pub fn openjd_expr::functions::math::ceil_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::math::ceil_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::math::floor_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::math::floor_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::math::max_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::math::min_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::math::round_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::math::sum_list(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub mod openjd_expr::functions::misc
+pub fn openjd_expr::functions::misc::abs_float(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::abs_int(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::all_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::any_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::fail_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::getitem_list(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::getitem_range(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::getitem_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::len_list(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::len_path(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::len_range(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::len_string(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::path_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::path_join_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::misc::zfill_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub mod openjd_expr::functions::path
+pub fn openjd_expr::functions::path::as_posix_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::is_absolute(&str, openjd_expr::path_mapping::PathFormat) -> bool
+pub fn openjd_expr::functions::path::is_absolute_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::is_relative_to_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::join(&str, &str, openjd_expr::path_mapping::PathFormat) -> alloc::string::String
+pub fn openjd_expr::functions::path::make_apply_path_mapping_fn(alloc::sync::Arc<alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>>) -> impl core::ops::function::Fn(&mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError> + core::marker::Send + core::marker::Sync + 'static
+pub fn openjd_expr::functions::path::non_uri_join(&str, &str, openjd_expr::path_mapping::PathFormat) -> alloc::string::String
+pub fn openjd_expr::functions::path::prop_name(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::prop_parent(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::prop_parts(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::prop_stem(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::prop_suffix(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::prop_suffixes(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::relative_to_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::with_name_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::with_number_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::with_stem_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::path::with_suffix_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub mod openjd_expr::functions::path_parse
+pub fn openjd_expr::functions::path_parse::extension(&str, openjd_expr::path_mapping::PathFormat) -> &str
+pub fn openjd_expr::functions::path_parse::extension_no_dot(&str, openjd_expr::path_mapping::PathFormat) -> &str
+pub fn openjd_expr::functions::path_parse::file_name(&str, openjd_expr::path_mapping::PathFormat) -> &str
+pub fn openjd_expr::functions::path_parse::file_stem(&str, openjd_expr::path_mapping::PathFormat) -> &str
+pub fn openjd_expr::functions::path_parse::join_pathlib(&[alloc::string::String], openjd_expr::path_mapping::PathFormat) -> alloc::string::String
+pub fn openjd_expr::functions::path_parse::parent(&str, openjd_expr::path_mapping::PathFormat) -> alloc::string::String
+pub fn openjd_expr::functions::path_parse::parts(&str, openjd_expr::path_mapping::PathFormat) -> alloc::vec::Vec<alloc::string::String>
+pub fn openjd_expr::functions::path_parse::pathlib_normalize(&str, openjd_expr::path_mapping::PathFormat) -> alloc::string::String
+pub fn openjd_expr::functions::path_parse::sep(openjd_expr::path_mapping::PathFormat) -> char
+pub fn openjd_expr::functions::path_parse::split(&str, openjd_expr::path_mapping::PathFormat) -> (&str, &str)
+pub fn openjd_expr::functions::path_parse::suffixes(&str, openjd_expr::path_mapping::PathFormat) -> alloc::vec::Vec<alloc::string::String>
+pub mod openjd_expr::functions::regex
+pub fn openjd_expr::functions::regex::re_escape_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::regex::re_findall_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::regex::re_match_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::regex::re_replace_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::regex::re_search_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::regex::re_split_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub mod openjd_expr::functions::repr
+pub fn openjd_expr::functions::repr::repr_cmd_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::repr::repr_json_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::repr::repr_pwsh_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::repr::repr_py_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::repr::repr_sh_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub mod openjd_expr::functions::string
+pub fn openjd_expr::functions::string::capitalize_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::center_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::count_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::endswith_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::find_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::index_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::isalnum_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::isalpha_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::isascii_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::isdigit_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::islower_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::isspace_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::isupper_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::ljust_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::lower_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::lstrip_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::removeprefix_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::removesuffix_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::replace_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::rfind_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::rindex_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::rjust_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::rsplit_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::rstrip_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::split_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::startswith_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::strip_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::title_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::functions::string::upper_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub mod openjd_expr::path_mapping
+pub enum openjd_expr::path_mapping::PathFormat
+pub openjd_expr::path_mapping::PathFormat::Posix
+pub openjd_expr::path_mapping::PathFormat::Uri
+pub openjd_expr::path_mapping::PathFormat::Windows
+impl openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::host() -> Self
+impl core::clone::Clone for openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::clone(&self) -> openjd_expr::path_mapping::PathFormat
+impl core::cmp::Eq for openjd_expr::path_mapping::PathFormat
+impl core::cmp::PartialEq for openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::eq(&self, &openjd_expr::path_mapping::PathFormat) -> bool
+impl core::fmt::Debug for openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_expr::path_mapping::PathFormat
+impl core::marker::StructuralPartialEq for openjd_expr::path_mapping::PathFormat
+impl serde_core::ser::Serialize for openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct openjd_expr::path_mapping::PathMappingRule
+pub openjd_expr::path_mapping::PathMappingRule::destination_path: alloc::string::String
+pub openjd_expr::path_mapping::PathMappingRule::source_path: alloc::string::String
+pub openjd_expr::path_mapping::PathMappingRule::source_path_format: openjd_expr::path_mapping::PathFormat
+impl openjd_expr::path_mapping::PathMappingRule
+pub fn openjd_expr::path_mapping::PathMappingRule::apply(&self, &str) -> core::option::Option<alloc::string::String>
+pub fn openjd_expr::path_mapping::PathMappingRule::apply_with_format(&self, &str, openjd_expr::path_mapping::PathFormat) -> core::option::Option<alloc::string::String>
+impl core::clone::Clone for openjd_expr::path_mapping::PathMappingRule
+pub fn openjd_expr::path_mapping::PathMappingRule::clone(&self) -> openjd_expr::path_mapping::PathMappingRule
+impl core::fmt::Debug for openjd_expr::path_mapping::PathMappingRule
+pub fn openjd_expr::path_mapping::PathMappingRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for openjd_expr::path_mapping::PathMappingRule
+pub fn openjd_expr::path_mapping::PathMappingRule::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::path_mapping::PathMappingRule
+pub fn openjd_expr::path_mapping::PathMappingRule::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub fn openjd_expr::path_mapping::apply_rules(&[openjd_expr::path_mapping::PathMappingRule], &str) -> alloc::string::String
+pub fn openjd_expr::path_mapping::apply_rules_with_format(&[openjd_expr::path_mapping::PathMappingRule], &str, openjd_expr::path_mapping::PathFormat) -> alloc::string::String
+pub fn openjd_expr::path_mapping::is_uri(&str) -> bool
+pub mod openjd_expr::profile
+#[non_exhaustive] pub enum openjd_expr::profile::ExprExtension
+impl openjd_expr::profile::ExprExtension
+pub const openjd_expr::profile::ExprExtension::ALL: &'static [openjd_expr::profile::ExprExtension]
+impl core::clone::Clone for openjd_expr::profile::ExprExtension
+pub fn openjd_expr::profile::ExprExtension::clone(&self) -> openjd_expr::profile::ExprExtension
+impl core::cmp::Eq for openjd_expr::profile::ExprExtension
+impl core::cmp::PartialEq for openjd_expr::profile::ExprExtension
+pub fn openjd_expr::profile::ExprExtension::eq(&self, &openjd_expr::profile::ExprExtension) -> bool
+impl core::fmt::Debug for openjd_expr::profile::ExprExtension
+pub fn openjd_expr::profile::ExprExtension::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::profile::ExprExtension
+pub fn openjd_expr::profile::ExprExtension::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_expr::profile::ExprExtension
+impl core::marker::StructuralPartialEq for openjd_expr::profile::ExprExtension
+#[non_exhaustive] pub enum openjd_expr::profile::ExprRevision
+pub openjd_expr::profile::ExprRevision::V2026_02
+impl openjd_expr::profile::ExprRevision
+pub const openjd_expr::profile::ExprRevision::CURRENT: openjd_expr::profile::ExprRevision
+impl core::clone::Clone for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::clone(&self) -> openjd_expr::profile::ExprRevision
+impl core::cmp::Eq for openjd_expr::profile::ExprRevision
+impl core::cmp::Ord for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::cmp(&self, &openjd_expr::profile::ExprRevision) -> core::cmp::Ordering
+impl core::cmp::PartialEq for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::eq(&self, &openjd_expr::profile::ExprRevision) -> bool
+impl core::cmp::PartialOrd for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::partial_cmp(&self, &openjd_expr::profile::ExprRevision) -> core::option::Option<core::cmp::Ordering>
+impl core::default::Default for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::default() -> Self
+impl core::fmt::Debug for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_expr::profile::ExprRevision
+impl core::marker::StructuralPartialEq for openjd_expr::profile::ExprRevision
+pub enum openjd_expr::profile::HostContext
+pub openjd_expr::profile::HostContext::None
+pub openjd_expr::profile::HostContext::Unresolved
+pub openjd_expr::profile::HostContext::WithRules(alloc::sync::Arc<alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>>)
+impl openjd_expr::profile::HostContext
+pub fn openjd_expr::profile::HostContext::is_enabled(&self) -> bool
+pub fn openjd_expr::profile::HostContext::is_unresolved(&self) -> bool
+pub fn openjd_expr::profile::HostContext::with_rules(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> Self
+impl core::clone::Clone for openjd_expr::profile::HostContext
+pub fn openjd_expr::profile::HostContext::clone(&self) -> openjd_expr::profile::HostContext
+impl core::default::Default for openjd_expr::profile::HostContext
+pub fn openjd_expr::profile::HostContext::default() -> openjd_expr::profile::HostContext
+impl core::fmt::Debug for openjd_expr::profile::HostContext
+pub fn openjd_expr::profile::HostContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::profile::ExprProfile
+impl openjd_expr::profile::ExprProfile
+pub fn openjd_expr::profile::ExprProfile::current() -> Self
+pub fn openjd_expr::profile::ExprProfile::extensions(&self) -> &std::collections::hash::set::HashSet<openjd_expr::profile::ExprExtension>
+pub fn openjd_expr::profile::ExprProfile::has_extension(&self, openjd_expr::profile::ExprExtension) -> bool
+pub fn openjd_expr::profile::ExprProfile::host_context(&self) -> &openjd_expr::profile::HostContext
+pub fn openjd_expr::profile::ExprProfile::latest() -> Self
+pub fn openjd_expr::profile::ExprProfile::new(openjd_expr::profile::ExprRevision) -> Self
+pub fn openjd_expr::profile::ExprProfile::revision(&self) -> openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprProfile::with_extensions(self, std::collections::hash::set::HashSet<openjd_expr::profile::ExprExtension>) -> Self
+pub fn openjd_expr::profile::ExprProfile::with_host_context(self, openjd_expr::profile::HostContext) -> Self
+impl core::clone::Clone for openjd_expr::profile::ExprProfile
+pub fn openjd_expr::profile::ExprProfile::clone(&self) -> openjd_expr::profile::ExprProfile
+impl core::default::Default for openjd_expr::profile::ExprProfile
+pub fn openjd_expr::profile::ExprProfile::default() -> Self
+impl core::fmt::Debug for openjd_expr::profile::ExprProfile
+pub fn openjd_expr::profile::ExprProfile::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod openjd_expr::range_expr
+pub struct openjd_expr::range_expr::IntRange
+impl openjd_expr::range_expr::IntRange
+pub fn openjd_expr::range_expr::IntRange::contains(&self, i64) -> bool
+pub fn openjd_expr::range_expr::IntRange::end(&self) -> i64
+pub fn openjd_expr::range_expr::IntRange::get(&self, usize) -> core::option::Option<i64>
+pub fn openjd_expr::range_expr::IntRange::is_empty(&self) -> bool
+pub fn openjd_expr::range_expr::IntRange::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = i64> + '_
+pub fn openjd_expr::range_expr::IntRange::len(&self) -> usize
+pub fn openjd_expr::range_expr::IntRange::new(i64, i64, i64) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::range_expr::IntRange::start(&self) -> i64
+pub fn openjd_expr::range_expr::IntRange::step(&self) -> i64
+impl core::clone::Clone for openjd_expr::range_expr::IntRange
+pub fn openjd_expr::range_expr::IntRange::clone(&self) -> openjd_expr::range_expr::IntRange
+impl core::cmp::Eq for openjd_expr::range_expr::IntRange
+impl core::cmp::PartialEq for openjd_expr::range_expr::IntRange
+pub fn openjd_expr::range_expr::IntRange::eq(&self, &openjd_expr::range_expr::IntRange) -> bool
+impl core::fmt::Debug for openjd_expr::range_expr::IntRange
+pub fn openjd_expr::range_expr::IntRange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::range_expr::IntRange
+pub fn openjd_expr::range_expr::IntRange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::range_expr::IntRange
+pub fn openjd_expr::range_expr::IntRange::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for openjd_expr::range_expr::IntRange
+impl serde_core::ser::Serialize for openjd_expr::range_expr::IntRange
+pub fn openjd_expr::range_expr::IntRange::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::range_expr::IntRange
+pub fn openjd_expr::range_expr::IntRange::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct openjd_expr::range_expr::RangeExpr
+impl openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::contains(&self, i64) -> bool
+pub fn openjd_expr::range_expr::RangeExpr::cumulative_lengths(&self) -> &[u64]
+pub fn openjd_expr::range_expr::RangeExpr::from_ranges(alloc::vec::Vec<openjd_expr::range_expr::IntRange>) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::range_expr::RangeExpr::from_values(alloc::vec::Vec<i64>) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::range_expr::RangeExpr::get(&self, i64) -> core::option::Option<i64>
+pub fn openjd_expr::range_expr::RangeExpr::heap_size(&self) -> usize
+pub fn openjd_expr::range_expr::RangeExpr::is_empty(&self) -> bool
+pub fn openjd_expr::range_expr::RangeExpr::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = i64> + '_
+pub fn openjd_expr::range_expr::RangeExpr::len(&self) -> usize
+pub fn openjd_expr::range_expr::RangeExpr::ranges(&self) -> &[openjd_expr::range_expr::IntRange]
+pub fn openjd_expr::range_expr::RangeExpr::slice(&self, i64, i64, i64) -> core::result::Result<openjd_expr::range_expr::RangeExpr, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::range_expr::RangeExpr::to_vec(&self) -> alloc::vec::Vec<i64>
+pub fn openjd_expr::range_expr::RangeExpr::with_contiguous(self, bool) -> Self
+impl core::clone::Clone for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::clone(&self) -> openjd_expr::range_expr::RangeExpr
+impl core::cmp::Eq for openjd_expr::range_expr::RangeExpr
+impl core::cmp::PartialEq for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::eq(&self, &Self) -> bool
+impl core::convert::From<openjd_expr::range_expr::RangeExpr> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(openjd_expr::range_expr::RangeExpr) -> Self
+impl core::fmt::Debug for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::hash<H: core::hash::Hasher>(&self, &mut H)
+impl core::str::traits::FromStr for openjd_expr::range_expr::RangeExpr
+pub type openjd_expr::range_expr::RangeExpr::Err = openjd_expr::error::ExpressionError
+pub fn openjd_expr::range_expr::RangeExpr::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct openjd_expr::range_expr::RangeExprError
+pub openjd_expr::range_expr::RangeExprError::expr: alloc::string::String
+pub openjd_expr::range_expr::RangeExprError::message: alloc::string::String
+pub openjd_expr::range_expr::RangeExprError::position: core::option::Option<usize>
+impl openjd_expr::range_expr::RangeExprError
+pub fn openjd_expr::range_expr::RangeExprError::at(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, usize) -> Self
+pub fn openjd_expr::range_expr::RangeExprError::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for openjd_expr::range_expr::RangeExprError
+pub fn openjd_expr::range_expr::RangeExprError::clone(&self) -> openjd_expr::range_expr::RangeExprError
+impl core::convert::From<openjd_expr::range_expr::RangeExprError> for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::from(openjd_expr::range_expr::RangeExprError) -> Self
+impl core::error::Error for openjd_expr::range_expr::RangeExprError
+impl core::fmt::Debug for openjd_expr::range_expr::RangeExprError
+pub fn openjd_expr::range_expr::RangeExprError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::range_expr::RangeExprError
+pub fn openjd_expr::range_expr::RangeExprError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const openjd_expr::range_expr::MAX_RANGE_EXPR_CHUNKS: usize
+pub const openjd_expr::range_expr::MAX_RANGE_VALUE_MAGNITUDE: i64
+pub mod openjd_expr::symbol_table
+pub enum openjd_expr::symbol_table::SymbolTableEntry
+pub openjd_expr::symbol_table::SymbolTableEntry::Table(openjd_expr::symbol_table::SymbolTable)
+pub openjd_expr::symbol_table::SymbolTableEntry::Value(openjd_expr::value::ExprValue)
+impl core::clone::Clone for openjd_expr::symbol_table::SymbolTableEntry
+pub fn openjd_expr::symbol_table::SymbolTableEntry::clone(&self) -> openjd_expr::symbol_table::SymbolTableEntry
+impl core::fmt::Debug for openjd_expr::symbol_table::SymbolTableEntry
+pub fn openjd_expr::symbol_table::SymbolTableEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::symbol_table::SerializedSymbolTable(_)
+impl openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::as_value(&self) -> &serde_json::value::Value
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::from_json_str(&str) -> core::result::Result<Self, serde_json::error::Error>
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::from_symtab(&openjd_expr::symbol_table::SymbolTable) -> Self
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::from_value(serde_json::value::Value) -> Self
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::to_symtab(&self, openjd_expr::path_mapping::PathFormat) -> core::result::Result<openjd_expr::symbol_table::SymbolTable, alloc::string::String>
+impl core::clone::Clone for openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::clone(&self) -> openjd_expr::symbol_table::SerializedSymbolTable
+impl core::cmp::Eq for openjd_expr::symbol_table::SerializedSymbolTable
+impl core::cmp::PartialEq for openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::eq(&self, &openjd_expr::symbol_table::SerializedSymbolTable) -> bool
+impl core::fmt::Debug for openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for openjd_expr::symbol_table::SerializedSymbolTable
+impl serde_core::ser::Serialize for openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct openjd_expr::symbol_table::SymbolTable
+impl openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::all_paths(&self, &str) -> alloc::vec::Vec<alloc::string::String>
+pub fn openjd_expr::symbol_table::SymbolTable::contains(&self, &str) -> bool
+pub fn openjd_expr::symbol_table::SymbolTable::from_pairs<'a, I>(I) -> core::result::Result<Self, openjd_expr::symbol_table::SymbolTableError> where I: core::iter::traits::collect::IntoIterator<Item = (&'a str, openjd_expr::value::ExprValue)>
+pub fn openjd_expr::symbol_table::SymbolTable::get(&self, &str) -> core::option::Option<&openjd_expr::symbol_table::SymbolTableEntry>
+pub fn openjd_expr::symbol_table::SymbolTable::get_string(&self, &str) -> core::option::Option<&str>
+pub fn openjd_expr::symbol_table::SymbolTable::get_table(&self, &str) -> core::option::Option<&openjd_expr::symbol_table::SymbolTable>
+pub fn openjd_expr::symbol_table::SymbolTable::get_value(&self, &str) -> core::option::Option<&openjd_expr::value::ExprValue>
+pub fn openjd_expr::symbol_table::SymbolTable::keys(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn openjd_expr::symbol_table::SymbolTable::merge_from(&mut self, &openjd_expr::symbol_table::SymbolTable)
+pub fn openjd_expr::symbol_table::SymbolTable::new() -> Self
+pub fn openjd_expr::symbol_table::SymbolTable::set(&mut self, &str, impl core::convert::Into<openjd_expr::value::ExprValue>) -> core::result::Result<(), openjd_expr::symbol_table::SymbolTableError>
+pub fn openjd_expr::symbol_table::SymbolTable::set_string(&mut self, &str, &str) -> core::result::Result<(), openjd_expr::symbol_table::SymbolTableError>
+pub fn openjd_expr::symbol_table::SymbolTable::set_table(&mut self, &str, openjd_expr::symbol_table::SymbolTable)
+impl core::clone::Clone for openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::clone(&self) -> openjd_expr::symbol_table::SymbolTable
+impl core::default::Default for openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::default() -> openjd_expr::symbol_table::SymbolTable
+impl core::fmt::Debug for openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'a> core::iter::traits::collect::FromIterator<(&'a str, openjd_expr::value::ExprValue)> for openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::from_iter<I: core::iter::traits::collect::IntoIterator<Item = (&'a str, openjd_expr::value::ExprValue)>>(I) -> Self
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct openjd_expr::symbol_table::SymbolTableError
+pub openjd_expr::symbol_table::SymbolTableError::conflict: alloc::string::String
+pub openjd_expr::symbol_table::SymbolTableError::key: alloc::string::String
+impl core::clone::Clone for openjd_expr::symbol_table::SymbolTableError
+pub fn openjd_expr::symbol_table::SymbolTableError::clone(&self) -> openjd_expr::symbol_table::SymbolTableError
+impl core::convert::From<openjd_expr::symbol_table::SymbolTableError> for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::from(openjd_expr::symbol_table::SymbolTableError) -> Self
+impl core::error::Error for openjd_expr::symbol_table::SymbolTableError
+impl core::fmt::Debug for openjd_expr::symbol_table::SymbolTableError
+pub fn openjd_expr::symbol_table::SymbolTableError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::symbol_table::SymbolTableError
+pub fn openjd_expr::symbol_table::SymbolTableError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const openjd_expr::symbol_table::MAX_SYMBOL_TABLE_ENTRIES: usize
+pub mod openjd_expr::types
+#[non_exhaustive] pub enum openjd_expr::types::TypeCode
+pub openjd_expr::types::TypeCode::Any
+pub openjd_expr::types::TypeCode::Bool
+pub openjd_expr::types::TypeCode::Float
+pub openjd_expr::types::TypeCode::Int
+pub openjd_expr::types::TypeCode::List
+pub openjd_expr::types::TypeCode::NoReturn
+pub openjd_expr::types::TypeCode::NullType
+pub openjd_expr::types::TypeCode::Path
+pub openjd_expr::types::TypeCode::RangeExpr
+pub openjd_expr::types::TypeCode::Signature
+pub openjd_expr::types::TypeCode::String
+pub openjd_expr::types::TypeCode::TypeVarT
+pub openjd_expr::types::TypeCode::TypeVarT1
+pub openjd_expr::types::TypeCode::TypeVarT2
+pub openjd_expr::types::TypeCode::TypeVarT3
+pub openjd_expr::types::TypeCode::Union
+pub openjd_expr::types::TypeCode::Unresolved
+impl core::clone::Clone for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::clone(&self) -> openjd_expr::types::TypeCode
+impl core::cmp::Eq for openjd_expr::types::TypeCode
+impl core::cmp::Ord for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::cmp(&self, &openjd_expr::types::TypeCode) -> core::cmp::Ordering
+impl core::cmp::PartialEq for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::eq(&self, &openjd_expr::types::TypeCode) -> bool
+impl core::cmp::PartialOrd for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::partial_cmp(&self, &openjd_expr::types::TypeCode) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_expr::types::TypeCode
+impl core::marker::StructuralPartialEq for openjd_expr::types::TypeCode
+impl serde_core::ser::Serialize for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct openjd_expr::types::ExprType
+impl openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::ANY: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::BOOL: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::FLOAT: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::INT: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::NORETURN: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::NULLTYPE: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::PATH: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::RANGE_EXPR: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::STRING: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::T: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::T1: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::T2: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::T3: openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::code(&self) -> openjd_expr::types::TypeCode
+pub fn openjd_expr::types::ExprType::list(openjd_expr::types::ExprType) -> Self
+pub fn openjd_expr::types::ExprType::match_call(&self, &[openjd_expr::types::ExprType]) -> core::option::Option<std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>>
+pub fn openjd_expr::types::ExprType::params(&self) -> &[openjd_expr::types::ExprType]
+pub fn openjd_expr::types::ExprType::resolve_call(&self, &[openjd_expr::types::ExprType]) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::types::ExprType::sig_params(&self) -> &[openjd_expr::types::ExprType]
+pub fn openjd_expr::types::ExprType::sig_return(&self) -> &openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::signature(alloc::vec::Vec<openjd_expr::types::ExprType>, openjd_expr::types::ExprType) -> Self
+pub fn openjd_expr::types::ExprType::union(alloc::vec::Vec<openjd_expr::types::ExprType>) -> Self
+pub fn openjd_expr::types::ExprType::unresolved(openjd_expr::types::ExprType) -> Self
+impl openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::is_concrete(&self) -> bool
+pub fn openjd_expr::types::ExprType::is_list(&self) -> bool
+pub fn openjd_expr::types::ExprType::is_symbolic(&self) -> bool
+pub fn openjd_expr::types::ExprType::list_element_type(&self) -> core::option::Option<&openjd_expr::types::ExprType>
+pub fn openjd_expr::types::ExprType::match_type(&self, &openjd_expr::types::ExprType) -> core::option::Option<std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>>
+pub fn openjd_expr::types::ExprType::new(openjd_expr::types::TypeCode, alloc::vec::Vec<openjd_expr::types::ExprType>) -> Self
+pub fn openjd_expr::types::ExprType::satisfies(&self, &openjd_expr::types::ExprType) -> bool
+pub fn openjd_expr::types::ExprType::substitute(&self, &std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>) -> openjd_expr::types::ExprType
+impl openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::parse(&str) -> core::result::Result<openjd_expr::types::ExprType, alloc::string::String>
+impl core::clone::Clone for openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::clone(&self) -> openjd_expr::types::ExprType
+impl core::cmp::Eq for openjd_expr::types::ExprType
+impl core::cmp::PartialEq for openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::eq(&self, &Self) -> bool
+impl core::convert::From<openjd_expr::types::ExprType> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(openjd_expr::types::ExprType) -> Self
+impl core::fmt::Debug for openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::hash<H: core::hash::Hasher>(&self, &mut H)
+impl serde_core::ser::Serialize for openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub mod openjd_expr::uri_path
+pub struct openjd_expr::uri_path::UriParts
+pub openjd_expr::uri_path::UriParts::authority: alloc::string::String
+pub openjd_expr::uri_path::UriParts::path_parts: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for openjd_expr::uri_path::UriParts
+pub fn openjd_expr::uri_path::UriParts::clone(&self) -> openjd_expr::uri_path::UriParts
+impl core::fmt::Debug for openjd_expr::uri_path::UriParts
+pub fn openjd_expr::uri_path::UriParts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn openjd_expr::uri_path::from_parts(&[alloc::string::String]) -> alloc::string::String
+pub fn openjd_expr::uri_path::is_uri(&str) -> bool
+pub fn openjd_expr::uri_path::join(&str, &str) -> alloc::string::String
+pub fn openjd_expr::uri_path::name(&str) -> alloc::string::String
+pub fn openjd_expr::uri_path::parent(&str) -> alloc::string::String
+pub fn openjd_expr::uri_path::parse(&str) -> core::option::Option<openjd_expr::uri_path::UriParts>
+pub fn openjd_expr::uri_path::parts(&str) -> alloc::vec::Vec<alloc::string::String>
+pub fn openjd_expr::uri_path::stem(&str) -> alloc::string::String
+pub fn openjd_expr::uri_path::suffix(&str) -> alloc::string::String
+pub fn openjd_expr::uri_path::suffixes(&str) -> alloc::vec::Vec<alloc::string::String>
+pub mod openjd_expr::value
+#[non_exhaustive] pub enum openjd_expr::value::ExprValue
+pub openjd_expr::value::ExprValue::Bool(bool)
+pub openjd_expr::value::ExprValue::Float(openjd_expr::value::Float64)
+pub openjd_expr::value::ExprValue::Int(i64)
+pub openjd_expr::value::ExprValue::ListBool(alloc::vec::Vec<bool>)
+pub openjd_expr::value::ExprValue::ListFloat(alloc::vec::Vec<openjd_expr::value::Float64>)
+pub openjd_expr::value::ExprValue::ListInt(alloc::vec::Vec<i64>)
+pub openjd_expr::value::ExprValue::ListList(alloc::vec::Vec<openjd_expr::value::ExprValue>, openjd_expr::types::ExprType, usize)
+pub openjd_expr::value::ExprValue::ListPath(alloc::vec::Vec<alloc::string::String>, openjd_expr::path_mapping::PathFormat, usize)
+pub openjd_expr::value::ExprValue::ListString(alloc::vec::Vec<alloc::string::String>, usize)
+pub openjd_expr::value::ExprValue::Null
+#[non_exhaustive] pub openjd_expr::value::ExprValue::Path
+pub openjd_expr::value::ExprValue::Path::format: openjd_expr::path_mapping::PathFormat
+pub openjd_expr::value::ExprValue::Path::value: alloc::string::String
+pub openjd_expr::value::ExprValue::RangeExpr(openjd_expr::range_expr::RangeExpr)
+pub openjd_expr::value::ExprValue::String(alloc::string::String)
+pub openjd_expr::value::ExprValue::Unresolved(openjd_expr::types::ExprType)
+impl openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::as_str_repr(&self) -> alloc::borrow::Cow<'_, str>
+pub fn openjd_expr::value::ExprValue::coerce(self, &openjd_expr::types::ExprType, openjd_expr::path_mapping::PathFormat) -> core::result::Result<Self, alloc::string::String>
+pub fn openjd_expr::value::ExprValue::compare(&self, &openjd_expr::value::ExprValue) -> core::result::Result<core::cmp::Ordering, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::value::ExprValue::equals(&self, &openjd_expr::value::ExprValue) -> bool
+pub fn openjd_expr::value::ExprValue::expr_type(&self) -> openjd_expr::types::ExprType
+pub fn openjd_expr::value::ExprValue::from_json_transport(&serde_json::value::Value, openjd_expr::path_mapping::PathFormat) -> core::result::Result<Self, alloc::string::String>
+pub fn openjd_expr::value::ExprValue::from_str_coerce(&str, &openjd_expr::types::ExprType, openjd_expr::path_mapping::PathFormat) -> core::result::Result<Self, alloc::string::String>
+pub fn openjd_expr::value::ExprValue::from_transport_value(&serde_json::value::Value, &openjd_expr::types::ExprType, openjd_expr::path_mapping::PathFormat) -> core::result::Result<Self, alloc::string::String>
+pub fn openjd_expr::value::ExprValue::into_list(self) -> core::option::Option<(alloc::vec::Vec<openjd_expr::value::ExprValue>, openjd_expr::types::ExprType)>
+pub fn openjd_expr::value::ExprValue::is_list(&self) -> bool
+pub fn openjd_expr::value::ExprValue::is_unresolved(&self) -> bool
+pub fn openjd_expr::value::ExprValue::list_elem_type(&self) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::value::ExprValue::list_elements(&self) -> core::option::Option<alloc::vec::Vec<openjd_expr::value::ExprValue>>
+pub fn openjd_expr::value::ExprValue::list_get(&self, i64) -> core::option::Option<openjd_expr::value::ExprValue>
+pub fn openjd_expr::value::ExprValue::list_iter(&self) -> core::option::Option<openjd_expr::value::ListIter<'_>>
+pub fn openjd_expr::value::ExprValue::list_len(&self) -> core::option::Option<usize>
+pub fn openjd_expr::value::ExprValue::make_list(alloc::vec::Vec<openjd_expr::value::ExprValue>, openjd_expr::types::ExprType) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::value::ExprValue::make_list_checked(&mut dyn openjd_expr::function_library::EvalContext, alloc::vec::Vec<openjd_expr::value::ExprValue>, openjd_expr::types::ExprType) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::value::ExprValue::memory_size(&self) -> usize
+pub fn openjd_expr::value::ExprValue::new_path(impl core::convert::Into<alloc::string::String>, openjd_expr::path_mapping::PathFormat) -> Self
+pub fn openjd_expr::value::ExprValue::repr_python(&self) -> alloc::string::String
+pub fn openjd_expr::value::ExprValue::to_display_string(&self) -> alloc::string::String
+pub fn openjd_expr::value::ExprValue::to_json_transport(&self) -> serde_json::value::Value
+pub fn openjd_expr::value::ExprValue::transport_value(&self) -> serde_json::value::Value
+pub fn openjd_expr::value::ExprValue::type_name(&self) -> &'static str
+pub fn openjd_expr::value::ExprValue::unresolved(openjd_expr::types::ExprType) -> Self
+impl core::clone::Clone for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::clone(&self) -> openjd_expr::value::ExprValue
+impl core::cmp::Eq for openjd_expr::value::ExprValue
+impl core::cmp::PartialEq for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::eq(&self, &Self) -> bool
+impl core::convert::From<&str> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(&str) -> Self
+impl core::convert::From<alloc::string::String> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(alloc::string::String) -> Self
+impl core::convert::From<bool> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(bool) -> Self
+impl core::convert::From<i32> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(i32) -> Self
+impl core::convert::From<i64> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(i64) -> Self
+impl core::convert::From<openjd_expr::range_expr::RangeExpr> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(openjd_expr::range_expr::RangeExpr) -> Self
+impl core::convert::From<openjd_expr::types::ExprType> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(openjd_expr::types::ExprType) -> Self
+impl core::fmt::Debug for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::hash<H: core::hash::Hasher>(&self, &mut H)
+impl serde_core::ser::Serialize for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub enum openjd_expr::value::ListIter<'a>
+pub openjd_expr::value::ListIter::Bool(core::slice::iter::Iter<'a, bool>)
+pub openjd_expr::value::ListIter::Float(core::slice::iter::Iter<'a, openjd_expr::value::Float64>)
+pub openjd_expr::value::ListIter::Int(core::slice::iter::Iter<'a, i64>)
+pub openjd_expr::value::ListIter::List(core::slice::iter::Iter<'a, openjd_expr::value::ExprValue>)
+pub openjd_expr::value::ListIter::Path(core::slice::iter::Iter<'a, alloc::string::String>, openjd_expr::path_mapping::PathFormat)
+pub openjd_expr::value::ListIter::String(core::slice::iter::Iter<'a, alloc::string::String>)
+impl<'a> core::iter::traits::exact_size::ExactSizeIterator for openjd_expr::value::ListIter<'a>
+impl<'a> core::iter::traits::iterator::Iterator for openjd_expr::value::ListIter<'a>
+pub type openjd_expr::value::ListIter<'a>::Item = openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ListIter<'a>::next(&mut self) -> core::option::Option<openjd_expr::value::ExprValue>
+pub fn openjd_expr::value::ListIter<'a>::size_hint(&self) -> (usize, core::option::Option<usize>)
+pub struct openjd_expr::value::Float64
+impl openjd_expr::value::Float64
+pub fn openjd_expr::value::Float64::new(f64) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::value::Float64::to_display_string(&self) -> alloc::string::String
+pub fn openjd_expr::value::Float64::value(&self) -> f64
+pub fn openjd_expr::value::Float64::with_str(f64, alloc::string::String) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+impl core::clone::Clone for openjd_expr::value::Float64
+pub fn openjd_expr::value::Float64::clone(&self) -> openjd_expr::value::Float64
+impl core::cmp::PartialEq for openjd_expr::value::Float64
+pub fn openjd_expr::value::Float64::eq(&self, &Self) -> bool
+impl core::cmp::PartialEq<f64> for openjd_expr::value::Float64
+pub fn openjd_expr::value::Float64::eq(&self, &f64) -> bool
+impl core::cmp::PartialOrd<f64> for openjd_expr::value::Float64
+pub fn openjd_expr::value::Float64::partial_cmp(&self, &f64) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for openjd_expr::value::Float64
+pub fn openjd_expr::value::Float64::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::value::Float64
+pub fn openjd_expr::value::Float64::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::value::Float64
+pub fn openjd_expr::value::Float64::hash<H: core::hash::Hasher>(&self, &mut H)
+impl core::ops::deref::Deref for openjd_expr::value::Float64
+pub type openjd_expr::value::Float64::Target = f64
+pub fn openjd_expr::value::Float64::deref(&self) -> &f64
+impl serde_core::ser::Serialize for openjd_expr::value::Float64
+pub fn openjd_expr::value::Float64::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::value::Float64
+pub fn openjd_expr::value::Float64::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub fn openjd_expr::value::format_float(f64) -> alloc::string::String
+pub fn openjd_expr::value::normalize_path_separators(&str, openjd_expr::path_mapping::PathFormat) -> alloc::string::String
+pub macro openjd_expr::symtab!
+#[non_exhaustive] pub enum openjd_expr::ExprExtension
+impl openjd_expr::profile::ExprExtension
+pub const openjd_expr::profile::ExprExtension::ALL: &'static [openjd_expr::profile::ExprExtension]
+impl core::clone::Clone for openjd_expr::profile::ExprExtension
+pub fn openjd_expr::profile::ExprExtension::clone(&self) -> openjd_expr::profile::ExprExtension
+impl core::cmp::Eq for openjd_expr::profile::ExprExtension
+impl core::cmp::PartialEq for openjd_expr::profile::ExprExtension
+pub fn openjd_expr::profile::ExprExtension::eq(&self, &openjd_expr::profile::ExprExtension) -> bool
+impl core::fmt::Debug for openjd_expr::profile::ExprExtension
+pub fn openjd_expr::profile::ExprExtension::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::profile::ExprExtension
+pub fn openjd_expr::profile::ExprExtension::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_expr::profile::ExprExtension
+impl core::marker::StructuralPartialEq for openjd_expr::profile::ExprExtension
+#[non_exhaustive] pub enum openjd_expr::ExprRevision
+pub openjd_expr::ExprRevision::V2026_02
+impl openjd_expr::profile::ExprRevision
+pub const openjd_expr::profile::ExprRevision::CURRENT: openjd_expr::profile::ExprRevision
+impl core::clone::Clone for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::clone(&self) -> openjd_expr::profile::ExprRevision
+impl core::cmp::Eq for openjd_expr::profile::ExprRevision
+impl core::cmp::Ord for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::cmp(&self, &openjd_expr::profile::ExprRevision) -> core::cmp::Ordering
+impl core::cmp::PartialEq for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::eq(&self, &openjd_expr::profile::ExprRevision) -> bool
+impl core::cmp::PartialOrd for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::partial_cmp(&self, &openjd_expr::profile::ExprRevision) -> core::option::Option<core::cmp::Ordering>
+impl core::default::Default for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::default() -> Self
+impl core::fmt::Debug for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprRevision::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_expr::profile::ExprRevision
+impl core::marker::StructuralPartialEq for openjd_expr::profile::ExprRevision
+#[non_exhaustive] pub enum openjd_expr::ExprValue
+pub openjd_expr::ExprValue::Bool(bool)
+pub openjd_expr::ExprValue::Float(openjd_expr::value::Float64)
+pub openjd_expr::ExprValue::Int(i64)
+pub openjd_expr::ExprValue::ListBool(alloc::vec::Vec<bool>)
+pub openjd_expr::ExprValue::ListFloat(alloc::vec::Vec<openjd_expr::value::Float64>)
+pub openjd_expr::ExprValue::ListInt(alloc::vec::Vec<i64>)
+pub openjd_expr::ExprValue::ListList(alloc::vec::Vec<openjd_expr::value::ExprValue>, openjd_expr::types::ExprType, usize)
+pub openjd_expr::ExprValue::ListPath(alloc::vec::Vec<alloc::string::String>, openjd_expr::path_mapping::PathFormat, usize)
+pub openjd_expr::ExprValue::ListString(alloc::vec::Vec<alloc::string::String>, usize)
+pub openjd_expr::ExprValue::Null
+#[non_exhaustive] pub openjd_expr::ExprValue::Path
+pub openjd_expr::ExprValue::Path::format: openjd_expr::path_mapping::PathFormat
+pub openjd_expr::ExprValue::Path::value: alloc::string::String
+pub openjd_expr::ExprValue::RangeExpr(openjd_expr::range_expr::RangeExpr)
+pub openjd_expr::ExprValue::String(alloc::string::String)
+pub openjd_expr::ExprValue::Unresolved(openjd_expr::types::ExprType)
+impl openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::as_str_repr(&self) -> alloc::borrow::Cow<'_, str>
+pub fn openjd_expr::value::ExprValue::coerce(self, &openjd_expr::types::ExprType, openjd_expr::path_mapping::PathFormat) -> core::result::Result<Self, alloc::string::String>
+pub fn openjd_expr::value::ExprValue::compare(&self, &openjd_expr::value::ExprValue) -> core::result::Result<core::cmp::Ordering, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::value::ExprValue::equals(&self, &openjd_expr::value::ExprValue) -> bool
+pub fn openjd_expr::value::ExprValue::expr_type(&self) -> openjd_expr::types::ExprType
+pub fn openjd_expr::value::ExprValue::from_json_transport(&serde_json::value::Value, openjd_expr::path_mapping::PathFormat) -> core::result::Result<Self, alloc::string::String>
+pub fn openjd_expr::value::ExprValue::from_str_coerce(&str, &openjd_expr::types::ExprType, openjd_expr::path_mapping::PathFormat) -> core::result::Result<Self, alloc::string::String>
+pub fn openjd_expr::value::ExprValue::from_transport_value(&serde_json::value::Value, &openjd_expr::types::ExprType, openjd_expr::path_mapping::PathFormat) -> core::result::Result<Self, alloc::string::String>
+pub fn openjd_expr::value::ExprValue::into_list(self) -> core::option::Option<(alloc::vec::Vec<openjd_expr::value::ExprValue>, openjd_expr::types::ExprType)>
+pub fn openjd_expr::value::ExprValue::is_list(&self) -> bool
+pub fn openjd_expr::value::ExprValue::is_unresolved(&self) -> bool
+pub fn openjd_expr::value::ExprValue::list_elem_type(&self) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::value::ExprValue::list_elements(&self) -> core::option::Option<alloc::vec::Vec<openjd_expr::value::ExprValue>>
+pub fn openjd_expr::value::ExprValue::list_get(&self, i64) -> core::option::Option<openjd_expr::value::ExprValue>
+pub fn openjd_expr::value::ExprValue::list_iter(&self) -> core::option::Option<openjd_expr::value::ListIter<'_>>
+pub fn openjd_expr::value::ExprValue::list_len(&self) -> core::option::Option<usize>
+pub fn openjd_expr::value::ExprValue::make_list(alloc::vec::Vec<openjd_expr::value::ExprValue>, openjd_expr::types::ExprType) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::value::ExprValue::make_list_checked(&mut dyn openjd_expr::function_library::EvalContext, alloc::vec::Vec<openjd_expr::value::ExprValue>, openjd_expr::types::ExprType) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::value::ExprValue::memory_size(&self) -> usize
+pub fn openjd_expr::value::ExprValue::new_path(impl core::convert::Into<alloc::string::String>, openjd_expr::path_mapping::PathFormat) -> Self
+pub fn openjd_expr::value::ExprValue::repr_python(&self) -> alloc::string::String
+pub fn openjd_expr::value::ExprValue::to_display_string(&self) -> alloc::string::String
+pub fn openjd_expr::value::ExprValue::to_json_transport(&self) -> serde_json::value::Value
+pub fn openjd_expr::value::ExprValue::transport_value(&self) -> serde_json::value::Value
+pub fn openjd_expr::value::ExprValue::type_name(&self) -> &'static str
+pub fn openjd_expr::value::ExprValue::unresolved(openjd_expr::types::ExprType) -> Self
+impl core::clone::Clone for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::clone(&self) -> openjd_expr::value::ExprValue
+impl core::cmp::Eq for openjd_expr::value::ExprValue
+impl core::cmp::PartialEq for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::eq(&self, &Self) -> bool
+impl core::convert::From<&str> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(&str) -> Self
+impl core::convert::From<alloc::string::String> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(alloc::string::String) -> Self
+impl core::convert::From<bool> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(bool) -> Self
+impl core::convert::From<i32> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(i32) -> Self
+impl core::convert::From<i64> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(i64) -> Self
+impl core::convert::From<openjd_expr::range_expr::RangeExpr> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(openjd_expr::range_expr::RangeExpr) -> Self
+impl core::convert::From<openjd_expr::types::ExprType> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(openjd_expr::types::ExprType) -> Self
+impl core::fmt::Debug for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::hash<H: core::hash::Hasher>(&self, &mut H)
+impl serde_core::ser::Serialize for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+#[non_exhaustive] pub enum openjd_expr::ExpressionErrorKind
+pub openjd_expr::ExpressionErrorKind::DivisionByZero
+pub openjd_expr::ExpressionErrorKind::DivisionByZero::op: &'static str
+pub openjd_expr::ExpressionErrorKind::ExplicitFail(alloc::string::String)
+pub openjd_expr::ExpressionErrorKind::ExpressionTooDeep
+pub openjd_expr::ExpressionErrorKind::ExpressionTooDeep::depth: usize
+pub openjd_expr::ExpressionErrorKind::ExpressionTooDeep::limit: usize
+pub openjd_expr::ExpressionErrorKind::FloatError
+pub openjd_expr::ExpressionErrorKind::FloatError::message: alloc::string::String
+pub openjd_expr::ExpressionErrorKind::IndexOutOfBounds
+pub openjd_expr::ExpressionErrorKind::IndexOutOfBounds::message: alloc::string::String
+pub openjd_expr::ExpressionErrorKind::IntegerOverflow
+pub openjd_expr::ExpressionErrorKind::MemoryLimitExceeded
+pub openjd_expr::ExpressionErrorKind::MemoryLimitExceeded::limit: usize
+pub openjd_expr::ExpressionErrorKind::MemoryLimitExceeded::used: usize
+pub openjd_expr::ExpressionErrorKind::OperationLimitExceeded
+pub openjd_expr::ExpressionErrorKind::OperationLimitExceeded::count: usize
+pub openjd_expr::ExpressionErrorKind::OperationLimitExceeded::limit: usize
+pub openjd_expr::ExpressionErrorKind::Other(alloc::string::String)
+pub openjd_expr::ExpressionErrorKind::ParseError(alloc::string::String)
+pub openjd_expr::ExpressionErrorKind::TypeError
+pub openjd_expr::ExpressionErrorKind::TypeError::message: alloc::string::String
+pub openjd_expr::ExpressionErrorKind::UndefinedVariable
+pub openjd_expr::ExpressionErrorKind::UndefinedVariable::name: alloc::string::String
+pub openjd_expr::ExpressionErrorKind::UndefinedVariable::suggestion: alloc::string::String
+pub openjd_expr::ExpressionErrorKind::UnknownFunction
+pub openjd_expr::ExpressionErrorKind::UnknownFunction::name: alloc::string::String
+pub openjd_expr::ExpressionErrorKind::UnsupportedSyntax
+pub openjd_expr::ExpressionErrorKind::UnsupportedSyntax::feature: alloc::string::String
+impl core::clone::Clone for openjd_expr::error::ExpressionErrorKind
+pub fn openjd_expr::error::ExpressionErrorKind::clone(&self) -> openjd_expr::error::ExpressionErrorKind
+impl core::error::Error for openjd_expr::error::ExpressionErrorKind
+impl core::fmt::Debug for openjd_expr::error::ExpressionErrorKind
+pub fn openjd_expr::error::ExpressionErrorKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::error::ExpressionErrorKind
+pub fn openjd_expr::error::ExpressionErrorKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum openjd_expr::HostContext
+pub openjd_expr::HostContext::None
+pub openjd_expr::HostContext::Unresolved
+pub openjd_expr::HostContext::WithRules(alloc::sync::Arc<alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>>)
+impl openjd_expr::profile::HostContext
+pub fn openjd_expr::profile::HostContext::is_enabled(&self) -> bool
+pub fn openjd_expr::profile::HostContext::is_unresolved(&self) -> bool
+pub fn openjd_expr::profile::HostContext::with_rules(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> Self
+impl core::clone::Clone for openjd_expr::profile::HostContext
+pub fn openjd_expr::profile::HostContext::clone(&self) -> openjd_expr::profile::HostContext
+impl core::default::Default for openjd_expr::profile::HostContext
+pub fn openjd_expr::profile::HostContext::default() -> openjd_expr::profile::HostContext
+impl core::fmt::Debug for openjd_expr::profile::HostContext
+pub fn openjd_expr::profile::HostContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum openjd_expr::PathFormat
+pub openjd_expr::PathFormat::Posix
+pub openjd_expr::PathFormat::Uri
+pub openjd_expr::PathFormat::Windows
+impl openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::host() -> Self
+impl core::clone::Clone for openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::clone(&self) -> openjd_expr::path_mapping::PathFormat
+impl core::cmp::Eq for openjd_expr::path_mapping::PathFormat
+impl core::cmp::PartialEq for openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::eq(&self, &openjd_expr::path_mapping::PathFormat) -> bool
+impl core::fmt::Debug for openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_expr::path_mapping::PathFormat
+impl core::marker::StructuralPartialEq for openjd_expr::path_mapping::PathFormat
+impl serde_core::ser::Serialize for openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::path_mapping::PathFormat::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+#[non_exhaustive] pub enum openjd_expr::TypeCode
+pub openjd_expr::TypeCode::Any
+pub openjd_expr::TypeCode::Bool
+pub openjd_expr::TypeCode::Float
+pub openjd_expr::TypeCode::Int
+pub openjd_expr::TypeCode::List
+pub openjd_expr::TypeCode::NoReturn
+pub openjd_expr::TypeCode::NullType
+pub openjd_expr::TypeCode::Path
+pub openjd_expr::TypeCode::RangeExpr
+pub openjd_expr::TypeCode::Signature
+pub openjd_expr::TypeCode::String
+pub openjd_expr::TypeCode::TypeVarT
+pub openjd_expr::TypeCode::TypeVarT1
+pub openjd_expr::TypeCode::TypeVarT2
+pub openjd_expr::TypeCode::TypeVarT3
+pub openjd_expr::TypeCode::Union
+pub openjd_expr::TypeCode::Unresolved
+impl core::clone::Clone for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::clone(&self) -> openjd_expr::types::TypeCode
+impl core::cmp::Eq for openjd_expr::types::TypeCode
+impl core::cmp::Ord for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::cmp(&self, &openjd_expr::types::TypeCode) -> core::cmp::Ordering
+impl core::cmp::PartialEq for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::eq(&self, &openjd_expr::types::TypeCode) -> bool
+impl core::cmp::PartialOrd for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::partial_cmp(&self, &openjd_expr::types::TypeCode) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_expr::types::TypeCode
+impl core::marker::StructuralPartialEq for openjd_expr::types::TypeCode
+impl serde_core::ser::Serialize for openjd_expr::types::TypeCode
+pub fn openjd_expr::types::TypeCode::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct openjd_expr::EvalBuilder<'a>
+impl<'a> openjd_expr::EvalBuilder<'a>
+pub fn openjd_expr::EvalBuilder<'a>::evaluate(self, &'a [&'a openjd_expr::symbol_table::SymbolTable]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::EvalBuilder<'a>::evaluate_with_metrics(self, &'a [&'a openjd_expr::symbol_table::SymbolTable]) -> core::result::Result<openjd_expr::EvalResult, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::EvalBuilder<'a>::with_library(self, &'a openjd_expr::function_library::FunctionLibrary) -> Self
+pub fn openjd_expr::EvalBuilder<'a>::with_memory_limit(self, usize) -> Self
+pub fn openjd_expr::EvalBuilder<'a>::with_operation_limit(self, usize) -> Self
+pub fn openjd_expr::EvalBuilder<'a>::with_path_format(self, openjd_expr::path_mapping::PathFormat) -> Self
+pub fn openjd_expr::EvalBuilder<'a>::with_target_type(self, &'a openjd_expr::types::ExprType) -> Self
+pub struct openjd_expr::EvalResult
+pub openjd_expr::EvalResult::operation_count: usize
+pub openjd_expr::EvalResult::peak_memory: usize
+pub openjd_expr::EvalResult::value: openjd_expr::value::ExprValue
+impl core::fmt::Debug for openjd_expr::EvalResult
+pub fn openjd_expr::EvalResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::ExprProfile
+impl openjd_expr::profile::ExprProfile
+pub fn openjd_expr::profile::ExprProfile::current() -> Self
+pub fn openjd_expr::profile::ExprProfile::extensions(&self) -> &std::collections::hash::set::HashSet<openjd_expr::profile::ExprExtension>
+pub fn openjd_expr::profile::ExprProfile::has_extension(&self, openjd_expr::profile::ExprExtension) -> bool
+pub fn openjd_expr::profile::ExprProfile::host_context(&self) -> &openjd_expr::profile::HostContext
+pub fn openjd_expr::profile::ExprProfile::latest() -> Self
+pub fn openjd_expr::profile::ExprProfile::new(openjd_expr::profile::ExprRevision) -> Self
+pub fn openjd_expr::profile::ExprProfile::revision(&self) -> openjd_expr::profile::ExprRevision
+pub fn openjd_expr::profile::ExprProfile::with_extensions(self, std::collections::hash::set::HashSet<openjd_expr::profile::ExprExtension>) -> Self
+pub fn openjd_expr::profile::ExprProfile::with_host_context(self, openjd_expr::profile::HostContext) -> Self
+impl core::clone::Clone for openjd_expr::profile::ExprProfile
+pub fn openjd_expr::profile::ExprProfile::clone(&self) -> openjd_expr::profile::ExprProfile
+impl core::default::Default for openjd_expr::profile::ExprProfile
+pub fn openjd_expr::profile::ExprProfile::default() -> Self
+impl core::fmt::Debug for openjd_expr::profile::ExprProfile
+pub fn openjd_expr::profile::ExprProfile::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::ExprType
+impl openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::ANY: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::BOOL: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::FLOAT: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::INT: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::NORETURN: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::NULLTYPE: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::PATH: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::RANGE_EXPR: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::STRING: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::T: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::T1: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::T2: openjd_expr::types::ExprType
+pub const openjd_expr::types::ExprType::T3: openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::code(&self) -> openjd_expr::types::TypeCode
+pub fn openjd_expr::types::ExprType::list(openjd_expr::types::ExprType) -> Self
+pub fn openjd_expr::types::ExprType::match_call(&self, &[openjd_expr::types::ExprType]) -> core::option::Option<std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>>
+pub fn openjd_expr::types::ExprType::params(&self) -> &[openjd_expr::types::ExprType]
+pub fn openjd_expr::types::ExprType::resolve_call(&self, &[openjd_expr::types::ExprType]) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::types::ExprType::sig_params(&self) -> &[openjd_expr::types::ExprType]
+pub fn openjd_expr::types::ExprType::sig_return(&self) -> &openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::signature(alloc::vec::Vec<openjd_expr::types::ExprType>, openjd_expr::types::ExprType) -> Self
+pub fn openjd_expr::types::ExprType::union(alloc::vec::Vec<openjd_expr::types::ExprType>) -> Self
+pub fn openjd_expr::types::ExprType::unresolved(openjd_expr::types::ExprType) -> Self
+impl openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::is_concrete(&self) -> bool
+pub fn openjd_expr::types::ExprType::is_list(&self) -> bool
+pub fn openjd_expr::types::ExprType::is_symbolic(&self) -> bool
+pub fn openjd_expr::types::ExprType::list_element_type(&self) -> core::option::Option<&openjd_expr::types::ExprType>
+pub fn openjd_expr::types::ExprType::match_type(&self, &openjd_expr::types::ExprType) -> core::option::Option<std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>>
+pub fn openjd_expr::types::ExprType::new(openjd_expr::types::TypeCode, alloc::vec::Vec<openjd_expr::types::ExprType>) -> Self
+pub fn openjd_expr::types::ExprType::satisfies(&self, &openjd_expr::types::ExprType) -> bool
+pub fn openjd_expr::types::ExprType::substitute(&self, &std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>) -> openjd_expr::types::ExprType
+impl openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::parse(&str) -> core::result::Result<openjd_expr::types::ExprType, alloc::string::String>
+impl core::clone::Clone for openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::clone(&self) -> openjd_expr::types::ExprType
+impl core::cmp::Eq for openjd_expr::types::ExprType
+impl core::cmp::PartialEq for openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::eq(&self, &Self) -> bool
+impl core::convert::From<openjd_expr::types::ExprType> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(openjd_expr::types::ExprType) -> Self
+impl core::fmt::Debug for openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::hash<H: core::hash::Hasher>(&self, &mut H)
+impl serde_core::ser::Serialize for openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct openjd_expr::ExpressionError
+impl openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::caret_offset(&self) -> core::option::Option<usize>
+pub fn openjd_expr::error::ExpressionError::col_offset(&self) -> core::option::Option<usize>
+pub fn openjd_expr::error::ExpressionError::division_by_zero(&'static str) -> Self
+pub fn openjd_expr::error::ExpressionError::end_col_offset(&self) -> core::option::Option<usize>
+pub fn openjd_expr::error::ExpressionError::explicit_fail(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::expr(&self) -> core::option::Option<&str>
+pub fn openjd_expr::error::ExpressionError::expression_too_deep(usize, usize) -> Self
+pub fn openjd_expr::error::ExpressionError::float_error(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::from_kind(openjd_expr::error::ExpressionErrorKind) -> Self
+pub fn openjd_expr::error::ExpressionError::index_out_of_bounds(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::integer_overflow() -> Self
+pub fn openjd_expr::error::ExpressionError::kind(&self) -> &openjd_expr::error::ExpressionErrorKind
+pub fn openjd_expr::error::ExpressionError::message(&self) -> alloc::string::String
+pub fn openjd_expr::error::ExpressionError::message_with_expr_prefix(&self, &str) -> alloc::string::String
+pub fn openjd_expr::error::ExpressionError::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::parse_error(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::set_source_span(&mut self, &str, usize, usize, usize)
+pub fn openjd_expr::error::ExpressionError::sub_errors(&self) -> &[openjd_expr::error::ExpressionError]
+pub fn openjd_expr::error::ExpressionError::type_error(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::unsupported(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_expr::error::ExpressionError::with_node(self, &str, &ruff_python_ast::generated::Expr) -> Self
+pub fn openjd_expr::error::ExpressionError::with_span(self, &str, usize, usize) -> Self
+pub fn openjd_expr::error::ExpressionError::with_sub_errors(self, alloc::vec::Vec<openjd_expr::error::ExpressionError>) -> Self
+impl core::clone::Clone for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::clone(&self) -> openjd_expr::error::ExpressionError
+impl core::convert::From<openjd_expr::range_expr::RangeExprError> for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::from(openjd_expr::range_expr::RangeExprError) -> Self
+impl core::convert::From<openjd_expr::symbol_table::SymbolTableError> for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::from(openjd_expr::symbol_table::SymbolTableError) -> Self
+impl core::error::Error for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::FormatString
+impl openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::accessed_symbols(&self) -> std::collections::hash::set::HashSet<alloc::string::String>
+pub fn openjd_expr::format_string::FormatString::copy_used_symtab_values(&self, &openjd_expr::symbol_table::SymbolTable, &mut openjd_expr::symbol_table::SymbolTable)
+pub fn openjd_expr::format_string::FormatString::expression_names(&self) -> alloc::vec::Vec<&str>
+pub fn openjd_expr::format_string::FormatString::has_complex_expressions(&self) -> bool
+pub fn openjd_expr::format_string::FormatString::is_literal(&self) -> bool
+pub fn openjd_expr::format_string::FormatString::literal_segments(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn openjd_expr::format_string::FormatString::new(&str) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::format_string::FormatString::raw(&self) -> &str
+pub fn openjd_expr::format_string::FormatString::resolve_string_with(&self, &openjd_expr::symbol_table::SymbolTable, &openjd_expr::format_string::FormatStringOptions<'_>) -> core::result::Result<alloc::string::String, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::format_string::FormatString::resolve_with(&self, &openjd_expr::symbol_table::SymbolTable, &openjd_expr::format_string::FormatStringOptions<'_>) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::format_string::FormatString::segment_count(&self) -> usize
+pub fn openjd_expr::format_string::FormatString::validate_comprehension_vars(&self, &std::collections::hash::set::HashSet<alloc::string::String>) -> core::result::Result<(), openjd_expr::error::ExpressionError>
+pub fn openjd_expr::format_string::FormatString::validate_expressions(&self, &openjd_expr::symbol_table::SymbolTable, &openjd_expr::format_string::FormatStringOptions<'_>) -> core::result::Result<openjd_expr::format_string::StaticResolution, openjd_expr::format_string::FormatStringValidationError>
+pub fn openjd_expr::format_string::FormatString::with_profile(&str, &openjd_expr::profile::ExprProfile) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+impl core::clone::Clone for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::clone(&self) -> openjd_expr::format_string::FormatString
+impl core::cmp::Eq for openjd_expr::format_string::FormatString
+impl core::cmp::PartialEq for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::eq(&self, &Self) -> bool
+impl core::fmt::Debug for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::hash<H: core::hash::Hasher>(&self, &mut H)
+impl serde_core::ser::Serialize for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::format_string::FormatString
+pub fn openjd_expr::format_string::FormatString::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct openjd_expr::FormatStringOptions<'a>
+impl<'a> openjd_expr::format_string::FormatStringOptions<'a>
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::new() -> Self
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::with_library(self, impl core::convert::Into<core::option::Option<&'a openjd_expr::function_library::FunctionLibrary>>) -> Self
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::with_memory_limit(self, usize) -> Self
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::with_operation_limit(self, usize) -> Self
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::with_path_format(self, openjd_expr::path_mapping::PathFormat) -> Self
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::with_target_type(self, &'a openjd_expr::types::ExprType) -> Self
+impl<'a> core::clone::Clone for openjd_expr::format_string::FormatStringOptions<'a>
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::clone(&self) -> openjd_expr::format_string::FormatStringOptions<'a>
+impl<'a> core::default::Default for openjd_expr::format_string::FormatStringOptions<'a>
+pub fn openjd_expr::format_string::FormatStringOptions<'a>::default() -> Self
+pub struct openjd_expr::FormatStringValidationError
+pub openjd_expr::FormatStringValidationError::end: usize
+pub openjd_expr::FormatStringValidationError::expression_error: core::option::Option<alloc::boxed::Box<openjd_expr::error::ExpressionError>>
+pub openjd_expr::FormatStringValidationError::input: alloc::string::String
+pub openjd_expr::FormatStringValidationError::message: alloc::string::String
+pub openjd_expr::FormatStringValidationError::start: usize
+impl core::clone::Clone for openjd_expr::format_string::FormatStringValidationError
+pub fn openjd_expr::format_string::FormatStringValidationError::clone(&self) -> openjd_expr::format_string::FormatStringValidationError
+impl core::error::Error for openjd_expr::format_string::FormatStringValidationError
+impl core::fmt::Debug for openjd_expr::format_string::FormatStringValidationError
+pub fn openjd_expr::format_string::FormatStringValidationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::format_string::FormatStringValidationError
+pub fn openjd_expr::format_string::FormatStringValidationError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::FunctionLibrary
+impl openjd_expr::function_library::FunctionLibrary
+pub fn openjd_expr::function_library::FunctionLibrary::call(&self, &str, &[openjd_expr::value::ExprValue], &mut dyn openjd_expr::function_library::EvalContext) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::function_library::FunctionLibrary::call_method(&self, &str, &[openjd_expr::value::ExprValue], &mut dyn openjd_expr::function_library::EvalContext) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::function_library::FunctionLibrary::derive_return_type(&self, &str, &[openjd_expr::types::ExprType]) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::function_library::FunctionLibrary::function_names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn openjd_expr::function_library::FunctionLibrary::get_property_type(&self, &openjd_expr::types::ExprType, &str) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::function_library::FunctionLibrary::get_signatures(&self, &str) -> &[openjd_expr::function_library::FunctionEntry]
+pub fn openjd_expr::function_library::FunctionLibrary::merge(self, openjd_expr::function_library::FunctionLibrary) -> Self
+pub fn openjd_expr::function_library::FunctionLibrary::new() -> Self
+pub fn openjd_expr::function_library::FunctionLibrary::register<F>(&mut self, &str, openjd_expr::types::ExprType, F) where F: core::ops::function::Fn(&mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError> + core::marker::Send + core::marker::Sync + 'static
+pub fn openjd_expr::function_library::FunctionLibrary::register_sig<F>(&mut self, &str, &str, F) -> core::result::Result<(), alloc::string::String> where F: core::ops::function::Fn(&mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError> + core::marker::Send + core::marker::Sync + 'static
+impl openjd_expr::function_library::FunctionLibrary
+pub fn openjd_expr::function_library::FunctionLibrary::for_profile(&openjd_expr::profile::ExprProfile) -> alloc::sync::Arc<openjd_expr::function_library::FunctionLibrary>
+impl core::clone::Clone for openjd_expr::function_library::FunctionLibrary
+pub fn openjd_expr::function_library::FunctionLibrary::clone(&self) -> openjd_expr::function_library::FunctionLibrary
+impl core::default::Default for openjd_expr::function_library::FunctionLibrary
+pub fn openjd_expr::function_library::FunctionLibrary::default() -> openjd_expr::function_library::FunctionLibrary
+pub struct openjd_expr::ParsedExpression
+impl openjd_expr::ParsedExpression
+pub fn openjd_expr::ParsedExpression::accessed_symbols(&self) -> &std::collections::hash::set::HashSet<alloc::string::String>
+pub fn openjd_expr::ParsedExpression::called_functions(&self) -> &std::collections::hash::set::HashSet<alloc::string::String>
+pub fn openjd_expr::ParsedExpression::expression(&self) -> &str
+pub fn openjd_expr::ParsedExpression::local_bindings(&self) -> &std::collections::hash::set::HashSet<alloc::string::String>
+impl openjd_expr::ParsedExpression
+pub fn openjd_expr::ParsedExpression::as_name_lookup(&self) -> core::option::Option<&str>
+pub fn openjd_expr::ParsedExpression::evaluate(&self, &openjd_expr::symbol_table::SymbolTable) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::ParsedExpression::evaluate_with_metrics(&self, &[&openjd_expr::symbol_table::SymbolTable]) -> core::result::Result<openjd_expr::EvalResult, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::ParsedExpression::new(&str) -> core::result::Result<openjd_expr::ParsedExpression, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::ParsedExpression::with_library<'a>(&'a self, &'a openjd_expr::function_library::FunctionLibrary) -> openjd_expr::EvalBuilder<'a>
+pub fn openjd_expr::ParsedExpression::with_memory_limit(&self, usize) -> openjd_expr::EvalBuilder<'_>
+pub fn openjd_expr::ParsedExpression::with_operation_limit(&self, usize) -> openjd_expr::EvalBuilder<'_>
+pub fn openjd_expr::ParsedExpression::with_path_format(&self, openjd_expr::path_mapping::PathFormat) -> openjd_expr::EvalBuilder<'_>
+pub fn openjd_expr::ParsedExpression::with_profile(&str, &openjd_expr::profile::ExprProfile) -> core::result::Result<openjd_expr::ParsedExpression, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::ParsedExpression::with_target_type<'a>(&'a self, &'a openjd_expr::types::ExprType) -> openjd_expr::EvalBuilder<'a>
+impl core::clone::Clone for openjd_expr::ParsedExpression
+pub fn openjd_expr::ParsedExpression::clone(&self) -> openjd_expr::ParsedExpression
+impl core::fmt::Debug for openjd_expr::ParsedExpression
+pub fn openjd_expr::ParsedExpression::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::PathMappingRule
+pub openjd_expr::PathMappingRule::destination_path: alloc::string::String
+pub openjd_expr::PathMappingRule::source_path: alloc::string::String
+pub openjd_expr::PathMappingRule::source_path_format: openjd_expr::path_mapping::PathFormat
+impl openjd_expr::path_mapping::PathMappingRule
+pub fn openjd_expr::path_mapping::PathMappingRule::apply(&self, &str) -> core::option::Option<alloc::string::String>
+pub fn openjd_expr::path_mapping::PathMappingRule::apply_with_format(&self, &str, openjd_expr::path_mapping::PathFormat) -> core::option::Option<alloc::string::String>
+impl core::clone::Clone for openjd_expr::path_mapping::PathMappingRule
+pub fn openjd_expr::path_mapping::PathMappingRule::clone(&self) -> openjd_expr::path_mapping::PathMappingRule
+impl core::fmt::Debug for openjd_expr::path_mapping::PathMappingRule
+pub fn openjd_expr::path_mapping::PathMappingRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for openjd_expr::path_mapping::PathMappingRule
+pub fn openjd_expr::path_mapping::PathMappingRule::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::path_mapping::PathMappingRule
+pub fn openjd_expr::path_mapping::PathMappingRule::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct openjd_expr::RangeExpr
+impl openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::contains(&self, i64) -> bool
+pub fn openjd_expr::range_expr::RangeExpr::cumulative_lengths(&self) -> &[u64]
+pub fn openjd_expr::range_expr::RangeExpr::from_ranges(alloc::vec::Vec<openjd_expr::range_expr::IntRange>) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::range_expr::RangeExpr::from_values(alloc::vec::Vec<i64>) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::range_expr::RangeExpr::get(&self, i64) -> core::option::Option<i64>
+pub fn openjd_expr::range_expr::RangeExpr::heap_size(&self) -> usize
+pub fn openjd_expr::range_expr::RangeExpr::is_empty(&self) -> bool
+pub fn openjd_expr::range_expr::RangeExpr::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = i64> + '_
+pub fn openjd_expr::range_expr::RangeExpr::len(&self) -> usize
+pub fn openjd_expr::range_expr::RangeExpr::ranges(&self) -> &[openjd_expr::range_expr::IntRange]
+pub fn openjd_expr::range_expr::RangeExpr::slice(&self, i64, i64, i64) -> core::result::Result<openjd_expr::range_expr::RangeExpr, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::range_expr::RangeExpr::to_vec(&self) -> alloc::vec::Vec<i64>
+pub fn openjd_expr::range_expr::RangeExpr::with_contiguous(self, bool) -> Self
+impl core::clone::Clone for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::clone(&self) -> openjd_expr::range_expr::RangeExpr
+impl core::cmp::Eq for openjd_expr::range_expr::RangeExpr
+impl core::cmp::PartialEq for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::eq(&self, &Self) -> bool
+impl core::convert::From<openjd_expr::range_expr::RangeExpr> for openjd_expr::value::ExprValue
+pub fn openjd_expr::value::ExprValue::from(openjd_expr::range_expr::RangeExpr) -> Self
+impl core::fmt::Debug for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::hash<H: core::hash::Hasher>(&self, &mut H)
+impl core::str::traits::FromStr for openjd_expr::range_expr::RangeExpr
+pub type openjd_expr::range_expr::RangeExpr::Err = openjd_expr::error::ExpressionError
+pub fn openjd_expr::range_expr::RangeExpr::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl serde_core::ser::Serialize for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::range_expr::RangeExpr
+pub fn openjd_expr::range_expr::RangeExpr::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct openjd_expr::RangeExprError
+pub openjd_expr::RangeExprError::expr: alloc::string::String
+pub openjd_expr::RangeExprError::message: alloc::string::String
+pub openjd_expr::RangeExprError::position: core::option::Option<usize>
+impl openjd_expr::range_expr::RangeExprError
+pub fn openjd_expr::range_expr::RangeExprError::at(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>, usize) -> Self
+pub fn openjd_expr::range_expr::RangeExprError::new(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for openjd_expr::range_expr::RangeExprError
+pub fn openjd_expr::range_expr::RangeExprError::clone(&self) -> openjd_expr::range_expr::RangeExprError
+impl core::convert::From<openjd_expr::range_expr::RangeExprError> for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::from(openjd_expr::range_expr::RangeExprError) -> Self
+impl core::error::Error for openjd_expr::range_expr::RangeExprError
+impl core::fmt::Debug for openjd_expr::range_expr::RangeExprError
+pub fn openjd_expr::range_expr::RangeExprError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::range_expr::RangeExprError
+pub fn openjd_expr::range_expr::RangeExprError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::SerializedSymbolTable(_)
+impl openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::as_value(&self) -> &serde_json::value::Value
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::from_json_str(&str) -> core::result::Result<Self, serde_json::error::Error>
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::from_symtab(&openjd_expr::symbol_table::SymbolTable) -> Self
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::from_value(serde_json::value::Value) -> Self
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::to_symtab(&self, openjd_expr::path_mapping::PathFormat) -> core::result::Result<openjd_expr::symbol_table::SymbolTable, alloc::string::String>
+impl core::clone::Clone for openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::clone(&self) -> openjd_expr::symbol_table::SerializedSymbolTable
+impl core::cmp::Eq for openjd_expr::symbol_table::SerializedSymbolTable
+impl core::cmp::PartialEq for openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::eq(&self, &openjd_expr::symbol_table::SerializedSymbolTable) -> bool
+impl core::fmt::Debug for openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for openjd_expr::symbol_table::SerializedSymbolTable
+impl serde_core::ser::Serialize for openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::symbol_table::SerializedSymbolTable
+pub fn openjd_expr::symbol_table::SerializedSymbolTable::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct openjd_expr::StaticResolution
+pub openjd_expr::StaticResolution::min_resolved_string_len: usize
+pub openjd_expr::StaticResolution::resolved_type: openjd_expr::types::ExprType
+pub openjd_expr::StaticResolution::resolved_value: core::option::Option<openjd_expr::value::ExprValue>
+impl core::clone::Clone for openjd_expr::format_string::StaticResolution
+pub fn openjd_expr::format_string::StaticResolution::clone(&self) -> openjd_expr::format_string::StaticResolution
+impl core::fmt::Debug for openjd_expr::format_string::StaticResolution
+pub fn openjd_expr::format_string::StaticResolution::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::SymbolTable
+impl openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::all_paths(&self, &str) -> alloc::vec::Vec<alloc::string::String>
+pub fn openjd_expr::symbol_table::SymbolTable::contains(&self, &str) -> bool
+pub fn openjd_expr::symbol_table::SymbolTable::from_pairs<'a, I>(I) -> core::result::Result<Self, openjd_expr::symbol_table::SymbolTableError> where I: core::iter::traits::collect::IntoIterator<Item = (&'a str, openjd_expr::value::ExprValue)>
+pub fn openjd_expr::symbol_table::SymbolTable::get(&self, &str) -> core::option::Option<&openjd_expr::symbol_table::SymbolTableEntry>
+pub fn openjd_expr::symbol_table::SymbolTable::get_string(&self, &str) -> core::option::Option<&str>
+pub fn openjd_expr::symbol_table::SymbolTable::get_table(&self, &str) -> core::option::Option<&openjd_expr::symbol_table::SymbolTable>
+pub fn openjd_expr::symbol_table::SymbolTable::get_value(&self, &str) -> core::option::Option<&openjd_expr::value::ExprValue>
+pub fn openjd_expr::symbol_table::SymbolTable::keys(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
+pub fn openjd_expr::symbol_table::SymbolTable::merge_from(&mut self, &openjd_expr::symbol_table::SymbolTable)
+pub fn openjd_expr::symbol_table::SymbolTable::new() -> Self
+pub fn openjd_expr::symbol_table::SymbolTable::set(&mut self, &str, impl core::convert::Into<openjd_expr::value::ExprValue>) -> core::result::Result<(), openjd_expr::symbol_table::SymbolTableError>
+pub fn openjd_expr::symbol_table::SymbolTable::set_string(&mut self, &str, &str) -> core::result::Result<(), openjd_expr::symbol_table::SymbolTableError>
+pub fn openjd_expr::symbol_table::SymbolTable::set_table(&mut self, &str, openjd_expr::symbol_table::SymbolTable)
+impl core::clone::Clone for openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::clone(&self) -> openjd_expr::symbol_table::SymbolTable
+impl core::default::Default for openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::default() -> openjd_expr::symbol_table::SymbolTable
+impl core::fmt::Debug for openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl serde_core::ser::Serialize for openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'a> core::iter::traits::collect::FromIterator<(&'a str, openjd_expr::value::ExprValue)> for openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::from_iter<I: core::iter::traits::collect::IntoIterator<Item = (&'a str, openjd_expr::value::ExprValue)>>(I) -> Self
+impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::symbol_table::SymbolTable
+pub fn openjd_expr::symbol_table::SymbolTable::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
+pub struct openjd_expr::SymbolTableError
+pub openjd_expr::SymbolTableError::conflict: alloc::string::String
+pub openjd_expr::SymbolTableError::key: alloc::string::String
+impl core::clone::Clone for openjd_expr::symbol_table::SymbolTableError
+pub fn openjd_expr::symbol_table::SymbolTableError::clone(&self) -> openjd_expr::symbol_table::SymbolTableError
+impl core::convert::From<openjd_expr::symbol_table::SymbolTableError> for openjd_expr::error::ExpressionError
+pub fn openjd_expr::error::ExpressionError::from(openjd_expr::symbol_table::SymbolTableError) -> Self
+impl core::error::Error for openjd_expr::symbol_table::SymbolTableError
+impl core::fmt::Debug for openjd_expr::symbol_table::SymbolTableError
+pub fn openjd_expr::symbol_table::SymbolTableError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::symbol_table::SymbolTableError
+pub fn openjd_expr::symbol_table::SymbolTableError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const openjd_expr::DEFAULT_MEMORY_LIMIT: usize
+pub const openjd_expr::DEFAULT_OPERATION_LIMIT: usize
+pub const openjd_expr::MAX_EXPRESSION_DEPTH: usize
+pub const openjd_expr::MAX_PARSE_INPUT_LEN: usize
+pub const openjd_expr::MAX_RANGE_EXPR_CHUNKS: usize
+pub const openjd_expr::MAX_RANGE_VALUE_MAGNITUDE: i64
+pub const openjd_expr::MAX_SYMBOL_TABLE_ENTRIES: usize
+pub trait openjd_expr::EvalContext
+pub fn openjd_expr::EvalContext::check_memory(&self, usize) -> core::result::Result<(), openjd_expr::error::ExpressionError>
+pub fn openjd_expr::EvalContext::count_op(&mut self) -> core::result::Result<(), openjd_expr::error::ExpressionError>
+pub fn openjd_expr::EvalContext::count_ops(&mut self, usize) -> core::result::Result<(), openjd_expr::error::ExpressionError>
+pub fn openjd_expr::EvalContext::count_string_ops(&mut self, usize) -> core::result::Result<(), openjd_expr::error::ExpressionError>
+pub fn openjd_expr::EvalContext::get_or_compile_regex(&mut self, &str) -> core::result::Result<regex::regex::string::Regex, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::EvalContext::path_format(&self) -> openjd_expr::path_mapping::PathFormat
+pub fn openjd_expr::escape_format_string(&str) -> alloc::string::String

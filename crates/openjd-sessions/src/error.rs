@@ -4,6 +4,11 @@
 
 //! Error types for openjd-sessions.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use std::path::PathBuf;
 
 use crate::session::SessionState;

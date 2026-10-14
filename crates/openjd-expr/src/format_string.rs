@@ -4,6 +4,11 @@
 
 //! Format string parsing and resolution.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use crate::error::ExpressionError;
 use crate::profile::ExprProfile;
 use crate::symbol_table::{SymbolTable, SymbolTableEntry};

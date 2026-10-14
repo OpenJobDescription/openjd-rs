@@ -4,6 +4,11 @@
 
 //! Environment types per spec §4.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use super::actions::EnvironmentActions;
 use super::constrained_strings::Description;
 use crate::format_string::FormatString;

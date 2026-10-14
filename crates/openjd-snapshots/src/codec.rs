@@ -19,6 +19,11 @@
 //!   [`encode_abs_snapshot_diff_v2025`], [`encode_snapshot_v2025`],
 //!   [`encode_snapshot_diff_v2025`], [`decode_v2025`].
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use crate::hash::HashAlgorithm;
 use crate::manifest::{
     AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, Full, Manifest, Rel, Snapshot, SnapshotDiff,

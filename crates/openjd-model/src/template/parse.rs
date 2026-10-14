@@ -6,6 +6,11 @@
 //!
 //! Mirrors Python `_parse.py`.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use std::str::FromStr;
 
 use crate::error::{path_field, path_index, ModelError, PathElement, ValidationErrors};

@@ -4,6 +4,11 @@
 //! Model bindings: template decode, job creation, step dependency graph,
 //! parameter space iteration.
 
+#![allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
+
 use std::collections::HashMap;
 
 use crate::errors::*;
