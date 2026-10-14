@@ -8,11 +8,6 @@
 //! Supports primitive types, list types, union types, type variables,
 //! unresolved types, and normalization rules.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::collections::HashMap;
 use std::fmt;
 
@@ -23,6 +18,10 @@ use std::fmt;
 /// break. External callers must use a wildcard arm when matching.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum TypeCode {
     NullType,
     Bool,
@@ -56,6 +55,10 @@ pub struct ExprType {
 
 // ── Constants ──
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl ExprType {
     pub const BOOL: ExprType = ExprType {
         code: TypeCode::Bool,
@@ -537,6 +540,10 @@ fn normalize_union(types: Vec<ExprType>) -> ExprType {
 
 // ── Queries ──
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl ExprType {
     pub fn is_list(&self) -> bool {
         self.code == TypeCode::List

@@ -88,9 +88,11 @@ This skill applies the criteria with these settings:
   the shared working tree: the failing tests written in step 7 and the report
   are uncommitted work there. Scope `cargo mutants` with `-f` to the slice
   under review, because a whole crate takes hours.
-- **Q2 inputs**: `specs/<crate>/public-api.txt` (or `public-api.<os>.txt`) is
-  the generated, CI-checked list of public items and signatures. Review
-  `public-api.md` against it rather than re-deriving the API from source.
+- **Q2 inputs**: each library crate's `specs/<crate>/public-api.txt` (or
+  `public-api.<os>.txt`) is the generated, CI-checked list of public items
+  and signatures. `cli` has no listing because it has no library target. For
+  the library crates, review `public-api.md` against the listing rather than
+  re-deriving the API from source.
   Report the crate's `allow(missing_docs, reason = "missing-docs burn-down ...")`
   attributes as a single finding that gives their count, not one finding per
   undocumented item.

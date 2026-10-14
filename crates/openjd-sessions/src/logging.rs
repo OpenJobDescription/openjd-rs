@@ -9,11 +9,6 @@
 //! only EXCEPTION_INFO | PROCESS_CONTROL | HOST_INFO go to the worker log;
 //! all records go to CloudWatch via the session log stream.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use bitflags::bitflags;
 
 bitflags! {
@@ -28,13 +23,23 @@ bitflags! {
     /// ```
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct LogContent: u32 {
+        /// A banner, such as one that visually separates log sections.
         const BANNER = 1 << 0;
+        /// A file path.
         const FILE_PATH = 1 << 1;
+        /// The contents of a file.
         const FILE_CONTENTS = 1 << 2;
+        /// Output from a command that was run.
         const COMMAND_OUTPUT = 1 << 3;
+        /// An error openjd encountered. It may include sensitive information,
+        /// such as file paths or host information.
         const EXCEPTION_INFO = 1 << 4;
+        /// Starting, killing, or signaling processes.
         const PROCESS_CONTROL = 1 << 5;
+        /// Parameters, and their values, of the running action.
         const PARAMETER_INFO = 1 << 6;
+        /// The system environment, such as dependency versions, OS name, and
+        /// CPU architecture.
         const HOST_INFO = 1 << 7;
     }
 }

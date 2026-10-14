@@ -30,7 +30,7 @@ categories = ["command-line-utilities", "parser-implementations"]
 # runs clippy with `-D warnings`, so a `warn` here fails the build.
 #
 # `missing_docs` enforces quality-criteria Q2's "every public item has a `///`
-# doc comment". Modules and items that predate the lint carry an
+# doc comment". Items that predate the lint carry an item-level
 # `allow(missing_docs, reason = "missing-docs burn-down ...")` attribute;
 # documenting them and deleting that attribute is tracked debt, and new code
 # must not add one.

@@ -4,11 +4,6 @@
 
 //! Environment script runner — handles enter/exit actions.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -37,10 +32,18 @@ use crate::subprocess::SubprocessResult;
 /// `onExit`, so sessions always tear down in bounded time).
 pub(crate) const ENV_EXIT_DEFAULT_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct EnvironmentScriptRunner {
     base: ScriptRunnerBase,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl EnvironmentScriptRunner {
     pub fn new(
         session_id: &str,

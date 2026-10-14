@@ -168,8 +168,9 @@ scripts/coverage.sh                                                    # coverag
 
 `scripts/check_public_api.sh` needs a pinned nightly toolchain and
 `cargo-public-api`. The script's header gives the install commands.
-`cargo mutants` needs `cargo install cargo-mutants --locked`. Run it scoped
-(`-f`, `--in-diff`): a whole crate has thousands of mutants and takes hours.
+`cargo mutants` needs `cargo install cargo-mutants --locked --version 27.1.0`
+(the version `eval_crate.yml` pins). Run it scoped (`-f`, `--in-diff`): a
+whole crate has thousands of mutants and takes hours.
 
 See AGENTS.md for CI jobs, the conformance suite, and S3 integration tests.
 
@@ -192,7 +193,9 @@ If the path doesn't exist the harness falls back to the `PATH` probe.
 - `cargo fmt` before committing (nightly rustfmt).
 - `cargo clippy` clean with `-D warnings`.
 - All public items documented with `///`. The `missing_docs` lint enforces
-  this. Don't add new `missing-docs burn-down` allows.
+  this. Don't add new `missing-docs burn-down` allows, and document new
+  fields, variants, or methods you add inside an item that already has one:
+  the lint can't check those.
 - Prefer `Result` over panicking.
 - Conventional commit messages.
 - Copyright headers on new files (CI checks this).

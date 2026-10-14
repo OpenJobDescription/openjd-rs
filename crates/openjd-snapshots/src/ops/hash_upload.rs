@@ -2,11 +2,6 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use super::memory_pool::{default_max_memory_bytes, MemoryPool};
 use super::rate::SlidingWindowRate;
 use crate::data_cache::AsyncDataCache;
@@ -79,6 +74,10 @@ async fn dedup_upload(
 }
 
 #[derive(Default)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct HashUploadOptions {
     pub hash_cache: Option<Arc<HashCache>>,
     pub force_rehash: bool,
@@ -89,12 +88,20 @@ pub struct HashUploadOptions {
 }
 
 #[derive(Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct UploadResult {
     pub manifest: AbsManifest,
     pub statistics: UploadStatistics,
 }
 
 #[derive(Debug, Default, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct UploadStatistics {
     pub total_files: usize,
     pub total_bytes: u64,

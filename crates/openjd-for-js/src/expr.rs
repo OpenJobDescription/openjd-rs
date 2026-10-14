@@ -4,11 +4,6 @@
 //! Expression engine bindings: ExprValue, FormatString, SymbolTable,
 //! FunctionLibrary, PathMappingRule, ParsedExpression.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::errors::*;
 use wasm_bindgen::prelude::*;
 
@@ -38,6 +33,10 @@ use wasm_bindgen::prelude::*;
 /// Resolves review findings F5 (Medium) and F9 (Low).
 #[derive(Clone, Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JsEvalOptions {
     #[serde(default)]
     pub memory_limit: Option<usize>,
@@ -142,12 +141,20 @@ impl JsExprValue {
 /// Path format: Posix, Windows, or URI. Mirrors [`openjd_expr::PathFormat`].
 #[wasm_bindgen(js_name = "PathFormat")]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum JsPathFormat {
     Posix = 0,
     Windows = 1,
     Uri = 2,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JsPathFormat {
     pub fn into_inner(self) -> openjd_expr::PathFormat {
         match self {
@@ -175,6 +182,10 @@ pub struct JsPathMappingRule {
 }
 
 #[wasm_bindgen(js_class = "PathMappingRule")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JsPathMappingRule {
     #[wasm_bindgen(constructor)]
     pub fn new(
@@ -202,6 +213,10 @@ pub struct JsSymbolTable {
 
 #[wasm_bindgen(js_class = "SymbolTable")]
 #[allow(clippy::new_without_default)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JsSymbolTable {
     #[wasm_bindgen(constructor)]
     pub fn new() -> JsSymbolTable {
@@ -293,6 +308,10 @@ pub struct JsFormatString {
 }
 
 #[wasm_bindgen(js_class = "FormatString")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JsFormatString {
     #[wasm_bindgen(constructor)]
     pub fn new(input: &str) -> Result<JsFormatString, JsError> {

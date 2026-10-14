@@ -4,17 +4,16 @@
 
 //! Host requirements per spec §3.3.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::format_string::FormatString;
 use serde::Deserialize;
 
 /// §3.3 HostRequirements
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct HostRequirements {
     pub amounts: Option<Vec<AmountRequirement>>,
     pub attributes: Option<Vec<AttributeRequirement>>,
@@ -26,6 +25,10 @@ pub struct HostRequirements {
 /// its §3.3.1.1 constraints checked, at job creation.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct AmountRequirement {
     pub name: FormatString,
     pub min: Option<FormatString>,
@@ -38,6 +41,10 @@ pub struct AmountRequirement {
 /// its §3.3.2.1 constraints checked, at job creation.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct AttributeRequirement {
     pub name: FormatString,
     pub any_of: Option<Vec<FormatString>>,

@@ -4,11 +4,6 @@
 
 //! Secure temporary directory creation — mirrors Python `_tempdir.py`.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::path::{Path, PathBuf};
 
 use crate::error::SessionError;
@@ -148,6 +143,10 @@ impl AsRef<std::path::Path> for TempDir {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl TempDir {
     /// Create a new secure temp directory.
     ///

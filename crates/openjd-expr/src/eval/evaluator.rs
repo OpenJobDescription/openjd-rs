@@ -8,11 +8,6 @@
 //! against a symbol table, mirroring the Python `Evaluator` class in
 //! `openjd.expr._eval._evaluator`.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use ruff_python_ast as ast;
 
 use crate::error::{write_caret_line, ExpressionError, ExpressionErrorKind};
@@ -196,6 +191,10 @@ pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;
 
 /// Result of expression evaluation.
 #[derive(Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct EvalResult {
     pub value: ExprValue,
     pub peak_memory: usize,

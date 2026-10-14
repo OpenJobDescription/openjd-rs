@@ -4,11 +4,6 @@
 
 //! Step script runner — handles onRun actions.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -28,10 +23,18 @@ use crate::let_bindings::evaluate_let_bindings;
 use crate::session_user::SessionUser;
 use crate::subprocess::SubprocessResult;
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct StepScriptRunner {
     base: ScriptRunnerBase,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl StepScriptRunner {
     pub fn new(
         session_id: &str,

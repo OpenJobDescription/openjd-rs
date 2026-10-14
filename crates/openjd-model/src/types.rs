@@ -7,11 +7,6 @@
 //! Mirrors Python `_types.py`: SpecificationRevision, ParameterValueType,
 //! ParameterValue, TemplateSpecificationVersion, etc.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::collections::HashMap;
 use std::fmt;
 
@@ -30,6 +25,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum FileType {
     Text,
 }
@@ -45,6 +44,10 @@ impl fmt::Display for FileType {
 /// End-of-line mode for embedded files (FEATURE_BUNDLE_1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum EndOfLine {
     Lf,
     Crlf,
@@ -64,6 +67,10 @@ impl fmt::Display for EndOfLine {
 /// §2.2 PATH parameter objectType.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ObjectType {
     File,
     Directory,
@@ -81,6 +88,10 @@ impl fmt::Display for ObjectType {
 /// §2.2 PATH parameter dataFlow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum DataFlow {
     None,
     In,
@@ -102,6 +113,10 @@ impl fmt::Display for DataFlow {
 /// Specification revision identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum SpecificationRevision {
     V2023_09,
 }
@@ -132,11 +147,19 @@ impl fmt::Display for SpecificationRevision {
 /// must not be a breaking change for downstream crates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum TemplateSpecificationVersion {
     JobTemplate2023_09,
     Environment2023_09,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl TemplateSpecificationVersion {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -179,6 +202,10 @@ impl std::str::FromStr for TemplateSpecificationVersion {
 /// and the `List[…]` family) without a SemVer break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum JobParameterType {
     String,
     Int,
@@ -266,6 +293,10 @@ impl fmt::Display for JobParameterType {
 /// chunked variants) without a SemVer break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum TaskParameterType {
     Int,
     Float,
@@ -319,6 +350,10 @@ impl fmt::Display for TaskParameterType {
 
 /// A processed job parameter value.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobParameterValue {
     pub param_type: JobParameterType,
     pub value: openjd_expr::ExprValue,
@@ -326,6 +361,10 @@ pub struct JobParameterValue {
 
 /// A processed task parameter value.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct TaskParameterValue {
     pub param_type: TaskParameterType,
     pub value: openjd_expr::ExprValue,
@@ -358,6 +397,10 @@ pub type Extensions = std::collections::HashSet<ModelExtension>;
 /// element is guaranteed to be a known extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ModelExtension {
     TaskChunking,
     RedactedEnvVars,
@@ -368,6 +411,10 @@ pub enum ModelExtension {
     WrapActions,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl ModelExtension {
     /// All extension variants, in a stable order for iteration and
     /// for building default "enable all" allowlists.
@@ -615,6 +662,10 @@ impl Default for ModelProfile {
 /// extensions) and the caller's policy overrides. When only the
 /// profile is needed, take `&ModelProfile` directly.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ValidationContext {
     pub profile: ModelProfile,
     pub caller_limits: CallerLimits,

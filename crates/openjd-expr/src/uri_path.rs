@@ -8,13 +8,12 @@
 //! (scheme://authority/path), these functions handle path operations instead of
 //! `std::path`. The scheme+authority prefix is preserved as an opaque root.
 
-#![allow(
+/// Parsed URI: authority (`scheme://host`) and path segments.
+#[derive(Debug, Clone)]
+#[allow(
     missing_docs,
     reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
 )]
-
-/// Parsed URI: authority (`scheme://host`) and path segments.
-#[derive(Debug, Clone)]
 pub struct UriParts {
     pub authority: String,
     pub path_parts: Vec<String>,

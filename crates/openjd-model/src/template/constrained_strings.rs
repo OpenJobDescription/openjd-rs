@@ -4,11 +4,6 @@
 
 //! Constrained string types per spec §7.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::error::ModelError;
 use regex::Regex;
 use serde::de::{self, Deserializer};
@@ -21,6 +16,10 @@ pub struct Identifier(pub String);
 static IDENTIFIER_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl Identifier {
     pub fn new(s: &str) -> Result<Self, ModelError> {
         if s.is_empty() || s.len() > 512 {
@@ -65,6 +64,10 @@ impl std::fmt::Display for Identifier {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Description(pub String);
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl Description {
     pub fn new(s: &str) -> Result<Self, ModelError> {
         if s.chars().count() > 2048 {
@@ -103,6 +106,10 @@ pub struct ExtensionName(pub String);
 static EXTENSION_NAME_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Z_0-9]{3,128}$").unwrap());
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl ExtensionName {
     pub fn new(s: &str) -> Result<Self, ModelError> {
         if !EXTENSION_NAME_RE.is_match(s) {

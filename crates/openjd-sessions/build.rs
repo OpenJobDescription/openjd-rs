@@ -2,9 +2,11 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-//! Build script for `openjd-sessions`. Builds the cross-user helper binary
-//! from `src/helper/` (a separate Cargo project) for the current target, and
-//! sets `OPENJD_HELPER_BINARY_PATH` so the crate can embed it.
+//! Build script for `openjd-sessions`. On Unix and Windows targets it builds
+//! the cross-user helper binary from `src/helper/` (a separate Cargo project)
+//! for the current target. On any other target it writes an empty placeholder
+//! instead. Either way it sets `OPENJD_HELPER_BINARY_PATH` so the crate can
+//! embed the result.
 
 use std::path::{Path, PathBuf};
 

@@ -72,9 +72,11 @@ for crate in "${CRATES[@]}"; do
     fi
 
     # -ss omits blanket impls (`impl<T> From<T> for T`) and auto-trait impls
-    # (Send, Sync, Unpin), which are noise. Derived impls (Clone, Debug, ...)
-    # are kept: removing one is an API change. `tr` drops the carriage
-    # returns a Windows pipe can add.
+    # (Send, Sync, Unpin), which would otherwise be a large share of every
+    # listing. The cost is that a type silently losing Send or Sync does not
+    # show up here; cargo-semver-checks in the release workflow catches that.
+    # Derived impls (Clone, Debug, ...) are kept: removing one is an API
+    # change. `tr` drops the carriage returns a Windows pipe can add.
     cargo "+$TOOLCHAIN" public-api -p "openjd-$crate" -ss --color=never |
         tr -d '\r' >"$tmp/$crate.txt"
 

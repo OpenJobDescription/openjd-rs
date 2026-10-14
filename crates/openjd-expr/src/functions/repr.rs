@@ -4,11 +4,6 @@
 
 //! Repr function implementations (repr_py, repr_json, repr_sh, repr_cmd, repr_pwsh).
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use super::StringOutputBudget;
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
@@ -261,6 +256,10 @@ pub(super) fn preflight_display_list(
 
 // ─── Public entry points ───
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn repr_py_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let budget = preflight_repr(ctx, &a[0], ReprStyle::Py)?;
     let mut buf = String::new();
@@ -268,6 +267,10 @@ pub fn repr_py_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(budget.finish(buf))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn repr_json_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let budget = preflight_repr(ctx, &a[0], ReprStyle::Json)?;
     let mut buf = String::new();
@@ -275,12 +278,20 @@ pub fn repr_json_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(budget.finish(buf))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn repr_sh_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let budget = preflight_repr(ctx, &a[0], ReprStyle::Sh)?;
     let result = repr_sh(&a[0])?;
     Ok(budget.finish(result))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn repr_cmd_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let budget = preflight_repr(ctx, &a[0], ReprStyle::Cmd)?;
     let mut buf = String::new();
@@ -288,6 +299,10 @@ pub fn repr_cmd_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(budget.finish(buf))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn repr_pwsh_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let budget = preflight_repr(ctx, &a[0], ReprStyle::Pwsh)?;
     let mut buf = String::new();

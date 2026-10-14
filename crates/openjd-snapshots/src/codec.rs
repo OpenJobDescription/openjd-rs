@@ -19,11 +19,6 @@
 //!   [`encode_abs_snapshot_diff_v2025`], [`encode_snapshot_v2025`],
 //!   [`encode_snapshot_diff_v2025`], [`decode_v2025`].
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::hash::HashAlgorithm;
 use crate::manifest::{
     AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, Full, Manifest, Rel, Snapshot, SnapshotDiff,
@@ -47,12 +42,20 @@ use tracing::warn;
 ///   is expected to change before any stable release (its
 ///   `specificationVersion` strings carry the `beta-2025-12` tag).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ManifestFormat {
     V2023,
     V2025,
 }
 
 #[derive(Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum DecodedManifest {
     AbsSnapshot(AbsSnapshot),
     AbsSnapshotDiff(AbsSnapshotDiff),

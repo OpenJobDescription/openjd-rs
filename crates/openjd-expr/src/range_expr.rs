@@ -7,11 +7,6 @@
 //! Mirrors Python `openjd.expr._range_expr`. Parses expressions like
 //! `"1-10"`, `"1-10:2"`, `"1-5,10-15"` into sorted, non-overlapping ranges.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::error::ExpressionError;
 use std::fmt;
 
@@ -38,12 +33,20 @@ pub const MAX_RANGE_EXPR_CHUNKS: usize = 10_000;
 
 /// Error raised when parsing a range expression fails.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct RangeExprError {
     pub expr: String,
     pub message: String,
     pub position: Option<usize>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl RangeExprError {
     pub fn new(expr: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
@@ -348,6 +351,10 @@ impl std::str::FromStr for RangeExpr {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl RangeExpr {
     /// Set contiguous display mode. When true, Display uses "{start}-{end}" format
     /// even for single values (e.g., "5-5"). Only meaningful for contiguous chunks.

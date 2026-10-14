@@ -6,11 +6,6 @@
 //!
 //! These types are only available when the EXPR extension is enabled.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use super::constrained_strings::{Description, Identifier};
 use super::parameters::{validate_ui_label, FileFilter, FlexFloat, FlexInt};
 use crate::types::{DataFlow, ObjectType};
@@ -20,6 +15,10 @@ use serde::Deserialize;
 /// User interface definition for BOOL parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct BoolUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -29,6 +28,10 @@ pub struct BoolUserInterface {
 /// User interface definition for RANGE_EXPR parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct RangeExprUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -38,6 +41,10 @@ pub struct RangeExprUserInterface {
 /// User interface definition for `LIST[STRING]` and `LIST[BOOL]` parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ListSimpleUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -47,6 +54,10 @@ pub struct ListSimpleUserInterface {
 /// User interface definition for `LIST[PATH]` parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ListPathUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -58,6 +69,10 @@ pub struct ListPathUserInterface {
 /// User interface definition for `LIST[INT]` parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ListIntUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -68,6 +83,10 @@ pub struct ListIntUserInterface {
 /// User interface definition for `LIST[FLOAT]` parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ListFloatUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -79,6 +98,10 @@ pub struct ListFloatUserInterface {
 /// User interface definition for `LIST[LIST[INT]]` parameters (HIDDEN only).
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct HiddenOnlyUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -88,6 +111,10 @@ pub struct HiddenOnlyUserInterface {
 /// §2.9 JobBoolParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobBoolParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -135,6 +162,10 @@ impl<'de> Deserialize<'de> for BoolValue {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobBoolParameterDefinition {
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         match value {
@@ -178,6 +209,10 @@ impl JobBoolParameterDefinition {
 /// §2.10 JobRangeExprParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobRangeExprParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -187,6 +222,10 @@ pub struct JobRangeExprParameterDefinition {
     pub user_interface: Option<RangeExprUserInterface>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobRangeExprParameterDefinition {
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let s = match value {
@@ -260,6 +299,10 @@ impl JobRangeExprParameterDefinition {
 /// §2.11 JobListStringParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobListStringParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -272,12 +315,20 @@ pub struct JobListStringParameterDefinition {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ListStringItemConstraints {
     pub allowed_values: Option<Vec<String>>,
     pub min_length: Option<usize>,
     pub max_length: Option<usize>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobListStringParameterDefinition {
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let items = match value {
@@ -330,6 +381,10 @@ impl JobListStringParameterDefinition {
 /// §2.12 JobListPathParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobListPathParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -342,6 +397,10 @@ pub struct JobListPathParameterDefinition {
     pub user_interface: Option<ListPathUserInterface>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobListPathParameterDefinition {
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let items = match value {
@@ -399,6 +458,10 @@ impl JobListPathParameterDefinition {
 /// §2.13 JobListIntParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobListIntParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -411,12 +474,20 @@ pub struct JobListIntParameterDefinition {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ListIntItemConstraints {
     pub allowed_values: Option<Vec<FlexInt>>,
     pub min_value: Option<FlexInt>,
     pub max_value: Option<FlexInt>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobListIntParameterDefinition {
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let items = match value {
@@ -469,6 +540,10 @@ impl JobListIntParameterDefinition {
 /// §2.14 JobListFloatParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobListFloatParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -481,12 +556,20 @@ pub struct JobListFloatParameterDefinition {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ListFloatItemConstraints {
     pub allowed_values: Option<Vec<super::parameters::FlexFloat>>,
     pub min_value: Option<super::parameters::FlexFloat>,
     pub max_value: Option<super::parameters::FlexFloat>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobListFloatParameterDefinition {
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let items = match value {
@@ -581,6 +664,10 @@ impl JobListFloatParameterDefinition {
 /// §2.15 JobListBoolParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobListBoolParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -590,6 +677,10 @@ pub struct JobListBoolParameterDefinition {
     pub user_interface: Option<ListSimpleUserInterface>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobListBoolParameterDefinition {
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let items = match value {
@@ -636,6 +727,10 @@ impl JobListBoolParameterDefinition {
 /// §2.16 JobListListIntParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobListListIntParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -648,12 +743,20 @@ pub struct JobListListIntParameterDefinition {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ListListIntItemConstraints {
     pub min_length: Option<usize>,
     pub max_length: Option<usize>,
     pub item: Option<ListIntItemConstraints>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobListListIntParameterDefinition {
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let items = match value {

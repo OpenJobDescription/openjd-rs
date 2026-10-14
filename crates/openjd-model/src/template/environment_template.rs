@@ -4,11 +4,6 @@
 
 //! Environment template per spec §1.2.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use super::constrained_strings::ExtensionName;
 use super::environment::Environment;
 use super::parameters::JobParameterDefinition;
@@ -17,6 +12,10 @@ use serde::Deserialize;
 /// §1.2 EnvironmentTemplate
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct EnvironmentTemplate {
     pub specification_version: String,
     pub extensions: Option<Vec<ExtensionName>>,
@@ -24,6 +23,10 @@ pub struct EnvironmentTemplate {
     pub environment: Environment,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl EnvironmentTemplate {
     pub fn environment(&self) -> &Environment {
         &self.environment

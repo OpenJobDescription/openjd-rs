@@ -2,11 +2,6 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use super::rate::SlidingWindowRate;
 use crate::hash::{hash_file, hash_file_chunked};
 use crate::hash_cache::{HashCache, WHOLE_FILE_RANGE_END};
@@ -18,6 +13,10 @@ use std::sync::{Arc, Mutex};
 use tracing::debug;
 
 #[derive(Default)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct HashOptions {
     pub hash_cache: Option<Arc<HashCache>>,
     pub force_rehash: bool,
@@ -27,6 +26,10 @@ pub struct HashOptions {
 }
 
 #[derive(Debug, Default, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct HashStatistics {
     pub total_files: usize,
     pub total_bytes: u64,
@@ -52,6 +55,10 @@ pub struct HashStatistics {
 /// returns an [`AbsManifest`]. The default `M = AbsManifest` keeps the bare
 /// `HashResult` name usable as a shorthand for the enum-dispatch case.
 #[derive(Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct HashResult<M = AbsManifest> {
     pub manifest: M,
     pub statistics: HashStatistics,

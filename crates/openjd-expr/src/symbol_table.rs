@@ -31,11 +31,6 @@
 //! ].into_iter().collect();
 //! ```
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::types::ExprType;
 use crate::value::ExprValue;
 use std::collections::HashMap;
@@ -64,6 +59,10 @@ pub const MAX_SYMBOL_TABLE_ENTRIES: usize = 100_000;
 ///
 /// For example, setting `"A.B.C"` when `"A.B"` is already a scalar value.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct SymbolTableError {
     pub key: String,
     pub conflict: String,
@@ -95,6 +94,10 @@ impl From<SymbolTableError> for crate::error::ExpressionError {
 
 /// Entry in a symbol table: either a nested table or a value.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum SymbolTableEntry {
     Table(SymbolTable),
     Value(ExprValue),
@@ -109,6 +112,10 @@ pub struct SymbolTable {
     pub(crate) table: HashMap<String, SymbolTableEntry>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl SymbolTable {
     pub fn new() -> Self {
         Self {

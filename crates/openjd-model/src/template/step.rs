@@ -4,11 +4,6 @@
 
 //! Step types per spec §3.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use super::actions::{Action, CancelationMode, StepActions};
 use super::constrained_strings::Description;
 use super::environment::{EmbeddedFile, Environment};
@@ -235,6 +230,10 @@ impl SimpleActionKind {
 /// §3 StepTemplate
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct StepTemplate {
     pub name: String,
     pub description: Option<Description>,
@@ -294,6 +293,10 @@ impl StepTemplate {
 /// §3.2 StepDependency
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct StepDependency {
     pub depends_on: String,
 }
@@ -301,6 +304,10 @@ pub struct StepDependency {
 /// §3.5 StepScript
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct StepScript {
     #[serde(rename = "let")]
     pub let_bindings: Option<Vec<String>>,

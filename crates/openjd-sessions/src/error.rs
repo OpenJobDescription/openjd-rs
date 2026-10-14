@@ -4,11 +4,6 @@
 
 //! Error types for openjd-sessions.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::path::PathBuf;
 
 use crate::session::SessionState;
@@ -23,6 +18,10 @@ use crate::session::SessionState;
 /// ```
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum SessionError {
     /// Session is not in the expected state for the requested operation.
     #[error("Session must be in {} state, current: {current}", format_expected(.expected))]

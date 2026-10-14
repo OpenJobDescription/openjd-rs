@@ -4,12 +4,11 @@
 
 //! Session user types for cross-user execution — mirrors Python `_session_user.py`.
 
-#![allow(
+/// Trait for session user identity.
+#[allow(
     missing_docs,
     reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
 )]
-
-/// Trait for session user identity.
 pub trait SessionUser: Send + Sync + std::fmt::Debug {
     fn user(&self) -> &str;
     fn group(&self) -> &str;
@@ -83,6 +82,10 @@ impl SessionUser for PosixSessionUser {
 /// Error for incorrect username or password.
 #[cfg(windows)]
 #[derive(Debug, thiserror::Error)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum BadCredentialsError {
     #[error("The username or password is incorrect.")]
     LogonFailure,

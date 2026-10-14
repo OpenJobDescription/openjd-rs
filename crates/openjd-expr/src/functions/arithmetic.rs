@@ -4,11 +4,6 @@
 
 //! Arithmetic operator implementations.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
 use crate::types::ExprType;
@@ -19,6 +14,10 @@ type Ctx<'a> = &'a mut dyn EvalContext;
 
 // ── Integer arithmetic ──
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn add_int(_: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::Int(l), ExprValue::Int(r)) => Ok(ExprValue::Int(
@@ -29,6 +28,10 @@ pub fn add_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn sub_int(_: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::Int(l), ExprValue::Int(r)) => Ok(ExprValue::Int(
@@ -39,6 +42,10 @@ pub fn sub_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn mul_int(_: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::Int(l), ExprValue::Int(r)) => Ok(ExprValue::Int(
@@ -49,6 +56,10 @@ pub fn mul_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn truediv_int(_: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::Int(l), ExprValue::Int(r)) => {
@@ -61,6 +72,10 @@ pub fn truediv_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn floordiv_int(_: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::Int(l), ExprValue::Int(r)) => {
@@ -79,6 +94,10 @@ pub fn floordiv_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn mod_int(_: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::Int(l), ExprValue::Int(r)) => {
@@ -103,6 +122,10 @@ pub fn mod_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn pow_int(_: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::Int(base), ExprValue::Int(exp)) => {
@@ -143,6 +166,10 @@ pub fn pow_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn neg_int(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Int(n) => Ok(ExprValue::Int(
@@ -153,6 +180,10 @@ pub fn neg_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn pos_int(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Int(n) => Ok(ExprValue::Int(*n)),
@@ -162,21 +193,37 @@ pub fn pos_int(_: Ctx, a: &[ExprValue]) -> R {
 
 // ── Float arithmetic ──
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn add_float(_: Ctx, a: &[ExprValue]) -> R {
     let (l, r) = get_two_floats(a)?;
     Ok(ExprValue::Float(Float64::new(l + r)?))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn sub_float(_: Ctx, a: &[ExprValue]) -> R {
     let (l, r) = get_two_floats(a)?;
     Ok(ExprValue::Float(Float64::new(l - r)?))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn mul_float(_: Ctx, a: &[ExprValue]) -> R {
     let (l, r) = get_two_floats(a)?;
     Ok(ExprValue::Float(Float64::new(l * r)?))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn truediv_float(_: Ctx, a: &[ExprValue]) -> R {
     let (l, r) = get_two_floats(a)?;
     if r == 0.0 {
@@ -205,6 +252,10 @@ fn float_divmod(l: f64, r: f64) -> (f64, f64) {
     (quotient, rem)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn floordiv_float(_: Ctx, a: &[ExprValue]) -> R {
     let (l, r) = get_two_floats(a)?;
     if r == 0.0 {
@@ -217,6 +268,10 @@ pub fn floordiv_float(_: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Int(v as i64))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn mod_float(_: Ctx, a: &[ExprValue]) -> R {
     let (l, r) = get_two_floats(a)?;
     if r == 0.0 {
@@ -226,6 +281,10 @@ pub fn mod_float(_: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Float(Float64::new(rem)?))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn pow_float(_: Ctx, a: &[ExprValue]) -> R {
     let (l, r) = get_two_floats(a)?;
     if l == 0.0 && r < 0.0 {
@@ -249,6 +308,10 @@ pub fn pow_float(_: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Float(Float64::new(result)?))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn neg_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(n) => Ok(ExprValue::Float(Float64::new(-n.value())?)),
@@ -256,6 +319,10 @@ pub fn neg_float(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn pos_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(n) => Ok(ExprValue::Float(Float64::new(n.value())?)),
@@ -265,6 +332,10 @@ pub fn pos_float(_: Ctx, a: &[ExprValue]) -> R {
 
 // ── String operators ──
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn add_string(ctx: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::String(l), ExprValue::String(r)) => {
@@ -275,6 +346,10 @@ pub fn add_string(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn add_string_range(_: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::String(l), ExprValue::RangeExpr(r)) => Ok(ExprValue::String(format!("{l}{r}"))),
@@ -282,6 +357,10 @@ pub fn add_string_range(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn add_range_string(_: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::RangeExpr(l), ExprValue::String(r)) => Ok(ExprValue::String(format!("{l}{r}"))),
@@ -289,6 +368,10 @@ pub fn add_range_string(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn mul_string(ctx: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::String(s), ExprValue::Int(n)) => {
@@ -312,6 +395,10 @@ pub fn mul_string(ctx: Ctx, a: &[ExprValue]) -> R {
 
 // ── Path operators ──
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn path_div(ctx: Ctx, a: &[ExprValue]) -> R {
     let (l, format) = match &a[0] {
         ExprValue::Path { value, format } => (value.as_str(), *format),
@@ -326,6 +413,10 @@ pub fn path_div(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::new_path(super::path::join(l, r, format), format))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn add_path_string(ctx: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::Path { value: l, format }, ExprValue::String(r)) => {
@@ -338,6 +429,10 @@ pub fn add_path_string(ctx: Ctx, a: &[ExprValue]) -> R {
 
 // ── List operators ──
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn add_range_range(ctx: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::RangeExpr(l), ExprValue::RangeExpr(r)) => {
@@ -349,6 +444,10 @@ pub fn add_range_range(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn mul_list(ctx: Ctx, a: &[ExprValue]) -> R {
     let (elements, elem_type) = a[0]
         .clone()
@@ -384,6 +483,10 @@ pub fn mul_list(ctx: Ctx, a: &[ExprValue]) -> R {
     ExprValue::make_list_checked(ctx, result, elem_type)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn add_list_list(ctx: Ctx, a: &[ExprValue]) -> R {
     let (l, lt) = a[0]
         .clone()
@@ -412,6 +515,10 @@ pub fn add_list_list(ctx: Ctx, a: &[ExprValue]) -> R {
     ExprValue::make_list_checked(ctx, combined, result_type)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn add_list_range(ctx: Ctx, a: &[ExprValue]) -> R {
     let (mut l, et) = a[0]
         .clone()
@@ -426,6 +533,10 @@ pub fn add_list_range(ctx: Ctx, a: &[ExprValue]) -> R {
     ExprValue::make_list_checked(ctx, l, et)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn add_range_list(ctx: Ctx, a: &[ExprValue]) -> R {
     let r = match &a[0] {
         ExprValue::RangeExpr(r) => r,
@@ -443,6 +554,10 @@ pub fn add_range_list(ctx: Ctx, a: &[ExprValue]) -> R {
 
 // ── Comparison operators ──
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn not_bool(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Bool(b) => Ok(ExprValue::Bool(!*b)),

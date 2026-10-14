@@ -3,11 +3,6 @@
 
 //! ECMAScript error types wrapping OpenJD errors.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use openjd_model::ModelError;
 use wasm_bindgen::prelude::*;
 
@@ -37,6 +32,10 @@ pub fn symtab_to_js_error(e: openjd_expr::SymbolTableError) -> JsError {
 }
 
 // Convenience: convert serde_wasm_bindgen errors
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn serde_wasm_to_js_error(e: serde_wasm_bindgen::Error) -> JsError {
     JsError::new(&format!("Serialization error: {e}"))
 }

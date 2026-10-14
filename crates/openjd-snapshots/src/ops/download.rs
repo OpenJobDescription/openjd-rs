@@ -2,11 +2,6 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use super::memory_pool::{default_max_memory_bytes, MemoryPool};
 use super::rate::SlidingWindowRate;
 use crate::data_cache::AsyncDataCache;
@@ -97,12 +92,20 @@ fn preallocate_file(path: &std::path::Path, size: u64) -> std::io::Result<()> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum FileConflictResolution {
     Skip,
     Overwrite,
     CreateCopy,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct DownloadOptions {
     pub hash_cache: Option<Arc<HashCache>>,
     pub file_conflict_resolution: FileConflictResolution,
@@ -128,12 +131,20 @@ impl Default for DownloadOptions {
 }
 
 #[derive(Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct DownloadResult {
     pub manifest: AbsManifest,
     pub statistics: DownloadStatistics,
 }
 
 #[derive(Debug, Default, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct DownloadStatistics {
     pub total_files: usize,
     pub total_bytes: u64,

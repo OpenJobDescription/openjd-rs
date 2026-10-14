@@ -4,11 +4,6 @@
 
 //! Runtime values for expression evaluation.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::path_mapping::PathFormat;
 use crate::py_escape::py_string_literal;
 use crate::range_expr::RangeExpr;
@@ -311,6 +306,10 @@ impl PartialOrd<f64> for Float64 {
 /// enforce the separator-normalization invariant).
 #[derive(Debug, Clone, serde::Serialize)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ExprValue {
     Null,
     Bool(bool),
@@ -444,6 +443,10 @@ impl std::hash::Hash for ExprValue {
 
 impl Eq for ExprValue {}
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl ExprValue {
     /// Create a list, promoting elements as needed. Produces old List variant for compatibility.
     fn make_list_string(v: Vec<String>) -> Self {
@@ -1891,6 +1894,10 @@ impl From<crate::types::ExprType> for ExprValue {
 }
 
 /// Zero-allocation iterator over list elements.
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ListIter<'a> {
     Bool(std::slice::Iter<'a, bool>),
     Int(std::slice::Iter<'a, i64>),
@@ -1926,6 +1933,10 @@ impl<'a> Iterator for ListIter<'a> {
 
 impl<'a> ExactSizeIterator for ListIter<'a> {}
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn format_float(f: f64) -> String {
     if f == 0.0 {
         return "0.0".to_string();

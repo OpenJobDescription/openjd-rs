@@ -4,11 +4,6 @@
 
 //! Expression language error types.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::fmt;
 
 /// Structured error kinds for expression evaluation.
@@ -17,6 +12,10 @@ use std::fmt;
 /// without parsing error message strings.
 #[derive(Debug, Clone, thiserror::Error)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ExpressionErrorKind {
     /// A referenced variable was not found in any symbol table.
     #[error("Undefined variable: '{name}'.{suggestion}")]

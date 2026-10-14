@@ -4,11 +4,6 @@
 
 //! Format string parsing and resolution.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::error::ExpressionError;
 use crate::profile::ExprProfile;
 use crate::symbol_table::{SymbolTable, SymbolTableEntry};
@@ -31,6 +26,10 @@ enum Segment {
 }
 
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct FormatString {
     raw: String,
     segments: Vec<Segment>,
@@ -73,6 +72,10 @@ pub const MAX_FORMAT_STRING_SEGMENTS: usize = 1_000;
 /// See `specs/expr/format-string.md` (Defensive caps) for rationale.
 pub const MAX_STATIC_RESOLVED_VALUE_LEN: usize = 10 * 1024 * 1024;
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl FormatString {
     /// Parse a format string using the "latest" profile
     /// ([`ExprProfile::latest`]): the current revision with every known

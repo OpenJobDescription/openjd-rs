@@ -7,13 +7,12 @@
 //! The primary error type is [`ModelError`], which covers all failure modes
 //! during template parsing, validation, and job creation.
 
-#![allow(
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+#[allow(
     missing_docs,
     reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
 )]
-
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
 pub enum ModelError {
     /// Structural deserialization failure (bad YAML/JSON, missing fields, wrong types).
     #[error("Validation error: {0}")]
@@ -83,6 +82,10 @@ impl From<openjd_expr::FormatStringValidationError> for ModelError {
 
 /// An element in a validation error path.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum PathElement {
     Field(String),
     Index(usize),
@@ -131,6 +134,10 @@ pub struct DiagnosticSpan {
 
 /// Collects multiple validation errors with structured paths.
 #[derive(Debug, Default)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ValidationErrors {
     pub errors: Vec<ValidationError>,
     /// Model name used for Display formatting (set by `into_result`).
@@ -144,6 +151,10 @@ impl std::fmt::Display for ValidationErrors {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl ValidationErrors {
     /// Create a `ValidationErrors` with a single root-level message.
     pub fn single(msg: impl Into<String>) -> Self {

@@ -2,11 +2,6 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::manifest::{DirEntry, FileEntry, Manifest, ManifestEntry};
 
 /// Filters a manifest's entries using the provided predicate.
@@ -38,11 +33,19 @@ pub fn filter_manifest<P: Clone, K: Clone>(
     result
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct IncludeExcludePathsFilter {
     include: Vec<glob::Pattern>,
     exclude: Vec<glob::Pattern>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl IncludeExcludePathsFilter {
     pub fn new(include: &[&str], exclude: &[&str]) -> crate::Result<Self> {
         fn compile(patterns: &[&str]) -> crate::Result<Vec<glob::Pattern>> {

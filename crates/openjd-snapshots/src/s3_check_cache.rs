@@ -2,21 +2,24 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const ENTRY_EXPIRY_DAYS: u64 = 30;
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct S3CheckCache {
     conn: Mutex<rusqlite::Connection>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl S3CheckCache {
     pub fn new(cache_dir: impl AsRef<Path>) -> crate::Result<Self> {
         let dir = cache_dir.as_ref();

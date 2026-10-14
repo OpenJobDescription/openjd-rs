@@ -4,11 +4,6 @@
 
 //! Math function implementations (min, max, floor, ceil, round, sum).
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
 use crate::value::{float_fits_i64, ExprValue, Float64};
@@ -61,6 +56,10 @@ fn min_max_items(a: &[ExprValue], name: &str) -> Result<Vec<ExprValue>, Expressi
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn min_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let items = min_max_items(a, "min")?;
     ctx.count_ops(items.len())?;
@@ -78,6 +77,10 @@ pub fn min_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(result)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn max_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let items = min_max_items(a, "max")?;
     ctx.count_ops(items.len())?;
@@ -108,6 +111,10 @@ fn round_half_even(x: f64) -> f64 {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn floor_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => {
@@ -121,6 +128,10 @@ pub fn floor_float(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn floor_int(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Int(i) => Ok(ExprValue::Int(*i)),
@@ -128,6 +139,10 @@ pub fn floor_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn ceil_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => {
@@ -141,6 +156,10 @@ pub fn ceil_float(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn ceil_int(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Int(i) => Ok(ExprValue::Int(*i)),
@@ -148,6 +167,10 @@ pub fn ceil_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => {
@@ -252,6 +275,10 @@ pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn sum_list(ctx: Ctx, a: &[ExprValue]) -> R {
     if let Some(iter) = a[0].list_iter() {
         let mut int_sum: i64 = 0;

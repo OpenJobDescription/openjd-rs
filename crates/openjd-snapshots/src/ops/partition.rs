@@ -2,16 +2,15 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::manifest::{AbsSnapshot, Manifest, Snapshot, SymlinkPolicy};
 use crate::ops::subtree::{subtree_rel_snapshot, subtree_snapshot};
 use crate::path_util::{is_absolute_path, normalize_path};
 use tracing::debug;
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct PartitionOptions {
     pub roots: Option<Vec<String>>,
     pub referenced_paths: Option<Vec<String>>,

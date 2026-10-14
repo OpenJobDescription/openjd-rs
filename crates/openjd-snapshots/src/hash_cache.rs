@@ -2,14 +2,13 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub const WHOLE_FILE_RANGE_END: i64 = -1;
 
 /// Normalize a path to a consistent cache key.
@@ -25,10 +24,18 @@ fn normalize_cache_key(path: &Path) -> Vec<u8> {
     s.into_bytes()
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct HashCache {
     conn: Mutex<rusqlite::Connection>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl HashCache {
     pub fn new(cache_dir: impl AsRef<Path>) -> crate::Result<Self> {
         let dir = cache_dir.as_ref();

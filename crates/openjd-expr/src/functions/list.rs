@@ -4,11 +4,6 @@
 
 //! List function implementations (sorted, reversed, unique, flatten, range).
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use super::StringOutputBudget;
 use crate::budgeted_vec::BudgetedVec;
 use crate::error::ExpressionError;
@@ -19,6 +14,10 @@ use crate::value::ExprValue;
 type R = Result<ExprValue, ExpressionError>;
 type Ctx<'a> = &'a mut dyn EvalContext;
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn sorted_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (elements, elem_type) = a[0]
         .clone()
@@ -30,6 +29,10 @@ pub fn sorted_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ExprValue::make_list_checked(ctx, sorted, elem_type)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn reversed_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (mut elements, elem_type) = a[0]
         .clone()
@@ -40,6 +43,10 @@ pub fn reversed_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ExprValue::make_list_checked(ctx, elements, elem_type)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn unique_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (elements, elem_type) = a[0]
         .clone()
@@ -56,6 +63,10 @@ pub fn unique_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ExprValue::make_list_checked(ctx, result, elem_type)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn flatten_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let iter = a[0]
         .list_iter()
@@ -82,6 +93,10 @@ pub fn flatten_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ExprValue::make_list_checked(ctx, result, et)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn range_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (start, stop, step) = match a.len() {
         1 => (
@@ -148,6 +163,10 @@ pub fn range_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ExprValue::make_list_checked(ctx, elements, ExprType::INT)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn join_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let len = a[0]
         .list_len()
@@ -185,6 +204,10 @@ pub fn join_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(budget.finish(result))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn list_from_range(ctx: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::RangeExpr(r) => {
@@ -207,6 +230,10 @@ pub fn list_from_range(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn range_expr_from_string(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::String(s) => {
@@ -217,6 +244,10 @@ pub fn range_expr_from_string(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn range_expr_from_list(ctx: Ctx, a: &[ExprValue]) -> R {
     if let Some(iter) = a[0].list_iter() {
         if a[0].list_len() == Some(0) {
@@ -241,6 +272,10 @@ pub fn range_expr_from_list(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn range_expr_from_empty_list(_: Ctx, _a: &[ExprValue]) -> R {
     Err(ExpressionError::new(
         "range_expr() requires at least one value",

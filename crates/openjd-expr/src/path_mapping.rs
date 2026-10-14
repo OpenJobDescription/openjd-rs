@@ -6,16 +6,15 @@
 //!
 //! Mirrors Python `openjd.expr._path_mapping`.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use serde::{Deserialize, Serialize};
 
 /// Path format (POSIX, Windows, or URI).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum PathFormat {
     #[serde(alias = "posix", alias = "Posix")]
     Posix,
@@ -25,6 +24,10 @@ pub enum PathFormat {
     Uri,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl PathFormat {
     pub fn host() -> Self {
         if cfg!(windows) {
@@ -41,6 +44,10 @@ impl PathFormat {
 /// <https://github.com/OpenJobDescription/openjd-specifications/wiki/How-Jobs-Are-Run#path-mapping>
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct PathMappingRule {
     pub source_path_format: PathFormat,
     pub source_path: String,

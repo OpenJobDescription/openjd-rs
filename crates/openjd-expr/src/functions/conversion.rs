@@ -4,11 +4,6 @@
 
 //! Type conversion function implementations.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
 use crate::value::{ExprValue, Float64};
@@ -16,6 +11,10 @@ use crate::value::{ExprValue, Float64};
 type R = Result<ExprValue, ExpressionError>;
 type Ctx<'a> = &'a mut dyn EvalContext;
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn string_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     // A list renders as a JSON array whose element strings are escaped, so the
     // output can grow several times larger than the input. Charge the same
@@ -27,6 +26,10 @@ pub fn string_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::String(a[0].to_display_string()))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn int_from_int(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Int(i) => Ok(ExprValue::Int(*i)),
@@ -34,6 +37,10 @@ pub fn int_from_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn int_from_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => {
@@ -51,6 +58,10 @@ pub fn int_from_float(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn int_from_bool(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Bool(b) => Ok(ExprValue::Int(if *b { 1 } else { 0 })),
@@ -79,6 +90,10 @@ fn normalize_decimal_digits(s: &str) -> std::borrow::Cow<'_, str> {
     )
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn int_from_string(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::String(s) => {
@@ -91,6 +106,10 @@ pub fn int_from_string(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn float_from_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => Ok(ExprValue::Float(Float64::new(f.value())?)),
@@ -98,6 +117,10 @@ pub fn float_from_float(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn float_from_int(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Int(i) => Ok(ExprValue::Float(Float64::new(*i as f64)?)),
@@ -105,6 +128,10 @@ pub fn float_from_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn float_from_string(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::String(s) => {
@@ -126,6 +153,10 @@ pub fn float_from_string(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn bool_from_bool(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Bool(b) => Ok(ExprValue::Bool(*b)),
@@ -133,6 +164,10 @@ pub fn bool_from_bool(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn bool_from_int(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Int(i) => Ok(ExprValue::Bool(*i != 0)),
@@ -140,6 +175,10 @@ pub fn bool_from_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn bool_from_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => Ok(ExprValue::Bool(*f != 0.0)),
@@ -147,10 +186,18 @@ pub fn bool_from_float(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn bool_from_null(_: Ctx, _a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(false))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn bool_from_string(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::String(s) => match s.to_lowercase().as_str() {
@@ -164,10 +211,18 @@ pub fn bool_from_string(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn bool_from_path(_: Ctx, _a: &[ExprValue]) -> R {
     Err(ExpressionError::new("Cannot convert path to bool"))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn bool_from_list(_: Ctx, _a: &[ExprValue]) -> R {
     Err(ExpressionError::new("Cannot convert list to bool"))
 }

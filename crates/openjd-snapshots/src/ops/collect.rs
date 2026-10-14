@@ -2,11 +2,6 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::hash::HashAlgorithm;
 use crate::manifest::{AbsSnapshot, DirEntry, FileEntry, Manifest, SymlinkPolicy};
 use crate::path_util::normalize_path;
@@ -18,6 +13,10 @@ use tracing::{debug, warn};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct CollectOptions {
     pub optional_filenames: Vec<PathBuf>,
     pub symlink_policy: SymlinkPolicy,

@@ -25,11 +25,6 @@
 //! The rule's heuristic assumes web-application session cookies, which is not
 //! the concept modeled here.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -77,6 +72,10 @@ use crate::session_user::SessionUser;
 /// assert_eq!(format!("{state}"), "READY");
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum SessionState {
     Ready,
     Running,
@@ -104,6 +103,10 @@ pub type EnvironmentIdentifier = String;
 pub type SessionCallbackType = Box<dyn Fn(&str, &ActionStatus) + Send + Sync>;
 
 /// Configuration for creating a new Session.
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct SessionConfig {
     pub session_id: String,
     pub job_parameter_values: JobParameterValues,
@@ -487,6 +490,10 @@ fn derive_library(
     openjd_expr::FunctionLibrary::for_profile(&expr_profile)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct Session {
     session_id: String,
     state: SessionState,
@@ -539,6 +546,10 @@ pub struct Session {
     limits: crate::limits::SessionLimits,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl Session {
     /// Test-only constructor that accepts a pre-existing working directory.
     /// Production code should use `Session::with_config`.

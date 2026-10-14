@@ -4,11 +4,6 @@
 
 //! Job parameter definitions per spec §2.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use super::constrained_strings::{Description, Identifier};
 use crate::types::{DataFlow, ObjectType};
 use serde::Deserialize;
@@ -60,6 +55,10 @@ impl<'de, T: serde::de::DeserializeOwned> Deserialize<'de> for NullableVec<T> {
 /// types are available (BOOL, RANGE_EXPR, `LIST[*]`).
 #[derive(Debug, Clone)]
 #[allow(non_camel_case_types)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum JobParameterDefinition {
     STRING(JobStringParameterDefinition),
     INT(JobIntParameterDefinition),
@@ -153,6 +152,10 @@ impl<'de> serde::Deserialize<'de> for JobParameterDefinition {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobParameterDefinition {
     pub fn job_param_type(&self) -> crate::types::JobParameterType {
         use crate::types::JobParameterType;
@@ -558,6 +561,10 @@ impl JobParameterDefinition {
 /// User interface definition for STRING parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct StringUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -567,6 +574,10 @@ pub struct StringUserInterface {
 /// User interface definition for INT parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct IntUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -577,6 +588,10 @@ pub struct IntUserInterface {
 /// User interface definition for FLOAT parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct FloatUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -588,6 +603,10 @@ pub struct FloatUserInterface {
 /// User interface definition for PATH parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct PathUserInterface {
     pub control: Option<String>,
     pub label: Option<String>,
@@ -599,6 +618,10 @@ pub struct PathUserInterface {
 /// §2.7 JobPathParameterFileFilter
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct FileFilter {
     pub label: String,
     pub patterns: Vec<String>,
@@ -633,6 +656,10 @@ pub(crate) fn validate_ui_label(
 /// §2.1 JobStringParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobStringParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -643,6 +670,10 @@ pub struct JobStringParameterDefinition {
     pub user_interface: Option<StringUserInterface>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobStringParameterDefinition {
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
         let char_len = value.chars().count();
@@ -940,6 +971,10 @@ impl std::fmt::Display for FlexFloat {
 /// §2.3 JobIntParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobIntParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -952,6 +987,10 @@ pub struct JobIntParameterDefinition {
     pub user_interface: Option<IntUserInterface>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobIntParameterDefinition {
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
         let parsed: i64 = value.parse().map_err(|_| {
@@ -1082,6 +1121,10 @@ impl JobIntParameterDefinition {
 /// §2.4 JobFloatParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobFloatParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -1094,6 +1137,10 @@ pub struct JobFloatParameterDefinition {
     pub user_interface: Option<FloatUserInterface>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobFloatParameterDefinition {
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
         let parsed: f64 = value.parse().map_err(|_| {
@@ -1256,6 +1303,10 @@ impl JobFloatParameterDefinition {
 /// §2.2 JobPathParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobPathParameterDefinition {
     pub name: Identifier,
     pub description: Option<Description>,
@@ -1268,6 +1319,10 @@ pub struct JobPathParameterDefinition {
     pub user_interface: Option<PathUserInterface>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JobPathParameterDefinition {
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
         let char_len = value.chars().count();

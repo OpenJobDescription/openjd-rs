@@ -6,11 +6,6 @@
 //!
 //! Mirrors Python `_parse.py`.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::str::FromStr;
 
 use crate::error::{path_field, path_index, ModelError, PathElement, ValidationErrors};
@@ -24,6 +19,10 @@ use crate::types::{
 
 /// Document format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum DocumentType {
     Json,
     Yaml,
@@ -431,6 +430,10 @@ pub fn decode_environment_template(
 // Both variants are large structs only used as return values, not stored in collections.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum DecodedTemplate {
     Job(JobTemplate),
     Environment(EnvironmentTemplate),

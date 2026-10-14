@@ -6,11 +6,6 @@
 //!
 //! Mirrors Python `_embedded_files.py`.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -28,11 +23,19 @@ use crate::session_user::SessionUser;
 
 /// Scope for embedded file symbol table entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum EmbeddedFilesScope {
     Step,
     Env,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl EmbeddedFilesScope {
     pub fn prefix(&self) -> &'static str {
         match self {
@@ -351,6 +354,10 @@ pub struct EmbeddedFiles {
     limits: crate::limits::SessionLimits,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl EmbeddedFiles {
     /// Create a new embedded-file materializer targeting
     /// `session_files_directory`.

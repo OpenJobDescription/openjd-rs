@@ -6,11 +6,6 @@
 //!
 //! Mirrors Python `_win32/_helpers.py` and `_win32/_api.py`.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::collections::HashMap;
 
 use windows::core::{PCWSTR, PWSTR};
@@ -62,6 +57,10 @@ pub struct LogonToken {
     handle: HANDLE,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl LogonToken {
     pub fn as_handle(&self) -> HANDLE {
         self.handle
@@ -249,6 +248,10 @@ use windows::Win32::System::Threading::{
 };
 
 /// Result of spawning a cross-user process.
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct SpawnedProcess {
     pub process_handle: HANDLE,
     pub pid: u32,

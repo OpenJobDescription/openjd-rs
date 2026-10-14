@@ -9,11 +9,6 @@
 //! evaluator's hardcoded match arms handle actual evaluation. The library
 //! is used for static type checking via `derive_return_type`.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::function_library::FunctionLibrary;
 use crate::profile::{ExprProfile, ExprRevision, HostContext, HostKind, ProfileKey};
 use std::collections::HashMap;
@@ -791,6 +786,10 @@ pub fn register_host_context_functions(
     .expect("bad builtin signature");
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn register_unresolved_host_context_functions(lib: &mut FunctionLibrary) {
     fn unresolved_apply_path_mapping(
         _ctx: &mut dyn crate::function_library::EvalContext,

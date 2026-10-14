@@ -4,11 +4,6 @@
 
 //! Regex function implementations.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use crate::error::ExpressionError;
 use crate::function_library::EvalContext;
 use crate::types::ExprType;
@@ -528,6 +523,10 @@ fn check_hir_portability(hir: &regex_syntax::hir::Hir) -> Result<(), ExpressionE
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn re_escape_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = match &a[0] {
         ExprValue::String(s) => s.clone(),
@@ -537,6 +536,10 @@ pub fn re_escape_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::String(regex::escape(&s)))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn re_match_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (s, pat) = get_two_strings(a, "re_match")?;
     ctx.count_string_ops(s.len())?;
@@ -559,6 +562,10 @@ pub fn re_match_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn re_search_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (s, pat) = get_two_strings(a, "re_search")?;
     ctx.count_string_ops(s.len())?;
@@ -581,6 +588,10 @@ pub fn re_search_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn re_findall_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (s, pat) = get_two_strings(a, "re_findall")?;
     ctx.count_string_ops(s.len())?;
@@ -635,6 +646,10 @@ pub fn re_findall_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn re_replace_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     if a.len() != 3 {
         return Err(ExpressionError::new("re_replace() takes 3 arguments"));
@@ -688,6 +703,10 @@ fn validate_regex_replacement(repl: &str) -> Result<(), ExpressionError> {
     Ok(())
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn re_split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     if a.len() < 2 || a.len() > 3 {
         return Err(ExpressionError::new("re_split() takes 2-3 arguments"));

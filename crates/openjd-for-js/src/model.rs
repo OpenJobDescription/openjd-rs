@@ -4,11 +4,6 @@
 //! Model bindings: template decode, job creation, step dependency graph,
 //! parameter space iteration.
 
-#![allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
-
 use std::collections::HashMap;
 
 use crate::errors::*;
@@ -24,6 +19,10 @@ pub struct JsJobTemplate {
 }
 
 #[wasm_bindgen(js_class = "JobTemplate")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JsJobTemplate {
     #[wasm_bindgen(getter)]
     pub fn name(&self) -> String {
@@ -55,6 +54,10 @@ pub struct JsEnvironmentTemplate {
 }
 
 #[wasm_bindgen(js_class = "EnvironmentTemplate")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JsEnvironmentTemplate {
     #[wasm_bindgen(getter, js_name = "specificationVersion")]
     pub fn specification_version(&self) -> String {
@@ -88,6 +91,10 @@ pub struct JsPathParameterOptions {
 }
 
 #[wasm_bindgen(js_class = "PathParameterOptions")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JsPathParameterOptions {
     /// Construct options with the same safe defaults as
     /// `openjd_model::PathParameterOptions::new` in Rust.
@@ -202,6 +209,10 @@ impl JsPathParameterOptions {
 /// and the host had no way to cap memory before parsing begins.
 #[derive(Clone, Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JsCallerLimits {
     #[serde(default)]
     pub max_step_count: Option<usize>,
@@ -272,6 +283,10 @@ pub struct JsJob {
 }
 
 #[wasm_bindgen(js_class = "Job")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 impl JsJob {
     #[wasm_bindgen(getter)]
     pub fn name(&self) -> String {
@@ -415,6 +430,10 @@ pub fn get_supported_extensions() -> Vec<String> {
 /// they received can pass `Yaml` and get the correct answer either way.
 #[wasm_bindgen(js_name = "DocumentType")]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum JsDocumentType {
     Yaml = 0,
     Json = 1,
