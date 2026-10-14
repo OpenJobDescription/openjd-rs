@@ -310,12 +310,8 @@ impl fmt::Display for ExpressionError {
             self.inner.end_col_offset,
         ) {
             let is_multiline = expr.contains('\n');
-            // For multi-line, the parser wraps in parens shifting offsets by 1
-            let (col, end_col) = if is_multiline {
-                (col.saturating_sub(1), end_col.saturating_sub(1))
-            } else {
-                (col, end_col)
-            };
+            let shift = crate::eval::parser_offset_shift(expr);
+            let (col, end_col) = (col.saturating_sub(shift), end_col.saturating_sub(shift));
 
             // Find the line containing col_offset and adjust to line-relative offsets
             let (expr_line, line_col, line_end_col) = if is_multiline {
@@ -403,17 +399,26 @@ pub(crate) fn write_caret_line(
 fn compute_caret_offset(expr: &str, node: &ruff_python_ast::Expr) -> usize {
     use ruff_python_ast as ast;
     use ruff_text_size::Ranged;
+    // `expr` is the unwrapped source, so every offset taken from the AST has to come back
+    // into its coordinates before being used as an index. The returned value is a difference
+    // between two such offsets, so the shift cancels there and only the byte reads below
+    // actually depend on this -- which is how the BinOp scan ran one position to the right
+    // for multi-line expressions while the other arms looked fine. See issue #339.
+    let shift = crate::eval::parser_offset_shift(expr);
     match node {
         ast::Expr::BinOp(b) => {
-            let left_end = b.left.range().end().to_usize();
-            let right_start = b.right.range().start().to_usize();
-            let node_start = node.range().start().to_usize();
-            // Scan backwards from right operand to find operator
+            let left_end = b.left.range().end().to_usize().saturating_sub(shift);
+            let right_start = b.right.range().start().to_usize().saturating_sub(shift);
+            let node_start = node.range().start().to_usize().saturating_sub(shift);
+            // Scan backwards from the right operand to find the operator, stepping over the
+            // whitespace between them. The line break counts: for a multi-line expression it
+            // is what sits between the operator and the operand, so without it the scan stops
+            // on the newline and never tests for a two-character operator.
             let bytes = expr.as_bytes();
             let mut i = right_start.saturating_sub(1);
             while i > left_end
                 && i < bytes.len()
-                && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'(')
+                && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | b'(')
             {
                 i -= 1;
             }
@@ -431,23 +436,25 @@ fn compute_caret_offset(expr: &str, node: &ruff_python_ast::Expr) -> usize {
                 0
             }
         }
+        // These three subtract two shifted offsets from each other, so they were correct
+        // before and stay correct: unshifting both operands leaves the difference alone.
         ast::Expr::Attribute(a) => {
-            let value_end = a.value.range().end().to_usize();
-            let node_start = node.range().start().to_usize();
+            let value_end = a.value.range().end().to_usize().saturating_sub(shift);
+            let node_start = node.range().start().to_usize().saturating_sub(shift);
             (value_end + 1).saturating_sub(node_start) // +1 for the dot
         }
         ast::Expr::Call(c) => {
             if let ast::Expr::Attribute(a) = &*c.func {
-                let value_end = a.value.range().end().to_usize();
-                let node_start = node.range().start().to_usize();
+                let value_end = a.value.range().end().to_usize().saturating_sub(shift);
+                let node_start = node.range().start().to_usize().saturating_sub(shift);
                 (value_end + 1).saturating_sub(node_start)
             } else {
                 0
             }
         }
         ast::Expr::Subscript(s) => {
-            let value_end = s.value.range().end().to_usize();
-            let node_start = node.range().start().to_usize();
+            let value_end = s.value.range().end().to_usize().saturating_sub(shift);
+            let node_start = node.range().start().to_usize().saturating_sub(shift);
             value_end.saturating_sub(node_start)
         }
         _ => 0,
