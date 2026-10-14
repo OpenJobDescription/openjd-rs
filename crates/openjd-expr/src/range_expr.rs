@@ -43,11 +43,11 @@ pub struct RangeExprError {
     pub position: Option<usize>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl RangeExprError {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(expr: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             expr: expr.into(),
@@ -55,6 +55,10 @@ impl RangeExprError {
             position: None,
         }
     }
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn at(expr: impl Into<String>, message: impl Into<String>, position: usize) -> Self {
         Self {
             expr: expr.into(),
@@ -351,10 +355,6 @@ impl std::str::FromStr for RangeExpr {
     }
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl RangeExpr {
     /// Set contiguous display mode. When true, Display uses "{start}-{end}" format
     /// even for single values (e.g., "5-5"). Only meaningful for contiguous chunks.
@@ -577,6 +577,10 @@ impl RangeExpr {
         self.ranges.iter().flat_map(|r| r.iter())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn to_vec(&self) -> Vec<i64> {
         self.iter().collect()
     }

@@ -62,11 +62,11 @@ impl<'de> serde::Deserialize<'de> for TaskParameterDefinition {
     }
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl TaskParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn task_param_type(&self) -> crate::types::TaskParameterType {
         use crate::types::TaskParameterType;
         match self {
@@ -78,6 +78,10 @@ impl TaskParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn name(&self) -> &str {
         match self {
             Self::INT(p) => p.name.as_str(),

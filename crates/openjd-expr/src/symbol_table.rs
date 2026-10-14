@@ -112,11 +112,11 @@ pub struct SymbolTable {
     pub(crate) table: HashMap<String, SymbolTableEntry>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl SymbolTable {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new() -> Self {
         Self {
             table: HashMap::new(),
@@ -247,6 +247,10 @@ impl SymbolTable {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn contains(&self, key: &str) -> bool {
         self.get(key).is_some()
     }

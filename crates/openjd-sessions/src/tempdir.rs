@@ -143,10 +143,6 @@ impl AsRef<std::path::Path> for TempDir {
     }
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl TempDir {
     /// Create a new secure temp directory.
     ///
@@ -235,6 +231,10 @@ impl TempDir {
         })
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn path(&self) -> &Path {
         &self.path
     }

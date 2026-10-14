@@ -184,11 +184,11 @@ pub struct FileEntry {
     pub deleted: bool,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl FileEntry {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(path: impl Into<String>) -> Self {
         Self {
             path: normalize_path(&path.into()),
@@ -202,6 +202,10 @@ impl FileEntry {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn file(path: impl Into<String>, size: u64, mtime: u64) -> Self {
         Self {
             size: Some(size),
@@ -210,6 +214,10 @@ impl FileEntry {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn symlink(path: impl Into<String>, target: impl Into<String>) -> Self {
         Self {
             symlink_target: Some(normalize_path(&target.into())),
@@ -217,6 +225,10 @@ impl FileEntry {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn deleted(path: impl Into<String>) -> Self {
         Self {
             deleted: true,
@@ -249,11 +261,11 @@ pub struct DirEntry {
     pub deleted: bool,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl DirEntry {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(path: impl Into<String>) -> Self {
         Self {
             path: normalize_path(&path.into()),
@@ -261,6 +273,10 @@ impl DirEntry {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn deleted(path: impl Into<String>) -> Self {
         Self {
             path: normalize_path(&path.into()),
@@ -430,11 +446,11 @@ impl ValidateKind for Diff {
 
 // --- Manifest impl ---
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl<P, K> Manifest<P, K> {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(hash_alg: HashAlgorithm, file_chunk_size_bytes: i64) -> Self {
         Self {
             hash_alg,
@@ -447,22 +463,38 @@ impl<P, K> Manifest<P, K> {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_files(mut self, files: Vec<FileEntry>) -> Self {
         self.files = files;
         self.recompute_total_size();
         self
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_dirs(mut self, dirs: Vec<DirEntry>) -> Self {
         self.dirs = dirs;
         self
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_parent_hash(mut self, hash: Option<String>) -> Self {
         self.parent_manifest_hash = hash;
         self
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn clear_hashes(&mut self) {
         for f in &mut self.files {
             if f.symlink_target.is_none() && !f.deleted {
@@ -472,6 +504,10 @@ impl<P, K> Manifest<P, K> {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn recompute_total_size(&mut self) {
         self.total_size = self
             .files
@@ -577,11 +613,11 @@ impl<P, K> Manifest<P, K> {
     }
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate(&self) -> crate::Result<()> {
         // The chunk size is a manifest-level invariant: either the sentinel
         // WHOLE_FILE_CHUNK_SIZE (-1, meaning "no chunking") or a positive
@@ -850,11 +886,11 @@ pub enum ManifestEntry<'a> {
     Dir(&'a DirEntry),
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl<'a> ManifestEntry<'a> {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn path(&self) -> &str {
         match self {
             Self::File(f) => &f.path,

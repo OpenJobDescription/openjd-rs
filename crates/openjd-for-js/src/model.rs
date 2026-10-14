@@ -19,17 +19,21 @@ pub struct JsJobTemplate {
 }
 
 #[wasm_bindgen(js_class = "JobTemplate")]
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JsJobTemplate {
     #[wasm_bindgen(getter)]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn name(&self) -> String {
         self.inner.name.raw().to_string()
     }
 
     #[wasm_bindgen(getter, js_name = "specificationVersion")]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn specification_version(&self) -> String {
         self.inner.specification_version.clone()
     }
@@ -54,12 +58,12 @@ pub struct JsEnvironmentTemplate {
 }
 
 #[wasm_bindgen(js_class = "EnvironmentTemplate")]
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JsEnvironmentTemplate {
     #[wasm_bindgen(getter, js_name = "specificationVersion")]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn specification_version(&self) -> String {
         self.inner.specification_version.clone()
     }
@@ -91,10 +95,6 @@ pub struct JsPathParameterOptions {
 }
 
 #[wasm_bindgen(js_class = "PathParameterOptions")]
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JsPathParameterOptions {
     /// Construct options with the same safe defaults as
     /// `openjd_model::PathParameterOptions::new` in Rust.
@@ -114,51 +114,91 @@ impl JsPathParameterOptions {
     }
 
     #[wasm_bindgen(getter, js_name = "jobTemplateDir")]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn job_template_dir(&self) -> String {
         self.job_template_dir.clone()
     }
 
     #[wasm_bindgen(setter, js_name = "jobTemplateDir")]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn set_job_template_dir(&mut self, v: String) {
         self.job_template_dir = v;
     }
 
     #[wasm_bindgen(getter, js_name = "currentWorkingDir")]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn current_working_dir(&self) -> String {
         self.current_working_dir.clone()
     }
 
     #[wasm_bindgen(setter, js_name = "currentWorkingDir")]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn set_current_working_dir(&mut self, v: String) {
         self.current_working_dir = v;
     }
 
     #[wasm_bindgen(getter, js_name = "pathFormat")]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn path_format(&self) -> crate::expr::JsPathFormat {
         self.path_format
     }
 
     #[wasm_bindgen(setter, js_name = "pathFormat")]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn set_path_format(&mut self, v: crate::expr::JsPathFormat) {
         self.path_format = v;
     }
 
     #[wasm_bindgen(getter, js_name = "allowTemplateDirWalkUp")]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn allow_template_dir_walk_up(&self) -> bool {
         self.allow_template_dir_walk_up
     }
 
     #[wasm_bindgen(setter, js_name = "allowTemplateDirWalkUp")]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn set_allow_template_dir_walk_up(&mut self, v: bool) {
         self.allow_template_dir_walk_up = v;
     }
 
     #[wasm_bindgen(getter, js_name = "allowUriPathValues")]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn allow_uri_path_values(&self) -> bool {
         self.allow_uri_path_values
     }
 
     #[wasm_bindgen(setter, js_name = "allowUriPathValues")]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn set_allow_uri_path_values(&mut self, v: bool) {
         self.allow_uri_path_values = v;
     }
@@ -283,17 +323,21 @@ pub struct JsJob {
 }
 
 #[wasm_bindgen(js_class = "Job")]
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JsJob {
     #[wasm_bindgen(getter)]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn name(&self) -> String {
         self.inner.name.clone()
     }
 
     #[wasm_bindgen(getter)]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn description(&self) -> Option<String> {
         self.inner.description.clone()
     }

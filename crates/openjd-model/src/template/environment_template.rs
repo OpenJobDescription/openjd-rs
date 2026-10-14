@@ -23,11 +23,11 @@ pub struct EnvironmentTemplate {
     pub environment: Environment,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl EnvironmentTemplate {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn environment(&self) -> &Environment {
         &self.environment
     }

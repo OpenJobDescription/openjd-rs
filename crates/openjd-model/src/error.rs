@@ -151,10 +151,6 @@ impl std::fmt::Display for ValidationErrors {
     }
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl ValidationErrors {
     /// Create a `ValidationErrors` with a single root-level message.
     pub fn single(msg: impl Into<String>) -> Self {
@@ -187,11 +183,19 @@ impl ValidationErrors {
     }
 
     #[must_use]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_empty(&self) -> bool {
         self.errors.is_empty()
     }
 
     #[must_use]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn len(&self) -> usize {
         self.errors.len()
     }
@@ -215,6 +219,10 @@ impl ValidationErrors {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn into_result(self, model_name: &str) -> Result<(), ModelError> {
         if self.errors.is_empty() {
             Ok(())

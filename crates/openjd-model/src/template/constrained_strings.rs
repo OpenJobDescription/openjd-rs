@@ -16,11 +16,11 @@ pub struct Identifier(pub String);
 static IDENTIFIER_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").unwrap());
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl Identifier {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(s: &str) -> Result<Self, ModelError> {
         if s.is_empty() || s.len() > 512 {
             return Err(ModelError::DecodeValidation(format!(
@@ -36,6 +36,10 @@ impl Identifier {
         Ok(Self(s.to_string()))
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -64,11 +68,11 @@ impl std::fmt::Display for Identifier {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Description(pub String);
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl Description {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(s: &str) -> Result<Self, ModelError> {
         if s.chars().count() > 2048 {
             return Err(ModelError::DecodeValidation(
@@ -106,11 +110,11 @@ pub struct ExtensionName(pub String);
 static EXTENSION_NAME_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Z_0-9]{3,128}$").unwrap());
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl ExtensionName {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(s: &str) -> Result<Self, ModelError> {
         if !EXTENSION_NAME_RE.is_match(s) {
             return Err(ModelError::DecodeValidation(format!(
@@ -120,6 +124,10 @@ impl ExtensionName {
         Ok(Self(s.to_string()))
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn as_str(&self) -> &str {
         &self.0
     }

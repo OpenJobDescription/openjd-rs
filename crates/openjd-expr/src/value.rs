@@ -443,10 +443,6 @@ impl std::hash::Hash for ExprValue {
 
 impl Eq for ExprValue {}
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl ExprValue {
     /// Create a list, promoting elements as needed. Produces old List variant for compatibility.
     fn make_list_string(v: Vec<String>) -> Self {
@@ -1421,6 +1417,10 @@ impl ExprValue {
         serde_json::json!({"type": type_str, "value": value})
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn transport_value(&self) -> serde_json::Value {
         match self {
             val if val.is_list() => {
@@ -1446,6 +1446,10 @@ impl ExprValue {
         Self::from_transport_value(value, &expr_type, path_format)
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn from_transport_value(
         value: &serde_json::Value,
         target: &ExprType,

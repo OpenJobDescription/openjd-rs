@@ -162,11 +162,11 @@ impl<'de> Deserialize<'de> for BoolValue {
     }
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobBoolParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         match value {
             ExprValue::Bool(_) => Ok(()),
@@ -186,6 +186,10 @@ impl JobBoolParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         if let Some(ui) = &self.user_interface {
@@ -222,11 +226,11 @@ pub struct JobRangeExprParameterDefinition {
     pub user_interface: Option<RangeExprUserInterface>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobRangeExprParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let s = match value {
             ExprValue::RangeExpr(r) => r.to_string(),
@@ -268,6 +272,10 @@ impl JobRangeExprParameterDefinition {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         if let Some(default) = &self.default {
@@ -325,11 +333,11 @@ pub struct ListStringItemConstraints {
     pub max_length: Option<usize>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobListStringParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let items = match value {
             ExprValue::ListString(v, _) | ExprValue::ListPath(v, _, _) => v,
@@ -348,6 +356,10 @@ impl JobListStringParameterDefinition {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         validate_list_length(
@@ -397,11 +409,11 @@ pub struct JobListPathParameterDefinition {
     pub user_interface: Option<ListPathUserInterface>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobListPathParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let items = match value {
             ExprValue::ListString(v, _) | ExprValue::ListPath(v, _, _) => v,
@@ -420,6 +432,10 @@ impl JobListPathParameterDefinition {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         validate_list_length(
@@ -484,11 +500,11 @@ pub struct ListIntItemConstraints {
     pub max_value: Option<FlexInt>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobListIntParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let items = match value {
             ExprValue::ListInt(v) => v,
@@ -507,6 +523,10 @@ impl JobListIntParameterDefinition {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         validate_list_length(
@@ -566,11 +586,11 @@ pub struct ListFloatItemConstraints {
     pub max_value: Option<super::parameters::FlexFloat>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobListFloatParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let items = match value {
             ExprValue::ListFloat(v) => v,
@@ -614,6 +634,10 @@ impl JobListFloatParameterDefinition {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         validate_list_length(
@@ -677,11 +701,11 @@ pub struct JobListBoolParameterDefinition {
     pub user_interface: Option<ListSimpleUserInterface>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobListBoolParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let items = match value {
             ExprValue::ListBool(v) => v,
@@ -697,6 +721,10 @@ impl JobListBoolParameterDefinition {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         validate_list_length(
@@ -753,11 +781,11 @@ pub struct ListListIntItemConstraints {
     pub item: Option<ListIntItemConstraints>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobListListIntParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_value_constraints(&self, value: &ExprValue) -> Result<(), String> {
         let items = match value {
             ExprValue::ListList(v, _, _) => v,
@@ -808,6 +836,10 @@ impl JobListListIntParameterDefinition {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         validate_list_length(

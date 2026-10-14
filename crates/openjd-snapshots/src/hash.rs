@@ -34,11 +34,11 @@ pub enum HashAlgorithm {
     Xxh128,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl HashAlgorithm {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn extension(&self) -> &'static str {
         match self {
             Self::Xxh128 => "xxh128",

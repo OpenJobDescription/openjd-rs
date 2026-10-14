@@ -151,11 +151,11 @@ pub enum JsPathFormat {
     Uri = 2,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JsPathFormat {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn into_inner(self) -> openjd_expr::PathFormat {
         match self {
             JsPathFormat::Posix => openjd_expr::PathFormat::Posix,
@@ -164,6 +164,10 @@ impl JsPathFormat {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn from_inner(f: openjd_expr::PathFormat) -> Self {
         match f {
             openjd_expr::PathFormat::Posix => JsPathFormat::Posix,
@@ -182,12 +186,12 @@ pub struct JsPathMappingRule {
 }
 
 #[wasm_bindgen(js_class = "PathMappingRule")]
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JsPathMappingRule {
     #[wasm_bindgen(constructor)]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(
         source_format: JsPathFormat,
         source_path: &str,
@@ -213,12 +217,12 @@ pub struct JsSymbolTable {
 
 #[wasm_bindgen(js_class = "SymbolTable")]
 #[allow(clippy::new_without_default)]
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JsSymbolTable {
     #[wasm_bindgen(constructor)]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new() -> JsSymbolTable {
         JsSymbolTable {
             inner: openjd_expr::SymbolTable::new(),
@@ -308,12 +312,12 @@ pub struct JsFormatString {
 }
 
 #[wasm_bindgen(js_class = "FormatString")]
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JsFormatString {
     #[wasm_bindgen(constructor)]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(input: &str) -> Result<JsFormatString, JsError> {
         let fs = openjd_expr::FormatString::new(input).map_err(expr_to_js_error)?;
         Ok(JsFormatString { inner: fs })

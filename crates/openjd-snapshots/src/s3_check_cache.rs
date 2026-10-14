@@ -16,11 +16,11 @@ pub struct S3CheckCache {
     conn: Mutex<rusqlite::Connection>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl S3CheckCache {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(cache_dir: impl AsRef<Path>) -> crate::Result<Self> {
         let dir = cache_dir.as_ref();
         std::fs::create_dir_all(dir)?;
@@ -54,6 +54,10 @@ impl S3CheckCache {
         })
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn open_default() -> crate::Result<Self> {
         let home = std::env::var("HOME").map_err(|_| {
             crate::SnapshotError::Cache("$HOME is not set, cannot locate default cache".into())

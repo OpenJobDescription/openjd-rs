@@ -30,19 +30,27 @@ pub struct JobTemplate {
     pub steps: Vec<StepTemplate>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobTemplate {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn name(&self) -> &FormatString {
         &self.name
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn description(&self) -> Option<&str> {
         self.description.as_ref().map(|d| d.0.as_str())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn parameter_definitions_list(&self) -> &[JobParameterDefinition] {
         match &self.parameter_definitions {
             Some(defs) => defs,

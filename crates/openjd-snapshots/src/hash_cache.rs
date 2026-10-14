@@ -32,11 +32,11 @@ pub struct HashCache {
     conn: Mutex<rusqlite::Connection>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl HashCache {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(cache_dir: impl AsRef<Path>) -> crate::Result<Self> {
         let dir = cache_dir.as_ref();
         std::fs::create_dir_all(dir)?;
@@ -62,6 +62,10 @@ impl HashCache {
         })
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn open_default() -> crate::Result<Self> {
         let home = std::env::var("HOME").map_err(|_| {
             crate::SnapshotError::Cache("$HOME is not set, cannot locate default cache".into())
@@ -69,6 +73,10 @@ impl HashCache {
         Self::new(PathBuf::from(home).join(".deadline/job_attachments"))
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn get(
         &self,
         file_path: &Path,
@@ -95,6 +103,10 @@ impl HashCache {
         .ok()
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn put(
         &self,
         file_path: &Path,
@@ -124,6 +136,10 @@ impl HashCache {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn get_if_fresh(
         &self,
         file_path: &Path,

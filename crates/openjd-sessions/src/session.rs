@@ -546,10 +546,6 @@ pub struct Session {
     limits: crate::limits::SessionLimits,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl Session {
     /// Test-only constructor that accepts a pre-existing working directory.
     /// Production code should use `Session::with_config`.
@@ -823,6 +819,10 @@ impl Session {
         })
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_path_mapping(mut self, mut rules: Vec<PathMappingRule>) -> Self {
         rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         self.path_mapping_rules = Arc::new(rules);
@@ -901,18 +901,38 @@ impl Session {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn state(&self) -> SessionState {
         self.state
     }
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn working_directory(&self) -> &Path {
         &self.working_directory
     }
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn files_directory(&self) -> &Path {
         &self.files_directory
     }
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn environments_entered(&self) -> &[EnvironmentIdentifier] {
         &self.environments_entered
     }

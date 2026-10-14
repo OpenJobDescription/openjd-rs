@@ -126,7 +126,10 @@ Add the following checks when they apply:
 - `scripts/check_copyright_headers.sh`, when files were added.
 
 If a check cannot run locally (no Docker, no test user, no S3 bucket), say so
-in the audit inputs and the final summary, and rely on CI for it.
+in the audit inputs and the final summary, and rely on CI for it. Local
+clippy, `cargo doc`, and `check_public_api.sh` only see the host's `cfg`, so
+a change that touches `#[cfg(unix)]` or `#[cfg(windows)]` public items also
+needs the other platforms' CI results before the gate counts as passed.
 
 Record each command and its result. They go into the audit inputs, the
 commit message, and the final summary.

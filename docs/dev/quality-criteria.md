@@ -55,8 +55,8 @@ concentrate on the prose:
   `allow(missing_docs, reason = "missing-docs burn-down ...")` attribute.
   Those attributes are known debt, and new code MUST NOT add one. The lint
   still checks new items, except inside an item that carries the attribute,
-  such as a new field of an allowed struct or a new method in an allowed
-  `impl` block. Review MUST check those by hand.
+  such as a new field of an allowed struct or a new variant of an allowed
+  enum. Review MUST check those by hand.
 
 `public-api.md` MUST describe every public module, type, trait, function,
 method, constant, and static in the listing: what it is for, how the items fit

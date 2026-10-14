@@ -24,11 +24,11 @@ pub enum PathFormat {
     Uri,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl PathFormat {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn host() -> Self {
         if cfg!(windows) {
             PathFormat::Windows

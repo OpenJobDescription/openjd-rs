@@ -72,10 +72,6 @@ pub const MAX_FORMAT_STRING_SEGMENTS: usize = 1_000;
 /// See `specs/expr/format-string.md` (Defensive caps) for rationale.
 pub const MAX_STATIC_RESOLVED_VALUE_LEN: usize = 10 * 1024 * 1024;
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl FormatString {
     /// Parse a format string using the "latest" profile
     /// ([`ExprProfile::latest`]): the current revision with every known
@@ -121,6 +117,10 @@ impl FormatString {
         })
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn raw(&self) -> &str {
         &self.raw
     }
@@ -530,6 +530,10 @@ impl FormatString {
             .collect()
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_literal(&self) -> bool {
         self.segments
             .iter()

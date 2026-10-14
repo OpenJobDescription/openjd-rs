@@ -373,12 +373,15 @@ jobs:
             working tree. Each mutation subagent creates its own worktree as a
             sibling of openjd-rs, inside the workspace root, so that its file
             tools can edit there: from openjd-rs, run
-            `git worktree add --detach ../mutants-<id> HEAD`. It then runs
-            `cargo mutants -p openjd-${{ matrix.crate }} -f <path> --output ../mutants-out-<id>`
-            from inside `../mutants-<id>`, scoped to one or two files, because a
-            whole crate takes hours. It makes any hand mutation there and undoes
-            it with `git -C ../mutants-<id> checkout -- <path>`. When done, it
-            removes the worktree with
+            `git worktree add --detach ../mutants-<id> HEAD`. Do not `cd` into
+            it; address it from openjd-rs instead:
+            `cargo mutants -d ../mutants-<id> -p openjd-${{ matrix.crate }} -f <path> --output ../mutants-out-<id>`,
+            scoped to one or two files because a whole crate takes hours, and
+            `cargo test --manifest-path ../mutants-<id>/Cargo.toml -p openjd-${{ matrix.crate }} ...`
+            for hand mutations. Make a hand mutation with Edit on the file
+            under ../mutants-<id>/, undo it with Edit, and confirm the undo
+            with `git show HEAD:<path> | diff --strip-trailing-cr - ../mutants-<id>/<path>`
+            before the next mutation. When done, remove the worktree with
             `git worktree remove --force ../mutants-<id>`. Each worktree is a
             cold build of several GB, so on this runner run ONE mutation
             subagent at a time. `rm` is only for files a probe created under
@@ -405,10 +408,13 @@ jobs:
           #     surface only as `if-no-files-found: error` two steps later.
           #   - `git checkout --` in the shared tree: it would discard the
           #     failing tests written earlier in the run. Mutations happen in a
-          #     per-subagent worktree at ../mutants-<id> instead (`git
-          #     worktree`, `cd ../mutants-`, `cargo mutants`), and only
-          #     `git -C ../mutants-... checkout --` can undo one, so a mutation
-          #     never reaches the shared tree.
+          #     per-subagent worktree at ../mutants-<id> instead, addressed
+          #     from openjd-rs with `cargo mutants -d` and `cargo test
+          #     --manifest-path`. Hand mutations are undone with Edit and
+          #     checked with `git show HEAD:<path> | diff`. There is no
+          #     `git -C ../mutants-` or `cd ../mutants-` entry: a prefix rule
+          #     like that also matches `../mutants-x/../openjd-rs`, which
+          #     would reach the shared tree.
           #   - `rm` under reports/: for the same reason. Scratch-file deletion
           #     is scoped to crates/ and /tmp, so the agent can remove its
           #     probes but cannot reach its own output. With no `rm` here, the only way
@@ -418,7 +424,7 @@ jobs:
           #     dated name sidesteps both: the path never already exists.
           claude_args: |
             --model us.anthropic.claude-opus-5
-            --allowedTools "Task,Read,Glob,Grep,Write,Edit,Bash(cd openjd-rs:*),Bash(cargo build:*),Bash(cargo test:*),Bash(cargo clippy:*),Bash(cargo fmt:*),Bash(python3:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(ls:*),Bash(diff:*),Bash(cp:*),Bash(mv:*),Bash(find:*),Bash(rm crates/:*),Bash(rm -f crates/:*),Bash(rm openjd-rs/crates/:*),Bash(rm -f openjd-rs/crates/:*),Bash(rm /tmp/:*),Bash(rm -f /tmp/:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git worktree:*),Bash(git -C openjd-rs status:*),Bash(git -C openjd-rs diff:*),Bash(git -C openjd-rs log:*),Bash(git -C openjd-rs worktree:*),Bash(git -C ../mutants-:*),Bash(cd ../mutants-:*),Bash(cargo mutants:*)"
+            --allowedTools "Task,Read,Glob,Grep,Write,Edit,Bash(cd openjd-rs:*),Bash(cargo build:*),Bash(cargo test:*),Bash(cargo clippy:*),Bash(cargo fmt:*),Bash(python3:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Bash(ls:*),Bash(diff:*),Bash(cp:*),Bash(mv:*),Bash(find:*),Bash(rm crates/:*),Bash(rm -f crates/:*),Bash(rm openjd-rs/crates/:*),Bash(rm -f openjd-rs/crates/:*),Bash(rm /tmp/:*),Bash(rm -f /tmp/:*),Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git worktree:*),Bash(git -C openjd-rs status:*),Bash(git -C openjd-rs diff:*),Bash(git -C openjd-rs log:*),Bash(git -C openjd-rs worktree:*),Bash(git show HEAD::*),Bash(cargo mutants:*)"
 
       # ---- outputs ------------------------------------------------------------
 

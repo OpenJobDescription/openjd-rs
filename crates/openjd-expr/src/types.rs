@@ -55,59 +55,107 @@ pub struct ExprType {
 
 // ── Constants ──
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl ExprType {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const BOOL: ExprType = ExprType {
         code: TypeCode::Bool,
         params: Vec::new(),
     };
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const INT: ExprType = ExprType {
         code: TypeCode::Int,
         params: Vec::new(),
     };
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const FLOAT: ExprType = ExprType {
         code: TypeCode::Float,
         params: Vec::new(),
     };
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const STRING: ExprType = ExprType {
         code: TypeCode::String,
         params: Vec::new(),
     };
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const PATH: ExprType = ExprType {
         code: TypeCode::Path,
         params: Vec::new(),
     };
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const RANGE_EXPR: ExprType = ExprType {
         code: TypeCode::RangeExpr,
         params: Vec::new(),
     };
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const NULLTYPE: ExprType = ExprType {
         code: TypeCode::NullType,
         params: Vec::new(),
     };
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const ANY: ExprType = ExprType {
         code: TypeCode::Any,
         params: Vec::new(),
     };
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const NORETURN: ExprType = ExprType {
         code: TypeCode::NoReturn,
         params: Vec::new(),
     };
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const T: ExprType = ExprType {
         code: TypeCode::TypeVarT,
         params: Vec::new(),
     };
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const T1: ExprType = ExprType {
         code: TypeCode::TypeVarT1,
         params: Vec::new(),
     };
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const T2: ExprType = ExprType {
         code: TypeCode::TypeVarT2,
         params: Vec::new(),
     };
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub const T3: ExprType = ExprType {
         code: TypeCode::TypeVarT3,
         params: Vec::new(),
@@ -123,6 +171,10 @@ impl ExprType {
         &self.params
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn list(elem: ExprType) -> Self {
         // Normalize: list[unresolved[T]] -> unresolved[list[T]]
         if elem.code == TypeCode::Unresolved && elem.params.len() == 1 {
@@ -141,10 +193,18 @@ impl ExprType {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn union(types: Vec<ExprType>) -> Self {
         normalize_union(types)
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn unresolved(constraint: ExprType) -> Self {
         // Normalize: unresolved[unresolved[T]] -> unresolved[T]
         if constraint.code == TypeCode::Unresolved {
@@ -540,15 +600,19 @@ fn normalize_union(types: Vec<ExprType>) -> ExprType {
 
 // ── Queries ──
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl ExprType {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_list(&self) -> bool {
         self.code == TypeCode::List
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn list_element_type(&self) -> Option<&ExprType> {
         if self.code == TypeCode::List {
             self.params.first()
@@ -557,6 +621,10 @@ impl ExprType {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_symbolic(&self) -> bool {
         matches!(
             self.code,
@@ -564,6 +632,10 @@ impl ExprType {
         ) || self.params.iter().any(|p| p.is_symbolic())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_concrete(&self) -> bool {
         if matches!(
             self.code,

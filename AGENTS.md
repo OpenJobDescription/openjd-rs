@@ -248,7 +248,7 @@ fn empty_command() {
 
 - `cargo fmt` before committing (nightly rustfmt for some options).
 - `cargo clippy` clean with `-D warnings` — no warnings allowed.
-- All public items must have `///` documentation comments. The `missing_docs` lint (enabled in `[workspace.lints]`) enforces this. Older items carry an item-level `missing-docs burn-down` allow. Don't add new ones, and document anything you add inside an allowed item (a field, variant, or method), because the lint can't see it.
+- All public items must have `///` documentation comments. The `missing_docs` lint (enabled in `[workspace.lints]`) enforces this. Older items carry an item-level `missing-docs burn-down` allow. Don't add new ones, and document anything you add inside an allowed item (a field or variant), because the lint can't see it.
 - Prefer `Result` types over panicking.
 - See [DEVELOPMENT.md](DEVELOPMENT.md) for more.
 

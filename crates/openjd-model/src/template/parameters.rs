@@ -152,11 +152,11 @@ impl<'de> serde::Deserialize<'de> for JobParameterDefinition {
     }
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn job_param_type(&self) -> crate::types::JobParameterType {
         use crate::types::JobParameterType;
         match self {
@@ -175,6 +175,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn name(&self) -> &str {
         match self {
             Self::STRING(p) => p.name.as_str(),
@@ -192,6 +196,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn description(&self) -> Option<&str> {
         match self {
             Self::STRING(p) => p.description.as_ref().map(|d| d.0.as_str()),
@@ -209,6 +217,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn type_name(&self) -> &str {
         match self {
             Self::STRING(_) => "STRING",
@@ -226,6 +238,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn path_properties(&self) -> (Option<ObjectType>, Option<DataFlow>) {
         match self {
             Self::PATH(p) => (p.object_type, p.data_flow),
@@ -234,6 +250,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn default_value(&self) -> Option<String> {
         match self {
             Self::STRING(p) => p.default.clone(),
@@ -275,6 +295,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn min_value_i64(&self) -> Option<i64> {
         match self {
             Self::INT(p) => p.min_value.as_ref().map(|v| v.0),
@@ -282,6 +306,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn max_value_i64(&self) -> Option<i64> {
         match self {
             Self::INT(p) => p.max_value.as_ref().map(|v| v.0),
@@ -289,6 +317,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn allowed_values_i64(&self) -> Option<Vec<i64>> {
         match self {
             Self::INT(p) => p
@@ -299,6 +331,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn allowed_values_f64(&self) -> Option<Vec<f64>> {
         match self {
             Self::FLOAT(p) => p
@@ -309,6 +345,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn allowed_values_strings(&self) -> Option<Vec<String>> {
         match self {
             Self::STRING(p) => p.allowed_values.clone(),
@@ -317,6 +357,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn min_length(&self) -> Option<usize> {
         match self {
             Self::STRING(p) => p.min_length,
@@ -332,6 +376,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn max_length(&self) -> Option<usize> {
         match self {
             Self::STRING(p) => p.max_length,
@@ -347,6 +395,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn min_value_f64(&self) -> Option<f64> {
         match self {
             Self::FLOAT(p) => p.min_value.as_ref().map(|v| v.0),
@@ -354,6 +406,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn max_value_f64(&self) -> Option<f64> {
         match self {
             Self::FLOAT(p) => p.max_value.as_ref().map(|v| v.0),
@@ -501,6 +557,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_constraints(&self, value: &openjd_expr::ExprValue) -> Result<(), String> {
         // Extract string representation for base type constraint checking
         let s;
@@ -537,6 +597,10 @@ impl JobParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(
         &self,
         limits: &super::validate_v2023_09::EffectiveLimits,
@@ -670,11 +734,11 @@ pub struct JobStringParameterDefinition {
     pub user_interface: Option<StringUserInterface>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobStringParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
         let char_len = value.chars().count();
         if let Some(min) = self.min_length {
@@ -704,6 +768,10 @@ impl JobStringParameterDefinition {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(
         &self,
         limits: &super::validate_v2023_09::EffectiveLimits,
@@ -987,11 +1055,11 @@ pub struct JobIntParameterDefinition {
     pub user_interface: Option<IntUserInterface>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobIntParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
         let parsed: i64 = value.parse().map_err(|_| {
             format!(
@@ -1026,6 +1094,10 @@ impl JobIntParameterDefinition {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         if let Some(allowed) = self.allowed_values.as_ref() {
@@ -1137,11 +1209,11 @@ pub struct JobFloatParameterDefinition {
     pub user_interface: Option<FloatUserInterface>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobFloatParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
         let parsed: f64 = value.parse().map_err(|_| {
             format!(
@@ -1177,6 +1249,10 @@ impl JobFloatParameterDefinition {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         if let Some(allowed) = self.allowed_values.as_ref() {
@@ -1319,11 +1395,11 @@ pub struct JobPathParameterDefinition {
     pub user_interface: Option<PathUserInterface>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl JobPathParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
         let char_len = value.chars().count();
         if let Some(min) = self.min_length {
@@ -1353,6 +1429,10 @@ impl JobPathParameterDefinition {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate_definition(
         &self,
         limits: &super::validate_v2023_09::EffectiveLimits,

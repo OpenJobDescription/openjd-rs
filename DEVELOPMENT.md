@@ -194,8 +194,8 @@ If the path doesn't exist the harness falls back to the `PATH` probe.
 - `cargo clippy` clean with `-D warnings`.
 - All public items documented with `///`. The `missing_docs` lint enforces
   this. Don't add new `missing-docs burn-down` allows, and document new
-  fields, variants, or methods you add inside an item that already has one:
-  the lint can't check those.
+  fields or variants you add inside an item that already has one: the lint
+  can't check those.
 - Prefer `Result` over panicking.
 - Conventional commit messages.
 - Copyright headers on new files (CI checks this).

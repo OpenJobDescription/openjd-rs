@@ -42,11 +42,11 @@ pub struct IncludeExcludePathsFilter {
     exclude: Vec<glob::Pattern>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl IncludeExcludePathsFilter {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(include: &[&str], exclude: &[&str]) -> crate::Result<Self> {
         fn compile(patterns: &[&str]) -> crate::Result<Vec<glob::Pattern>> {
             patterns
@@ -64,10 +64,18 @@ impl IncludeExcludePathsFilter {
         })
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn matches(&self, entry: &ManifestEntry) -> bool {
         self.matches_path(entry.path())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn matches_path(&self, path: &str) -> bool {
         let included = self.include.is_empty() || self.include.iter().any(|p| p.matches(path));
         included && !self.exclude.iter().any(|p| p.matches(path))

@@ -93,5 +93,8 @@ if [[ $status -ne 0 ]]; then
     echo >&2
     echo "Run scripts/check_public_api.sh --update, review the diff, and update" >&2
     echo "specs/<crate>/public-api.md to describe any added or changed items." >&2
+    echo "If the change is to an item that exists only on $os, create" >&2
+    echo "specs/<crate>/public-api.$os.txt first so that --update does not" >&2
+    echo "overwrite the listing that other platforms share." >&2
 fi
 exit "$status"

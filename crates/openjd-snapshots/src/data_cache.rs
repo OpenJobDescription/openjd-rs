@@ -301,11 +301,11 @@ pub struct FileSystemDataCache {
     pub root_path: PathBuf,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl FileSystemDataCache {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(root_path: impl Into<PathBuf>) -> crate::Result<Self> {
         let root_path = root_path.into();
         if !root_path.is_absolute() {
@@ -579,11 +579,11 @@ impl Default for CacheValidationState {
     }
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl CacheValidationState {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new() -> Self {
         Self {
             hit_count: AtomicU64::new(0),
@@ -603,6 +603,10 @@ impl CacheValidationState {
         self.invalidated.store(true, Ordering::Relaxed);
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_invalidated(&self) -> bool {
         self.invalidated.load(Ordering::Relaxed)
     }
@@ -621,11 +625,11 @@ pub struct S3DataCache {
     copy_config: Option<S3CopyConfig>,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl S3DataCache {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(bucket: String, key_prefix: String, client: aws_sdk_s3::Client) -> Self {
         Self {
             bucket,

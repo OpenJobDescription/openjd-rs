@@ -24,7 +24,10 @@ pub trait SessionUser: Send + Sync + std::fmt::Debug {
 #[cfg(unix)]
 #[derive(Debug, Clone)]
 pub struct PosixSessionUser {
+    /// User name that actions run as, through `sudo -u`.
     pub user: String,
+    /// Group shared by this process's user and `user`. Session files and
+    /// directories are given this group so that both users can access them.
     pub group: String,
 }
 

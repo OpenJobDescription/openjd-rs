@@ -156,11 +156,11 @@ pub enum TemplateSpecificationVersion {
     Environment2023_09,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl TemplateSpecificationVersion {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::JobTemplate2023_09 => "jobtemplate-2023-09",
@@ -168,14 +168,26 @@ impl TemplateSpecificationVersion {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_job_template(&self) -> bool {
         matches!(self, Self::JobTemplate2023_09)
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_environment_template(&self) -> bool {
         matches!(self, Self::Environment2023_09)
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn revision(&self) -> SpecificationRevision {
         match self {
             Self::JobTemplate2023_09 | Self::Environment2023_09 => SpecificationRevision::V2023_09,
@@ -411,10 +423,6 @@ pub enum ModelExtension {
     WrapActions,
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 impl ModelExtension {
     /// All extension variants, in a stable order for iteration and
     /// for building default "enable all" allowlists.
@@ -426,6 +434,10 @@ impl ModelExtension {
         Self::WrapActions,
     ];
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::TaskChunking => "TASK_CHUNKING",
