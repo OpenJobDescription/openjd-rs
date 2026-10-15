@@ -1059,6 +1059,13 @@ pub fn escape_format_string(value: &str) -> String {
         } else if c == '}' && chars.peek() == Some(&'}') {
             chars.next();
             result.push_str("{{ \"}\" + \"}\" }}");
+        } else if c == '{' && {
+            let mut ahead = chars.clone();
+            ahead.next() == Some('}') && ahead.next() == Some('}')
+        } {
+            // A lone `{` right before an escaped `}}` would join the
+            // escape's opening `{{` into `{{{`, which does not parse.
+            result.push_str("{{ \"{\" }}");
         } else {
             result.push(c);
         }
@@ -1270,6 +1277,25 @@ mod tests {
             .is_ok());
     }
 
+    /// A lone `{` before `}}` used to escape to `{{{ ... }}`, which does not
+    /// parse. Found by the `expr_format_string` fuzz target.
+    #[test]
+    fn escape_format_string_lone_brace_before_closing_pair() {
+        for s in ["{}}", "a{}}b", "{}}{", "{}}}", "{{}}}"] {
+            let escaped = escape_format_string(s);
+            let fs =
+                FormatString::new(&escaped).unwrap_or_else(|e| panic!("{s:?} -> {escaped:?}: {e}"));
+            assert_eq!(
+                fs.resolve_string_with(&SymbolTable::new(), &FormatStringOptions::new())
+                    .unwrap(),
+                s
+            );
+        }
+        assert_eq!(
+            escape_format_string("{}}"),
+            "{{ \"{\" }}{{ \"}\" + \"}\" }}"
+        );
+    }
     #[test]
     fn escape_format_string_no_special_chars() {
         assert_eq!(escape_format_string("hello world"), "hello world");
