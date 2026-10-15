@@ -380,6 +380,19 @@ fn has_type_var(t: &ExprType) -> bool {
     ) || t.params().iter().any(has_type_var)
 }
 
+/// `v` is `sum([])`'s int `0` where `t` expects a float, possibly inside
+/// lists (`[sum([]) for ...]` is `list[float]` statically, `[0, 0]` at run
+/// time): known issue `expr-sum-empty-float`.
+fn int_zeros_for_floats(v: &ExprValue, t: &ExprType) -> bool {
+    if *t == ExprType::FLOAT {
+        return matches!(v, ExprValue::Int(0));
+    }
+    match (v.list_elements(), t.list_element_type()) {
+        (Some(xs), Some(et)) => !xs.is_empty() && xs.iter().all(|x| int_zeros_for_floats(x, et)),
+        _ => false,
+    }
+}
+
 /// Static type of a static evaluation result.
 fn static_type(v: &ExprValue) -> ExprType {
     match v {
@@ -470,13 +483,13 @@ pub fn check_expression(
                     if (facts.union || facts.conditional) && flatten_null {
                         explained.push("expr-flatten-union-static-type");
                     }
-                    if facts.union && !flatten_null {
+                    // A `nulltype` in the static type marks an untyped `[]`
+                    // branch whose overload won the dispatch.
+                    let empty_branch = facts.conditional && st.to_string().contains("nulltype");
+                    if (facts.union || empty_branch) && !flatten_null {
                         explained.push("expr-union-arg-overload");
                     }
-                    if st == ExprType::FLOAT
-                        && matches!(cv, ExprValue::Int(0))
-                        && src.contains("sum(")
-                    {
+                    if src.contains("sum(") && int_zeros_for_floats(cv, &st) {
                         explained.push("expr-sum-empty-float");
                     }
                     // The static pass folds path operations in the host's
@@ -536,6 +549,12 @@ pub fn check_expression(
                 if is_null_element_error(e) {
                     // Dead code that fails whenever evaluated (a list of
                     // `None`) is rightly refused statically.
+                } else if is_ordering_type_error(e) {
+                    // The generator trusted `__gt__: (T1, T2) -> bool` and
+                    // built an ordering of incomparable types in dead code.
+                    crate::known::hit("expr-ordering-runtime-type-check", || {
+                        format!("well-typed {src:?} evaluates to {cv:?} but static checking rejects it: {e}")
+                    });
                 } else if facts.unbound_return
                     && matches!(e.kind(), ExpressionErrorKind::TypeError { .. })
                 {
