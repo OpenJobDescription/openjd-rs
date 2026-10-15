@@ -365,7 +365,7 @@ pub fn check_expression(
                         "{src:?}: static type {st} but run-time value {cv:?} has type {ct}"
                     );
                 }
-                if !sv.is_unresolved() && fmt == PathFormat::Posix {
+                if !sv.is_unresolved() && fmt == PathFormat::host() {
                     if boolop {
                         known_issue!(
                             "expr-boolop-static-type",

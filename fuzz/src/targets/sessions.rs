@@ -289,8 +289,13 @@ pub fn embedded_files(data: &[u8]) {
         let session_ok = single
             .allocate_file_paths(&[one], &mut openjd_expr::SymbolTable::new())
             .is_ok();
+        // The session's documented Windows-only rules (a `:` anywhere; a name
+        // of only dots and spaces) are host-specific, so the platform-neutral
+        // model cannot apply them.
+        let windows_only =
+            cfg!(windows) && (fname.contains(':') || fname.trim_end_matches([' ', '.']).is_empty());
         oracle!(
-            !model_ok || session_ok,
+            !model_ok || session_ok || windows_only,
             "filename {fname:?} passes template validation but the session rejects it"
         );
     }
