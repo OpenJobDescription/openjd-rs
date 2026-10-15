@@ -240,6 +240,26 @@ library.call(name, &args, ctx)
    parameter matched by `list[nulltype]` (the empty list) binds only weakly, so a
    sibling parameter's binding wins and a lone one still yields `nulltype`
 
+**With an unresolved argument** the call is type-only (`unresolved_return_type`):
+the same phases are applied to the argument types, and the result is
+`unresolved` of the matched signature's return type. A list argument whose
+element type is a union stands for one list type per member
+([type-system.md § Lists with union element
+types](type-system.md#lists-with-union-element-types)), so the call is typed
+for every combination of the arguments' forms (`types::list_forms`): the
+result is the union of the return types of the combinations that match, its
+list members merged into one list type (`types::merge_list_union`), and the
+call fails as usual when none matches. `sum` of a `list[float | int | nulltype]`
+is `float | int` (from `sum(list[float])`, `sum(list[int])`, and
+`sum(list[nulltype])`); `sorted` of it is `list[float | int | nulltype]`. Past
+64 combinations the call is `any`. A top-level union argument is not expanded
+(it dispatches as before). `derive_return_type` expands list forms the same way.
+
+Indexing has a `(list[nulltype], int) -> noreturn` overload, registered before
+the generic `(list[T1], int) -> T1`: the empty list has no element, so indexing
+it is always out of bounds, and the empty form of `list[int | nulltype]` adds
+nothing to `int`.
+
 The method-vs-function distinction is made by the evaluator before dispatch:
 `eval_call` transforms `obj.method(args)` into `method(obj, args)` via UFCS and sets
 a per-call flag on the dispatch indicating that position 0 is a receiver. The library
@@ -274,7 +294,7 @@ Operators are registered as dunder-named functions:
 | `<=` | `__le__` | `(T1, T2) -> bool` |
 | `>` | `__gt__` | `(T1, T2) -> bool` |
 | `>=` | `__ge__` | `(T1, T2) -> bool` |
-| `x[i]` | `__getitem__` | `(list[T1], int) -> T1`, `(string, int) -> string`, `(range_expr, int) -> int`, plus slice overloads |
+| `x[i]` | `__getitem__` | `(list[T1], int) -> T1`, `(list[nulltype], int) -> noreturn`, `(string, int) -> string`, `(range_expr, int) -> int`, plus slice overloads |
 | `in` | `__contains__` | `(list[T], T) -> bool`, `(string, string) -> bool`, `(range_expr, int \| float) -> bool` |
 | `not in` | `__not_contains__` | Same as `__contains__` |
 

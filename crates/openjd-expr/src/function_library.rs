@@ -152,7 +152,9 @@ impl FunctionLibrary {
         self.functions.keys().map(|s| s.as_str())
     }
 
-    /// Dispatch a function call: exact → coerced → generic.
+    /// Dispatch a function call: exact → coerced → generic. With an
+    /// unresolved argument the call is type-only: a list argument whose
+    /// element type is a union is typed by each of its forms.
     pub fn call(
         &self,
         name: &str,
@@ -200,37 +202,32 @@ impl FunctionLibrary {
             .collect();
         let any_unresolved = args.iter().any(|a| a.is_unresolved());
 
+        // An unresolved argument makes the call type-only: its result is
+        // the signature's return type. The phases are applied to the
+        // types, with list arguments whose element type is a union
+        // matched by their forms (`unresolved_return_type`).
+        if any_unresolved {
+            if let Some(ret) = unresolved_return_type(entries, &arg_types, skip_receiver_coercion) {
+                return Ok(ExprValue::unresolved(ret));
+            }
+        }
+
         // Phase 1: exact match (non-generic)
         for entry in entries {
             if entry.signature.is_symbolic() {
                 continue;
             }
-            if entry.signature.match_call(&arg_types).is_some() {
-                if any_unresolved {
-                    let ret = entry.signature.sig_return().clone();
-                    return Ok(ExprValue::unresolved(ret));
-                }
+            if !any_unresolved && entry.signature.match_call(&arg_types).is_some() {
                 return (entry.implementation)(ctx, args);
             }
         }
 
         // Phase 2: coerced match (non-generic)
         for entry in entries {
-            if entry.signature.is_symbolic() {
+            if entry.signature.is_symbolic() || any_unresolved {
                 continue;
             }
-            if any_unresolved {
-                if try_coerce_types(
-                    &arg_types,
-                    entry.signature.sig_params(),
-                    skip_receiver_coercion,
-                )
-                .is_some()
-                {
-                    let ret = entry.signature.sig_return().clone();
-                    return Ok(ExprValue::unresolved(ret));
-                }
-            } else if let Some(coerced) = try_coerce_args(
+            if let Some(coerced) = try_coerce_args(
                 args,
                 &arg_types,
                 entry.signature.sig_params(),
@@ -242,14 +239,10 @@ impl FunctionLibrary {
 
         // Phase 3: generic match
         for entry in entries {
-            if !entry.signature.is_symbolic() {
+            if !entry.signature.is_symbolic() || any_unresolved {
                 continue;
             }
-            if let Some(bindings) = entry.signature.match_call(&arg_types) {
-                if any_unresolved {
-                    let ret = entry.signature.sig_return().substitute(&bindings);
-                    return Ok(ExprValue::unresolved(ret));
-                }
+            if entry.signature.match_call(&arg_types).is_some() {
                 return (entry.implementation)(ctx, args);
             }
             // Try with coercion for generics too
@@ -258,12 +251,8 @@ impl FunctionLibrary {
                 entry.signature.sig_params(),
                 skip_receiver_coercion,
             ) {
-                if let Some(bindings) = entry.signature.match_call(&coerced_types) {
+                if entry.signature.match_call(&coerced_types).is_some() {
                     let coerced = coerce_values(args, &coerced_types);
-                    if any_unresolved {
-                        let ret = entry.signature.sig_return().substitute(&bindings);
-                        return Ok(ExprValue::unresolved(ret));
-                    }
                     return (entry.implementation)(ctx, &coerced);
                 }
             }
@@ -353,7 +342,26 @@ impl FunctionLibrary {
 
     /// Derive the return type without evaluation (for static type checking).
     /// Accepts union types in arg_types and returns a union of all possible return types.
+    /// A list argument whose element type is a union is typed by its
+    /// forms (`list[int | nulltype]` as `list[int]` and `list[nulltype]`).
     pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
+        // A list argument whose element type is a union is typed by its
+        // forms, as `call` types an unresolved one (2026-02 Expression
+        // Language §1.2.1).
+        match form_combinations(arg_types) {
+            None => return Some(ExprType::ANY),
+            Some(combinations) if combinations.len() > 1 => {
+                let returns: Vec<ExprType> = combinations
+                    .iter()
+                    .filter_map(|c| self.derive_return_type(name, c))
+                    .collect();
+                if returns.is_empty() {
+                    return None;
+                }
+                return Some(crate::types::merge_list_union(ExprType::union(returns)));
+            }
+            Some(_) => {}
+        }
         // Fast path: if no union args, try exact match first (matches Python's singleton optimization)
         let has_unions = arg_types
             .iter()
@@ -524,6 +532,116 @@ fn can_coerce(from: &ExprType, to: &ExprType) -> bool {
     (from.code() == crate::types::TypeCode::Int && to.code() == crate::types::TypeCode::Float)
         || (from.code() == crate::types::TypeCode::Path
             && to.code() == crate::types::TypeCode::String)
+}
+
+/// Most combinations of list forms a call is typed by; past this the
+/// call is typed `any`, which every run's result satisfies.
+const MAX_FORM_COMBINATIONS: usize = 64;
+
+/// The combinations of the arguments' list forms
+/// ([`crate::types::list_forms`]): one argument list per way of picking a
+/// form for each argument. `None` past [`MAX_FORM_COMBINATIONS`].
+fn form_combinations(arg_types: &[ExprType]) -> Option<Vec<Vec<ExprType>>> {
+    let forms: Vec<Vec<ExprType>> = arg_types.iter().map(crate::types::list_forms).collect();
+    let count = forms
+        .iter()
+        .try_fold(1usize, |n, f| n.checked_mul(f.len()))
+        .filter(|n| *n <= MAX_FORM_COMBINATIONS)?;
+    Some(
+        (0..count)
+            .map(|i| {
+                let mut rest = i;
+                forms
+                    .iter()
+                    .map(|f| {
+                        let t = f[rest % f.len()].clone();
+                        rest /= f.len();
+                        t
+                    })
+                    .collect()
+            })
+            .collect(),
+    )
+}
+
+/// The return type of a call with an unresolved argument, typed from the
+/// argument types by the same phases [`FunctionLibrary::call`] applies
+/// to values (exact, coerced, then generic), or `None` when no signature
+/// matches.
+///
+/// A list argument whose element type is a union stands for one list
+/// type per member (2026-02 Expression Language §1.2.1:
+/// `list[int | nulltype]` is a `list[int]` or the empty `list[nulltype]`),
+/// so the call is typed for each combination of forms: the result is the
+/// union of the return types of the combinations that match, a union of
+/// list types read as one list type (`list[int] | list[nulltype]` is
+/// `list[int | nulltype]`). It is `None` when no combination matches.
+fn unresolved_return_type(
+    entries: &[FunctionEntry],
+    arg_types: &[ExprType],
+    skip_receiver_coercion: bool,
+) -> Option<ExprType> {
+    let Some(combinations) = form_combinations(arg_types) else {
+        return Some(ExprType::ANY);
+    };
+    if let [only] = combinations.as_slice() {
+        return phase_return_type(entries, only, skip_receiver_coercion);
+    }
+    let returns: Vec<ExprType> = combinations
+        .iter()
+        .filter_map(|c| phase_return_type(entries, c, skip_receiver_coercion))
+        .collect();
+    if returns.is_empty() {
+        return None;
+    }
+    Some(crate::types::merge_list_union(ExprType::union(returns)))
+}
+
+/// The return type of the first signature the dispatch phases match for
+/// `arg_types`, applied to types.
+fn phase_return_type(
+    entries: &[FunctionEntry],
+    arg_types: &[ExprType],
+    skip_receiver_coercion: bool,
+) -> Option<ExprType> {
+    // Phase 1: exact match (non-generic)
+    for entry in entries {
+        if !entry.signature.is_symbolic() && entry.signature.match_call(arg_types).is_some() {
+            return Some(entry.signature.sig_return().clone());
+        }
+    }
+    // Phase 2: coerced match (non-generic)
+    for entry in entries {
+        if !entry.signature.is_symbolic()
+            && try_coerce_types(
+                arg_types,
+                entry.signature.sig_params(),
+                skip_receiver_coercion,
+            )
+            .is_some()
+        {
+            return Some(entry.signature.sig_return().clone());
+        }
+    }
+    // Phase 3: generic match, then generic with coercion
+    for entry in entries {
+        if !entry.signature.is_symbolic() {
+            continue;
+        }
+        if let Some(bindings) = entry.signature.match_call(arg_types) {
+            return Some(entry.signature.sig_return().substitute(&bindings));
+        }
+        if let Some(coerced) = try_coerce_types(
+            arg_types,
+            entry.signature.sig_params(),
+            skip_receiver_coercion,
+        ) {
+            if let Some(bindings) = entry.signature.match_call(&coerced) {
+                return Some(entry.signature.sig_return().substitute(&bindings));
+            }
+        }
+    }
+    None
 }
 
 /// Try to coerce argument types to match parameter types.

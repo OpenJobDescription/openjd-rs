@@ -1807,7 +1807,7 @@ fn join_gate2_listcomp_empty_list_beside_unresolved_list() {
     // list[int], list[nulltype]".
     assert_join_types(
         "[[] if x > 2 else [Task.Param.I] for x in Param.L]",
-        "unresolved[list[list[int]]]",
+        "unresolved[list[list[int | nulltype] | nulltype]]",
         "unresolved[list[list[int]]]",
         "list[list[int]]",
     );
@@ -1824,8 +1824,9 @@ fn join_gate2_listcomp_empty_list_beside_unresolved_list() {
 
 #[test]
 fn join_gate2_empty_concrete_comprehension_beside_unresolved_list() {
-    // An empty concrete comprehension is `list[nulltype]`; it yields to
-    // the unresolved `list[int]` sibling, also through enclosing calls.
+    // An empty concrete comprehension over `list[int]` is an empty
+    // `list[int]` (2026-02 §1.3.7); it joins the unresolved `list[int]`
+    // sibling, also through enclosing calls.
     let inner = "[[x for x in Param.L if x > 100], [Task.Param.I]]";
     assert_join_types(
         inner,
@@ -1855,16 +1856,19 @@ fn join_gate2_empty_concrete_comprehension_beside_unresolved_list() {
 
 #[test]
 fn join_gate2_listcomp_list_int_beside_list_float() {
-    // Previously gate 2: "list[float], list[int]".
+    // Previously gate 2: "list[float], list[int]". At pass 8 the body type
+    // is a union, so the comprehension is `list[T | nulltype]` (2026-02
+    // §1.3.7), its element `list[float] | list[int]` read as the one list
+    // type `list[float | int]`.
     assert_join_types(
         "[[x] if x > 2 else [Task.Param.F] for x in Param.L]",
-        "unresolved[list[list[float] | list[int]]]",
+        "unresolved[list[list[float | int] | nulltype]]",
         "unresolved[list[list[float]]]",
         "list[list[float]]",
     );
     assert_join_types(
         "[Param.L if x > 2 else [Task.Param.F] for x in Param.L]",
-        "unresolved[list[list[float] | list[int]]]",
+        "unresolved[list[list[float | int] | nulltype]]",
         "unresolved[list[list[float]]]",
         "list[list[float]]",
     );
@@ -1875,7 +1879,7 @@ fn join_gate2_listcomp_list_string_beside_list_path() {
     // Previously gate 2: "list[path], list[string]".
     assert_join_types(
         "[[Task.Param.S] if x > 2 else [Task.Param.P] for x in Param.L]",
-        "unresolved[list[list[path] | list[string]]]",
+        "unresolved[list[list[path | string] | nulltype]]",
         "unresolved[list[list[string]]]",
         "list[list[string]]",
     );
@@ -1885,10 +1889,11 @@ fn join_gate2_listcomp_list_string_beside_list_path() {
 fn join_gate2_listcomp_union_beside_member() {
     // Previously gate 2: "float | int, int". The values decide whether the
     // run-time list is `list[int]` (here) or `list[float]`, so the hoisted
-    // element type is the union of both.
+    // element type is the union of both; at pass 8 the comprehension is
+    // also possibly the untyped empty list (§1.3.7).
     assert_join_types(
         "[x if x > 2 else (Task.Param.I if Session.HasPathMappingRules else Param.F) for x in Param.L]",
-        "unresolved[list[float | int]]",
+        "unresolved[list[float | int | nulltype]]",
         "unresolved[list[float | int]]",
         "list[int]",
     );
@@ -1964,7 +1969,7 @@ fn join_stays_sound_listcomp_int_beside_string() {
     let [p8, g2, rt] = join_states();
     assert_eq!(
         eval_u(expr, &p8).expr_type(),
-        tp("unresolved[list[list[int] | list[string]]]")
+        tp("unresolved[list[list[int | string] | nulltype]]")
     );
     assert_err_w(
         expr,

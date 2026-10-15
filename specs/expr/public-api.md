@@ -429,6 +429,9 @@ impl FunctionLibrary {
     pub fn merge(self, other: FunctionLibrary) -> Self;
 
     /// Dispatch a function call — exact → coerced → generic phases.
+    /// With an unresolved argument the call is type-only, a list
+    /// argument whose element type is a union typed by each of its forms
+    /// (see function-library.md § Three-Phase Dispatch).
     pub fn call(
         &self, name: &str, args: &[ExprValue], ctx: &mut dyn EvalContext,
     ) -> Result<ExprValue, ExpressionError>;
@@ -441,7 +444,9 @@ impl FunctionLibrary {
 
     /// Static type-checking: derive the return type of a call from
     /// argument types, without evaluating. Accepts union types in
-    /// `arg_types` and returns a union of possible return types.
+    /// `arg_types` and returns a union of possible return types. A list
+    /// argument whose element type is a union is typed by its forms
+    /// (`list[int | nulltype]` as `list[int]` and `list[nulltype]`).
     pub fn derive_return_type(
         &self, name: &str, arg_types: &[ExprType],
     ) -> Option<ExprType>;

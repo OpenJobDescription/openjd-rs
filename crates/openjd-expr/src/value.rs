@@ -547,12 +547,14 @@ impl ExprValue {
         mut elements: Vec<ExprValue>,
         hint_type: ExprType,
     ) -> Result<Self, crate::error::ExpressionError> {
-        // Reject 3+ nesting levels: if any element is itself a ListList with a
-        // non-nulltype element type, that's too deep. Empty lists (ListList with
-        // NULLTYPE) represent `list[nulltype]` — a flat empty list, not a nested one.
+        // Reject 3+ nesting levels: if any element is itself a ListList
+        // whose elements are lists, that's too deep. Empty lists (ListList
+        // with NULLTYPE) represent `list[nulltype]` — a flat empty list,
+        // not a nested one — and a ListList of `range_expr` values is a
+        // flat list of ranges.
         if elements
             .iter()
-            .any(|e| matches!(e, Self::ListList(_, et, _) if *et != ExprType::NULLTYPE))
+            .any(|e| matches!(e, Self::ListList(_, et, _) if et.is_list()))
         {
             return Err(crate::error::ExpressionError::new(
                 "Lists may be nested at most 2 levels deep",
@@ -638,6 +640,9 @@ impl ExprValue {
                     Self::make_list_path(Vec::new(), PathFormat::host())
                 }
                 crate::types::TypeCode::List => Self::make_list_list(Vec::new(), hint_type),
+                crate::types::TypeCode::RangeExpr => {
+                    Self::ListList(Vec::new(), ExprType::RANGE_EXPR, 0)
+                }
                 crate::types::TypeCode::String => Self::ListString(Vec::new(), 0),
                 crate::types::TypeCode::NullType => {
                     Self::ListList(Vec::new(), ExprType::NULLTYPE, 0)

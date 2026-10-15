@@ -37,6 +37,8 @@ mod test_int64_bounds;
 mod test_list_json_display;
 #[path = "integration/test_list_nesting.rs"]
 mod test_list_nesting;
+#[path = "integration/test_listcomp_result_type.rs"]
+mod test_listcomp_result_type;
 #[path = "integration/test_lists.rs"]
 mod test_lists;
 #[path = "integration/test_memory.rs"]

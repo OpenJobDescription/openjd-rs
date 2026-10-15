@@ -557,6 +557,162 @@ where
     Ok(acc.map(simplify_joined_list_element))
 }
 
+// ── List comprehension types (2026-02 Expression Language §1.3.7) ──
+
+/// What the loop variable of a comprehension over a value of type `t`
+/// is bound to.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ComprehensionVar {
+    /// The loop variable has this type.
+    Typed(ExprType),
+    /// The iterable can only be the empty list: the body never runs.
+    EmptyOnly,
+    /// No value of the type can be iterated.
+    NotIterable,
+}
+
+/// The loop variable's type for a comprehension over an iterable of type
+/// `t` (§1.3.7): `E` for `list[E]`, `int` for `range_expr`, the union of
+/// the members' element types for a union, and `any` for `any`. A
+/// `nulltype` element member contributes nothing (§1.2.1: it marks the
+/// list as possibly empty), nor does a union member that cannot be
+/// iterated (a run with it fails). `unresolved[T]` is read as `T`.
+pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
+    let t = match (t.code, t.params.as_slice()) {
+        (TypeCode::Unresolved, [inner]) => inner,
+        _ => t,
+    };
+    let members: &[ExprType] = if t.code == TypeCode::Union {
+        &t.params
+    } else {
+        std::slice::from_ref(t)
+    };
+    let mut iterable = false;
+    let mut elems = Vec::new();
+    for m in members {
+        match (m.code, m.params.as_slice()) {
+            (TypeCode::List, [elem]) => {
+                iterable = true;
+                if let Some(e) = list_element_contribution(elem) {
+                    elems.push(e);
+                }
+            }
+            (TypeCode::RangeExpr, _) => {
+                iterable = true;
+                elems.push(ExprType::INT);
+            }
+            (TypeCode::Any, _) | (TypeCode::Unresolved, _) => {
+                iterable = true;
+                elems.push(ExprType::ANY);
+            }
+            _ => {}
+        }
+    }
+    if !iterable {
+        ComprehensionVar::NotIterable
+    } else if elems.is_empty() {
+        ComprehensionVar::EmptyOnly
+    } else {
+        ComprehensionVar::Typed(ExprType::union(elems))
+    }
+}
+
+/// The type of a comprehension whose element expression has type
+/// `body` (§1.3.7). `T` is `body` without a `nulltype` member (a list
+/// cannot hold `null`), with a union of list types read as one list of
+/// the union of their elements ([`merge_list_union`]). Then:
+///
+/// - `T` contains no union: `list[T]`.
+/// - `T` contains a union: `list[T | nulltype]` — a non-empty run takes
+///   its type from its elements, and an empty one is `list[nulltype]`.
+/// - nothing is left of `T`: `list[nulltype]`.
+pub(crate) fn comprehension_list_type(body: &ExprType) -> ExprType {
+    let body = match (body.code, body.params.as_slice()) {
+        (TypeCode::Unresolved, [inner]) => inner,
+        _ => body,
+    };
+    let Some(t) = list_element_contribution(body) else {
+        return ExprType::list(ExprType::NULLTYPE);
+    };
+    // A body that never produces a value (`fail(...)`): only a run with
+    // no elements succeeds.
+    if t.code == TypeCode::NoReturn {
+        return ExprType::list(ExprType::NULLTYPE);
+    }
+    let t = merge_list_union(t);
+    if contains_union(&t) {
+        ExprType::list(ExprType::union(vec![t, ExprType::NULLTYPE]))
+    } else {
+        ExprType::list(t)
+    }
+}
+
+/// Whether `t` has a union at any depth (`int | string`,
+/// `list[int | nulltype]`).
+pub(crate) fn contains_union(t: &ExprType) -> bool {
+    t.code == TypeCode::Union || t.params.iter().any(contains_union)
+}
+
+/// A union of list types as the single list type it equals (§1.2.1: a
+/// list type with a union element type is one list type per member):
+/// `list[A] | list[B]` is `list[A | B]`, applied at every depth. Any
+/// other type is returned unchanged (a union with a non-list member, or
+/// none at all, has its list members merged in place).
+pub(crate) fn merge_list_union(t: ExprType) -> ExprType {
+    match t.code {
+        TypeCode::List => match t.params.as_slice() {
+            [elem] => ExprType::list(merge_list_union(elem.clone())),
+            _ => t,
+        },
+        TypeCode::Union => {
+            let (lists, others): (Vec<ExprType>, Vec<ExprType>) =
+                t.params.into_iter().partition(ExprType::is_list);
+            let mut members = others;
+            if !lists.is_empty() {
+                let elems: Vec<ExprType> = lists
+                    .into_iter()
+                    .filter_map(|l| l.params.into_iter().next())
+                    .collect();
+                members.push(ExprType::list(merge_list_union(ExprType::union(elems))));
+            }
+            ExprType::union(members)
+        }
+        _ => t,
+    }
+}
+
+/// The forms of a type whose list element types may be unions (§1.2.1):
+/// `list[int | float | nulltype]` has the forms `list[int]`,
+/// `list[float]`, and `list[nulltype]`, at every depth. A type with no
+/// union element type is its own single form. A top-level union is kept
+/// as it is: only list element types are expanded.
+pub(crate) fn list_forms(t: &ExprType) -> Vec<ExprType> {
+    match (t.code, t.params.as_slice()) {
+        (TypeCode::List, [elem]) => element_forms(elem)
+            .into_iter()
+            .map(ExprType::list)
+            .collect(),
+        _ => vec![t.clone()],
+    }
+}
+
+fn element_forms(elem: &ExprType) -> Vec<ExprType> {
+    let members: &[ExprType] = if elem.code == TypeCode::Union {
+        &elem.params
+    } else {
+        std::slice::from_ref(elem)
+    };
+    let mut forms = Vec::new();
+    for m in members {
+        for f in list_forms(m) {
+            if !forms.contains(&f) {
+                forms.push(f);
+            }
+        }
+    }
+    forms
+}
+
 // ── Normalization ──
 
 fn normalize_union(types: Vec<ExprType>) -> ExprType {

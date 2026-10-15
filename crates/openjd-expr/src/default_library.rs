@@ -259,6 +259,18 @@ fn list_ops() -> FunctionLibrary {
     .expect("bad builtin signature");
     lib.register_sig("__mul__", "(list[T1], int) -> list[T1]", mul_list)
         .expect("bad builtin signature");
+    // The empty list has no element to give: indexing it is always out
+    // of bounds. Without this overload the generic one would type
+    // `list[nulltype][i]` as `nulltype`, and indexing the empty form of a
+    // `list[int | nulltype]` would add `nulltype` to `int`. Registered
+    // before the generic overload, which `derive_return_type`'s
+    // first-match lookup would otherwise pick.
+    lib.register_sig(
+        "__getitem__",
+        "(list[nulltype], int) -> noreturn",
+        crate::functions::misc::getitem_list,
+    )
+    .expect("bad builtin signature");
     lib.register_sig(
         "__getitem__",
         "(list[T1], int) -> T1",
@@ -861,6 +873,30 @@ mod tests {
         assert!(!lib.get_signatures("repr_py").is_empty(), "repr");
         assert!(!lib.get_signatures("re_match").is_empty(), "regex");
         assert!(!lib.get_signatures("fail").is_empty(), "misc");
+    }
+
+    #[test]
+    fn derive_return_type_matches_each_list_form() {
+        // 2026-02 §1.2.1: a list with a union element type is one list
+        // type per member, the `nulltype` member being the empty list.
+        let lib = &*DEFAULT_LIBRARY;
+        let tp = |s: &str| ExprType::parse(s).unwrap();
+        assert_eq!(
+            lib.derive_return_type("sum", &[tp("list[int | float | nulltype]")]),
+            Some(tp("float | int"))
+        );
+        assert_eq!(
+            lib.derive_return_type("__getitem__", &[tp("list[int | nulltype]"), ExprType::INT]),
+            Some(ExprType::INT)
+        );
+        assert_eq!(
+            lib.derive_return_type("__getitem__", &[tp("list[nulltype]"), ExprType::INT]),
+            Some(ExprType::NORETURN)
+        );
+        assert_eq!(
+            lib.derive_return_type("upper", &[tp("list[int | nulltype]")]),
+            None
+        );
     }
 
     #[test]

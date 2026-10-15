@@ -187,6 +187,33 @@ Crate-internal helpers (`pub(crate)`, not part of the public API):
 | `types::list_element_contribution(&ExprType) -> Option<ExprType>` | The type an element contributes to a built list: unwraps `unresolved[T]`; drops a top-level `nulltype` (union member or bare; `None` if nothing is left); keeps `list[nulltype]` members |
 | `types::join_list_element(&ExprType, &ExprType) -> Option<ExprType>` | The list-element join above; `None` on a conflict |
 | `types::simplify_joined_list_element(ExprType) -> ExprType` | On a joined element type, drops `list[nulltype]` from a union that also holds a typed list |
+| `types::comprehension_var(&ExprType) -> ComprehensionVar` | A list comprehension's loop variable for an iterable of this type (§1.3.7): `Typed(E)` for `list[E]` (`int` for `range_expr`, `any` for `any`, the union of the members' element types for a union, `nulltype` elements contributing nothing), `EmptyOnly` when the iterable can only be `[]`, `NotIterable` when no value can be iterated |
+| `types::comprehension_list_type(&ExprType) -> ExprType` | A comprehension's type from its body's type (§1.3.7): `T` is the body without `nulltype`, its unions of lists merged; `list[T]` if `T` has no union, `list[T \| nulltype]` if it has one, `list[nulltype]` if nothing is left or the body is `noreturn` |
+| `types::contains_union(&ExprType) -> bool` | Has a union at any depth |
+| `types::merge_list_union(ExprType) -> ExprType` | A union's list members as the one list type they equal (`list[A] \| list[B]` is `list[A \| B]`), at every depth |
+| `types::list_forms(&ExprType) -> Vec<ExprType>` | The list types a type with union list element types stands for (`list[int \| nulltype]` gives `list[int]` and `list[nulltype]`), at every depth; a top-level union is not expanded |
+
+### Lists with union element types
+
+A list value holds elements of one type, so a list type whose element type
+is a union stands for one list type per member (2026-02 Expression Language
+§1.2.1): `list[int | string]` is a `list[int]` or a `list[string]`, and
+`list[int | float | nulltype]` is a `list[int]`, a `list[float]`, or the
+empty `list[nulltype]` — a `nulltype` element member means "may be empty",
+since a list value never holds `null`. `list[A] | list[B]` and
+`list[A | B]` therefore stand for the same values, and where a result is
+built from several list types (a comprehension's body, a call typed by
+forms) it is written as the second (`types::merge_list_union`). Only
+unresolved values have such types; a concrete list's type never does.
+
+They arise from comprehensions whose body type is a union
+([evaluator.md § ListComp](evaluator.md#listcomp-eval_listcomp)), and from
+hoisted list literals with union-typed elements. Operations treat them by
+their forms ([function-library.md § Three-Phase
+Dispatch](function-library.md#three-phase-dispatch)): indexing
+`list[int | nulltype]` gives `int` (the empty form's `__getitem__` is
+`noreturn`), and `sum` of a `list[float | int | nulltype]` is
+`float | int`.
 
 ## Union Normalization
 

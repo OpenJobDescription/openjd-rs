@@ -213,7 +213,14 @@ Empty list variant selection by `hint_type`:
 | PATH | `ListPath([], host_format)` |
 | STRING | `ListString([])` |
 | LIST[T] | `ListList([], LIST[T])` |
+| RANGE_EXPR | `ListList([], RANGE_EXPR)` |
 | anything else | `ListList([], NULLTYPE)` (canonical empty list, `list[nulltype]`) |
+
+A comprehension whose filter kept nothing passes its element expression's
+type as the hint, so the empty result is a typed empty list (evaluator.md §
+ListComp). The nesting check counts only `ListList` elements whose element
+type is a list: a list of `range_expr` values is a flat list, so `[[r]]` is
+two levels deep (2026-02 §1.2.1).
 
 ## Display Strings
 

@@ -250,6 +250,13 @@ pub struct Evaluator<'a> {
     /// leak into operand evaluation (RFC 0005 propagation rules).
     target_type: Option<crate::types::ExprType>,
     regex_cache: std::collections::HashMap<String, regex::Regex>,
+    /// Read every symbol as `unresolved(its type)` instead of its value.
+    /// Set on the child that types an empty comprehension's element
+    /// expression (2026-02 Expression Language §1.3.7): the result's type
+    /// is the element expression's static type, the type template
+    /// validation gives it, not a type that depends on the values of the
+    /// symbols it reads. Inherited by nested children.
+    symbols_as_types: bool,
 }
 
 static EMPTY_KEYWORD_RENAMES: std::sync::LazyLock<std::collections::HashMap<String, String>> =
@@ -282,6 +289,7 @@ impl<'a> Evaluator<'a> {
             library: &crate::default_library::DEFAULT_LIBRARY,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
+            symbols_as_types: false,
         }
     }
 
@@ -761,6 +769,16 @@ impl<'a> Evaluator<'a> {
         }
     }
 
+    /// The value a symbol read yields: the symbol's value, or with
+    /// `symbols_as_types` set, `unresolved(its type)`.
+    fn read_symbol(&self, val: &ExprValue) -> ExprValue {
+        if self.symbols_as_types && !val.is_unresolved() {
+            ExprValue::unresolved(val.expr_type())
+        } else {
+            val.clone()
+        }
+    }
+
     fn eval_name(&mut self, n: &ast::ExprName) -> Result<ExprValue, ExpressionError> {
         let name = n.id.as_str();
         match name {
@@ -772,7 +790,8 @@ impl<'a> Evaluator<'a> {
         for symtab in self.symtabs.iter().rev() {
             if let Some(val) = symtab.get_value(name) {
                 self.check_path_format(val, name)?;
-                return self.track(val.clone());
+                let val = self.read_symbol(val);
+                return self.track(val);
             }
         }
         let available = self.collect_symbol_names();
@@ -797,7 +816,8 @@ impl<'a> Evaluator<'a> {
                 if let Some(val) = symtab.get_value(&resolved) {
                     self.count_op()?;
                     self.check_path_format(val, &resolved)?;
-                    return self.track(val.clone());
+                    let val = self.read_symbol(val);
+                    return self.track(val);
                 }
             }
         }
@@ -1724,6 +1744,7 @@ impl<'a> Evaluator<'a> {
             library: self.library,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
+            symbols_as_types: self.symbols_as_types,
         }
     }
 
@@ -1848,17 +1869,79 @@ impl<'a> Evaluator<'a> {
         let body_val = child.evaluate(&lc.elt);
         self.absorb_spend_and_reset(&child, memory_baseline);
         let body_val = body_val?;
-        // The body's type as a list element: the members that can be part
-        // of a built list (`int?` gives `list[int]`; `list[T] |
-        // list[nulltype]` gives `list[list[T]]`). A body that can only be
-        // `null` keeps its type — the comprehension still succeeds when
-        // the iterable is empty.
-        let body_type = unwrap_unresolved(&body_val.expr_type());
-        let body_type = match crate::types::list_element_contribution(&body_type) {
-            Some(t) => crate::types::simplify_joined_list_element(t),
-            None => body_type,
+        // The comprehension's type follows from the body's type alone
+        // (2026-02 Expression Language §1.3.7): `list[T]` when `T` has no
+        // union, `list[T | nulltype]` when it does (an empty run is the
+        // untyped empty list), `list[nulltype]` when the body can only be
+        // `null`. `int?` gives `list[int]`.
+        let list_type = crate::types::comprehension_list_type(&body_val.expr_type());
+        self.track(ExprValue::unresolved(list_type))
+    }
+
+    /// The loop variable for a comprehension over `iterable`
+    /// ([`crate::types::comprehension_var`]), or the error for an
+    /// iterable no value of which can be iterated.
+    fn comprehension_var_of(
+        &self,
+        iterable: &ExprValue,
+    ) -> Result<crate::types::ComprehensionVar, ExpressionError> {
+        match crate::types::comprehension_var(&iterable.expr_type()) {
+            crate::types::ComprehensionVar::NotIterable => {
+                Err(ExpressionError::type_error(format!(
+                    "Cannot iterate over {}",
+                    unwrap_unresolved(&iterable.expr_type())
+                )))
+            }
+            var => Ok(var),
+        }
+    }
+
+    /// The result of a comprehension over a concrete iterable whose filter
+    /// kept no element (2026-02 Expression Language §1.3.7). The type
+    /// follows from the element expression's static type `T`, not from
+    /// the values: an empty `list[T]` when `T` has no union, else (or when
+    /// the iterable can only be `[]`) the untyped empty `list[nulltype]`.
+    ///
+    /// `T` is the type template validation gives the element expression:
+    /// it is evaluated with the loop variable `unresolved(var_type)` and
+    /// every other symbol read as `unresolved(its type)`
+    /// (`symbols_as_types`), so a value it never reads at run time cannot
+    /// fail it. An error is the one validation reports, and propagates.
+    fn empty_comprehension(
+        &mut self,
+        lc: &ast::ExprListComp,
+        var: crate::types::ComprehensionVar,
+        var_name: &str,
+        elem_target: Option<&ExprType>,
+    ) -> Result<ExprValue, ExpressionError> {
+        let crate::types::ComprehensionVar::Typed(var_type) = var else {
+            let empty = ExprValue::make_list_checked(self, Vec::new(), ExprType::NULLTYPE)?;
+            return self.track(empty);
         };
-        self.track(ExprValue::unresolved(ExprType::list(body_type)))
+        let memory_baseline = self.current_memory;
+        let mut tmp = crate::symbol_table::SymbolTable::new();
+        tmp.set(var_name, ExprValue::unresolved(var_type))
+            .map_err(|e| ExpressionError::new(e.to_string()))?;
+        let mut combined: Vec<&SymbolTable> = self.symtabs.to_vec();
+        combined.push(&tmp);
+        let mut child = self.child_evaluator(&combined);
+        child.symbols_as_types = true;
+        let body_val = child.eval_node(&lc.elt, elem_target);
+        self.absorb_spend_and_reset(&child, memory_baseline);
+        let list_type = crate::types::comprehension_list_type(&body_val?.expr_type());
+        let elem = list_type
+            .list_element_type()
+            .cloned()
+            .unwrap_or(ExprType::NULLTYPE);
+        // An empty value needs a concrete element type: a union (or the
+        // `any` of a failed binding's placeholder) has none.
+        let elem = if crate::types::contains_union(&elem) || contains_any(&elem) {
+            ExprType::NULLTYPE
+        } else {
+            elem
+        };
+        let empty = ExprValue::make_list_checked(self, Vec::new(), elem)?;
+        self.track(empty)
     }
 
     fn eval_listcomp(
@@ -1922,10 +2005,15 @@ impl<'a> Evaluator<'a> {
         // the comprehension as a whole is unknown. The iterable is
         // consumed here like everywhere else below.
         if iterable.is_unresolved() {
-            let inner = unwrap_unresolved(&iterable.expr_type());
-            let elem_type = inner.list_element_type().cloned().unwrap_or(ExprType::INT);
             self.current_memory = comprehension_baseline;
-            return self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type);
+            return match self.comprehension_var_of(&iterable)? {
+                crate::types::ComprehensionVar::Typed(elem_type) => {
+                    self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type)
+                }
+                // The iterable can only be `[]`: the body never runs and
+                // is not type-checked (§1.3.7).
+                _ => self.track(ExprValue::unresolved(ExprType::list(ExprType::NULLTYPE))),
+            };
         }
 
         // Iterate the iterable in place — lists via a borrowing ListIter
@@ -2062,14 +2150,20 @@ impl<'a> Evaluator<'a> {
             // runtime filter may exclude could raise a spurious value
             // error (e.g. `[1 // f for f in [0, 1] if f > Task.Param.N]`
             // must not divide by zero here).
-            let elem_type = iterable
-                .expr_type()
-                .list_element_type()
-                .cloned()
-                .unwrap_or(ExprType::INT);
-            return self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type);
+            return match self.comprehension_var_of(&iterable)? {
+                crate::types::ComprehensionVar::Typed(elem_type) => {
+                    self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type)
+                }
+                _ => self.track(ExprValue::unresolved(ExprType::list(ExprType::NULLTYPE))),
+            };
         }
         let result = result.into_vec();
+        // A filter that kept nothing (or an empty iterable): the result's
+        // type comes from the element expression's type, not the values.
+        if result.is_empty() {
+            let var = self.comprehension_var_of(&iterable)?;
+            return self.empty_comprehension(lc, var, &var_name, elem_target.as_ref());
+        }
 
         // Check nesting depth
         for e in &result {
@@ -2093,11 +2187,7 @@ impl<'a> Evaluator<'a> {
             })?;
             return self.track(val);
         }
-        let elem_type = if result.is_empty() {
-            ExprType::NULLTYPE
-        } else {
-            result[0].expr_type()
-        };
+        let elem_type = result[0].expr_type();
         let list = ExprValue::make_list_checked(self, result, elem_type)?;
         self.track(list)
     }
@@ -2183,6 +2273,11 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
         self.regex_cache.insert(pattern.to_string(), re.clone());
         Ok(re)
     }
+}
+
+/// Whether `t` has `any` at any depth.
+fn contains_any(t: &ExprType) -> bool {
+    t.code() == crate::types::TypeCode::Any || t.params().iter().any(contains_any)
 }
 
 /// Unwrap unresolved[T] to T, or return the type as-is if not unresolved.

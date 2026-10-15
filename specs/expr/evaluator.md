@@ -591,14 +591,44 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   job creation as it does at run time (`list[int]` beside `list[string]`),
   though template validation, typing the body once as a union, accepts it.
 - Over an unresolved iterable (or an unresolved filter), the result is
-  `unresolved(list[T])` with `T` the body type's list-element contribution
-  (see [type-system.md § List element join](type-system.md#list-element-join)):
-  a `null` member is dropped (`int?` gives `list[int]`) and the result is
-  simplified as a join result, so `list[nulltype]` yields to a typed list
-  member and `[[] if x > 2 else [Task.Param.S] for x
-  in Param.L]` is `unresolved[list[list[string]]]` at template validation as
-  at job creation. A body that can only be `null` keeps its type (the
-  comprehension still succeeds over an empty iterable).
+  `unresolved(types::comprehension_list_type(body_type))`, the body typed
+  once under an unresolved loop variable (see the result-type rule below).
+  `[[] if x > 2 else [Task.Param.S] for x in Param.L]` at template
+  validation is `unresolved[list[list[string | nulltype] | nulltype]]`: the
+  body's `list[string] | list[nulltype]` is the one list type
+  `list[string | nulltype]` (type-system.md § Lists with union element
+  types), and indexing it twice gives `string`.
+- **Result type** (2026-02 Expression Language §1.3.7). A comprehension's
+  type follows from its parts' types, not from how many elements the filter
+  keeps, so every evaluation stage agrees on an empty result:
+  - The loop variable's type is `types::comprehension_var` of the
+    iterable's type: `E` for `list[E]`, `int` for `range_expr`, `any` for
+    `any`, and for a union the union of its members' element types (a
+    member that cannot be iterated contributes nothing, nor does a
+    `nulltype` element). An iterable that can only be `[]` gives
+    `list[nulltype]` with the body neither run nor type-checked
+    (`[x * 2 for x in []]`). An unresolved iterable no value of which can be
+    iterated fails with "Cannot iterate over `T`", as a concrete one does.
+  - `T` is the body's type without a `nulltype` member, a union of list
+    types read as one list type (`types::comprehension_list_type`). With no
+    union in `T` the comprehension is `list[T]`; with a union it is
+    `list[T | nulltype]`; with nothing left of `T` (the body can only be
+    `null`, or always fails) it is `list[nulltype]`.
+  - A non-empty result over a concrete iterable builds from its values
+    through `make_list`, as above — the elements' type is the one the rule
+    gives when `T` has no union, and the values decide it when `T` has one
+    (`[x if x > 1 else 2.5 for x in L]` is `list[int]` or `list[float]`).
+  - An empty result (`empty_comprehension`) types the body once, with the
+    loop variable unresolved and `symbols_as_types` set so that every
+    symbol it reads is `unresolved(its type)` — the type template
+    validation gives it, never a value it would not read at run time
+    (`[1 // Param.Z for x in L if Param.Z != 0]` with `Param.Z = 0` is an
+    empty `list[int]`). The result is the empty `list[T]` when `T` has no
+    union (or `any`), so `[x for x in [1, 2] if x > 5] + ['a']` fails as
+    `[1] + ['a']` does, and the untyped empty `list[nulltype]` otherwise.
+    An error from the typing is the one template validation reports, and
+    propagates; the typing's spend is absorbed and its footprint reset like
+    an iteration's.
 - Operation count: +1 per iteration
 - Each iteration's child evaluator hands its *spend* — memory
   high-water mark and operation count — back to the parent on **every**
@@ -724,3 +754,9 @@ Key differences:
    between evaluation control flow and function logic.
 4. **Typed list variants** — The evaluator constructs typed list variants directly,
    avoiding the overhead of wrapping each element in a tagged `ExprValue`.
+5. **List comprehension result type** — The Python `expr` branch of
+   `openjd-model-for-python` takes a comprehension's element type from its first
+   result and makes an empty result `list[nulltype]`. The Rust evaluator follows
+   the 2026-02 Expression Language §1.3.7 rule above (an empty result of a
+   comprehension whose element type has no union is a typed empty list). The
+   Python mainline is moving to these Rust bindings rather than being changed.
