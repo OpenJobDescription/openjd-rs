@@ -456,7 +456,6 @@ pub fn check_expression(
             (Ok(sv), Ok(cv)) => {
                 let st = static_type(sv);
                 let ct = cv.expr_type();
-                let boolop = facts.boolop;
                 let mismatch = !fits(cv, &st);
                 let flatten_null = st.to_string().contains("nulltype") && src.contains("flatten");
                 // Every known issue that can explain the mismatch is recorded
@@ -464,13 +463,11 @@ pub fn check_expression(
                 // explains is a new bug.
                 let mut explained: Vec<&'static str> = Vec::new();
                 if mismatch {
-                    if boolop {
-                        explained.push("expr-boolop-static-type");
-                    }
                     if facts.unbound_return || has_type_var(&st) {
                         explained.push("expr-unbound-return-typevar");
                     }
-                    if facts.union && flatten_null {
+                    // The union may come from an untyped `[]` in a conditional branch.
+                    if (facts.union || facts.conditional) && flatten_null {
                         explained.push("expr-flatten-union-static-type");
                     }
                     if facts.union && !flatten_null {
@@ -508,18 +505,10 @@ pub fn check_expression(
                     );
                 }
                 if !sv.is_unresolved() && fmt == PathFormat::host() {
-                    if boolop {
-                        known_issue!(
-                            "expr-boolop-static-type",
-                            sv.equals(cv),
-                            "{src:?}: statically folded to {sv:?} but evaluates to {cv:?}"
-                        );
-                    } else {
-                        oracle!(
-                            sv.equals(cv),
-                            "{src:?}: statically folded to {sv:?} but evaluates to {cv:?}"
-                        );
-                    }
+                    oracle!(
+                        sv.equals(cv),
+                        "{src:?}: statically folded to {sv:?} but evaluates to {cv:?}"
+                    );
                 }
             }
             (Ok(sv), Err(e)) => {
@@ -1023,14 +1012,7 @@ pub fn format_string(data: &[u8]) {
         Ok(sr) => {
             if let Ok(s) = &as_string {
                 let n = s.chars().count();
-                if uses_boolop(text) {
-                    known_issue!(
-                        "expr-boolop-static-type",
-                        n >= sr.min_resolved_string_len,
-                        "{text:?}: static lower bound {} > actual length {n} ({s:?})",
-                        sr.min_resolved_string_len
-                    );
-                } else if target.is_none() || fs.segment_count() != 1 {
+                if target.is_none() || fs.segment_count() != 1 {
                     oracle!(
                         n >= sr.min_resolved_string_len,
                         "{text:?}: static lower bound {} > actual length {n} ({s:?})",
@@ -1039,13 +1021,7 @@ pub fn format_string(data: &[u8]) {
                 }
             }
             if let (Some(sv), Ok(rv)) = (&sr.resolved_value, &resolved) {
-                if fmt == PathFormat::host() && uses_boolop(text) {
-                    known_issue!(
-                        "expr-boolop-static-type",
-                        sv.equals(rv),
-                        "{text:?}: static resolved_value {sv:?} but resolution gives {rv:?}"
-                    );
-                } else if fmt == PathFormat::host() {
+                if fmt == PathFormat::host() {
                     oracle!(
                         sv.equals(rv),
                         "{text:?}: static resolved_value {sv:?} but resolution gives {rv:?}"
