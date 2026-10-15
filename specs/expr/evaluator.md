@@ -569,7 +569,8 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
 - A filter condition that evaluates to an *unresolved* value on a
   concrete element concludes the same way: per-element inclusion is
   undecidable, so any accumulated elements are abandoned and the
-  comprehension returns `unresolved(list[body_type])`, with the body's
+  comprehension concludes as over an unresolved iterable (below), with
+  the body's
   type derived under an unresolved loop variable (evaluating the body
   on a concrete element the runtime filter may exclude could raise a
   spurious value error). This state — iterable concrete, filter
@@ -620,10 +621,15 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     type covers its values (the known `flatten` of a typed empty list, which
     is `list[nulltype]`, does not), and the values decide it otherwise
     (`[x if x > 1 else 2.5 for x in L]` is `list[int]` or `list[float]`).
-  - An empty result (`empty_comprehension`) types the body once, with the
-    loop variable unresolved and `symbols_as_types` set so that every
-    symbol it reads is `unresolved(its type)` — the type template
-    validation gives it, never a value it would not read at run time
+  - An empty result (`empty_comprehension`) types the iterable and then
+    the body once, with `symbols_as_types` set so that every symbol they
+    read is `unresolved(its type)` — the type template validation gives
+    them, never a value. The loop variable takes the element type of the
+    iterable's static type, not of the iterable value that ran
+    (`[x + 1 for x in (Param.L if Task.Param.C else Param.LS)]` with an
+    empty `Param.LS` binds `int | string`, as validation does), falling
+    back to the value's type if the iterable cannot be typed so. A body
+    symbol that is never read at run time cannot fail it
     (`[1 // Param.Z for x in L if Param.Z != 0]` with `Param.Z = 0` is an
     empty `list[int]`). The result is the empty `list[T]` when `T` is a
     single concrete type (`types::is_concrete_element_type`: no union,
@@ -636,15 +642,15 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     `Opt` null is an empty `list[string]`). Where a value's type is narrower
     than the type template validation gave the symbol (a `let` binding of a
     union type), the typing can fail where validation's did not, making run
-    time stricter than validation, never laxer.
+    time stricter than validation. Reading `null` as `any` can instead make
+    run time laxer than the rule: `[Opt for x in L if Opt != None] + [1]`
+    with `Opt` null types the body `any` and is `[1]`, where the rule, with
+    `Opt: string?`, makes it an empty `list[string]` and an error. Template
+    validation, which sees `string?`, accepts it either way, so no stage
+    rejects a run that succeeds.
     An error from the typing is an error of the comprehension, and
-    propagates: the body is type-checked even when it never runs. Over a
-    concrete iterable the loop variable has the iterable's own type, which
-    may be narrower than the one template validation saw (a `list[string]`
-    where validation saw `list[int] | list[string]`), so a typing error can
-    surface here that validation, typing the union, did not report — run
-    time is then stricter than validation, never laxer. The typing's spend
-    is absorbed and its footprint reset like an iteration's.
+    propagates: the body is type-checked even when it never runs. The
+    typing's spend is absorbed and its footprint reset like an iteration's.
   - An element type `T` that is a list of lists (every form of it, for a
     union) is an error, "Lists may be nested at most 2 levels deep",
     located on the comprehension, at every stage and whether or not the

@@ -1937,28 +1937,45 @@ impl<'a> Evaluator<'a> {
     /// The result of a comprehension over a concrete iterable whose filter
     /// kept no element (2026-02 Expression Language §1.3.7). The type
     /// follows from the element expression's static type `T`, not from
-    /// the values: an empty `list[T]` when `T` has no union, else (or when
-    /// the iterable can only be `[]`) the untyped empty `list[nulltype]`.
+    /// the values: an empty `list[T]` when `T` is a single concrete type,
+    /// else (or when the iterable can only be `[]`) the untyped empty
+    /// `list[nulltype]`.
     ///
-    /// `T` is the type template validation gives the element expression:
-    /// it is evaluated with the loop variable `unresolved(var_type)` and
-    /// every other symbol read as `unresolved(its type)`
-    /// (`symbols_as_types`), so a value it never reads at run time cannot
-    /// fail it, and under the caller's list target, as every element of a
+    /// The loop variable's type is the element type of the iterable's
+    /// static type, and `T` the element expression's static type with the
+    /// loop variable of that type: both are evaluated with every symbol read
+    /// as `unresolved(its type)` (`symbols_as_types`), so a value is never
+    /// consulted — not even the iterable's, which may be narrower than its
+    /// static type (`Param.L if Task.Param.C else Param.LS` is a
+    /// `list[int] | list[string]` whichever branch ran). If the iterable
+    /// cannot be typed so, its value's type is used. The element expression
+    /// is typed under the caller's list target, as every element of a
     /// non-empty run is. An error typing it is an error of the
     /// comprehension, and propagates.
     fn empty_comprehension(
         &mut self,
         lc: &ast::ExprListComp,
-        var: crate::types::ComprehensionVar,
+        iterable: &ExprValue,
         var_name: &str,
         elem_target: Option<&ExprType>,
     ) -> Result<ExprValue, ExpressionError> {
+        let memory_baseline = self.current_memory;
+        let static_iterable = {
+            let mut child = self.child_evaluator(self.symtabs);
+            child.symbols_as_types = true;
+            let t = child.eval_node(&lc.generators[0].iter, None);
+            self.absorb_spend_and_reset(&child, memory_baseline);
+            match t {
+                Ok(v) => v,
+                Err(e) if contains_budget_error(&e) => return Err(e),
+                Err(_) => iterable.clone(),
+            }
+        };
+        let var = self.comprehension_var_of(&static_iterable)?;
         let crate::types::ComprehensionVar::Typed(var_type) = var else {
             let empty = ExprValue::make_list_checked(self, Vec::new(), ExprType::NULLTYPE)?;
             return self.track(empty);
         };
-        let memory_baseline = self.current_memory;
         let mut tmp = crate::symbol_table::SymbolTable::new();
         tmp.set(var_name, ExprValue::unresolved(var_type))
             .map_err(|e| ExpressionError::new(e.to_string()))?;
@@ -2201,8 +2218,7 @@ impl<'a> Evaluator<'a> {
         // A filter that kept nothing (or an empty iterable): the result's
         // type comes from the element expression's type, not the values.
         if result.is_empty() {
-            let var = self.comprehension_var_of(&iterable)?;
-            return self.empty_comprehension(lc, var, &var_name, elem_target.as_ref());
+            return self.empty_comprehension(lc, &iterable, &var_name, elem_target.as_ref());
         }
 
         // Check nesting depth

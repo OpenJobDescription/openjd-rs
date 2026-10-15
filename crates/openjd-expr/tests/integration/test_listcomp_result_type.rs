@@ -577,3 +577,65 @@ fn concatenation_with_an_empty_side_has_the_common_type() {
         ],
     );
 }
+
+// ── Audit round 3 ──
+
+#[test]
+fn range_concatenation_with_an_empty_side_has_the_common_type() {
+    // F1: the range overloads took the type from the elements, so a range
+    // and an empty `list[float]` gave `list[int]` (2026-02 §2.1.3:
+    // `range_expr + list[T]` is `list[T]`).
+    let st = SymbolTable::new();
+    for expr in [
+        "[x for x in [1.5] if x > 100] + range_expr('1-2')",
+        "range_expr('1-2') + [x for x in [1.5] if x > 100]",
+    ] {
+        let v = eval(expr, &st);
+        assert_eq!(v.expr_type(), tp("list[float]"), "{expr}");
+        assert_eq!(v.to_display_string(), "[1.0, 2.0]", "{expr}");
+    }
+    let expr = "range_expr('1-2') + [s for s in ['a'] if s == 'z']";
+    assert_err_in(
+        expr,
+        &st,
+        "concrete",
+        &[
+            "Cannot concatenate range_expr and list[string]\n",
+            &format!("  {expr}\n"),
+        ],
+    );
+}
+
+#[test]
+fn sum_of_an_empty_float_list_is_a_float() {
+    // F2: `sum(list[float]) -> float`, but an empty one summed to `int 0`.
+    let st = SymbolTable::new();
+    let v = eval("sum([x for x in [1.5] if x > 100])", &st);
+    assert_eq!(v.expr_type(), ExprType::FLOAT);
+    assert_eq!(v.to_display_string(), "0.0");
+    assert_eq!(
+        eval("sum([x for x in [1] if x > 100])", &st),
+        ExprValue::Int(0)
+    );
+}
+
+#[test]
+fn empty_result_types_the_loop_variable_from_the_iterable_static_type() {
+    // F3: the loop variable took the run's iterable value's type
+    // (`list[string]`), not its static `list[int] | list[string]`, so an
+    // empty run failed typing `x + 1` that validation accepted.
+    let mut rt = states()[2].clone();
+    rt.set("Task.Param.C", ExprValue::Bool(false)).unwrap();
+    rt.set("Param.LS", ExprValue::ListString(vec![], 0))
+        .unwrap();
+    let expr = "[x + 1 for x in (Param.L if Task.Param.C else Param.LS)]";
+    let [p8, _, _] = states();
+    let static_type = eval(expr, &p8).expr_type();
+    let v = eval(expr, &rt);
+    assert_eq!(v.to_display_string(), "[]");
+    assert_eq!(
+        ExprValue::unresolved(v.expr_type()).expr_type(),
+        static_type,
+        "the empty run has the type validation gives it"
+    );
+}

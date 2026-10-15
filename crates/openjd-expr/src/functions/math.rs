@@ -282,7 +282,9 @@ pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 pub fn sum_list(ctx: Ctx, a: &[ExprValue]) -> R {
     if let Some(iter) = a[0].list_iter() {
         let mut int_sum: i64 = 0;
-        let mut is_float = false;
+        // A `list[float]` sums to a float even when empty: the signature
+        // `sum(list[float]) -> float` fixes the type, not the elements seen.
+        let mut is_float = matches!(&a[0], ExprValue::ListFloat(_));
         let mut float_sum: f64 = 0.0;
         for e in iter {
             ctx.count_op()?;

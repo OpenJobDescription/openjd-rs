@@ -676,6 +676,9 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   `s3://bucket/a//b`.
 - **Slicing a `range_expr`** returns `range_expr` for positive step, `list[int]` for
   negative step (§2.1.8)
+- **`sum` of an empty `list[float]`** is the float `0.0`, as its
+  `sum(list[float]) -> float` signature says; an empty `list[int]` (or
+  `list[nulltype]`) sums to the int `0`.
 - **List concatenation** (`__add__` over two lists) gives the common element
   type (2026-02 Expression Language §2.1.3) by the join a list literal holding
   both lists uses (`types::join_list_element`; see [type-system.md § List
@@ -687,4 +690,7 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   the common element type even when one side is empty: each element of
   another type is coerced to it (an empty `list[float]` plus `[1]` is
   `[1.0]`), since `make_list` would otherwise take the type from the
-  elements alone.
+  elements alone. A `range_expr` operand concatenates as a `list[int]`, by
+  the same rule (`range_expr('1-2')` plus an empty `list[float]` is
+  `[1.0, 2.0]`; plus a `list[string]`, empty or not, is "Cannot concatenate
+  range_expr and list[string]").
