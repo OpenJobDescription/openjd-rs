@@ -145,11 +145,15 @@ In short: it deletes the old report, reads the specs/source/tests, compares
 against the Python reference, builds and tests the crate, runs exploratory
 probes, and writes a fresh report at `reports/<crate>-quality-evaluation-report.md`.
 
-The full procedure — including the Python reference branch table, the
-required report structure, and the alignment criteria the skill checks
-— lives in [`skills/eval-crate/SKILL.md`](../../skills/eval-crate/SKILL.md).
-It is short and worth reading directly if you want to understand exactly what
-the agent will do, or to adapt it into a custom variant.
+The full procedure, including the Python reference branch table and the
+required report structure, lives in
+[`skills/eval-crate/SKILL.md`](../../skills/eval-crate/SKILL.md). The criteria
+it applies, along with the evidence, labelling, and severity rules, live in
+[`docs/dev/quality-criteria.md`](quality-criteria.md). That file is
+shared with the `implement-change` skill, so individual changes are audited
+against the same bar the reports use. Both files are short and worth reading
+directly if you want to understand exactly what the agent will do, or to
+adapt the skill into a custom variant.
 
 A run typically takes around ten minutes and produces a report several
 hundred lines long.

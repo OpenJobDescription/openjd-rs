@@ -34,6 +34,13 @@ changed, the spec must reflect it. If the spec changed, the code and tests must 
 
 ## Workflows
 
+Every change, whatever its size, goes through the
+[`implement-change`](skills/implement-change/SKILL.md) skill: implement, run the
+gates, have an independent auditor check the change against
+[`docs/dev/quality-criteria.md`](docs/dev/quality-criteria.md), fix what the audit
+confirms, and repeat until it comes back clean. The workflows below describe
+*what* to change. That skill is *how* each change is made and checked.
+
 ### Making a bug fix or small change
 
 1. Point the agent at the spec and code for the area. A prompt like *"Read
@@ -44,7 +51,11 @@ changed, the spec must reflect it. If the spec changed, the code and tests must 
    in AGENTS.md.
 3. Implement the fix. Update the spec if behavior changed.
 4. Run `cargo clippy --all-features --all-targets --workspace -- -D warnings` and
-   `cargo test --workspace`. These are the minimum before opening a PR.
+   `cargo test --workspace`. These are part of the skill's gate step, which lists
+   the full set.
+5. Commit, then let the `implement-change` audit loop run to a clean round. The
+   skill commits each implement and fix stage separately, and the branch is
+   ready to push once a round comes back clean.
 
 ### Adding a feature from an RFC
 
@@ -136,8 +147,9 @@ better than doing everything in one long session. Good subagent tasks are self-c
 with clear success criteria: implement one finding from a report, port one group of
 Python tests, write the tests for one spec section.
 
-The main session plans, delegates, and validates. Subagents execute. Validation can
-itself be a subagent run, but a human should verify before merge.
+The main session plans, delegates, and validates. Subagents execute. Each
+delegated change still goes through the `implement-change` audit loop, whose
+auditor is itself a subagent. A human should verify before merge.
 
 ## Commands
 

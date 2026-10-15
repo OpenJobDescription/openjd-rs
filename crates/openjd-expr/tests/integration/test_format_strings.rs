@@ -673,6 +673,48 @@ fn static_resolution_unresolved_symbol_coerces_at_type_level() {
 }
 
 #[test]
+fn static_resolution_boolop_after_unresolved_operand_has_no_resolved_value() {
+    // Resolved-value-limits item 25: at gate 2 (`Param.N` concrete,
+    // `Task.Param.I` unresolved) `Task.Param.I or Param.N` used to resolve
+    // to `Param.N`, giving the static value "n=3" — but an int is never
+    // falsy, so run time always produces `Task.Param.I` ("n=2" for 2).
+    let fs = FormatString::new("n={{ Task.Param.I or Param.N }}").unwrap();
+    let gate2 = symtab!(
+        "Param.N" => ExprValue::Int(3),
+        "Task.Param.I" => ExprValue::unresolved(ExprType::INT),
+    );
+    let sr = fs
+        .validate_expressions(&gate2, &FormatStringOptions::new())
+        .unwrap();
+    assert!(sr.resolved_value.is_none());
+    assert_eq!(sr.min_resolved_string_len, 2); // "n="
+    assert_eq!(sr.resolved_type, ExprType::STRING);
+    let run = symtab!(
+        "Param.N" => ExprValue::Int(3),
+        "Task.Param.I" => ExprValue::Int(2),
+    );
+    assert_eq!(
+        fs.resolve_string_with(&run, &FormatStringOptions::new())
+            .unwrap(),
+        "n=2"
+    );
+
+    // When the unresolved operand can never decide (`and` with an int),
+    // the later concrete operand is the run-time result and the static
+    // value stays exact.
+    let fs = FormatString::new("n={{ Task.Param.I and Param.N }}").unwrap();
+    let sr = fs
+        .validate_expressions(&gate2, &FormatStringOptions::new())
+        .unwrap();
+    assert_eq!(sr.resolved_value, Some(ExprValue::String("n=3".into())));
+    assert_eq!(
+        fs.resolve_string_with(&run, &FormatStringOptions::new())
+            .unwrap(),
+        "n=3"
+    );
+}
+
+#[test]
 fn static_resolution_uncoercible_value_fails_validation_like_resolution() {
     // A value that cannot coerce to the target fails resolution, so it
     // must fail validation with the same diagnostic.

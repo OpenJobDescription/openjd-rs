@@ -139,7 +139,14 @@ pub fn parts(path: &str) -> Vec<String> {
     result
 }
 
-/// Join a URI path with child segments.
+/// Join a URI path with a child component.
+///
+/// One trailing slash on `path` is dropped before appending, so
+/// `s3://bucket/dir/` and `s3://bucket/dir` both join to
+/// `s3://bucket/dir/<child>`. A bare authority (`s3://bucket` or
+/// `s3://bucket/`) joins to `s3://bucket/<child>`. Otherwise the path is
+/// opaque: interior empty segments are kept. A non-URI `path` is joined with
+/// a single `/`.
 pub fn join(path: &str, child: &str) -> String {
     let Some(uri) = parse(path) else {
         return format!("{path}/{child}");
@@ -148,6 +155,9 @@ pub fn join(path: &str, child: &str) -> String {
     // Remove trailing empty part (from trailing slash) before appending
     if p.last().is_some_and(|s| s.is_empty()) {
         p.pop();
+    }
+    if p.is_empty() {
+        return format!("{}/{child}", uri.authority);
     }
     format!("{}/{}/{child}", uri.authority, p.join("/"))
 }
@@ -260,6 +270,18 @@ mod tests {
     fn suffix_none() {
         assert_eq!(suffix("s3://bucket/file"), "");
     }
+    #[test]
+    fn suffix_leading_dot_only_is_not_a_suffix() {
+        assert_eq!(suffix("s3://bucket/.hidden"), "");
+    }
+    #[test]
+    fn suffix_trailing_dot_is_not_a_suffix() {
+        assert_eq!(suffix("s3://bucket/foo."), "");
+    }
+    #[test]
+    fn suffix_after_leading_dot() {
+        assert_eq!(suffix("s3://bucket/.config.json"), ".json");
+    }
 
     #[test]
     fn suffixes_compound() {
@@ -277,6 +299,49 @@ mod tests {
     #[test]
     fn stem_no_ext() {
         assert_eq!(stem("s3://bucket/file"), "file");
+    }
+    #[test]
+    fn stem_leading_dot_only_keeps_name() {
+        assert_eq!(stem("s3://bucket/.hidden"), ".hidden");
+    }
+    #[test]
+    fn stem_trailing_dot_keeps_name() {
+        assert_eq!(stem("s3://bucket/foo."), "foo.");
+    }
+    #[test]
+    fn stem_after_leading_dot() {
+        assert_eq!(stem("s3://bucket/.config.json"), ".config");
+    }
+
+    #[test]
+    fn join_basic() {
+        assert_eq!(join("s3://bucket/dir", "file"), "s3://bucket/dir/file");
+    }
+    #[test]
+    fn join_trailing_slash() {
+        assert_eq!(join("s3://bucket/dir/", "file"), "s3://bucket/dir/file");
+    }
+    #[test]
+    fn join_bare_authority() {
+        assert_eq!(join("s3://bucket", "file"), "s3://bucket/file");
+    }
+    #[test]
+    fn join_bare_authority_trailing_slash() {
+        assert_eq!(join("s3://bucket/", "file"), "s3://bucket/file");
+    }
+    #[test]
+    fn join_child_with_segments() {
+        assert_eq!(join("s3://bucket/a", "b/c"), "s3://bucket/a/b/c");
+    }
+    #[test]
+    fn join_keeps_interior_empty_segment() {
+        // URIs are opaque: only the single trailing empty segment left by a
+        // trailing slash is dropped, so `a//` keeps one empty segment.
+        assert_eq!(join("s3://bucket/a//", "x"), "s3://bucket/a//x");
+    }
+    #[test]
+    fn join_not_uri() {
+        assert_eq!(join("/local/dir", "file"), "/local/dir/file");
     }
 
     #[test]
