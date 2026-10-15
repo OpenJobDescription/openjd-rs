@@ -194,9 +194,9 @@ pub(crate) fn check_static_miss(e: &ExpressionError, facts: Facts, msg: impl FnO
         crate::known::hit("expr-ordering-runtime-type-check", msg);
     } else if facts.boolop {
         crate::known::hit("expr-boolop-static-type", msg);
-    } else if facts.unbound_return && is_type_error {
-        crate::known::hit("expr-unbound-return-typevar", msg);
-    } else if is_list_element_mix_error(e) && facts.list_add {
+    } else if (facts.unbound_return && is_type_error)
+        || (is_list_element_mix_error(e) && facts.list_add)
+    {
         crate::known::hit("expr-unbound-return-typevar", msg);
     } else if is_list_element_mix_error(e) && facts.conditional {
         crate::known::hit("expr-conditional-list-element-join", msg);
