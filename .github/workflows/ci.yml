@@ -455,10 +455,16 @@ jobs:
         run: |
           sudo mkdir -p "${TMPDIR}"
           sudo chmod 1777 "${TMPDIR}"
-          # Record the default per-user TMPDIR this runner would otherwise use,
-          # so the override is self-documenting: the tests rely on it being
-          # world-traversable, unlike the default /var/folders/<hash>/T (0700).
-          echo "default TMPDIR mode: $(stat -f '%Lp %N' "${TMPDIR:-/tmp}" 2>/dev/null || true)"
+          # Record the default per-user TMPDIR this runner would otherwise use
+          # alongside the override, so the override is self-documenting: the
+          # tests rely on it being world-traversable, unlike the default
+          # /var/folders/<hash>/T (0700).
+          #
+          # getconf, not ${TMPDIR}: TMPDIR is already the override at job
+          # scope, so statting it reports 1777 and says nothing about the
+          # default this is here to contrast with.
+          echo "default TMPDIR mode:  $(stat -f '%Lp %N' "$(getconf DARWIN_USER_TEMP_DIR)" 2>/dev/null || true)"
+          echo "override TMPDIR mode: $(stat -f '%Lp %N' "${TMPDIR}" 2>/dev/null || true)"
           echo "runner default temp: ${RUNNER_TEMP:-unset}"
       - uses: actions/checkout@v7
       - name: Install rust stable

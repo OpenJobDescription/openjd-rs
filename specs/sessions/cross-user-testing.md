@@ -143,7 +143,7 @@ process user.
 |---|---|
 | `test_cross_user_tempdir_permissions` | Group ownership matches target user's group, mode is 0o770 |
 | `test_cross_user_tempdir_cleanup` | Cleanup works when target user has created files inside |
-| `test_cross_user_tempdir_disjoint_fails` | TempDir with disjoint user (no shared group) fails or has wrong group |
+| `test_cross_user_tempdir_disjoint_fails` | TempDir with disjoint user (no shared group) fails with `PathPermissions`, and leaves no orphaned directory behind |
 
 ## macOS
 
