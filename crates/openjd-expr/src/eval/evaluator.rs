@@ -59,6 +59,15 @@ fn contains_budget_error(err: &ExpressionError) -> bool {
     ) || err.sub_errors().iter().any(contains_budget_error)
 }
 
+/// Did evaluating an attribute's base fail because the base name is not
+/// defined (as opposed to existing but being unusable)?
+fn base_is_undefined(err: &ExpressionError) -> bool {
+    matches!(
+        err.kind(),
+        crate::error::ExpressionErrorKind::UndefinedVariable { .. }
+    )
+}
+
 /// Outcome of evaluating a sub-expression whose failure an enclosing
 /// construct may absorb (see [`Evaluator::eval_speculative`]).
 enum Speculative {
@@ -681,6 +690,10 @@ impl<'a> Evaluator<'a> {
         let value = match self.eval_node(&a.value, None) {
             Ok(v) => v,
             Err(e) if contains_budget_error(&e) => return Err(e),
+            // A base that exists but cannot be used (e.g. a PATH value in the
+            // other path format) keeps its own error; rewriting it as an
+            // undefined `Base.attr` would hide the real problem.
+            Err(e) if dotted_path.is_some() && !base_is_undefined(&e) => return Err(e),
             Err(_) if dotted_path.is_some() => {
                 let path = dotted_path.as_ref().unwrap();
                 let available = self.collect_symbol_names();
