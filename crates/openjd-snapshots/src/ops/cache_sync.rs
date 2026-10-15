@@ -11,6 +11,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct CacheSyncOptions {
     pub max_workers: Option<usize>,
     pub max_memory_bytes: Option<usize>,
@@ -18,11 +22,19 @@ pub struct CacheSyncOptions {
 }
 
 #[derive(Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct CacheSyncResult {
     pub statistics: CacheSyncStatistics,
 }
 
 #[derive(Debug, Default, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct CacheSyncStatistics {
     pub total_objects: usize,
     pub total_bytes: u64,

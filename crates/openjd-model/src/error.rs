@@ -9,6 +9,10 @@
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ModelError {
     /// Structural deserialization failure (bad YAML/JSON, missing fields, wrong types).
     #[error("Validation error: {0}")]
@@ -78,6 +82,10 @@ impl From<openjd_expr::FormatStringValidationError> for ModelError {
 
 /// An element in a validation error path.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum PathElement {
     Field(String),
     Index(usize),
@@ -126,6 +134,10 @@ pub struct DiagnosticSpan {
 
 /// Collects multiple validation errors with structured paths.
 #[derive(Debug, Default)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ValidationErrors {
     pub errors: Vec<ValidationError>,
     /// Model name used for Display formatting (set by `into_result`).
@@ -171,11 +183,19 @@ impl ValidationErrors {
     }
 
     #[must_use]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_empty(&self) -> bool {
         self.errors.is_empty()
     }
 
     #[must_use]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn len(&self) -> usize {
         self.errors.len()
     }
@@ -199,6 +219,10 @@ impl ValidationErrors {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn into_result(self, model_name: &str) -> Result<(), ModelError> {
         if self.errors.is_empty() {
             Ok(())

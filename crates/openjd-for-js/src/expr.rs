@@ -33,6 +33,10 @@ use wasm_bindgen::prelude::*;
 /// Resolves review findings F5 (Medium) and F9 (Low).
 #[derive(Clone, Debug, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JsEvalOptions {
     #[serde(default)]
     pub memory_limit: Option<usize>,
@@ -137,6 +141,10 @@ impl JsExprValue {
 /// Path format: Posix, Windows, or URI. Mirrors [`openjd_expr::PathFormat`].
 #[wasm_bindgen(js_name = "PathFormat")]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum JsPathFormat {
     Posix = 0,
     Windows = 1,
@@ -144,6 +152,10 @@ pub enum JsPathFormat {
 }
 
 impl JsPathFormat {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn into_inner(self) -> openjd_expr::PathFormat {
         match self {
             JsPathFormat::Posix => openjd_expr::PathFormat::Posix,
@@ -152,6 +164,10 @@ impl JsPathFormat {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn from_inner(f: openjd_expr::PathFormat) -> Self {
         match f {
             openjd_expr::PathFormat::Posix => JsPathFormat::Posix,
@@ -172,6 +188,10 @@ pub struct JsPathMappingRule {
 #[wasm_bindgen(js_class = "PathMappingRule")]
 impl JsPathMappingRule {
     #[wasm_bindgen(constructor)]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(
         source_format: JsPathFormat,
         source_path: &str,
@@ -199,6 +219,10 @@ pub struct JsSymbolTable {
 #[allow(clippy::new_without_default)]
 impl JsSymbolTable {
     #[wasm_bindgen(constructor)]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new() -> JsSymbolTable {
         JsSymbolTable {
             inner: openjd_expr::SymbolTable::new(),
@@ -290,6 +314,10 @@ pub struct JsFormatString {
 #[wasm_bindgen(js_class = "FormatString")]
 impl JsFormatString {
     #[wasm_bindgen(constructor)]
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(input: &str) -> Result<JsFormatString, JsError> {
         let fs = openjd_expr::FormatString::new(input).map_err(expr_to_js_error)?;
         Ok(JsFormatString { inner: fs })

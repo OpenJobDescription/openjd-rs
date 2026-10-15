@@ -786,6 +786,10 @@ pub fn register_host_context_functions(
     .expect("bad builtin signature");
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn register_unresolved_host_context_functions(lib: &mut FunctionLibrary) {
     fn unresolved_apply_path_mapping(
         _ctx: &mut dyn crate::function_library::EvalContext,

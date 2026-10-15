@@ -8,7 +8,8 @@ implementation in Rust.
 | Document | Description |
 |----------|-------------|
 | [architecture.md](architecture.md) | Crate structure, module layout, dependency graph, public API surface |
-| [public-api.md](public-api.md) | Authoritative reference for every public type, function, trait, and constant |
+| [public-api.md](public-api.md) | Reference for every public type, function, trait, and constant |
+| [public-api.txt](public-api.txt) | Generated listing of every public item and signature, checked by CI (`scripts/check_public_api.sh`) |
 | [profile.md](profile.md) | ExprProfile: revision/extension/host-context axes, syntax gating, library cache |
 | [type-system.md](type-system.md) | ExprType, TypeCode, type matching, union normalization, type variables |
 | [values.md](values.md) | ExprValue, typed list variants, Float64, memory sizing, coercion |

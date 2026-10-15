@@ -158,6 +158,10 @@ fn is_root_path(path: &str) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct FileEntry {
     pub path: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -181,6 +185,10 @@ pub struct FileEntry {
 }
 
 impl FileEntry {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(path: impl Into<String>) -> Self {
         Self {
             path: normalize_path(&path.into()),
@@ -194,6 +202,10 @@ impl FileEntry {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn file(path: impl Into<String>, size: u64, mtime: u64) -> Self {
         Self {
             size: Some(size),
@@ -202,6 +214,10 @@ impl FileEntry {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn symlink(path: impl Into<String>, target: impl Into<String>) -> Self {
         Self {
             symlink_target: Some(normalize_path(&target.into())),
@@ -209,6 +225,10 @@ impl FileEntry {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn deleted(path: impl Into<String>) -> Self {
         Self {
             deleted: true,
@@ -231,6 +251,10 @@ impl std::fmt::Display for FileEntry {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct DirEntry {
     pub path: String,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -238,6 +262,10 @@ pub struct DirEntry {
 }
 
 impl DirEntry {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(path: impl Into<String>) -> Self {
         Self {
             path: normalize_path(&path.into()),
@@ -245,6 +273,10 @@ impl DirEntry {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn deleted(path: impl Into<String>) -> Self {
         Self {
             path: normalize_path(&path.into()),
@@ -266,12 +298,28 @@ impl std::fmt::Display for DirEntry {
 // --- Marker types ---
 
 #[derive(Clone, Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct Abs;
 #[derive(Clone, Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct Rel;
 #[derive(Clone, Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct Full;
 #[derive(Clone, Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct Diff;
 
 // --- Manifest ---
@@ -291,6 +339,10 @@ pub struct Diff;
 /// on the result to enforce the phantom type constraints at runtime.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct Manifest<P, K> {
     pub hash_alg: HashAlgorithm,
     pub files: Vec<FileEntry>,
@@ -304,13 +356,33 @@ pub struct Manifest<P, K> {
     _phantom: PhantomData<(P, K)>,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub type AbsSnapshot = Manifest<Abs, Full>;
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub type AbsSnapshotDiff = Manifest<Abs, Diff>;
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub type Snapshot = Manifest<Rel, Full>;
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub type SnapshotDiff = Manifest<Rel, Diff>;
 
 // --- Validation traits ---
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub trait ValidatePaths {
     fn validate_path(path: &str) -> crate::Result<()>;
 }
@@ -347,6 +419,10 @@ impl ValidatePaths for Rel {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub trait ValidateKind {
     fn validate_deleted(deleted: bool) -> crate::Result<()>;
 }
@@ -371,6 +447,10 @@ impl ValidateKind for Diff {
 // --- Manifest impl ---
 
 impl<P, K> Manifest<P, K> {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(hash_alg: HashAlgorithm, file_chunk_size_bytes: i64) -> Self {
         Self {
             hash_alg,
@@ -383,22 +463,38 @@ impl<P, K> Manifest<P, K> {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_files(mut self, files: Vec<FileEntry>) -> Self {
         self.files = files;
         self.recompute_total_size();
         self
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_dirs(mut self, dirs: Vec<DirEntry>) -> Self {
         self.dirs = dirs;
         self
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_parent_hash(mut self, hash: Option<String>) -> Self {
         self.parent_manifest_hash = hash;
         self
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn clear_hashes(&mut self) {
         for f in &mut self.files {
             if f.symlink_target.is_none() && !f.deleted {
@@ -408,6 +504,10 @@ impl<P, K> Manifest<P, K> {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn recompute_total_size(&mut self) {
         self.total_size = self
             .files
@@ -514,6 +614,10 @@ impl<P, K> Manifest<P, K> {
 }
 
 impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn validate(&self) -> crate::Result<()> {
         // The chunk size is a manifest-level invariant: either the sentinel
         // WHOLE_FILE_CHUNK_SIZE (-1, meaning "no chunking") or a positive
@@ -648,6 +752,10 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
 // --- SymlinkPolicy ---
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum SymlinkPolicy {
     CollapseEscaping,
     CollapseAll,
@@ -673,6 +781,10 @@ impl std::fmt::Display for SymlinkPolicy {
 // --- ManifestRef trait ---
 
 /// Trait for accessing manifest data regardless of path type (absolute or relative).
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub trait ManifestRef {
     fn files(&self) -> &[FileEntry];
     fn hash_alg(&self) -> HashAlgorithm;
@@ -682,12 +794,20 @@ pub trait ManifestRef {
 // --- Enum wrappers ---
 
 #[derive(Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum AbsManifest {
     Snapshot(AbsSnapshot),
     Diff(AbsSnapshotDiff),
 }
 
 #[derive(Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum RelManifest {
     Snapshot(Snapshot),
     Diff(SnapshotDiff),
@@ -695,6 +815,10 @@ pub enum RelManifest {
 
 macro_rules! impl_manifest_accessors {
     ($name:ident, $snap:ty, $diff:ty) => {
+        #[allow(
+            missing_docs,
+            reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+        )]
         impl $name {
             pub fn files(&self) -> &[FileEntry] {
                 match self {
@@ -753,12 +877,20 @@ impl_manifest_accessors!(RelManifest, Snapshot, SnapshotDiff);
 
 // --- ManifestEntry enum for filter operations ---
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ManifestEntry<'a> {
     File(&'a FileEntry),
     Dir(&'a DirEntry),
 }
 
 impl<'a> ManifestEntry<'a> {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn path(&self) -> &str {
         match self {
             Self::File(f) => &f.path,

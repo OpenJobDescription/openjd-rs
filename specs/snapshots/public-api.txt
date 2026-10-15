@@ -1,0 +1,1341 @@
+pub mod openjd_snapshots
+pub mod openjd_snapshots::codec
+pub enum openjd_snapshots::codec::DecodedManifest
+pub openjd_snapshots::codec::DecodedManifest::AbsSnapshot(openjd_snapshots::manifest::AbsSnapshot)
+pub openjd_snapshots::codec::DecodedManifest::AbsSnapshotDiff(openjd_snapshots::manifest::AbsSnapshotDiff)
+pub openjd_snapshots::codec::DecodedManifest::Snapshot(openjd_snapshots::manifest::Snapshot)
+pub openjd_snapshots::codec::DecodedManifest::SnapshotDiff(openjd_snapshots::manifest::SnapshotDiff)
+impl core::fmt::Debug for openjd_snapshots::codec::DecodedManifest
+pub fn openjd_snapshots::codec::DecodedManifest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum openjd_snapshots::codec::ManifestFormat
+pub openjd_snapshots::codec::ManifestFormat::V2023
+pub openjd_snapshots::codec::ManifestFormat::V2025
+impl core::clone::Clone for openjd_snapshots::codec::ManifestFormat
+pub fn openjd_snapshots::codec::ManifestFormat::clone(&self) -> openjd_snapshots::codec::ManifestFormat
+impl core::cmp::Eq for openjd_snapshots::codec::ManifestFormat
+impl core::cmp::PartialEq for openjd_snapshots::codec::ManifestFormat
+pub fn openjd_snapshots::codec::ManifestFormat::eq(&self, &openjd_snapshots::codec::ManifestFormat) -> bool
+impl core::fmt::Debug for openjd_snapshots::codec::ManifestFormat
+pub fn openjd_snapshots::codec::ManifestFormat::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_snapshots::codec::ManifestFormat
+impl core::marker::StructuralPartialEq for openjd_snapshots::codec::ManifestFormat
+pub fn openjd_snapshots::codec::decode_manifest(&str) -> openjd_snapshots::error::Result<openjd_snapshots::codec::DecodedManifest>
+pub fn openjd_snapshots::codec::decode_v2023(&str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
+pub fn openjd_snapshots::codec::decode_v2023_as_diff(&str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub fn openjd_snapshots::codec::decode_v2025(&str) -> openjd_snapshots::error::Result<openjd_snapshots::codec::DecodedManifest>
+pub fn openjd_snapshots::codec::encode_abs_snapshot_diff_v2025(&openjd_snapshots::manifest::AbsSnapshotDiff) -> openjd_snapshots::error::Result<alloc::string::String>
+pub fn openjd_snapshots::codec::encode_abs_snapshot_v2025(&openjd_snapshots::manifest::AbsSnapshot) -> openjd_snapshots::error::Result<alloc::string::String>
+pub fn openjd_snapshots::codec::encode_snapshot_diff_v2023(&openjd_snapshots::manifest::SnapshotDiff) -> openjd_snapshots::error::Result<alloc::string::String>
+pub fn openjd_snapshots::codec::encode_snapshot_diff_v2025(&openjd_snapshots::manifest::SnapshotDiff) -> openjd_snapshots::error::Result<alloc::string::String>
+pub fn openjd_snapshots::codec::encode_snapshot_v2023(&openjd_snapshots::manifest::Snapshot) -> openjd_snapshots::error::Result<alloc::string::String>
+pub fn openjd_snapshots::codec::encode_snapshot_v2025(&openjd_snapshots::manifest::Snapshot) -> openjd_snapshots::error::Result<alloc::string::String>
+pub fn openjd_snapshots::codec::encode_v2025<P: core::clone::Clone + core::fmt::Debug, K: core::clone::Clone + core::fmt::Debug>(&openjd_snapshots::manifest::Manifest<P, K>, &str) -> openjd_snapshots::error::Result<alloc::string::String>
+pub mod openjd_snapshots::data_cache
+pub enum openjd_snapshots::data_cache::CopyResult
+pub openjd_snapshots::data_cache::CopyResult::NotSupported
+pub openjd_snapshots::data_cache::CopyResult::ServerSideCopy
+impl core::cmp::PartialEq for openjd_snapshots::data_cache::CopyResult
+pub fn openjd_snapshots::data_cache::CopyResult::eq(&self, &openjd_snapshots::data_cache::CopyResult) -> bool
+impl core::fmt::Debug for openjd_snapshots::data_cache::CopyResult
+pub fn openjd_snapshots::data_cache::CopyResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_snapshots::data_cache::CopyResult
+pub struct openjd_snapshots::data_cache::CacheValidationState
+impl openjd_snapshots::data_cache::CacheValidationState
+pub fn openjd_snapshots::data_cache::CacheValidationState::is_invalidated(&self) -> bool
+pub fn openjd_snapshots::data_cache::CacheValidationState::new() -> Self
+impl core::default::Default for openjd_snapshots::data_cache::CacheValidationState
+pub fn openjd_snapshots::data_cache::CacheValidationState::default() -> Self
+pub struct openjd_snapshots::data_cache::FileSystemDataCache
+pub openjd_snapshots::data_cache::FileSystemDataCache::root_path: std::path::PathBuf
+impl openjd_snapshots::data_cache::FileSystemDataCache
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::new(impl core::convert::Into<std::path::PathBuf>) -> openjd_snapshots::error::Result<Self>
+impl openjd_snapshots::data_cache::AsyncDataCache for openjd_snapshots::data_cache::FileSystemDataCache
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::as_multipart(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::MultipartDataCache>
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::as_range_read(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::RangeReadDataCache>
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::copy_from<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 dyn openjd_snapshots::data_cache::AsyncDataCache, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<openjd_snapshots::data_cache::CopyResult>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::copy_object_to_file<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::get_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::multipart_part_size(&self) -> usize
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::object_exists<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<bool>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::object_key(&self, &str, &str) -> alloc::string::String
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::put_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::write_object_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub struct openjd_snapshots::data_cache::S3CopyConfig
+pub openjd_snapshots::data_cache::S3CopyConfig::max_concurrency: usize
+pub openjd_snapshots::data_cache::S3CopyConfig::multipart_threshold: u64
+pub openjd_snapshots::data_cache::S3CopyConfig::part_size: u64
+impl core::clone::Clone for openjd_snapshots::data_cache::S3CopyConfig
+pub fn openjd_snapshots::data_cache::S3CopyConfig::clone(&self) -> openjd_snapshots::data_cache::S3CopyConfig
+impl core::default::Default for openjd_snapshots::data_cache::S3CopyConfig
+pub fn openjd_snapshots::data_cache::S3CopyConfig::default() -> Self
+impl core::fmt::Debug for openjd_snapshots::data_cache::S3CopyConfig
+pub fn openjd_snapshots::data_cache::S3CopyConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::data_cache::S3DataCache
+impl openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::cache_key(&self, &str, &str) -> alloc::string::String
+pub fn openjd_snapshots::data_cache::S3DataCache::check_cache_exists(&self, &str, &str) -> bool
+pub fn openjd_snapshots::data_cache::S3DataCache::client(&self) -> &aws_sdk_s3::client::Client
+pub fn openjd_snapshots::data_cache::S3DataCache::copy_config(&self) -> core::option::Option<&openjd_snapshots::data_cache::S3CopyConfig>
+pub fn openjd_snapshots::data_cache::S3DataCache::expected_bucket_owner(&self) -> core::option::Option<&str>
+pub fn openjd_snapshots::data_cache::S3DataCache::is_cache_validation_invalidated(&self) -> bool
+pub fn openjd_snapshots::data_cache::S3DataCache::new(alloc::string::String, alloc::string::String, aws_sdk_s3::client::Client) -> Self
+pub async fn openjd_snapshots::data_cache::S3DataCache::new_with_auto_account_id(alloc::string::String, alloc::string::String, aws_sdk_s3::client::Client, aws_sdk_sts::client::Client) -> openjd_snapshots::error::Result<Self>
+pub fn openjd_snapshots::data_cache::S3DataCache::record_in_check_cache(&self, &str, &str)
+pub fn openjd_snapshots::data_cache::S3DataCache::with_copy_config(self, openjd_snapshots::data_cache::S3CopyConfig) -> Self
+pub fn openjd_snapshots::data_cache::S3DataCache::with_expected_bucket_owner(self, core::option::Option<alloc::string::String>) -> Self
+pub fn openjd_snapshots::data_cache::S3DataCache::with_force_s3_check(self, bool) -> Self
+pub fn openjd_snapshots::data_cache::S3DataCache::with_multipart_part_size(self, usize) -> Self
+pub fn openjd_snapshots::data_cache::S3DataCache::with_s3_check_cache(self, core::option::Option<alloc::sync::Arc<openjd_snapshots::s3_check_cache::S3CheckCache>>) -> Self
+impl openjd_snapshots::data_cache::AsyncDataCache for openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_snapshots::data_cache::S3DataCache::as_multipart(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::MultipartDataCache>
+pub fn openjd_snapshots::data_cache::S3DataCache::as_range_read(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::RangeReadDataCache>
+pub fn openjd_snapshots::data_cache::S3DataCache::copy_from<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 dyn openjd_snapshots::data_cache::AsyncDataCache, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<openjd_snapshots::data_cache::CopyResult>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::copy_object_to_file<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::get_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::multipart_part_size(&self) -> usize
+pub fn openjd_snapshots::data_cache::S3DataCache::object_exists<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<bool>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::object_key(&self, &str, &str) -> alloc::string::String
+pub fn openjd_snapshots::data_cache::S3DataCache::put_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::write_object_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+impl openjd_snapshots::data_cache::MultipartDataCache for openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::abort_multipart_upload<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::complete_multipart_upload<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str, alloc::vec::Vec<(i32, alloc::string::String)>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::create_multipart_upload<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::upload_part<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str, i32, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+impl openjd_snapshots::data_cache::RangeReadDataCache for openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::get_object_range<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, u64, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::stream_range_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, u64, u64, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub const openjd_snapshots::data_cache::S3_MAX_SINGLE_COPY_BYTES: u64
+pub trait openjd_snapshots::data_cache::AsyncDataCache: core::marker::Send + core::marker::Sync
+pub fn openjd_snapshots::data_cache::AsyncDataCache::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_snapshots::data_cache::AsyncDataCache::as_multipart(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::MultipartDataCache>
+pub fn openjd_snapshots::data_cache::AsyncDataCache::as_range_read(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::RangeReadDataCache>
+pub fn openjd_snapshots::data_cache::AsyncDataCache::copy_from<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 dyn openjd_snapshots::data_cache::AsyncDataCache, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<openjd_snapshots::data_cache::CopyResult>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::AsyncDataCache::copy_object_to_file<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::AsyncDataCache::get_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::AsyncDataCache::multipart_part_size(&self) -> usize
+pub fn openjd_snapshots::data_cache::AsyncDataCache::object_exists<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<bool>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::AsyncDataCache::object_key(&self, &str, &str) -> alloc::string::String
+pub fn openjd_snapshots::data_cache::AsyncDataCache::put_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::AsyncDataCache::write_object_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+impl openjd_snapshots::data_cache::AsyncDataCache for openjd_snapshots::data_cache::FileSystemDataCache
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::as_multipart(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::MultipartDataCache>
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::as_range_read(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::RangeReadDataCache>
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::copy_from<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 dyn openjd_snapshots::data_cache::AsyncDataCache, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<openjd_snapshots::data_cache::CopyResult>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::copy_object_to_file<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::get_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::multipart_part_size(&self) -> usize
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::object_exists<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<bool>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::object_key(&self, &str, &str) -> alloc::string::String
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::put_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::write_object_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+impl openjd_snapshots::data_cache::AsyncDataCache for openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_snapshots::data_cache::S3DataCache::as_multipart(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::MultipartDataCache>
+pub fn openjd_snapshots::data_cache::S3DataCache::as_range_read(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::RangeReadDataCache>
+pub fn openjd_snapshots::data_cache::S3DataCache::copy_from<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 dyn openjd_snapshots::data_cache::AsyncDataCache, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<openjd_snapshots::data_cache::CopyResult>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::copy_object_to_file<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::get_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::multipart_part_size(&self) -> usize
+pub fn openjd_snapshots::data_cache::S3DataCache::object_exists<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<bool>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::object_key(&self, &str, &str) -> alloc::string::String
+pub fn openjd_snapshots::data_cache::S3DataCache::put_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::write_object_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub trait openjd_snapshots::data_cache::MultipartDataCache: openjd_snapshots::data_cache::AsyncDataCache
+pub fn openjd_snapshots::data_cache::MultipartDataCache::abort_multipart_upload<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::MultipartDataCache::complete_multipart_upload<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str, alloc::vec::Vec<(i32, alloc::string::String)>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::MultipartDataCache::create_multipart_upload<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::MultipartDataCache::upload_part<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str, i32, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+impl openjd_snapshots::data_cache::MultipartDataCache for openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::abort_multipart_upload<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::complete_multipart_upload<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str, alloc::vec::Vec<(i32, alloc::string::String)>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::create_multipart_upload<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::upload_part<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str, i32, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub trait openjd_snapshots::data_cache::RangeReadDataCache: openjd_snapshots::data_cache::AsyncDataCache
+pub fn openjd_snapshots::data_cache::RangeReadDataCache::get_object_range<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, u64, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::RangeReadDataCache::stream_range_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, u64, u64, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: core::marker::Sync + 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+impl openjd_snapshots::data_cache::RangeReadDataCache for openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::get_object_range<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, u64, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::stream_range_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, u64, u64, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub mod openjd_snapshots::error
+#[non_exhaustive] pub enum openjd_snapshots::error::SnapshotError
+pub openjd_snapshots::error::SnapshotError::Cache(alloc::string::String)
+pub openjd_snapshots::error::SnapshotError::Cancelled
+pub openjd_snapshots::error::SnapshotError::FileNotFound(alloc::string::String)
+pub openjd_snapshots::error::SnapshotError::Io(core::io::error::Error)
+pub openjd_snapshots::error::SnapshotError::S3(alloc::string::String)
+pub openjd_snapshots::error::SnapshotError::Task(alloc::string::String)
+pub openjd_snapshots::error::SnapshotError::Validation(alloc::string::String)
+impl core::convert::From<core::io::error::Error> for openjd_snapshots::error::SnapshotError
+pub fn openjd_snapshots::error::SnapshotError::from(core::io::error::Error) -> Self
+impl core::error::Error for openjd_snapshots::error::SnapshotError
+pub fn openjd_snapshots::error::SnapshotError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for openjd_snapshots::error::SnapshotError
+pub fn openjd_snapshots::error::SnapshotError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::error::SnapshotError
+pub fn openjd_snapshots::error::SnapshotError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub type openjd_snapshots::error::Result<T> = core::result::Result<T, openjd_snapshots::error::SnapshotError>
+pub mod openjd_snapshots::hash
+pub enum openjd_snapshots::hash::HashAlgorithm
+pub openjd_snapshots::hash::HashAlgorithm::Xxh128
+impl openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::extension(&self) -> &'static str
+impl core::clone::Clone for openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::clone(&self) -> openjd_snapshots::hash::HashAlgorithm
+impl core::cmp::Eq for openjd_snapshots::hash::HashAlgorithm
+impl core::cmp::PartialEq for openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::eq(&self, &openjd_snapshots::hash::HashAlgorithm) -> bool
+impl core::fmt::Debug for openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_snapshots::hash::HashAlgorithm
+impl core::marker::StructuralPartialEq for openjd_snapshots::hash::HashAlgorithm
+impl serde_core::ser::Serialize for openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub const openjd_snapshots::hash::DEFAULT_FILE_CHUNK_SIZE: i64
+pub const openjd_snapshots::hash::DEFAULT_S3_MULTIPART_PART_SIZE: usize
+pub const openjd_snapshots::hash::WHOLE_FILE_CHUNK_SIZE: i64
+pub fn openjd_snapshots::hash::hash_data(&[u8]) -> alloc::string::String
+pub fn openjd_snapshots::hash::hash_file(&std::path::Path) -> core::io::error::Result<alloc::string::String>
+pub fn openjd_snapshots::hash::hash_file_chunked(&std::path::Path, u64, u64) -> core::io::error::Result<alloc::vec::Vec<alloc::string::String>>
+pub fn openjd_snapshots::hash::human_readable_file_size(u64) -> alloc::string::String
+pub mod openjd_snapshots::hash_cache
+pub struct openjd_snapshots::hash_cache::HashCache
+impl openjd_snapshots::hash_cache::HashCache
+pub fn openjd_snapshots::hash_cache::HashCache::get(&self, &std::path::Path, &str, i64, i64) -> core::option::Option<(alloc::string::String, u64)>
+pub fn openjd_snapshots::hash_cache::HashCache::get_if_fresh(&self, &std::path::Path, &str, i64, i64, u64) -> core::option::Option<alloc::string::String>
+pub fn openjd_snapshots::hash_cache::HashCache::new(impl core::convert::AsRef<std::path::Path>) -> openjd_snapshots::error::Result<Self>
+pub fn openjd_snapshots::hash_cache::HashCache::open_default() -> openjd_snapshots::error::Result<Self>
+pub fn openjd_snapshots::hash_cache::HashCache::put(&self, &std::path::Path, &str, i64, i64, &str, u64) -> openjd_snapshots::error::Result<()>
+pub const openjd_snapshots::hash_cache::WHOLE_FILE_RANGE_END: i64
+pub mod openjd_snapshots::manifest
+pub enum openjd_snapshots::manifest::AbsManifest
+pub openjd_snapshots::manifest::AbsManifest::Diff(openjd_snapshots::manifest::AbsSnapshotDiff)
+pub openjd_snapshots::manifest::AbsManifest::Snapshot(openjd_snapshots::manifest::AbsSnapshot)
+impl openjd_snapshots::manifest::AbsManifest
+pub fn openjd_snapshots::manifest::AbsManifest::dirs(&self) -> &[openjd_snapshots::manifest::DirEntry]
+pub fn openjd_snapshots::manifest::AbsManifest::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::AbsManifest::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::AbsManifest::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::manifest::AbsManifest::parent_manifest_hash(&self) -> core::option::Option<&str>
+pub fn openjd_snapshots::manifest::AbsManifest::total_size(&self) -> u64
+impl core::fmt::Debug for openjd_snapshots::manifest::AbsManifest
+pub fn openjd_snapshots::manifest::AbsManifest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl openjd_snapshots::manifest::ManifestRef for openjd_snapshots::manifest::AbsManifest
+pub fn openjd_snapshots::manifest::AbsManifest::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::AbsManifest::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::AbsManifest::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+pub enum openjd_snapshots::manifest::ManifestEntry<'a>
+pub openjd_snapshots::manifest::ManifestEntry::Dir(&'a openjd_snapshots::manifest::DirEntry)
+pub openjd_snapshots::manifest::ManifestEntry::File(&'a openjd_snapshots::manifest::FileEntry)
+impl<'a> openjd_snapshots::manifest::ManifestEntry<'a>
+pub fn openjd_snapshots::manifest::ManifestEntry<'a>::path(&self) -> &str
+pub enum openjd_snapshots::manifest::RelManifest
+pub openjd_snapshots::manifest::RelManifest::Diff(openjd_snapshots::manifest::SnapshotDiff)
+pub openjd_snapshots::manifest::RelManifest::Snapshot(openjd_snapshots::manifest::Snapshot)
+impl openjd_snapshots::manifest::RelManifest
+pub fn openjd_snapshots::manifest::RelManifest::dirs(&self) -> &[openjd_snapshots::manifest::DirEntry]
+pub fn openjd_snapshots::manifest::RelManifest::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::RelManifest::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::RelManifest::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::manifest::RelManifest::parent_manifest_hash(&self) -> core::option::Option<&str>
+pub fn openjd_snapshots::manifest::RelManifest::total_size(&self) -> u64
+impl core::fmt::Debug for openjd_snapshots::manifest::RelManifest
+pub fn openjd_snapshots::manifest::RelManifest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl openjd_snapshots::manifest::ManifestRef for openjd_snapshots::manifest::RelManifest
+pub fn openjd_snapshots::manifest::RelManifest::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::RelManifest::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::RelManifest::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+pub enum openjd_snapshots::manifest::SymlinkPolicy
+pub openjd_snapshots::manifest::SymlinkPolicy::CollapseAll
+pub openjd_snapshots::manifest::SymlinkPolicy::CollapseEscaping
+pub openjd_snapshots::manifest::SymlinkPolicy::ExcludeAll
+pub openjd_snapshots::manifest::SymlinkPolicy::ExcludeEscaping
+pub openjd_snapshots::manifest::SymlinkPolicy::Preserve
+pub openjd_snapshots::manifest::SymlinkPolicy::TransitiveIncludeTargets
+impl core::clone::Clone for openjd_snapshots::manifest::SymlinkPolicy
+pub fn openjd_snapshots::manifest::SymlinkPolicy::clone(&self) -> openjd_snapshots::manifest::SymlinkPolicy
+impl core::cmp::Eq for openjd_snapshots::manifest::SymlinkPolicy
+impl core::cmp::PartialEq for openjd_snapshots::manifest::SymlinkPolicy
+pub fn openjd_snapshots::manifest::SymlinkPolicy::eq(&self, &openjd_snapshots::manifest::SymlinkPolicy) -> bool
+impl core::fmt::Debug for openjd_snapshots::manifest::SymlinkPolicy
+pub fn openjd_snapshots::manifest::SymlinkPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::manifest::SymlinkPolicy
+pub fn openjd_snapshots::manifest::SymlinkPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_snapshots::manifest::SymlinkPolicy
+impl core::marker::StructuralPartialEq for openjd_snapshots::manifest::SymlinkPolicy
+pub struct openjd_snapshots::manifest::Abs
+impl core::clone::Clone for openjd_snapshots::manifest::Abs
+pub fn openjd_snapshots::manifest::Abs::clone(&self) -> openjd_snapshots::manifest::Abs
+impl core::fmt::Debug for openjd_snapshots::manifest::Abs
+pub fn openjd_snapshots::manifest::Abs::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl openjd_snapshots::manifest::ValidatePaths for openjd_snapshots::manifest::Abs
+pub fn openjd_snapshots::manifest::Abs::validate_path(&str) -> openjd_snapshots::error::Result<()>
+pub struct openjd_snapshots::manifest::Diff
+impl core::clone::Clone for openjd_snapshots::manifest::Diff
+pub fn openjd_snapshots::manifest::Diff::clone(&self) -> openjd_snapshots::manifest::Diff
+impl core::fmt::Debug for openjd_snapshots::manifest::Diff
+pub fn openjd_snapshots::manifest::Diff::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl openjd_snapshots::manifest::ValidateKind for openjd_snapshots::manifest::Diff
+pub fn openjd_snapshots::manifest::Diff::validate_deleted(bool) -> openjd_snapshots::error::Result<()>
+pub struct openjd_snapshots::manifest::DirEntry
+pub openjd_snapshots::manifest::DirEntry::deleted: bool
+pub openjd_snapshots::manifest::DirEntry::path: alloc::string::String
+impl openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::deleted(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_snapshots::manifest::DirEntry::new(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::clone(&self) -> openjd_snapshots::manifest::DirEntry
+impl core::cmp::PartialEq for openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::eq(&self, &openjd_snapshots::manifest::DirEntry) -> bool
+impl core::fmt::Debug for openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_snapshots::manifest::DirEntry
+impl serde_core::ser::Serialize for openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct openjd_snapshots::manifest::FileEntry
+pub openjd_snapshots::manifest::FileEntry::chunk_hashes: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub openjd_snapshots::manifest::FileEntry::deleted: bool
+pub openjd_snapshots::manifest::FileEntry::hash: core::option::Option<alloc::string::String>
+pub openjd_snapshots::manifest::FileEntry::mtime: core::option::Option<u64>
+pub openjd_snapshots::manifest::FileEntry::path: alloc::string::String
+pub openjd_snapshots::manifest::FileEntry::runnable: bool
+pub openjd_snapshots::manifest::FileEntry::size: core::option::Option<u64>
+pub openjd_snapshots::manifest::FileEntry::symlink_target: core::option::Option<alloc::string::String>
+impl openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::deleted(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_snapshots::manifest::FileEntry::file(impl core::convert::Into<alloc::string::String>, u64, u64) -> Self
+pub fn openjd_snapshots::manifest::FileEntry::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_snapshots::manifest::FileEntry::symlink(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::clone(&self) -> openjd_snapshots::manifest::FileEntry
+impl core::cmp::PartialEq for openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::eq(&self, &openjd_snapshots::manifest::FileEntry) -> bool
+impl core::fmt::Debug for openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_snapshots::manifest::FileEntry
+impl serde_core::ser::Serialize for openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct openjd_snapshots::manifest::Full
+impl core::clone::Clone for openjd_snapshots::manifest::Full
+pub fn openjd_snapshots::manifest::Full::clone(&self) -> openjd_snapshots::manifest::Full
+impl core::fmt::Debug for openjd_snapshots::manifest::Full
+pub fn openjd_snapshots::manifest::Full::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl openjd_snapshots::manifest::ValidateKind for openjd_snapshots::manifest::Full
+pub fn openjd_snapshots::manifest::Full::validate_deleted(bool) -> openjd_snapshots::error::Result<()>
+pub struct openjd_snapshots::manifest::Manifest<P, K>
+pub openjd_snapshots::manifest::Manifest::dirs: alloc::vec::Vec<openjd_snapshots::manifest::DirEntry>
+pub openjd_snapshots::manifest::Manifest::file_chunk_size_bytes: i64
+pub openjd_snapshots::manifest::Manifest::files: alloc::vec::Vec<openjd_snapshots::manifest::FileEntry>
+pub openjd_snapshots::manifest::Manifest::hash_alg: openjd_snapshots::hash::HashAlgorithm
+pub openjd_snapshots::manifest::Manifest::parent_manifest_hash: core::option::Option<alloc::string::String>
+pub openjd_snapshots::manifest::Manifest::total_size: u64
+impl<P, K> openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::clear_hashes(&mut self)
+pub fn openjd_snapshots::manifest::Manifest<P, K>::common_root(&self) -> core::option::Option<alloc::string::String>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::new(openjd_snapshots::hash::HashAlgorithm, i64) -> Self
+pub fn openjd_snapshots::manifest::Manifest<P, K>::recompute_total_size(&mut self)
+pub fn openjd_snapshots::manifest::Manifest<P, K>::with_dirs(self, alloc::vec::Vec<openjd_snapshots::manifest::DirEntry>) -> Self
+pub fn openjd_snapshots::manifest::Manifest<P, K>::with_files(self, alloc::vec::Vec<openjd_snapshots::manifest::FileEntry>) -> Self
+pub fn openjd_snapshots::manifest::Manifest<P, K>::with_parent_hash(self, core::option::Option<alloc::string::String>) -> Self
+impl<P: openjd_snapshots::manifest::ValidatePaths, K: openjd_snapshots::manifest::ValidateKind> openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::validate(&self) -> openjd_snapshots::error::Result<()>
+impl<'de, P, K> serde_core::de::Deserialize<'de> for openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl<P, K> serde_core::ser::Serialize for openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<P: core::clone::Clone, K: core::clone::Clone> core::clone::Clone for openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::clone(&self) -> openjd_snapshots::manifest::Manifest<P, K>
+impl<P: core::fmt::Debug, K: core::fmt::Debug> core::fmt::Debug for openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::manifest::Rel
+impl core::clone::Clone for openjd_snapshots::manifest::Rel
+pub fn openjd_snapshots::manifest::Rel::clone(&self) -> openjd_snapshots::manifest::Rel
+impl core::fmt::Debug for openjd_snapshots::manifest::Rel
+pub fn openjd_snapshots::manifest::Rel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl openjd_snapshots::manifest::ValidatePaths for openjd_snapshots::manifest::Rel
+pub fn openjd_snapshots::manifest::Rel::validate_path(&str) -> openjd_snapshots::error::Result<()>
+pub trait openjd_snapshots::manifest::ManifestRef
+pub fn openjd_snapshots::manifest::ManifestRef::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::ManifestRef::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::ManifestRef::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+impl openjd_snapshots::manifest::ManifestRef for openjd_snapshots::manifest::AbsManifest
+pub fn openjd_snapshots::manifest::AbsManifest::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::AbsManifest::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::AbsManifest::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+impl openjd_snapshots::manifest::ManifestRef for openjd_snapshots::manifest::RelManifest
+pub fn openjd_snapshots::manifest::RelManifest::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::RelManifest::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::RelManifest::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+pub trait openjd_snapshots::manifest::ValidateKind
+pub fn openjd_snapshots::manifest::ValidateKind::validate_deleted(bool) -> openjd_snapshots::error::Result<()>
+impl openjd_snapshots::manifest::ValidateKind for openjd_snapshots::manifest::Diff
+pub fn openjd_snapshots::manifest::Diff::validate_deleted(bool) -> openjd_snapshots::error::Result<()>
+impl openjd_snapshots::manifest::ValidateKind for openjd_snapshots::manifest::Full
+pub fn openjd_snapshots::manifest::Full::validate_deleted(bool) -> openjd_snapshots::error::Result<()>
+pub trait openjd_snapshots::manifest::ValidatePaths
+pub fn openjd_snapshots::manifest::ValidatePaths::validate_path(&str) -> openjd_snapshots::error::Result<()>
+impl openjd_snapshots::manifest::ValidatePaths for openjd_snapshots::manifest::Abs
+pub fn openjd_snapshots::manifest::Abs::validate_path(&str) -> openjd_snapshots::error::Result<()>
+impl openjd_snapshots::manifest::ValidatePaths for openjd_snapshots::manifest::Rel
+pub fn openjd_snapshots::manifest::Rel::validate_path(&str) -> openjd_snapshots::error::Result<()>
+pub type openjd_snapshots::manifest::AbsSnapshot = openjd_snapshots::manifest::Manifest<openjd_snapshots::manifest::Abs, openjd_snapshots::manifest::Full>
+pub type openjd_snapshots::manifest::AbsSnapshotDiff = openjd_snapshots::manifest::Manifest<openjd_snapshots::manifest::Abs, openjd_snapshots::manifest::Diff>
+pub type openjd_snapshots::manifest::Snapshot = openjd_snapshots::manifest::Manifest<openjd_snapshots::manifest::Rel, openjd_snapshots::manifest::Full>
+pub type openjd_snapshots::manifest::SnapshotDiff = openjd_snapshots::manifest::Manifest<openjd_snapshots::manifest::Rel, openjd_snapshots::manifest::Diff>
+pub mod openjd_snapshots::ops
+pub mod openjd_snapshots::ops::cache_sync
+pub struct openjd_snapshots::ops::cache_sync::CacheSyncOptions
+pub openjd_snapshots::ops::cache_sync::CacheSyncOptions::max_memory_bytes: core::option::Option<usize>
+pub openjd_snapshots::ops::cache_sync::CacheSyncOptions::max_workers: core::option::Option<usize>
+pub openjd_snapshots::ops::cache_sync::CacheSyncOptions::on_progress: core::option::Option<alloc::boxed::Box<openjd_snapshots::ops::ProgressFn<openjd_snapshots::ops::cache_sync::CacheSyncStatistics>>>
+impl core::default::Default for openjd_snapshots::ops::cache_sync::CacheSyncOptions
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncOptions::default() -> openjd_snapshots::ops::cache_sync::CacheSyncOptions
+pub struct openjd_snapshots::ops::cache_sync::CacheSyncResult
+pub openjd_snapshots::ops::cache_sync::CacheSyncResult::statistics: openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::cache_sync::CacheSyncResult
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+pub openjd_snapshots::ops::cache_sync::CacheSyncStatistics::copied_bytes: u64
+pub openjd_snapshots::ops::cache_sync::CacheSyncStatistics::copied_objects: usize
+pub openjd_snapshots::ops::cache_sync::CacheSyncStatistics::progress: f64
+pub openjd_snapshots::ops::cache_sync::CacheSyncStatistics::progress_message: alloc::string::String
+pub openjd_snapshots::ops::cache_sync::CacheSyncStatistics::rate: f64
+pub openjd_snapshots::ops::cache_sync::CacheSyncStatistics::skipped_bytes: u64
+pub openjd_snapshots::ops::cache_sync::CacheSyncStatistics::skipped_objects: usize
+pub openjd_snapshots::ops::cache_sync::CacheSyncStatistics::total_bytes: u64
+pub openjd_snapshots::ops::cache_sync::CacheSyncStatistics::total_objects: usize
+pub openjd_snapshots::ops::cache_sync::CacheSyncStatistics::total_time: f64
+impl core::clone::Clone for openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncStatistics::clone(&self) -> openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+impl core::default::Default for openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncStatistics::default() -> openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub async fn openjd_snapshots::ops::cache_sync::cache_sync_manifest(&[&dyn openjd_snapshots::manifest::ManifestRef], alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, openjd_snapshots::ops::cache_sync::CacheSyncOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::cache_sync::CacheSyncResult>
+pub mod openjd_snapshots::ops::collect
+pub struct openjd_snapshots::ops::collect::CollectOptions
+pub openjd_snapshots::ops::collect::CollectOptions::file_chunk_size_bytes: core::option::Option<i64>
+pub openjd_snapshots::ops::collect::CollectOptions::optional_filenames: alloc::vec::Vec<std::path::PathBuf>
+pub openjd_snapshots::ops::collect::CollectOptions::symlink_policy: openjd_snapshots::manifest::SymlinkPolicy
+impl core::clone::Clone for openjd_snapshots::ops::collect::CollectOptions
+pub fn openjd_snapshots::ops::collect::CollectOptions::clone(&self) -> openjd_snapshots::ops::collect::CollectOptions
+impl core::default::Default for openjd_snapshots::ops::collect::CollectOptions
+pub fn openjd_snapshots::ops::collect::CollectOptions::default() -> Self
+impl core::fmt::Debug for openjd_snapshots::ops::collect::CollectOptions
+pub fn openjd_snapshots::ops::collect::CollectOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn openjd_snapshots::ops::collect::collect_abs_snapshot(&[impl core::convert::AsRef<std::path::Path>], &[impl core::convert::AsRef<std::path::Path>], openjd_snapshots::ops::collect::CollectOptions) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::AbsSnapshot>
+pub mod openjd_snapshots::ops::compose
+pub fn openjd_snapshots::ops::compose::compose_diffs<P: core::clone::Clone>(&[&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>]) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>>
+pub fn openjd_snapshots::ops::compose::compose_snapshot_with_diffs<P: core::clone::Clone>(&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>, &[&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>]) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>>
+pub mod openjd_snapshots::ops::diff
+pub struct openjd_snapshots::ops::diff::DiffOptions
+pub openjd_snapshots::ops::diff::DiffOptions::ignore_hashes: bool
+pub openjd_snapshots::ops::diff::DiffOptions::parent_manifest_hash: core::option::Option<alloc::string::String>
+pub openjd_snapshots::ops::diff::DiffOptions::preserve_runnable: bool
+impl core::default::Default for openjd_snapshots::ops::diff::DiffOptions
+pub fn openjd_snapshots::ops::diff::DiffOptions::default() -> openjd_snapshots::ops::diff::DiffOptions
+pub fn openjd_snapshots::ops::diff::diff_snapshots<P: core::clone::Clone>(&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>, &openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>, &openjd_snapshots::ops::diff::DiffOptions) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>>
+pub fn openjd_snapshots::ops::diff::entries_differ(&openjd_snapshots::manifest::FileEntry, &openjd_snapshots::manifest::FileEntry, bool, bool) -> bool
+pub mod openjd_snapshots::ops::download
+pub enum openjd_snapshots::ops::download::FileConflictResolution
+pub openjd_snapshots::ops::download::FileConflictResolution::CreateCopy
+pub openjd_snapshots::ops::download::FileConflictResolution::Overwrite
+pub openjd_snapshots::ops::download::FileConflictResolution::Skip
+impl core::clone::Clone for openjd_snapshots::ops::download::FileConflictResolution
+pub fn openjd_snapshots::ops::download::FileConflictResolution::clone(&self) -> openjd_snapshots::ops::download::FileConflictResolution
+impl core::cmp::Eq for openjd_snapshots::ops::download::FileConflictResolution
+impl core::cmp::PartialEq for openjd_snapshots::ops::download::FileConflictResolution
+pub fn openjd_snapshots::ops::download::FileConflictResolution::eq(&self, &openjd_snapshots::ops::download::FileConflictResolution) -> bool
+impl core::fmt::Debug for openjd_snapshots::ops::download::FileConflictResolution
+pub fn openjd_snapshots::ops::download::FileConflictResolution::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_snapshots::ops::download::FileConflictResolution
+impl core::marker::StructuralPartialEq for openjd_snapshots::ops::download::FileConflictResolution
+pub struct openjd_snapshots::ops::download::DownloadOptions
+pub openjd_snapshots::ops::download::DownloadOptions::apply_deletes: bool
+pub openjd_snapshots::ops::download::DownloadOptions::file_conflict_resolution: openjd_snapshots::ops::download::FileConflictResolution
+pub openjd_snapshots::ops::download::DownloadOptions::hash_cache: core::option::Option<alloc::sync::Arc<openjd_snapshots::hash_cache::HashCache>>
+pub openjd_snapshots::ops::download::DownloadOptions::max_memory_bytes: core::option::Option<usize>
+pub openjd_snapshots::ops::download::DownloadOptions::max_workers: core::option::Option<usize>
+pub openjd_snapshots::ops::download::DownloadOptions::on_progress: core::option::Option<alloc::boxed::Box<openjd_snapshots::ops::ProgressFn<openjd_snapshots::ops::download::DownloadStatistics>>>
+pub openjd_snapshots::ops::download::DownloadOptions::symlink_policy: openjd_snapshots::manifest::SymlinkPolicy
+impl core::default::Default for openjd_snapshots::ops::download::DownloadOptions
+pub fn openjd_snapshots::ops::download::DownloadOptions::default() -> Self
+pub struct openjd_snapshots::ops::download::DownloadResult
+pub openjd_snapshots::ops::download::DownloadResult::manifest: openjd_snapshots::manifest::AbsManifest
+pub openjd_snapshots::ops::download::DownloadResult::statistics: openjd_snapshots::ops::download::DownloadStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::download::DownloadResult
+pub fn openjd_snapshots::ops::download::DownloadResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::download::DownloadStatistics
+pub openjd_snapshots::ops::download::DownloadStatistics::downloaded_bytes: u64
+pub openjd_snapshots::ops::download::DownloadStatistics::downloaded_files: usize
+pub openjd_snapshots::ops::download::DownloadStatistics::progress: f64
+pub openjd_snapshots::ops::download::DownloadStatistics::progress_message: alloc::string::String
+pub openjd_snapshots::ops::download::DownloadStatistics::rate: f64
+pub openjd_snapshots::ops::download::DownloadStatistics::skipped_bytes: u64
+pub openjd_snapshots::ops::download::DownloadStatistics::skipped_files: usize
+pub openjd_snapshots::ops::download::DownloadStatistics::total_bytes: u64
+pub openjd_snapshots::ops::download::DownloadStatistics::total_files: usize
+pub openjd_snapshots::ops::download::DownloadStatistics::total_time: f64
+impl core::clone::Clone for openjd_snapshots::ops::download::DownloadStatistics
+pub fn openjd_snapshots::ops::download::DownloadStatistics::clone(&self) -> openjd_snapshots::ops::download::DownloadStatistics
+impl core::default::Default for openjd_snapshots::ops::download::DownloadStatistics
+pub fn openjd_snapshots::ops::download::DownloadStatistics::default() -> openjd_snapshots::ops::download::DownloadStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::download::DownloadStatistics
+pub fn openjd_snapshots::ops::download::DownloadStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub async fn openjd_snapshots::ops::download::download_abs_manifest(&openjd_snapshots::manifest::AbsManifest, alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, openjd_snapshots::ops::download::DownloadOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::download::DownloadResult>
+pub mod openjd_snapshots::ops::filter
+pub struct openjd_snapshots::ops::filter::IncludeExcludePathsFilter
+impl openjd_snapshots::ops::filter::IncludeExcludePathsFilter
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::matches(&self, &openjd_snapshots::manifest::ManifestEntry<'_>) -> bool
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::matches_path(&self, &str) -> bool
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::new(&[&str], &[&str]) -> openjd_snapshots::error::Result<Self>
+impl core::fmt::Debug for openjd_snapshots::ops::filter::IncludeExcludePathsFilter
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::ops::filter::IncludeExcludePathsFilter
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn openjd_snapshots::ops::filter::filter_manifest<P: core::clone::Clone, K: core::clone::Clone>(&openjd_snapshots::manifest::Manifest<P, K>, &dyn core::ops::function::Fn(&openjd_snapshots::manifest::ManifestEntry<'_>) -> bool) -> openjd_snapshots::manifest::Manifest<P, K>
+pub mod openjd_snapshots::ops::hash_op
+pub struct openjd_snapshots::ops::hash_op::HashOptions
+pub openjd_snapshots::ops::hash_op::HashOptions::file_chunk_size_bytes: core::option::Option<i64>
+pub openjd_snapshots::ops::hash_op::HashOptions::force_rehash: bool
+pub openjd_snapshots::ops::hash_op::HashOptions::hash_cache: core::option::Option<alloc::sync::Arc<openjd_snapshots::hash_cache::HashCache>>
+pub openjd_snapshots::ops::hash_op::HashOptions::max_workers: core::option::Option<usize>
+pub openjd_snapshots::ops::hash_op::HashOptions::on_progress: core::option::Option<alloc::boxed::Box<openjd_snapshots::ops::ProgressFn<openjd_snapshots::ops::hash_op::HashStatistics>>>
+impl core::default::Default for openjd_snapshots::ops::hash_op::HashOptions
+pub fn openjd_snapshots::ops::hash_op::HashOptions::default() -> openjd_snapshots::ops::hash_op::HashOptions
+pub struct openjd_snapshots::ops::hash_op::HashResult<M>
+pub openjd_snapshots::ops::hash_op::HashResult::manifest: M
+pub openjd_snapshots::ops::hash_op::HashResult::statistics: openjd_snapshots::ops::hash_op::HashStatistics
+impl<M: core::fmt::Debug> core::fmt::Debug for openjd_snapshots::ops::hash_op::HashResult<M>
+pub fn openjd_snapshots::ops::hash_op::HashResult<M>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::hash_op::HashStatistics
+pub openjd_snapshots::ops::hash_op::HashStatistics::hashed_bytes: u64
+pub openjd_snapshots::ops::hash_op::HashStatistics::hashed_files: usize
+pub openjd_snapshots::ops::hash_op::HashStatistics::progress: f64
+pub openjd_snapshots::ops::hash_op::HashStatistics::progress_message: alloc::string::String
+pub openjd_snapshots::ops::hash_op::HashStatistics::rate: f64
+pub openjd_snapshots::ops::hash_op::HashStatistics::skipped_bytes: u64
+pub openjd_snapshots::ops::hash_op::HashStatistics::skipped_files: usize
+pub openjd_snapshots::ops::hash_op::HashStatistics::total_bytes: u64
+pub openjd_snapshots::ops::hash_op::HashStatistics::total_files: usize
+pub openjd_snapshots::ops::hash_op::HashStatistics::total_time: f64
+impl core::clone::Clone for openjd_snapshots::ops::hash_op::HashStatistics
+pub fn openjd_snapshots::ops::hash_op::HashStatistics::clone(&self) -> openjd_snapshots::ops::hash_op::HashStatistics
+impl core::default::Default for openjd_snapshots::ops::hash_op::HashStatistics
+pub fn openjd_snapshots::ops::hash_op::HashStatistics::default() -> openjd_snapshots::ops::hash_op::HashStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::hash_op::HashStatistics
+pub fn openjd_snapshots::ops::hash_op::HashStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub fn openjd_snapshots::ops::hash_op::hash_abs_manifest(&openjd_snapshots::manifest::AbsManifest, openjd_snapshots::ops::hash_op::HashOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::hash_op::HashResult<openjd_snapshots::manifest::AbsManifest>>
+pub fn openjd_snapshots::ops::hash_op::hash_abs_snapshot(&openjd_snapshots::manifest::AbsSnapshot, openjd_snapshots::ops::hash_op::HashOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::hash_op::HashResult<openjd_snapshots::manifest::AbsSnapshot>>
+pub fn openjd_snapshots::ops::hash_op::hash_abs_snapshot_diff(&openjd_snapshots::manifest::AbsSnapshotDiff, openjd_snapshots::ops::hash_op::HashOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::hash_op::HashResult<openjd_snapshots::manifest::AbsSnapshotDiff>>
+pub mod openjd_snapshots::ops::hash_upload
+pub struct openjd_snapshots::ops::hash_upload::HashUploadOptions
+pub openjd_snapshots::ops::hash_upload::HashUploadOptions::file_chunk_size_bytes: core::option::Option<i64>
+pub openjd_snapshots::ops::hash_upload::HashUploadOptions::force_rehash: bool
+pub openjd_snapshots::ops::hash_upload::HashUploadOptions::hash_cache: core::option::Option<alloc::sync::Arc<openjd_snapshots::hash_cache::HashCache>>
+pub openjd_snapshots::ops::hash_upload::HashUploadOptions::max_memory_bytes: core::option::Option<usize>
+pub openjd_snapshots::ops::hash_upload::HashUploadOptions::max_workers: core::option::Option<usize>
+pub openjd_snapshots::ops::hash_upload::HashUploadOptions::on_progress: core::option::Option<alloc::boxed::Box<openjd_snapshots::ops::ProgressFn<openjd_snapshots::ops::hash_upload::UploadStatistics>>>
+impl core::default::Default for openjd_snapshots::ops::hash_upload::HashUploadOptions
+pub fn openjd_snapshots::ops::hash_upload::HashUploadOptions::default() -> openjd_snapshots::ops::hash_upload::HashUploadOptions
+pub struct openjd_snapshots::ops::hash_upload::UploadResult
+pub openjd_snapshots::ops::hash_upload::UploadResult::manifest: openjd_snapshots::manifest::AbsManifest
+pub openjd_snapshots::ops::hash_upload::UploadResult::statistics: openjd_snapshots::ops::hash_upload::UploadStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::hash_upload::UploadResult
+pub fn openjd_snapshots::ops::hash_upload::UploadResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::hash_upload::UploadStatistics
+pub openjd_snapshots::ops::hash_upload::UploadStatistics::hashed_bytes: u64
+pub openjd_snapshots::ops::hash_upload::UploadStatistics::hashed_files: usize
+pub openjd_snapshots::ops::hash_upload::UploadStatistics::progress: f64
+pub openjd_snapshots::ops::hash_upload::UploadStatistics::progress_message: alloc::string::String
+pub openjd_snapshots::ops::hash_upload::UploadStatistics::rate: f64
+pub openjd_snapshots::ops::hash_upload::UploadStatistics::skipped_bytes: u64
+pub openjd_snapshots::ops::hash_upload::UploadStatistics::skipped_files: usize
+pub openjd_snapshots::ops::hash_upload::UploadStatistics::total_bytes: u64
+pub openjd_snapshots::ops::hash_upload::UploadStatistics::total_files: usize
+pub openjd_snapshots::ops::hash_upload::UploadStatistics::total_time: f64
+pub openjd_snapshots::ops::hash_upload::UploadStatistics::uploaded_bytes: u64
+pub openjd_snapshots::ops::hash_upload::UploadStatistics::uploaded_files: usize
+impl core::clone::Clone for openjd_snapshots::ops::hash_upload::UploadStatistics
+pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::clone(&self) -> openjd_snapshots::ops::hash_upload::UploadStatistics
+impl core::default::Default for openjd_snapshots::ops::hash_upload::UploadStatistics
+pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::default() -> openjd_snapshots::ops::hash_upload::UploadStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::hash_upload::UploadStatistics
+pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub async fn openjd_snapshots::ops::hash_upload::hash_upload_abs_manifest(&openjd_snapshots::manifest::AbsManifest, alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, openjd_snapshots::ops::hash_upload::HashUploadOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::hash_upload::UploadResult>
+pub mod openjd_snapshots::ops::join
+pub fn openjd_snapshots::ops::join::join_manifest(&openjd_snapshots::manifest::RelManifest, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::AbsManifest>
+pub fn openjd_snapshots::ops::join::join_manifest_rel(&openjd_snapshots::manifest::RelManifest, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::RelManifest>
+pub fn openjd_snapshots::ops::join::join_snapshot(&openjd_snapshots::manifest::Snapshot, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::AbsSnapshot>
+pub fn openjd_snapshots::ops::join::join_snapshot_diff(&openjd_snapshots::manifest::SnapshotDiff, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::AbsSnapshotDiff>
+pub fn openjd_snapshots::ops::join::join_snapshot_diff_rel(&openjd_snapshots::manifest::SnapshotDiff, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub fn openjd_snapshots::ops::join::join_snapshot_rel(&openjd_snapshots::manifest::Snapshot, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
+pub mod openjd_snapshots::ops::partition
+pub struct openjd_snapshots::ops::partition::PartitionOptions
+pub openjd_snapshots::ops::partition::PartitionOptions::referenced_paths: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub openjd_snapshots::ops::partition::PartitionOptions::roots: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub openjd_snapshots::ops::partition::PartitionOptions::symlink_policy: openjd_snapshots::manifest::SymlinkPolicy
+impl core::default::Default for openjd_snapshots::ops::partition::PartitionOptions
+pub fn openjd_snapshots::ops::partition::PartitionOptions::default() -> Self
+pub fn openjd_snapshots::ops::partition::partition_manifest(&openjd_snapshots::manifest::AbsSnapshot, &openjd_snapshots::ops::partition::PartitionOptions) -> openjd_snapshots::error::Result<alloc::vec::Vec<(alloc::string::String, openjd_snapshots::manifest::Snapshot)>>
+pub fn openjd_snapshots::ops::partition::partition_rel_manifest(&openjd_snapshots::manifest::Snapshot, &openjd_snapshots::ops::partition::PartitionOptions) -> openjd_snapshots::error::Result<alloc::vec::Vec<(alloc::string::String, openjd_snapshots::manifest::Snapshot)>>
+pub mod openjd_snapshots::ops::subtree
+pub fn openjd_snapshots::ops::subtree::subtree_manifest(&openjd_snapshots::manifest::AbsManifest, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::RelManifest>
+pub fn openjd_snapshots::ops::subtree::subtree_rel_manifest(&openjd_snapshots::manifest::RelManifest, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::RelManifest>
+pub fn openjd_snapshots::ops::subtree::subtree_rel_snapshot(&openjd_snapshots::manifest::Snapshot, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
+pub fn openjd_snapshots::ops::subtree::subtree_rel_snapshot_diff(&openjd_snapshots::manifest::SnapshotDiff, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub fn openjd_snapshots::ops::subtree::subtree_snapshot(&openjd_snapshots::manifest::AbsSnapshot, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
+pub fn openjd_snapshots::ops::subtree::subtree_snapshot_diff(&openjd_snapshots::manifest::AbsSnapshotDiff, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub enum openjd_snapshots::ops::FileConflictResolution
+pub openjd_snapshots::ops::FileConflictResolution::CreateCopy
+pub openjd_snapshots::ops::FileConflictResolution::Overwrite
+pub openjd_snapshots::ops::FileConflictResolution::Skip
+impl core::clone::Clone for openjd_snapshots::ops::download::FileConflictResolution
+pub fn openjd_snapshots::ops::download::FileConflictResolution::clone(&self) -> openjd_snapshots::ops::download::FileConflictResolution
+impl core::cmp::Eq for openjd_snapshots::ops::download::FileConflictResolution
+impl core::cmp::PartialEq for openjd_snapshots::ops::download::FileConflictResolution
+pub fn openjd_snapshots::ops::download::FileConflictResolution::eq(&self, &openjd_snapshots::ops::download::FileConflictResolution) -> bool
+impl core::fmt::Debug for openjd_snapshots::ops::download::FileConflictResolution
+pub fn openjd_snapshots::ops::download::FileConflictResolution::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_snapshots::ops::download::FileConflictResolution
+impl core::marker::StructuralPartialEq for openjd_snapshots::ops::download::FileConflictResolution
+pub struct openjd_snapshots::ops::CacheSyncOptions
+pub openjd_snapshots::ops::CacheSyncOptions::max_memory_bytes: core::option::Option<usize>
+pub openjd_snapshots::ops::CacheSyncOptions::max_workers: core::option::Option<usize>
+pub openjd_snapshots::ops::CacheSyncOptions::on_progress: core::option::Option<alloc::boxed::Box<openjd_snapshots::ops::ProgressFn<openjd_snapshots::ops::cache_sync::CacheSyncStatistics>>>
+impl core::default::Default for openjd_snapshots::ops::cache_sync::CacheSyncOptions
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncOptions::default() -> openjd_snapshots::ops::cache_sync::CacheSyncOptions
+pub struct openjd_snapshots::ops::CacheSyncResult
+pub openjd_snapshots::ops::CacheSyncResult::statistics: openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::cache_sync::CacheSyncResult
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::CacheSyncStatistics
+pub openjd_snapshots::ops::CacheSyncStatistics::copied_bytes: u64
+pub openjd_snapshots::ops::CacheSyncStatistics::copied_objects: usize
+pub openjd_snapshots::ops::CacheSyncStatistics::progress: f64
+pub openjd_snapshots::ops::CacheSyncStatistics::progress_message: alloc::string::String
+pub openjd_snapshots::ops::CacheSyncStatistics::rate: f64
+pub openjd_snapshots::ops::CacheSyncStatistics::skipped_bytes: u64
+pub openjd_snapshots::ops::CacheSyncStatistics::skipped_objects: usize
+pub openjd_snapshots::ops::CacheSyncStatistics::total_bytes: u64
+pub openjd_snapshots::ops::CacheSyncStatistics::total_objects: usize
+pub openjd_snapshots::ops::CacheSyncStatistics::total_time: f64
+impl core::clone::Clone for openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncStatistics::clone(&self) -> openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+impl core::default::Default for openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncStatistics::default() -> openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::CollectOptions
+pub openjd_snapshots::ops::CollectOptions::file_chunk_size_bytes: core::option::Option<i64>
+pub openjd_snapshots::ops::CollectOptions::optional_filenames: alloc::vec::Vec<std::path::PathBuf>
+pub openjd_snapshots::ops::CollectOptions::symlink_policy: openjd_snapshots::manifest::SymlinkPolicy
+impl core::clone::Clone for openjd_snapshots::ops::collect::CollectOptions
+pub fn openjd_snapshots::ops::collect::CollectOptions::clone(&self) -> openjd_snapshots::ops::collect::CollectOptions
+impl core::default::Default for openjd_snapshots::ops::collect::CollectOptions
+pub fn openjd_snapshots::ops::collect::CollectOptions::default() -> Self
+impl core::fmt::Debug for openjd_snapshots::ops::collect::CollectOptions
+pub fn openjd_snapshots::ops::collect::CollectOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::DiffOptions
+pub openjd_snapshots::ops::DiffOptions::ignore_hashes: bool
+pub openjd_snapshots::ops::DiffOptions::parent_manifest_hash: core::option::Option<alloc::string::String>
+pub openjd_snapshots::ops::DiffOptions::preserve_runnable: bool
+impl core::default::Default for openjd_snapshots::ops::diff::DiffOptions
+pub fn openjd_snapshots::ops::diff::DiffOptions::default() -> openjd_snapshots::ops::diff::DiffOptions
+pub struct openjd_snapshots::ops::DownloadOptions
+pub openjd_snapshots::ops::DownloadOptions::apply_deletes: bool
+pub openjd_snapshots::ops::DownloadOptions::file_conflict_resolution: openjd_snapshots::ops::download::FileConflictResolution
+pub openjd_snapshots::ops::DownloadOptions::hash_cache: core::option::Option<alloc::sync::Arc<openjd_snapshots::hash_cache::HashCache>>
+pub openjd_snapshots::ops::DownloadOptions::max_memory_bytes: core::option::Option<usize>
+pub openjd_snapshots::ops::DownloadOptions::max_workers: core::option::Option<usize>
+pub openjd_snapshots::ops::DownloadOptions::on_progress: core::option::Option<alloc::boxed::Box<openjd_snapshots::ops::ProgressFn<openjd_snapshots::ops::download::DownloadStatistics>>>
+pub openjd_snapshots::ops::DownloadOptions::symlink_policy: openjd_snapshots::manifest::SymlinkPolicy
+impl core::default::Default for openjd_snapshots::ops::download::DownloadOptions
+pub fn openjd_snapshots::ops::download::DownloadOptions::default() -> Self
+pub struct openjd_snapshots::ops::DownloadResult
+pub openjd_snapshots::ops::DownloadResult::manifest: openjd_snapshots::manifest::AbsManifest
+pub openjd_snapshots::ops::DownloadResult::statistics: openjd_snapshots::ops::download::DownloadStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::download::DownloadResult
+pub fn openjd_snapshots::ops::download::DownloadResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::DownloadStatistics
+pub openjd_snapshots::ops::DownloadStatistics::downloaded_bytes: u64
+pub openjd_snapshots::ops::DownloadStatistics::downloaded_files: usize
+pub openjd_snapshots::ops::DownloadStatistics::progress: f64
+pub openjd_snapshots::ops::DownloadStatistics::progress_message: alloc::string::String
+pub openjd_snapshots::ops::DownloadStatistics::rate: f64
+pub openjd_snapshots::ops::DownloadStatistics::skipped_bytes: u64
+pub openjd_snapshots::ops::DownloadStatistics::skipped_files: usize
+pub openjd_snapshots::ops::DownloadStatistics::total_bytes: u64
+pub openjd_snapshots::ops::DownloadStatistics::total_files: usize
+pub openjd_snapshots::ops::DownloadStatistics::total_time: f64
+impl core::clone::Clone for openjd_snapshots::ops::download::DownloadStatistics
+pub fn openjd_snapshots::ops::download::DownloadStatistics::clone(&self) -> openjd_snapshots::ops::download::DownloadStatistics
+impl core::default::Default for openjd_snapshots::ops::download::DownloadStatistics
+pub fn openjd_snapshots::ops::download::DownloadStatistics::default() -> openjd_snapshots::ops::download::DownloadStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::download::DownloadStatistics
+pub fn openjd_snapshots::ops::download::DownloadStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::HashOptions
+pub openjd_snapshots::ops::HashOptions::file_chunk_size_bytes: core::option::Option<i64>
+pub openjd_snapshots::ops::HashOptions::force_rehash: bool
+pub openjd_snapshots::ops::HashOptions::hash_cache: core::option::Option<alloc::sync::Arc<openjd_snapshots::hash_cache::HashCache>>
+pub openjd_snapshots::ops::HashOptions::max_workers: core::option::Option<usize>
+pub openjd_snapshots::ops::HashOptions::on_progress: core::option::Option<alloc::boxed::Box<openjd_snapshots::ops::ProgressFn<openjd_snapshots::ops::hash_op::HashStatistics>>>
+impl core::default::Default for openjd_snapshots::ops::hash_op::HashOptions
+pub fn openjd_snapshots::ops::hash_op::HashOptions::default() -> openjd_snapshots::ops::hash_op::HashOptions
+pub struct openjd_snapshots::ops::HashResult<M>
+pub openjd_snapshots::ops::HashResult::manifest: M
+pub openjd_snapshots::ops::HashResult::statistics: openjd_snapshots::ops::hash_op::HashStatistics
+impl<M: core::fmt::Debug> core::fmt::Debug for openjd_snapshots::ops::hash_op::HashResult<M>
+pub fn openjd_snapshots::ops::hash_op::HashResult<M>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::HashStatistics
+pub openjd_snapshots::ops::HashStatistics::hashed_bytes: u64
+pub openjd_snapshots::ops::HashStatistics::hashed_files: usize
+pub openjd_snapshots::ops::HashStatistics::progress: f64
+pub openjd_snapshots::ops::HashStatistics::progress_message: alloc::string::String
+pub openjd_snapshots::ops::HashStatistics::rate: f64
+pub openjd_snapshots::ops::HashStatistics::skipped_bytes: u64
+pub openjd_snapshots::ops::HashStatistics::skipped_files: usize
+pub openjd_snapshots::ops::HashStatistics::total_bytes: u64
+pub openjd_snapshots::ops::HashStatistics::total_files: usize
+pub openjd_snapshots::ops::HashStatistics::total_time: f64
+impl core::clone::Clone for openjd_snapshots::ops::hash_op::HashStatistics
+pub fn openjd_snapshots::ops::hash_op::HashStatistics::clone(&self) -> openjd_snapshots::ops::hash_op::HashStatistics
+impl core::default::Default for openjd_snapshots::ops::hash_op::HashStatistics
+pub fn openjd_snapshots::ops::hash_op::HashStatistics::default() -> openjd_snapshots::ops::hash_op::HashStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::hash_op::HashStatistics
+pub fn openjd_snapshots::ops::hash_op::HashStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::HashUploadOptions
+pub openjd_snapshots::ops::HashUploadOptions::file_chunk_size_bytes: core::option::Option<i64>
+pub openjd_snapshots::ops::HashUploadOptions::force_rehash: bool
+pub openjd_snapshots::ops::HashUploadOptions::hash_cache: core::option::Option<alloc::sync::Arc<openjd_snapshots::hash_cache::HashCache>>
+pub openjd_snapshots::ops::HashUploadOptions::max_memory_bytes: core::option::Option<usize>
+pub openjd_snapshots::ops::HashUploadOptions::max_workers: core::option::Option<usize>
+pub openjd_snapshots::ops::HashUploadOptions::on_progress: core::option::Option<alloc::boxed::Box<openjd_snapshots::ops::ProgressFn<openjd_snapshots::ops::hash_upload::UploadStatistics>>>
+impl core::default::Default for openjd_snapshots::ops::hash_upload::HashUploadOptions
+pub fn openjd_snapshots::ops::hash_upload::HashUploadOptions::default() -> openjd_snapshots::ops::hash_upload::HashUploadOptions
+pub struct openjd_snapshots::ops::IncludeExcludePathsFilter
+impl openjd_snapshots::ops::filter::IncludeExcludePathsFilter
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::matches(&self, &openjd_snapshots::manifest::ManifestEntry<'_>) -> bool
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::matches_path(&self, &str) -> bool
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::new(&[&str], &[&str]) -> openjd_snapshots::error::Result<Self>
+impl core::fmt::Debug for openjd_snapshots::ops::filter::IncludeExcludePathsFilter
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::ops::filter::IncludeExcludePathsFilter
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::PartitionOptions
+pub openjd_snapshots::ops::PartitionOptions::referenced_paths: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub openjd_snapshots::ops::PartitionOptions::roots: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub openjd_snapshots::ops::PartitionOptions::symlink_policy: openjd_snapshots::manifest::SymlinkPolicy
+impl core::default::Default for openjd_snapshots::ops::partition::PartitionOptions
+pub fn openjd_snapshots::ops::partition::PartitionOptions::default() -> Self
+pub struct openjd_snapshots::ops::UploadResult
+pub openjd_snapshots::ops::UploadResult::manifest: openjd_snapshots::manifest::AbsManifest
+pub openjd_snapshots::ops::UploadResult::statistics: openjd_snapshots::ops::hash_upload::UploadStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::hash_upload::UploadResult
+pub fn openjd_snapshots::ops::hash_upload::UploadResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::ops::UploadStatistics
+pub openjd_snapshots::ops::UploadStatistics::hashed_bytes: u64
+pub openjd_snapshots::ops::UploadStatistics::hashed_files: usize
+pub openjd_snapshots::ops::UploadStatistics::progress: f64
+pub openjd_snapshots::ops::UploadStatistics::progress_message: alloc::string::String
+pub openjd_snapshots::ops::UploadStatistics::rate: f64
+pub openjd_snapshots::ops::UploadStatistics::skipped_bytes: u64
+pub openjd_snapshots::ops::UploadStatistics::skipped_files: usize
+pub openjd_snapshots::ops::UploadStatistics::total_bytes: u64
+pub openjd_snapshots::ops::UploadStatistics::total_files: usize
+pub openjd_snapshots::ops::UploadStatistics::total_time: f64
+pub openjd_snapshots::ops::UploadStatistics::uploaded_bytes: u64
+pub openjd_snapshots::ops::UploadStatistics::uploaded_files: usize
+impl core::clone::Clone for openjd_snapshots::ops::hash_upload::UploadStatistics
+pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::clone(&self) -> openjd_snapshots::ops::hash_upload::UploadStatistics
+impl core::default::Default for openjd_snapshots::ops::hash_upload::UploadStatistics
+pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::default() -> openjd_snapshots::ops::hash_upload::UploadStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::hash_upload::UploadStatistics
+pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub async fn openjd_snapshots::ops::cache_sync_manifest(&[&dyn openjd_snapshots::manifest::ManifestRef], alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, openjd_snapshots::ops::cache_sync::CacheSyncOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::cache_sync::CacheSyncResult>
+pub fn openjd_snapshots::ops::collect_abs_snapshot(&[impl core::convert::AsRef<std::path::Path>], &[impl core::convert::AsRef<std::path::Path>], openjd_snapshots::ops::collect::CollectOptions) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::AbsSnapshot>
+pub fn openjd_snapshots::ops::compose_diffs<P: core::clone::Clone>(&[&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>]) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>>
+pub fn openjd_snapshots::ops::compose_snapshot_with_diffs<P: core::clone::Clone>(&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>, &[&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>]) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>>
+pub fn openjd_snapshots::ops::diff_snapshots<P: core::clone::Clone>(&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>, &openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>, &openjd_snapshots::ops::diff::DiffOptions) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>>
+pub async fn openjd_snapshots::ops::download_abs_manifest(&openjd_snapshots::manifest::AbsManifest, alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, openjd_snapshots::ops::download::DownloadOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::download::DownloadResult>
+pub fn openjd_snapshots::ops::entries_differ(&openjd_snapshots::manifest::FileEntry, &openjd_snapshots::manifest::FileEntry, bool, bool) -> bool
+pub fn openjd_snapshots::ops::filter_manifest<P: core::clone::Clone, K: core::clone::Clone>(&openjd_snapshots::manifest::Manifest<P, K>, &dyn core::ops::function::Fn(&openjd_snapshots::manifest::ManifestEntry<'_>) -> bool) -> openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::ops::hash_abs_manifest(&openjd_snapshots::manifest::AbsManifest, openjd_snapshots::ops::hash_op::HashOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::hash_op::HashResult<openjd_snapshots::manifest::AbsManifest>>
+pub fn openjd_snapshots::ops::hash_abs_snapshot(&openjd_snapshots::manifest::AbsSnapshot, openjd_snapshots::ops::hash_op::HashOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::hash_op::HashResult<openjd_snapshots::manifest::AbsSnapshot>>
+pub fn openjd_snapshots::ops::hash_abs_snapshot_diff(&openjd_snapshots::manifest::AbsSnapshotDiff, openjd_snapshots::ops::hash_op::HashOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::hash_op::HashResult<openjd_snapshots::manifest::AbsSnapshotDiff>>
+pub async fn openjd_snapshots::ops::hash_upload_abs_manifest(&openjd_snapshots::manifest::AbsManifest, alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, openjd_snapshots::ops::hash_upload::HashUploadOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::hash_upload::UploadResult>
+pub fn openjd_snapshots::ops::join_manifest(&openjd_snapshots::manifest::RelManifest, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::AbsManifest>
+pub fn openjd_snapshots::ops::join_manifest_rel(&openjd_snapshots::manifest::RelManifest, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::RelManifest>
+pub fn openjd_snapshots::ops::join_snapshot(&openjd_snapshots::manifest::Snapshot, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::AbsSnapshot>
+pub fn openjd_snapshots::ops::join_snapshot_diff(&openjd_snapshots::manifest::SnapshotDiff, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::AbsSnapshotDiff>
+pub fn openjd_snapshots::ops::join_snapshot_diff_rel(&openjd_snapshots::manifest::SnapshotDiff, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub fn openjd_snapshots::ops::join_snapshot_rel(&openjd_snapshots::manifest::Snapshot, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
+pub fn openjd_snapshots::ops::partition_manifest(&openjd_snapshots::manifest::AbsSnapshot, &openjd_snapshots::ops::partition::PartitionOptions) -> openjd_snapshots::error::Result<alloc::vec::Vec<(alloc::string::String, openjd_snapshots::manifest::Snapshot)>>
+pub fn openjd_snapshots::ops::partition_rel_manifest(&openjd_snapshots::manifest::Snapshot, &openjd_snapshots::ops::partition::PartitionOptions) -> openjd_snapshots::error::Result<alloc::vec::Vec<(alloc::string::String, openjd_snapshots::manifest::Snapshot)>>
+pub fn openjd_snapshots::ops::subtree_manifest(&openjd_snapshots::manifest::AbsManifest, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::RelManifest>
+pub fn openjd_snapshots::ops::subtree_rel_manifest(&openjd_snapshots::manifest::RelManifest, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::RelManifest>
+pub fn openjd_snapshots::ops::subtree_rel_snapshot(&openjd_snapshots::manifest::Snapshot, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
+pub fn openjd_snapshots::ops::subtree_rel_snapshot_diff(&openjd_snapshots::manifest::SnapshotDiff, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub fn openjd_snapshots::ops::subtree_snapshot(&openjd_snapshots::manifest::AbsSnapshot, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
+pub fn openjd_snapshots::ops::subtree_snapshot_diff(&openjd_snapshots::manifest::AbsSnapshotDiff, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub type openjd_snapshots::ops::ProgressFn<S> = (dyn core::ops::function::Fn(&S) -> bool + core::marker::Send + core::marker::Sync)
+pub mod openjd_snapshots::s3_check_cache
+pub struct openjd_snapshots::s3_check_cache::S3CheckCache
+impl openjd_snapshots::s3_check_cache::S3CheckCache
+pub fn openjd_snapshots::s3_check_cache::S3CheckCache::get_entry(&self, &str) -> core::option::Option<alloc::string::String>
+pub fn openjd_snapshots::s3_check_cache::S3CheckCache::new(impl core::convert::AsRef<std::path::Path>) -> openjd_snapshots::error::Result<Self>
+pub fn openjd_snapshots::s3_check_cache::S3CheckCache::open_default() -> openjd_snapshots::error::Result<Self>
+pub fn openjd_snapshots::s3_check_cache::S3CheckCache::put_entry(&self, &str) -> openjd_snapshots::error::Result<()>
+pub enum openjd_snapshots::AbsManifest
+pub openjd_snapshots::AbsManifest::Diff(openjd_snapshots::manifest::AbsSnapshotDiff)
+pub openjd_snapshots::AbsManifest::Snapshot(openjd_snapshots::manifest::AbsSnapshot)
+impl openjd_snapshots::manifest::AbsManifest
+pub fn openjd_snapshots::manifest::AbsManifest::dirs(&self) -> &[openjd_snapshots::manifest::DirEntry]
+pub fn openjd_snapshots::manifest::AbsManifest::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::AbsManifest::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::AbsManifest::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::manifest::AbsManifest::parent_manifest_hash(&self) -> core::option::Option<&str>
+pub fn openjd_snapshots::manifest::AbsManifest::total_size(&self) -> u64
+impl core::fmt::Debug for openjd_snapshots::manifest::AbsManifest
+pub fn openjd_snapshots::manifest::AbsManifest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl openjd_snapshots::manifest::ManifestRef for openjd_snapshots::manifest::AbsManifest
+pub fn openjd_snapshots::manifest::AbsManifest::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::AbsManifest::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::AbsManifest::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+pub enum openjd_snapshots::CopyResult
+pub openjd_snapshots::CopyResult::NotSupported
+pub openjd_snapshots::CopyResult::ServerSideCopy
+impl core::cmp::PartialEq for openjd_snapshots::data_cache::CopyResult
+pub fn openjd_snapshots::data_cache::CopyResult::eq(&self, &openjd_snapshots::data_cache::CopyResult) -> bool
+impl core::fmt::Debug for openjd_snapshots::data_cache::CopyResult
+pub fn openjd_snapshots::data_cache::CopyResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_snapshots::data_cache::CopyResult
+pub enum openjd_snapshots::DecodedManifest
+pub openjd_snapshots::DecodedManifest::AbsSnapshot(openjd_snapshots::manifest::AbsSnapshot)
+pub openjd_snapshots::DecodedManifest::AbsSnapshotDiff(openjd_snapshots::manifest::AbsSnapshotDiff)
+pub openjd_snapshots::DecodedManifest::Snapshot(openjd_snapshots::manifest::Snapshot)
+pub openjd_snapshots::DecodedManifest::SnapshotDiff(openjd_snapshots::manifest::SnapshotDiff)
+impl core::fmt::Debug for openjd_snapshots::codec::DecodedManifest
+pub fn openjd_snapshots::codec::DecodedManifest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum openjd_snapshots::FileConflictResolution
+pub openjd_snapshots::FileConflictResolution::CreateCopy
+pub openjd_snapshots::FileConflictResolution::Overwrite
+pub openjd_snapshots::FileConflictResolution::Skip
+impl core::clone::Clone for openjd_snapshots::ops::download::FileConflictResolution
+pub fn openjd_snapshots::ops::download::FileConflictResolution::clone(&self) -> openjd_snapshots::ops::download::FileConflictResolution
+impl core::cmp::Eq for openjd_snapshots::ops::download::FileConflictResolution
+impl core::cmp::PartialEq for openjd_snapshots::ops::download::FileConflictResolution
+pub fn openjd_snapshots::ops::download::FileConflictResolution::eq(&self, &openjd_snapshots::ops::download::FileConflictResolution) -> bool
+impl core::fmt::Debug for openjd_snapshots::ops::download::FileConflictResolution
+pub fn openjd_snapshots::ops::download::FileConflictResolution::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_snapshots::ops::download::FileConflictResolution
+impl core::marker::StructuralPartialEq for openjd_snapshots::ops::download::FileConflictResolution
+pub enum openjd_snapshots::HashAlgorithm
+pub openjd_snapshots::HashAlgorithm::Xxh128
+impl openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::extension(&self) -> &'static str
+impl core::clone::Clone for openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::clone(&self) -> openjd_snapshots::hash::HashAlgorithm
+impl core::cmp::Eq for openjd_snapshots::hash::HashAlgorithm
+impl core::cmp::PartialEq for openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::eq(&self, &openjd_snapshots::hash::HashAlgorithm) -> bool
+impl core::fmt::Debug for openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_snapshots::hash::HashAlgorithm
+impl core::marker::StructuralPartialEq for openjd_snapshots::hash::HashAlgorithm
+impl serde_core::ser::Serialize for openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::hash::HashAlgorithm::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub enum openjd_snapshots::ManifestEntry<'a>
+pub openjd_snapshots::ManifestEntry::Dir(&'a openjd_snapshots::manifest::DirEntry)
+pub openjd_snapshots::ManifestEntry::File(&'a openjd_snapshots::manifest::FileEntry)
+impl<'a> openjd_snapshots::manifest::ManifestEntry<'a>
+pub fn openjd_snapshots::manifest::ManifestEntry<'a>::path(&self) -> &str
+pub enum openjd_snapshots::ManifestFormat
+pub openjd_snapshots::ManifestFormat::V2023
+pub openjd_snapshots::ManifestFormat::V2025
+impl core::clone::Clone for openjd_snapshots::codec::ManifestFormat
+pub fn openjd_snapshots::codec::ManifestFormat::clone(&self) -> openjd_snapshots::codec::ManifestFormat
+impl core::cmp::Eq for openjd_snapshots::codec::ManifestFormat
+impl core::cmp::PartialEq for openjd_snapshots::codec::ManifestFormat
+pub fn openjd_snapshots::codec::ManifestFormat::eq(&self, &openjd_snapshots::codec::ManifestFormat) -> bool
+impl core::fmt::Debug for openjd_snapshots::codec::ManifestFormat
+pub fn openjd_snapshots::codec::ManifestFormat::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_snapshots::codec::ManifestFormat
+impl core::marker::StructuralPartialEq for openjd_snapshots::codec::ManifestFormat
+pub enum openjd_snapshots::RelManifest
+pub openjd_snapshots::RelManifest::Diff(openjd_snapshots::manifest::SnapshotDiff)
+pub openjd_snapshots::RelManifest::Snapshot(openjd_snapshots::manifest::Snapshot)
+impl openjd_snapshots::manifest::RelManifest
+pub fn openjd_snapshots::manifest::RelManifest::dirs(&self) -> &[openjd_snapshots::manifest::DirEntry]
+pub fn openjd_snapshots::manifest::RelManifest::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::RelManifest::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::RelManifest::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+pub fn openjd_snapshots::manifest::RelManifest::parent_manifest_hash(&self) -> core::option::Option<&str>
+pub fn openjd_snapshots::manifest::RelManifest::total_size(&self) -> u64
+impl core::fmt::Debug for openjd_snapshots::manifest::RelManifest
+pub fn openjd_snapshots::manifest::RelManifest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl openjd_snapshots::manifest::ManifestRef for openjd_snapshots::manifest::RelManifest
+pub fn openjd_snapshots::manifest::RelManifest::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::RelManifest::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::RelManifest::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+#[non_exhaustive] pub enum openjd_snapshots::SnapshotError
+pub openjd_snapshots::SnapshotError::Cache(alloc::string::String)
+pub openjd_snapshots::SnapshotError::Cancelled
+pub openjd_snapshots::SnapshotError::FileNotFound(alloc::string::String)
+pub openjd_snapshots::SnapshotError::Io(core::io::error::Error)
+pub openjd_snapshots::SnapshotError::S3(alloc::string::String)
+pub openjd_snapshots::SnapshotError::Task(alloc::string::String)
+pub openjd_snapshots::SnapshotError::Validation(alloc::string::String)
+impl core::convert::From<core::io::error::Error> for openjd_snapshots::error::SnapshotError
+pub fn openjd_snapshots::error::SnapshotError::from(core::io::error::Error) -> Self
+impl core::error::Error for openjd_snapshots::error::SnapshotError
+pub fn openjd_snapshots::error::SnapshotError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for openjd_snapshots::error::SnapshotError
+pub fn openjd_snapshots::error::SnapshotError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::error::SnapshotError
+pub fn openjd_snapshots::error::SnapshotError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum openjd_snapshots::SymlinkPolicy
+pub openjd_snapshots::SymlinkPolicy::CollapseAll
+pub openjd_snapshots::SymlinkPolicy::CollapseEscaping
+pub openjd_snapshots::SymlinkPolicy::ExcludeAll
+pub openjd_snapshots::SymlinkPolicy::ExcludeEscaping
+pub openjd_snapshots::SymlinkPolicy::Preserve
+pub openjd_snapshots::SymlinkPolicy::TransitiveIncludeTargets
+impl core::clone::Clone for openjd_snapshots::manifest::SymlinkPolicy
+pub fn openjd_snapshots::manifest::SymlinkPolicy::clone(&self) -> openjd_snapshots::manifest::SymlinkPolicy
+impl core::cmp::Eq for openjd_snapshots::manifest::SymlinkPolicy
+impl core::cmp::PartialEq for openjd_snapshots::manifest::SymlinkPolicy
+pub fn openjd_snapshots::manifest::SymlinkPolicy::eq(&self, &openjd_snapshots::manifest::SymlinkPolicy) -> bool
+impl core::fmt::Debug for openjd_snapshots::manifest::SymlinkPolicy
+pub fn openjd_snapshots::manifest::SymlinkPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::manifest::SymlinkPolicy
+pub fn openjd_snapshots::manifest::SymlinkPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_snapshots::manifest::SymlinkPolicy
+impl core::marker::StructuralPartialEq for openjd_snapshots::manifest::SymlinkPolicy
+pub struct openjd_snapshots::CacheSyncOptions
+pub openjd_snapshots::CacheSyncOptions::max_memory_bytes: core::option::Option<usize>
+pub openjd_snapshots::CacheSyncOptions::max_workers: core::option::Option<usize>
+pub openjd_snapshots::CacheSyncOptions::on_progress: core::option::Option<alloc::boxed::Box<openjd_snapshots::ops::ProgressFn<openjd_snapshots::ops::cache_sync::CacheSyncStatistics>>>
+impl core::default::Default for openjd_snapshots::ops::cache_sync::CacheSyncOptions
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncOptions::default() -> openjd_snapshots::ops::cache_sync::CacheSyncOptions
+pub struct openjd_snapshots::CacheSyncResult
+pub openjd_snapshots::CacheSyncResult::statistics: openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::cache_sync::CacheSyncResult
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::CacheSyncStatistics
+pub openjd_snapshots::CacheSyncStatistics::copied_bytes: u64
+pub openjd_snapshots::CacheSyncStatistics::copied_objects: usize
+pub openjd_snapshots::CacheSyncStatistics::progress: f64
+pub openjd_snapshots::CacheSyncStatistics::progress_message: alloc::string::String
+pub openjd_snapshots::CacheSyncStatistics::rate: f64
+pub openjd_snapshots::CacheSyncStatistics::skipped_bytes: u64
+pub openjd_snapshots::CacheSyncStatistics::skipped_objects: usize
+pub openjd_snapshots::CacheSyncStatistics::total_bytes: u64
+pub openjd_snapshots::CacheSyncStatistics::total_objects: usize
+pub openjd_snapshots::CacheSyncStatistics::total_time: f64
+impl core::clone::Clone for openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncStatistics::clone(&self) -> openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+impl core::default::Default for openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncStatistics::default() -> openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::cache_sync::CacheSyncStatistics
+pub fn openjd_snapshots::ops::cache_sync::CacheSyncStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::CollectOptions
+pub openjd_snapshots::CollectOptions::file_chunk_size_bytes: core::option::Option<i64>
+pub openjd_snapshots::CollectOptions::optional_filenames: alloc::vec::Vec<std::path::PathBuf>
+pub openjd_snapshots::CollectOptions::symlink_policy: openjd_snapshots::manifest::SymlinkPolicy
+impl core::clone::Clone for openjd_snapshots::ops::collect::CollectOptions
+pub fn openjd_snapshots::ops::collect::CollectOptions::clone(&self) -> openjd_snapshots::ops::collect::CollectOptions
+impl core::default::Default for openjd_snapshots::ops::collect::CollectOptions
+pub fn openjd_snapshots::ops::collect::CollectOptions::default() -> Self
+impl core::fmt::Debug for openjd_snapshots::ops::collect::CollectOptions
+pub fn openjd_snapshots::ops::collect::CollectOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::DiffOptions
+pub openjd_snapshots::DiffOptions::ignore_hashes: bool
+pub openjd_snapshots::DiffOptions::parent_manifest_hash: core::option::Option<alloc::string::String>
+pub openjd_snapshots::DiffOptions::preserve_runnable: bool
+impl core::default::Default for openjd_snapshots::ops::diff::DiffOptions
+pub fn openjd_snapshots::ops::diff::DiffOptions::default() -> openjd_snapshots::ops::diff::DiffOptions
+pub struct openjd_snapshots::DirEntry
+pub openjd_snapshots::DirEntry::deleted: bool
+pub openjd_snapshots::DirEntry::path: alloc::string::String
+impl openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::deleted(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_snapshots::manifest::DirEntry::new(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::clone(&self) -> openjd_snapshots::manifest::DirEntry
+impl core::cmp::PartialEq for openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::eq(&self, &openjd_snapshots::manifest::DirEntry) -> bool
+impl core::fmt::Debug for openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_snapshots::manifest::DirEntry
+impl serde_core::ser::Serialize for openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_snapshots::manifest::DirEntry
+pub fn openjd_snapshots::manifest::DirEntry::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct openjd_snapshots::DownloadOptions
+pub openjd_snapshots::DownloadOptions::apply_deletes: bool
+pub openjd_snapshots::DownloadOptions::file_conflict_resolution: openjd_snapshots::ops::download::FileConflictResolution
+pub openjd_snapshots::DownloadOptions::hash_cache: core::option::Option<alloc::sync::Arc<openjd_snapshots::hash_cache::HashCache>>
+pub openjd_snapshots::DownloadOptions::max_memory_bytes: core::option::Option<usize>
+pub openjd_snapshots::DownloadOptions::max_workers: core::option::Option<usize>
+pub openjd_snapshots::DownloadOptions::on_progress: core::option::Option<alloc::boxed::Box<openjd_snapshots::ops::ProgressFn<openjd_snapshots::ops::download::DownloadStatistics>>>
+pub openjd_snapshots::DownloadOptions::symlink_policy: openjd_snapshots::manifest::SymlinkPolicy
+impl core::default::Default for openjd_snapshots::ops::download::DownloadOptions
+pub fn openjd_snapshots::ops::download::DownloadOptions::default() -> Self
+pub struct openjd_snapshots::DownloadResult
+pub openjd_snapshots::DownloadResult::manifest: openjd_snapshots::manifest::AbsManifest
+pub openjd_snapshots::DownloadResult::statistics: openjd_snapshots::ops::download::DownloadStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::download::DownloadResult
+pub fn openjd_snapshots::ops::download::DownloadResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::DownloadStatistics
+pub openjd_snapshots::DownloadStatistics::downloaded_bytes: u64
+pub openjd_snapshots::DownloadStatistics::downloaded_files: usize
+pub openjd_snapshots::DownloadStatistics::progress: f64
+pub openjd_snapshots::DownloadStatistics::progress_message: alloc::string::String
+pub openjd_snapshots::DownloadStatistics::rate: f64
+pub openjd_snapshots::DownloadStatistics::skipped_bytes: u64
+pub openjd_snapshots::DownloadStatistics::skipped_files: usize
+pub openjd_snapshots::DownloadStatistics::total_bytes: u64
+pub openjd_snapshots::DownloadStatistics::total_files: usize
+pub openjd_snapshots::DownloadStatistics::total_time: f64
+impl core::clone::Clone for openjd_snapshots::ops::download::DownloadStatistics
+pub fn openjd_snapshots::ops::download::DownloadStatistics::clone(&self) -> openjd_snapshots::ops::download::DownloadStatistics
+impl core::default::Default for openjd_snapshots::ops::download::DownloadStatistics
+pub fn openjd_snapshots::ops::download::DownloadStatistics::default() -> openjd_snapshots::ops::download::DownloadStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::download::DownloadStatistics
+pub fn openjd_snapshots::ops::download::DownloadStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::FileEntry
+pub openjd_snapshots::FileEntry::chunk_hashes: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub openjd_snapshots::FileEntry::deleted: bool
+pub openjd_snapshots::FileEntry::hash: core::option::Option<alloc::string::String>
+pub openjd_snapshots::FileEntry::mtime: core::option::Option<u64>
+pub openjd_snapshots::FileEntry::path: alloc::string::String
+pub openjd_snapshots::FileEntry::runnable: bool
+pub openjd_snapshots::FileEntry::size: core::option::Option<u64>
+pub openjd_snapshots::FileEntry::symlink_target: core::option::Option<alloc::string::String>
+impl openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::deleted(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_snapshots::manifest::FileEntry::file(impl core::convert::Into<alloc::string::String>, u64, u64) -> Self
+pub fn openjd_snapshots::manifest::FileEntry::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_snapshots::manifest::FileEntry::symlink(impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::clone(&self) -> openjd_snapshots::manifest::FileEntry
+impl core::cmp::PartialEq for openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::eq(&self, &openjd_snapshots::manifest::FileEntry) -> bool
+impl core::fmt::Debug for openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_snapshots::manifest::FileEntry
+impl serde_core::ser::Serialize for openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for openjd_snapshots::manifest::FileEntry
+pub fn openjd_snapshots::manifest::FileEntry::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub struct openjd_snapshots::FileSystemDataCache
+pub openjd_snapshots::FileSystemDataCache::root_path: std::path::PathBuf
+impl openjd_snapshots::data_cache::FileSystemDataCache
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::new(impl core::convert::Into<std::path::PathBuf>) -> openjd_snapshots::error::Result<Self>
+impl openjd_snapshots::data_cache::AsyncDataCache for openjd_snapshots::data_cache::FileSystemDataCache
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::as_multipart(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::MultipartDataCache>
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::as_range_read(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::RangeReadDataCache>
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::copy_from<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 dyn openjd_snapshots::data_cache::AsyncDataCache, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<openjd_snapshots::data_cache::CopyResult>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::copy_object_to_file<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::get_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::multipart_part_size(&self) -> usize
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::object_exists<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<bool>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::object_key(&self, &str, &str) -> alloc::string::String
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::put_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::write_object_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub struct openjd_snapshots::HashCache
+impl openjd_snapshots::hash_cache::HashCache
+pub fn openjd_snapshots::hash_cache::HashCache::get(&self, &std::path::Path, &str, i64, i64) -> core::option::Option<(alloc::string::String, u64)>
+pub fn openjd_snapshots::hash_cache::HashCache::get_if_fresh(&self, &std::path::Path, &str, i64, i64, u64) -> core::option::Option<alloc::string::String>
+pub fn openjd_snapshots::hash_cache::HashCache::new(impl core::convert::AsRef<std::path::Path>) -> openjd_snapshots::error::Result<Self>
+pub fn openjd_snapshots::hash_cache::HashCache::open_default() -> openjd_snapshots::error::Result<Self>
+pub fn openjd_snapshots::hash_cache::HashCache::put(&self, &std::path::Path, &str, i64, i64, &str, u64) -> openjd_snapshots::error::Result<()>
+pub struct openjd_snapshots::HashOptions
+pub openjd_snapshots::HashOptions::file_chunk_size_bytes: core::option::Option<i64>
+pub openjd_snapshots::HashOptions::force_rehash: bool
+pub openjd_snapshots::HashOptions::hash_cache: core::option::Option<alloc::sync::Arc<openjd_snapshots::hash_cache::HashCache>>
+pub openjd_snapshots::HashOptions::max_workers: core::option::Option<usize>
+pub openjd_snapshots::HashOptions::on_progress: core::option::Option<alloc::boxed::Box<openjd_snapshots::ops::ProgressFn<openjd_snapshots::ops::hash_op::HashStatistics>>>
+impl core::default::Default for openjd_snapshots::ops::hash_op::HashOptions
+pub fn openjd_snapshots::ops::hash_op::HashOptions::default() -> openjd_snapshots::ops::hash_op::HashOptions
+pub struct openjd_snapshots::HashResult<M>
+pub openjd_snapshots::HashResult::manifest: M
+pub openjd_snapshots::HashResult::statistics: openjd_snapshots::ops::hash_op::HashStatistics
+impl<M: core::fmt::Debug> core::fmt::Debug for openjd_snapshots::ops::hash_op::HashResult<M>
+pub fn openjd_snapshots::ops::hash_op::HashResult<M>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::HashStatistics
+pub openjd_snapshots::HashStatistics::hashed_bytes: u64
+pub openjd_snapshots::HashStatistics::hashed_files: usize
+pub openjd_snapshots::HashStatistics::progress: f64
+pub openjd_snapshots::HashStatistics::progress_message: alloc::string::String
+pub openjd_snapshots::HashStatistics::rate: f64
+pub openjd_snapshots::HashStatistics::skipped_bytes: u64
+pub openjd_snapshots::HashStatistics::skipped_files: usize
+pub openjd_snapshots::HashStatistics::total_bytes: u64
+pub openjd_snapshots::HashStatistics::total_files: usize
+pub openjd_snapshots::HashStatistics::total_time: f64
+impl core::clone::Clone for openjd_snapshots::ops::hash_op::HashStatistics
+pub fn openjd_snapshots::ops::hash_op::HashStatistics::clone(&self) -> openjd_snapshots::ops::hash_op::HashStatistics
+impl core::default::Default for openjd_snapshots::ops::hash_op::HashStatistics
+pub fn openjd_snapshots::ops::hash_op::HashStatistics::default() -> openjd_snapshots::ops::hash_op::HashStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::hash_op::HashStatistics
+pub fn openjd_snapshots::ops::hash_op::HashStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::HashUploadOptions
+pub openjd_snapshots::HashUploadOptions::file_chunk_size_bytes: core::option::Option<i64>
+pub openjd_snapshots::HashUploadOptions::force_rehash: bool
+pub openjd_snapshots::HashUploadOptions::hash_cache: core::option::Option<alloc::sync::Arc<openjd_snapshots::hash_cache::HashCache>>
+pub openjd_snapshots::HashUploadOptions::max_memory_bytes: core::option::Option<usize>
+pub openjd_snapshots::HashUploadOptions::max_workers: core::option::Option<usize>
+pub openjd_snapshots::HashUploadOptions::on_progress: core::option::Option<alloc::boxed::Box<openjd_snapshots::ops::ProgressFn<openjd_snapshots::ops::hash_upload::UploadStatistics>>>
+impl core::default::Default for openjd_snapshots::ops::hash_upload::HashUploadOptions
+pub fn openjd_snapshots::ops::hash_upload::HashUploadOptions::default() -> openjd_snapshots::ops::hash_upload::HashUploadOptions
+pub struct openjd_snapshots::IncludeExcludePathsFilter
+impl openjd_snapshots::ops::filter::IncludeExcludePathsFilter
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::matches(&self, &openjd_snapshots::manifest::ManifestEntry<'_>) -> bool
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::matches_path(&self, &str) -> bool
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::new(&[&str], &[&str]) -> openjd_snapshots::error::Result<Self>
+impl core::fmt::Debug for openjd_snapshots::ops::filter::IncludeExcludePathsFilter
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_snapshots::ops::filter::IncludeExcludePathsFilter
+pub fn openjd_snapshots::ops::filter::IncludeExcludePathsFilter::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::Manifest<P, K>
+pub openjd_snapshots::Manifest::dirs: alloc::vec::Vec<openjd_snapshots::manifest::DirEntry>
+pub openjd_snapshots::Manifest::file_chunk_size_bytes: i64
+pub openjd_snapshots::Manifest::files: alloc::vec::Vec<openjd_snapshots::manifest::FileEntry>
+pub openjd_snapshots::Manifest::hash_alg: openjd_snapshots::hash::HashAlgorithm
+pub openjd_snapshots::Manifest::parent_manifest_hash: core::option::Option<alloc::string::String>
+pub openjd_snapshots::Manifest::total_size: u64
+impl<P, K> openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::clear_hashes(&mut self)
+pub fn openjd_snapshots::manifest::Manifest<P, K>::common_root(&self) -> core::option::Option<alloc::string::String>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::new(openjd_snapshots::hash::HashAlgorithm, i64) -> Self
+pub fn openjd_snapshots::manifest::Manifest<P, K>::recompute_total_size(&mut self)
+pub fn openjd_snapshots::manifest::Manifest<P, K>::with_dirs(self, alloc::vec::Vec<openjd_snapshots::manifest::DirEntry>) -> Self
+pub fn openjd_snapshots::manifest::Manifest<P, K>::with_files(self, alloc::vec::Vec<openjd_snapshots::manifest::FileEntry>) -> Self
+pub fn openjd_snapshots::manifest::Manifest<P, K>::with_parent_hash(self, core::option::Option<alloc::string::String>) -> Self
+impl<P: openjd_snapshots::manifest::ValidatePaths, K: openjd_snapshots::manifest::ValidateKind> openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::validate(&self) -> openjd_snapshots::error::Result<()>
+impl<'de, P, K> serde_core::de::Deserialize<'de> for openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl<P, K> serde_core::ser::Serialize for openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<P: core::clone::Clone, K: core::clone::Clone> core::clone::Clone for openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::clone(&self) -> openjd_snapshots::manifest::Manifest<P, K>
+impl<P: core::fmt::Debug, K: core::fmt::Debug> core::fmt::Debug for openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::manifest::Manifest<P, K>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::PartitionOptions
+pub openjd_snapshots::PartitionOptions::referenced_paths: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub openjd_snapshots::PartitionOptions::roots: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub openjd_snapshots::PartitionOptions::symlink_policy: openjd_snapshots::manifest::SymlinkPolicy
+impl core::default::Default for openjd_snapshots::ops::partition::PartitionOptions
+pub fn openjd_snapshots::ops::partition::PartitionOptions::default() -> Self
+pub struct openjd_snapshots::S3CheckCache
+impl openjd_snapshots::s3_check_cache::S3CheckCache
+pub fn openjd_snapshots::s3_check_cache::S3CheckCache::get_entry(&self, &str) -> core::option::Option<alloc::string::String>
+pub fn openjd_snapshots::s3_check_cache::S3CheckCache::new(impl core::convert::AsRef<std::path::Path>) -> openjd_snapshots::error::Result<Self>
+pub fn openjd_snapshots::s3_check_cache::S3CheckCache::open_default() -> openjd_snapshots::error::Result<Self>
+pub fn openjd_snapshots::s3_check_cache::S3CheckCache::put_entry(&self, &str) -> openjd_snapshots::error::Result<()>
+pub struct openjd_snapshots::S3CopyConfig
+pub openjd_snapshots::S3CopyConfig::max_concurrency: usize
+pub openjd_snapshots::S3CopyConfig::multipart_threshold: u64
+pub openjd_snapshots::S3CopyConfig::part_size: u64
+impl core::clone::Clone for openjd_snapshots::data_cache::S3CopyConfig
+pub fn openjd_snapshots::data_cache::S3CopyConfig::clone(&self) -> openjd_snapshots::data_cache::S3CopyConfig
+impl core::default::Default for openjd_snapshots::data_cache::S3CopyConfig
+pub fn openjd_snapshots::data_cache::S3CopyConfig::default() -> Self
+impl core::fmt::Debug for openjd_snapshots::data_cache::S3CopyConfig
+pub fn openjd_snapshots::data_cache::S3CopyConfig::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::S3DataCache
+impl openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::cache_key(&self, &str, &str) -> alloc::string::String
+pub fn openjd_snapshots::data_cache::S3DataCache::check_cache_exists(&self, &str, &str) -> bool
+pub fn openjd_snapshots::data_cache::S3DataCache::client(&self) -> &aws_sdk_s3::client::Client
+pub fn openjd_snapshots::data_cache::S3DataCache::copy_config(&self) -> core::option::Option<&openjd_snapshots::data_cache::S3CopyConfig>
+pub fn openjd_snapshots::data_cache::S3DataCache::expected_bucket_owner(&self) -> core::option::Option<&str>
+pub fn openjd_snapshots::data_cache::S3DataCache::is_cache_validation_invalidated(&self) -> bool
+pub fn openjd_snapshots::data_cache::S3DataCache::new(alloc::string::String, alloc::string::String, aws_sdk_s3::client::Client) -> Self
+pub async fn openjd_snapshots::data_cache::S3DataCache::new_with_auto_account_id(alloc::string::String, alloc::string::String, aws_sdk_s3::client::Client, aws_sdk_sts::client::Client) -> openjd_snapshots::error::Result<Self>
+pub fn openjd_snapshots::data_cache::S3DataCache::record_in_check_cache(&self, &str, &str)
+pub fn openjd_snapshots::data_cache::S3DataCache::with_copy_config(self, openjd_snapshots::data_cache::S3CopyConfig) -> Self
+pub fn openjd_snapshots::data_cache::S3DataCache::with_expected_bucket_owner(self, core::option::Option<alloc::string::String>) -> Self
+pub fn openjd_snapshots::data_cache::S3DataCache::with_force_s3_check(self, bool) -> Self
+pub fn openjd_snapshots::data_cache::S3DataCache::with_multipart_part_size(self, usize) -> Self
+pub fn openjd_snapshots::data_cache::S3DataCache::with_s3_check_cache(self, core::option::Option<alloc::sync::Arc<openjd_snapshots::s3_check_cache::S3CheckCache>>) -> Self
+impl openjd_snapshots::data_cache::AsyncDataCache for openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_snapshots::data_cache::S3DataCache::as_multipart(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::MultipartDataCache>
+pub fn openjd_snapshots::data_cache::S3DataCache::as_range_read(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::RangeReadDataCache>
+pub fn openjd_snapshots::data_cache::S3DataCache::copy_from<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 dyn openjd_snapshots::data_cache::AsyncDataCache, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<openjd_snapshots::data_cache::CopyResult>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::copy_object_to_file<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::get_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::multipart_part_size(&self) -> usize
+pub fn openjd_snapshots::data_cache::S3DataCache::object_exists<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<bool>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::object_key(&self, &str, &str) -> alloc::string::String
+pub fn openjd_snapshots::data_cache::S3DataCache::put_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::write_object_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+impl openjd_snapshots::data_cache::MultipartDataCache for openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::abort_multipart_upload<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::complete_multipart_upload<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str, alloc::vec::Vec<(i32, alloc::string::String)>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::create_multipart_upload<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::upload_part<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str, i32, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+impl openjd_snapshots::data_cache::RangeReadDataCache for openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::get_object_range<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, u64, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::stream_range_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, u64, u64, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub struct openjd_snapshots::UploadResult
+pub openjd_snapshots::UploadResult::manifest: openjd_snapshots::manifest::AbsManifest
+pub openjd_snapshots::UploadResult::statistics: openjd_snapshots::ops::hash_upload::UploadStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::hash_upload::UploadResult
+pub fn openjd_snapshots::ops::hash_upload::UploadResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_snapshots::UploadStatistics
+pub openjd_snapshots::UploadStatistics::hashed_bytes: u64
+pub openjd_snapshots::UploadStatistics::hashed_files: usize
+pub openjd_snapshots::UploadStatistics::progress: f64
+pub openjd_snapshots::UploadStatistics::progress_message: alloc::string::String
+pub openjd_snapshots::UploadStatistics::rate: f64
+pub openjd_snapshots::UploadStatistics::skipped_bytes: u64
+pub openjd_snapshots::UploadStatistics::skipped_files: usize
+pub openjd_snapshots::UploadStatistics::total_bytes: u64
+pub openjd_snapshots::UploadStatistics::total_files: usize
+pub openjd_snapshots::UploadStatistics::total_time: f64
+pub openjd_snapshots::UploadStatistics::uploaded_bytes: u64
+pub openjd_snapshots::UploadStatistics::uploaded_files: usize
+impl core::clone::Clone for openjd_snapshots::ops::hash_upload::UploadStatistics
+pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::clone(&self) -> openjd_snapshots::ops::hash_upload::UploadStatistics
+impl core::default::Default for openjd_snapshots::ops::hash_upload::UploadStatistics
+pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::default() -> openjd_snapshots::ops::hash_upload::UploadStatistics
+impl core::fmt::Debug for openjd_snapshots::ops::hash_upload::UploadStatistics
+pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub const openjd_snapshots::DEFAULT_FILE_CHUNK_SIZE: i64
+pub const openjd_snapshots::DEFAULT_S3_MULTIPART_PART_SIZE: usize
+pub const openjd_snapshots::WHOLE_FILE_CHUNK_SIZE: i64
+pub trait openjd_snapshots::AsyncDataCache: core::marker::Send + core::marker::Sync
+pub fn openjd_snapshots::AsyncDataCache::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_snapshots::AsyncDataCache::as_multipart(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::MultipartDataCache>
+pub fn openjd_snapshots::AsyncDataCache::as_range_read(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::RangeReadDataCache>
+pub fn openjd_snapshots::AsyncDataCache::copy_from<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 dyn openjd_snapshots::data_cache::AsyncDataCache, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<openjd_snapshots::data_cache::CopyResult>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::AsyncDataCache::copy_object_to_file<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::AsyncDataCache::get_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::AsyncDataCache::multipart_part_size(&self) -> usize
+pub fn openjd_snapshots::AsyncDataCache::object_exists<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<bool>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::AsyncDataCache::object_key(&self, &str, &str) -> alloc::string::String
+pub fn openjd_snapshots::AsyncDataCache::put_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::AsyncDataCache::write_object_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+impl openjd_snapshots::data_cache::AsyncDataCache for openjd_snapshots::data_cache::FileSystemDataCache
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::as_multipart(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::MultipartDataCache>
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::as_range_read(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::RangeReadDataCache>
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::copy_from<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 dyn openjd_snapshots::data_cache::AsyncDataCache, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<openjd_snapshots::data_cache::CopyResult>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::copy_object_to_file<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::get_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::multipart_part_size(&self) -> usize
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::object_exists<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<bool>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::object_key(&self, &str, &str) -> alloc::string::String
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::put_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::FileSystemDataCache::write_object_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+impl openjd_snapshots::data_cache::AsyncDataCache for openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_snapshots::data_cache::S3DataCache::as_multipart(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::MultipartDataCache>
+pub fn openjd_snapshots::data_cache::S3DataCache::as_range_read(&self) -> core::option::Option<&dyn openjd_snapshots::data_cache::RangeReadDataCache>
+pub fn openjd_snapshots::data_cache::S3DataCache::copy_from<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 dyn openjd_snapshots::data_cache::AsyncDataCache, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<openjd_snapshots::data_cache::CopyResult>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::copy_object_to_file<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::get_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::multipart_part_size(&self) -> usize
+pub fn openjd_snapshots::data_cache::S3DataCache::object_exists<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<bool>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::object_key(&self, &str, &str) -> alloc::string::String
+pub fn openjd_snapshots::data_cache::S3DataCache::put_object<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::write_object_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub trait openjd_snapshots::ManifestRef
+pub fn openjd_snapshots::ManifestRef::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::ManifestRef::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::ManifestRef::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+impl openjd_snapshots::manifest::ManifestRef for openjd_snapshots::manifest::AbsManifest
+pub fn openjd_snapshots::manifest::AbsManifest::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::AbsManifest::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::AbsManifest::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+impl openjd_snapshots::manifest::ManifestRef for openjd_snapshots::manifest::RelManifest
+pub fn openjd_snapshots::manifest::RelManifest::file_chunk_size_bytes(&self) -> i64
+pub fn openjd_snapshots::manifest::RelManifest::files(&self) -> &[openjd_snapshots::manifest::FileEntry]
+pub fn openjd_snapshots::manifest::RelManifest::hash_alg(&self) -> openjd_snapshots::hash::HashAlgorithm
+pub trait openjd_snapshots::MultipartDataCache: openjd_snapshots::data_cache::AsyncDataCache
+pub fn openjd_snapshots::MultipartDataCache::abort_multipart_upload<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::MultipartDataCache::complete_multipart_upload<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str, alloc::vec::Vec<(i32, alloc::string::String)>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::MultipartDataCache::create_multipart_upload<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::MultipartDataCache::upload_part<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str, i32, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+impl openjd_snapshots::data_cache::MultipartDataCache for openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::abort_multipart_upload<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::complete_multipart_upload<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str, alloc::vec::Vec<(i32, alloc::string::String)>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<()>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::create_multipart_upload<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::upload_part<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, &'life3 str, i32, alloc::vec::Vec<u8>) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::string::String>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub trait openjd_snapshots::RangeReadDataCache: openjd_snapshots::data_cache::AsyncDataCache
+pub fn openjd_snapshots::RangeReadDataCache::get_object_range<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, u64, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::RangeReadDataCache::stream_range_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, u64, u64, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: core::marker::Sync + 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+impl openjd_snapshots::data_cache::RangeReadDataCache for openjd_snapshots::data_cache::S3DataCache
+pub fn openjd_snapshots::data_cache::S3DataCache::get_object_range<'life0, 'life1, 'life2, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, u64, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<alloc::vec::Vec<u8>>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait
+pub fn openjd_snapshots::data_cache::S3DataCache::stream_range_to_file_at_offset<'life0, 'life1, 'life2, 'life3, 'async_trait>(&'life0 self, &'life1 str, &'life2 str, u64, u64, &'life3 std::path::Path, u64) -> core::pin::Pin<alloc::boxed::Box<(dyn core::future::future::Future<Output = core::io::error::Result<u64>> + core::marker::Send + 'async_trait)>> where Self: 'async_trait, 'life0: 'async_trait, 'life1: 'async_trait, 'life2: 'async_trait, 'life3: 'async_trait
+pub async fn openjd_snapshots::cache_sync_manifest(&[&dyn openjd_snapshots::manifest::ManifestRef], alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, openjd_snapshots::ops::cache_sync::CacheSyncOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::cache_sync::CacheSyncResult>
+pub fn openjd_snapshots::collect_abs_snapshot(&[impl core::convert::AsRef<std::path::Path>], &[impl core::convert::AsRef<std::path::Path>], openjd_snapshots::ops::collect::CollectOptions) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::AbsSnapshot>
+pub fn openjd_snapshots::compose_diffs<P: core::clone::Clone>(&[&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>]) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>>
+pub fn openjd_snapshots::compose_snapshot_with_diffs<P: core::clone::Clone>(&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>, &[&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>]) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>>
+pub fn openjd_snapshots::decode_manifest(&str) -> openjd_snapshots::error::Result<openjd_snapshots::codec::DecodedManifest>
+pub fn openjd_snapshots::decode_v2023(&str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
+pub fn openjd_snapshots::decode_v2023_as_diff(&str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub fn openjd_snapshots::decode_v2025(&str) -> openjd_snapshots::error::Result<openjd_snapshots::codec::DecodedManifest>
+pub fn openjd_snapshots::diff_snapshots<P: core::clone::Clone>(&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>, &openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>, &openjd_snapshots::ops::diff::DiffOptions) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>>
+pub async fn openjd_snapshots::download_abs_manifest(&openjd_snapshots::manifest::AbsManifest, alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, openjd_snapshots::ops::download::DownloadOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::download::DownloadResult>
+pub fn openjd_snapshots::encode_abs_snapshot_diff_v2025(&openjd_snapshots::manifest::AbsSnapshotDiff) -> openjd_snapshots::error::Result<alloc::string::String>
+pub fn openjd_snapshots::encode_abs_snapshot_v2025(&openjd_snapshots::manifest::AbsSnapshot) -> openjd_snapshots::error::Result<alloc::string::String>
+pub fn openjd_snapshots::encode_snapshot_diff_v2023(&openjd_snapshots::manifest::SnapshotDiff) -> openjd_snapshots::error::Result<alloc::string::String>
+pub fn openjd_snapshots::encode_snapshot_diff_v2025(&openjd_snapshots::manifest::SnapshotDiff) -> openjd_snapshots::error::Result<alloc::string::String>
+pub fn openjd_snapshots::encode_snapshot_v2023(&openjd_snapshots::manifest::Snapshot) -> openjd_snapshots::error::Result<alloc::string::String>
+pub fn openjd_snapshots::encode_snapshot_v2025(&openjd_snapshots::manifest::Snapshot) -> openjd_snapshots::error::Result<alloc::string::String>
+pub fn openjd_snapshots::entries_differ(&openjd_snapshots::manifest::FileEntry, &openjd_snapshots::manifest::FileEntry, bool, bool) -> bool
+pub fn openjd_snapshots::filter_manifest<P: core::clone::Clone, K: core::clone::Clone>(&openjd_snapshots::manifest::Manifest<P, K>, &dyn core::ops::function::Fn(&openjd_snapshots::manifest::ManifestEntry<'_>) -> bool) -> openjd_snapshots::manifest::Manifest<P, K>
+pub fn openjd_snapshots::hash_abs_manifest(&openjd_snapshots::manifest::AbsManifest, openjd_snapshots::ops::hash_op::HashOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::hash_op::HashResult<openjd_snapshots::manifest::AbsManifest>>
+pub fn openjd_snapshots::hash_abs_snapshot(&openjd_snapshots::manifest::AbsSnapshot, openjd_snapshots::ops::hash_op::HashOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::hash_op::HashResult<openjd_snapshots::manifest::AbsSnapshot>>
+pub fn openjd_snapshots::hash_abs_snapshot_diff(&openjd_snapshots::manifest::AbsSnapshotDiff, openjd_snapshots::ops::hash_op::HashOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::hash_op::HashResult<openjd_snapshots::manifest::AbsSnapshotDiff>>
+pub async fn openjd_snapshots::hash_upload_abs_manifest(&openjd_snapshots::manifest::AbsManifest, alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, openjd_snapshots::ops::hash_upload::HashUploadOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::hash_upload::UploadResult>
+pub fn openjd_snapshots::human_readable_file_size(u64) -> alloc::string::String
+pub fn openjd_snapshots::join_manifest(&openjd_snapshots::manifest::RelManifest, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::AbsManifest>
+pub fn openjd_snapshots::join_manifest_rel(&openjd_snapshots::manifest::RelManifest, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::RelManifest>
+pub fn openjd_snapshots::join_snapshot(&openjd_snapshots::manifest::Snapshot, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::AbsSnapshot>
+pub fn openjd_snapshots::join_snapshot_diff(&openjd_snapshots::manifest::SnapshotDiff, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::AbsSnapshotDiff>
+pub fn openjd_snapshots::join_snapshot_diff_rel(&openjd_snapshots::manifest::SnapshotDiff, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub fn openjd_snapshots::join_snapshot_rel(&openjd_snapshots::manifest::Snapshot, &str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
+pub fn openjd_snapshots::partition_manifest(&openjd_snapshots::manifest::AbsSnapshot, &openjd_snapshots::ops::partition::PartitionOptions) -> openjd_snapshots::error::Result<alloc::vec::Vec<(alloc::string::String, openjd_snapshots::manifest::Snapshot)>>
+pub fn openjd_snapshots::partition_rel_manifest(&openjd_snapshots::manifest::Snapshot, &openjd_snapshots::ops::partition::PartitionOptions) -> openjd_snapshots::error::Result<alloc::vec::Vec<(alloc::string::String, openjd_snapshots::manifest::Snapshot)>>
+pub fn openjd_snapshots::subtree_manifest(&openjd_snapshots::manifest::AbsManifest, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::RelManifest>
+pub fn openjd_snapshots::subtree_rel_manifest(&openjd_snapshots::manifest::RelManifest, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::RelManifest>
+pub fn openjd_snapshots::subtree_rel_snapshot(&openjd_snapshots::manifest::Snapshot, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
+pub fn openjd_snapshots::subtree_rel_snapshot_diff(&openjd_snapshots::manifest::SnapshotDiff, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub fn openjd_snapshots::subtree_snapshot(&openjd_snapshots::manifest::AbsSnapshot, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
+pub fn openjd_snapshots::subtree_snapshot_diff(&openjd_snapshots::manifest::AbsSnapshotDiff, &str, openjd_snapshots::manifest::SymlinkPolicy) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub type openjd_snapshots::AbsSnapshot = openjd_snapshots::manifest::Manifest<openjd_snapshots::manifest::Abs, openjd_snapshots::manifest::Full>
+pub type openjd_snapshots::AbsSnapshotDiff = openjd_snapshots::manifest::Manifest<openjd_snapshots::manifest::Abs, openjd_snapshots::manifest::Diff>
+pub type openjd_snapshots::Result<T> = core::result::Result<T, openjd_snapshots::error::SnapshotError>
+pub type openjd_snapshots::Snapshot = openjd_snapshots::manifest::Manifest<openjd_snapshots::manifest::Rel, openjd_snapshots::manifest::Full>
+pub type openjd_snapshots::SnapshotDiff = openjd_snapshots::manifest::Manifest<openjd_snapshots::manifest::Rel, openjd_snapshots::manifest::Diff>

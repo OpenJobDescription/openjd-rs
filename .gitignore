@@ -13,4 +13,8 @@ crates/openjd-for-js/node_modules/
 pkg-nomod
 pkg/
 
+# cargo-mutants output, if it is run without --output
+mutants.out/
+mutants.out.old/
+
 .claude/settings.local.json

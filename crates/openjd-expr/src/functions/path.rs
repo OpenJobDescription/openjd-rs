@@ -38,6 +38,10 @@ fn get_str_arg(a: &[ExprValue], idx: usize) -> String {
         .unwrap_or_default()
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn as_posix_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, _) = get_path(&a[0], ctx)?;
     // `replace` walks the input and allocates a new string
@@ -185,6 +189,10 @@ fn join_parent_and_name(parent: &str, name: &str, fmt: PathFormat) -> String {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn with_name_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let new_name = get_str_arg(a, 1);
@@ -223,6 +231,10 @@ pub fn with_name_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn with_stem_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let new_stem = get_str_arg(a, 1);
@@ -294,6 +306,10 @@ pub fn with_stem_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::new_path(result, fmt))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn with_suffix_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let new_suffix = get_str_arg(a, 1);
@@ -352,6 +368,10 @@ fn split_name_at_suffix(filename: &str) -> (&str, &str) {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn with_number_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let num = match &a[1] {
@@ -391,6 +411,10 @@ pub fn with_number_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn is_absolute_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     Ok(ExprValue::Bool(is_absolute(&path_str, fmt)))
@@ -546,6 +570,10 @@ fn path_starts_with(path: &str, base: &str, fmt: PathFormat) -> bool {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn is_relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let base = get_str_arg(a, 1);
@@ -563,6 +591,10 @@ pub fn is_relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(is_rel))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     let base = get_str_arg(a, 1);
@@ -689,6 +721,10 @@ fn with_number_replace(stem: &str, num: i64) -> Result<String, ExpressionError> 
 
 // ── Path properties ──
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn prop_name(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     ctx.count_string_ops(path_str.len())?;
@@ -698,6 +734,10 @@ pub fn prop_name(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::String(pp::file_name(&path_str, fmt).to_string()))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn prop_stem(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     ctx.count_string_ops(path_str.len())?;
@@ -707,6 +747,10 @@ pub fn prop_stem(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::String(pp::file_stem(&path_str, fmt).to_string()))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn prop_suffix(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     ctx.count_string_ops(path_str.len())?;
@@ -717,6 +761,10 @@ pub fn prop_suffix(ctx: Ctx, a: &[ExprValue]) -> R {
     }))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn prop_suffixes(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     ctx.count_string_ops(path_str.len())?;
@@ -734,6 +782,10 @@ pub fn prop_suffixes(ctx: Ctx, a: &[ExprValue]) -> R {
     ExprValue::make_list_checked(ctx, suffixes, crate::types::ExprType::STRING)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn prop_parent(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     ctx.count_string_ops(path_str.len())?;
@@ -743,6 +795,10 @@ pub fn prop_parent(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::new_path(pp::parent(&path_str, fmt), fmt))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn prop_parts(ctx: Ctx, a: &[ExprValue]) -> R {
     let (path_str, fmt) = get_path(&a[0], ctx)?;
     ctx.count_string_ops(path_str.len())?;

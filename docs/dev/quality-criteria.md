@@ -39,11 +39,31 @@ part of the implementation SHOULD be covered at an appropriate level of
 abstraction. A spec that describes behavior the code no longer has is a
 defect, even when the code is right.
 
-**Q2. Public API.** `public-api.md` MUST fully and accurately describe the
-crate's public API: every public type, function, trait, and constant, with its
-signature. The implementation MUST expose precisely that API and nothing more.
-Every public item MUST have a `///` doc comment. The API SHOULD be ergonomic
-and consistent with the other openjd crates.
+**Q2. Public API.** The crate MUST expose precisely the API its specs describe
+and nothing more. Two tools enforce the mechanical parts, so review can
+concentrate on the prose:
+
+- Each library crate (expr, model, sessions, snapshots) has a
+  `specs/<crate>/public-api.txt`, or a `public-api.<os>.txt` where the API
+  differs by platform. `scripts/check_public_api.sh --update` generates it,
+  and it lists every public item with its signature. CI fails when it does
+  not match the code. It is the authority on what is public and on
+  signatures.
+- The `missing_docs` lint is enabled for every workspace crate through
+  `[workspace.lints]`, and it fails CI when a public item has no `///` doc
+  comment. Items that predate the lint carry an item-level
+  `allow(missing_docs, reason = "missing-docs burn-down ...")` attribute.
+  Those attributes are known debt, and new code MUST NOT add one. The lint
+  still checks new items, except inside an item that carries the attribute,
+  such as a new field of an allowed struct or a new variant of an allowed
+  enum. Review MUST check those by hand.
+
+`public-api.md` MUST describe every public module, type, trait, function,
+method, constant, and static in the listing: what it is for, how the items fit
+together, and their invariants and error behavior. Trait impls need prose only
+when they carry behavior a user relies on. Where `public-api.md` shows a
+signature, the signature MUST match the listing. Doc comments MUST be accurate.
+The API SHOULD be ergonomic and consistent with the other openjd crates.
 
 **Q3. Code implements the specs.** Code MUST faithfully implement what the
 specs say. Error messages MUST be high quality: specific, actionable, located
@@ -83,8 +103,8 @@ gets its own criterion.
 `.github/workflows/ci.yml` is authoritative for the exact commands, and the
 CI Pipeline table in `AGENTS.md` summarizes them. They include formatting,
 clippy with `-D warnings`, build, tests, conformance, docs with
-`-D warnings`, `cargo deny`, MSRV, the copyright-header check, cross-user
-tests, and the `openjd-for-js` build. Each of these runs on both the workspace and the
+`-D warnings`, `cargo deny`, MSRV, the copyright-header check, the public API
+listings, cross-user tests, and the `openjd-for-js` build. Each of these runs on both the workspace and the
 helper sub-crate at `crates/openjd-sessions/src/helper/` where CI does.
 New source files covered by `scripts/check_copyright_headers.sh` MUST carry
 the copyright header. Work that resolves a report item MUST strike that item
@@ -101,7 +121,7 @@ claim needs a specific kind of evidence:
 | "the code does Y" | `file:line` |
 | "behavior is Z" | an executed command and its output |
 | "this is a bug" | a test that fails on the code in question |
-| "this is untested" | a mutation that the test suite fails to catch |
+| "this is untested" | a mutant that survives the test suite: a `cargo mutants` result, or a hand mutation made in an isolated copy (see §6 "Mutation testing") |
 | "Python diverges" | the same input run through both implementations, with both outputs |
 | "this is dead code" | a demonstration that it is unreachable |
 | "this is fixed" | the test that failed before the fix, now passing |
@@ -129,7 +149,7 @@ consequence, not the effort needed to fix it.
 
 | Severity | Meaning | Examples |
 |----------|---------|----------|
-| **high** | Wrong behavior, or a statement people will act on that is false. | Incorrect results, panics on reachable input, conformance violations, security issues, `public-api.md` not matching the code, a spec that contradicts the code in an area other work relies on |
+| **high** | Wrong behavior, or a statement people will act on that is false. | Incorrect results, panics on reachable input, conformance violations, security issues, `public-api.md` contradicting the code or the public API listing, a spec that contradicts the code in an area other work relies on |
 | **medium** | Correct today, but quality has degraded in a way that will cause defects or cost later. | Specified behavior with no test that would catch its breakage, misleading or unlocated error messages, inconsistent public naming, undocumented Python divergences, avoidable super-linear algorithms on realistic inputs, missing `///` docs |
 | **low** | Polish. | Wording, internal naming, test organization, minor duplication, idiomatic rewrites with no behavioral effect |
 
@@ -187,34 +207,54 @@ leaving the file behind.
 4. A finding that would change a maintainer's decision MUST be settled by
    execution, not by another round of review.
 
-### Mutation hygiene
+### Mutation testing
 
-Mutation checks share one working tree and one `target/` directory, so they
-are easy to corrupt:
+A mutation check needs a tree that holds exactly the code under review. The
+shared working tree is not one: it may hold uncommitted work, such as a report
+being written or failing tests written earlier in the run, and other verifiers
+may be writing probes in it. So mutation checks never touch the shared
+working tree:
 
-- Run mutation checks **one at a time**. Concurrent mutations compile against
-  each other, which makes "the suite did not fail" meaningless. Other angles
-  MAY run in parallel.
-- Before the first mutation, record the tree's starting state: the output of
-  `git status --short`, and a saved copy of `git diff` (for example
-  `git diff --output=/tmp/start.diff`).
-- Undo each mutation before the next one by restoring the file's
-  *pre-mutation* content, and delete any file the mutation created, meaning
-  any path that was not in the recorded `git status --short`. Then confirm
-  that `git status --short` matches the starting state and that `git diff`
-  matches the saved copy (`diff`). `git status` alone cannot show a mutation
-  left in a file that already had uncommitted edits. Neither command covers
-  the content of an untracked (`??`) file, so compare each mutated untracked
-  file with its aside copy as well. A leftover file under `crates/` compiles
-  into the next run.
-- `git checkout -- <path>` restores the content git has recorded for the file,
-  so it is a correct undo only for a tracked file that `git status --short`
-  showed as unmodified before the mutation. Otherwise it discards uncommitted
-  work, such as an uncommitted change under audit or a failing test written
-  earlier in the same run, and for an untracked file it fails. For any other file, copy
-  it aside to a location outside `crates/` (such as a temp directory) before
-  mutating it, and copy it back afterwards. A copy left under `crates/` can
-  compile as an extra test target.
-- Never use `git clean` or `git stash`. Uncommitted deliverables (a report
-  being written, probe tests, an uncommitted change) live in the working tree, and both
-  commands remove them from it.
+- Do all mutation work in a dedicated worktree of the commit under review,
+  next to the repository rather than inside it, for example
+  `git worktree add --detach ../mutants-<id> HEAD`. `<id>` is unique to the
+  verifier. A sibling directory stays inside the parent directory, which an
+  agent's file tools can usually edit when `/tmp` is out of bounds. Each
+  verifier uses its own worktree, so mutation verifiers MAY run in parallel
+  with each other and with other angles, if the machine has the disk and CPU:
+  each worktree is a cold build of several GB. A worktree adds no commits or
+  branches, so it does not count as touching git history. Remove it with
+  `git worktree remove --force <path>` before returning.
+- Use [cargo-mutants](https://mutants.rs/) first. Run it inside the worktree,
+  scoped to what is under review, because a whole crate has thousands of
+  mutants and takes hours. For a change, use `--in-diff` with the change's
+  diff, for example
+  `git diff --output=../change-<id>.diff $(git merge-base HEAD origin/main) HEAD`
+  and then `cargo mutants --in-diff ../change-<id>.diff`. Write the diff with
+  `--output`, not a shell redirect: Windows PowerShell 5.1's `>` writes
+  UTF-16, which cargo-mutants reads as an empty diff with no error. For a
+  slice of a crate, use `cargo mutants -p <crate> -f <path>`. Pass `--output`
+  with a directory outside the repository. Never pass `--in-place`.
+  cargo-mutants builds and tests in copies of the tree, one per `-j` job, so
+  parallel jobs cannot compile against each other. A `MISSED` mutant is the
+  evidence for "this is untested". Quote its line from the output. If
+  `cargo mutants --version` fails, say so in the output and fall back to hand
+  mutations.
+- cargo-mutants applies a fixed set of mutations. Among others, it replaces
+  function bodies with default values, swaps operators, deletes `!` and
+  unary `-`, deletes match arms and struct-literal fields, and forces match
+  guards to `true` or `false`. It does not edit string literals or constants
+  inside a function body, or delete a single statement. Make those mutations
+  by hand, in the worktree, one at a time. Run
+  the relevant tests there, and undo each before the next, either with
+  `git -C <worktree> checkout -- <path>` or by reverting the edit and
+  confirming with
+  `git show HEAD:<path> | diff --strip-trailing-cr - <worktree>/<path>`.
+  The worktree holds only committed content, so both undos are correct
+  there. To check an
+  error-message assertion, for example, change the message text and confirm
+  that a test fails. Quote the mutation's diff and the test output as
+  evidence.
+- Never use `git clean`, `git stash`, or `git checkout -- <path>` in the
+  shared working tree. Uncommitted deliverables (a report being written, probe
+  tests, an uncommitted change) live there, and these commands remove them.

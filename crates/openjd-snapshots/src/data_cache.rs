@@ -132,6 +132,10 @@ impl S3CopyConfig {
 /// [`as_range_read`](AsyncDataCache::as_range_read) so callers can discover the
 /// extra capability through a trait object.
 #[async_trait]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub trait AsyncDataCache: Send + Sync {
     fn object_key(&self, hash: &str, algorithm: &str) -> String;
     fn as_any(&self) -> &dyn Any;
@@ -215,6 +219,10 @@ pub trait AsyncDataCache: Send + Sync {
 
 /// Extension trait for caches that support S3-style multipart upload.
 #[async_trait]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub trait MultipartDataCache: AsyncDataCache {
     async fn create_multipart_upload(&self, hash: &str, algorithm: &str)
         -> std::io::Result<String>;
@@ -243,6 +251,10 @@ pub trait MultipartDataCache: AsyncDataCache {
 
 /// Extension trait for caches that support byte-range reads.
 #[async_trait]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub trait RangeReadDataCache: AsyncDataCache {
     async fn get_object_range(
         &self,
@@ -281,11 +293,19 @@ pub trait RangeReadDataCache: AsyncDataCache {
 }
 
 /// Content-addressed storage backed by a local or network filesystem.
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct FileSystemDataCache {
     pub root_path: PathBuf,
 }
 
 impl FileSystemDataCache {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(root_path: impl Into<PathBuf>) -> crate::Result<Self> {
         let root_path = root_path.into();
         if !root_path.is_absolute() {
@@ -544,6 +564,10 @@ fn rand_u64() -> u64 {
     h.finish()
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct CacheValidationState {
     hit_count: AtomicU64,
     invalidated: AtomicBool,
@@ -556,6 +580,10 @@ impl Default for CacheValidationState {
 }
 
 impl CacheValidationState {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new() -> Self {
         Self {
             hit_count: AtomicU64::new(0),
@@ -575,6 +603,10 @@ impl CacheValidationState {
         self.invalidated.store(true, Ordering::Relaxed);
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_invalidated(&self) -> bool {
         self.invalidated.load(Ordering::Relaxed)
     }
@@ -594,6 +626,10 @@ pub struct S3DataCache {
 }
 
 impl S3DataCache {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(bucket: String, key_prefix: String, client: aws_sdk_s3::Client) -> Self {
         Self {
             bucket,

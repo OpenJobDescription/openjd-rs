@@ -194,6 +194,10 @@ pub fn strip_extended_prefix(path: &std::path::Path) -> PathBuf {
 }
 
 #[derive(Args)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct RunArgs {
     /// Path to the job template file
     pub path: PathBuf,
@@ -258,6 +262,10 @@ pub struct RunArgs {
     pub output: String,
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub async fn execute(args: RunArgs) -> Result<(), RunError> {
     execution::execute(args).await
 }

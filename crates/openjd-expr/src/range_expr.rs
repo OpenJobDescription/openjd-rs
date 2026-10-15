@@ -33,6 +33,10 @@ pub const MAX_RANGE_EXPR_CHUNKS: usize = 10_000;
 
 /// Error raised when parsing a range expression fails.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct RangeExprError {
     pub expr: String,
     pub message: String,
@@ -40,6 +44,10 @@ pub struct RangeExprError {
 }
 
 impl RangeExprError {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(expr: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             expr: expr.into(),
@@ -47,6 +55,10 @@ impl RangeExprError {
             position: None,
         }
     }
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn at(expr: impl Into<String>, message: impl Into<String>, position: usize) -> Self {
         Self {
             expr: expr.into(),
@@ -565,6 +577,10 @@ impl RangeExpr {
         self.ranges.iter().flat_map(|r| r.iter())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn to_vec(&self) -> Vec<i64> {
         self.iter().collect()
     }

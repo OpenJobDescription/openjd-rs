@@ -13,6 +13,10 @@ use tracing::{debug, warn};
 use walkdir::WalkDir;
 
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct CollectOptions {
     pub optional_filenames: Vec<PathBuf>,
     pub symlink_policy: SymlinkPolicy,

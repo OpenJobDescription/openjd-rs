@@ -13,6 +13,10 @@ use crate::value::ExprValue;
 type R = Result<ExprValue, ExpressionError>;
 type Ctx<'a> = &'a mut dyn EvalContext;
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn fail_fn(_: Ctx, a: &[ExprValue]) -> R {
     let msg = if a.is_empty() {
         "fail() called".to_string()
@@ -22,6 +26,10 @@ pub fn fail_fn(_: Ctx, a: &[ExprValue]) -> R {
     Err(ExpressionError::explicit_fail(msg))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn zfill_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     if a.len() != 2 {
         return Err(ExpressionError::new("zfill() takes exactly 2 arguments"));
@@ -62,6 +70,10 @@ pub fn zfill_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(budget.finish(result))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn any_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     if a.len() != 1 {
         return Err(ExpressionError::new("any() takes 1 argument"));
@@ -79,6 +91,10 @@ pub fn any_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(false))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn all_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     if a.len() != 1 {
         return Err(ExpressionError::new("all() takes 1 argument"));
@@ -96,6 +112,10 @@ pub fn all_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(true))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn abs_int(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Int(i) => Ok(ExprValue::Int(
@@ -106,6 +126,10 @@ pub fn abs_int(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn abs_float(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => Ok(ExprValue::Float(crate::value::Float64::new(
@@ -115,6 +139,10 @@ pub fn abs_float(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn len_string(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::String(s) => Ok(ExprValue::Int(s.chars().count() as i64)),
@@ -122,6 +150,10 @@ pub fn len_string(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn len_path(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Path { value, .. } => Ok(ExprValue::Int(value.chars().count() as i64)),
@@ -129,6 +161,10 @@ pub fn len_path(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn len_list(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         val if val.is_list() => Ok(ExprValue::Int(val.list_len().unwrap() as i64)),
@@ -136,6 +172,10 @@ pub fn len_list(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn len_range(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         // len_u64 is exact and below 2^63 (bounded value domain), so the
@@ -146,6 +186,10 @@ pub fn len_range(_: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn path_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = match &a[0] {
         ExprValue::String(s) => s.clone(),
@@ -196,6 +240,10 @@ pub fn path_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::new_path(normalized, ctx.path_format()))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn path_join_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let parts: Vec<String> = a
         .iter()
@@ -216,6 +264,10 @@ pub fn path_join_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 
 // ── Getitem operators ──
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn getitem_list(_: Ctx, a: &[ExprValue]) -> R {
     let len = a[0]
         .list_len()
@@ -233,6 +285,10 @@ pub fn getitem_list(_: Ctx, a: &[ExprValue]) -> R {
     })
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn getitem_string(_: Ctx, a: &[ExprValue]) -> R {
     let s = match &a[0] {
         ExprValue::String(s) => s.as_str(),
@@ -258,6 +314,10 @@ pub fn getitem_string(_: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::String(chars[idx].to_string()))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn getitem_range(_: Ctx, a: &[ExprValue]) -> R {
     let r = match &a[0] {
         ExprValue::RangeExpr(r) => r,

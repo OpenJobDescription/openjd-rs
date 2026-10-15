@@ -58,6 +58,10 @@ pub struct LogonToken {
 }
 
 impl LogonToken {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn as_handle(&self) -> HANDLE {
         self.handle
     }
@@ -244,6 +248,10 @@ use windows::Win32::System::Threading::{
 };
 
 /// Result of spawning a cross-user process.
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct SpawnedProcess {
     pub process_handle: HANDLE,
     pub pid: u32,

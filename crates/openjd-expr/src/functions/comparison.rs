@@ -25,10 +25,18 @@ fn values_equal(ctx: Ctx, left: &ExprValue, right: &ExprValue) -> Result<bool, E
     left.equals_charged(right, &mut |n| ctx.count_ops(n))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn eq_generic(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(values_equal(ctx, &a[0], &a[1])?))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn ne_generic(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(!values_equal(ctx, &a[0], &a[1])?))
 }
@@ -46,18 +54,34 @@ fn do_compare(op_str: &str, a: &[ExprValue]) -> Result<std::cmp::Ordering, Expre
     })
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn lt_generic(_: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(do_compare("<", a)?.is_lt()))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn le_generic(_: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(do_compare("<=", a)?.is_le()))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn gt_generic(_: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(do_compare(">", a)?.is_gt()))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn ge_generic(_: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(do_compare(">=", a)?.is_ge()))
 }
@@ -77,14 +101,26 @@ fn list_contains(ctx: Ctx, a: &[ExprValue]) -> Result<bool, ExpressionError> {
     Ok(false)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn contains_list(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(list_contains(ctx, a)?))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn not_contains_list(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(!list_contains(ctx, a)?))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn contains_string(ctx: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::String(haystack), ExprValue::String(needle)) => {
@@ -95,6 +131,10 @@ pub fn contains_string(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn not_contains_string(ctx: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::String(haystack), ExprValue::String(needle)) => {
@@ -130,10 +170,18 @@ fn range_contains(a: &[ExprValue]) -> Result<bool, ExpressionError> {
         )),
     }
 }
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn contains_range(_: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(range_contains(a)?))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn not_contains_range(_: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::Bool(!range_contains(a)?))
 }
@@ -210,6 +258,10 @@ fn slice_len(start: i64, stop: i64, step: i64) -> usize {
     ((span as u64 - 1) / step.unsigned_abs() + 1) as usize
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn slice_list(ctx: Ctx, a: &[ExprValue]) -> R {
     let step = extract_int_or_none(&a[3]).unwrap_or(1);
     if step == 0 {
@@ -234,6 +286,10 @@ pub fn slice_list(ctx: Ctx, a: &[ExprValue]) -> R {
     ExprValue::make_list_checked(ctx, result.into_vec(), elem_type.clone())
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn slice_string(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = match &a[0] {
         ExprValue::String(s) => s.as_str(),
@@ -283,6 +339,10 @@ pub fn slice_string(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::String(result))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn slice_range(ctx: Ctx, a: &[ExprValue]) -> R {
     let r = match &a[0] {
         ExprValue::RangeExpr(r) => r,

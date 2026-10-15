@@ -159,7 +159,7 @@ Additional note for spec cross-check: `cmd_quote` does not double backslashes pr
 
 ### Priority 3 — Specs and public API hygiene
 
-15. **Fix `public-api.md`** (PA1–PA4, PM1–PM7); consider a `cargo public-api` CI diff to keep it honest.
+15. **Fix `public-api.md`** (PA1–PA4, PM1–PM7); consider a `cargo public-api` CI diff to keep it honest. *(The CI diff part is done: `scripts/check_public_api.sh` and the `public-api` CI job check `specs/expr/public-api.txt`. The `public-api.md` fixes remain.)*
 16. ~~**Privatize `IntRange` fields** (or document the invariant risk) — the spec already believes they're private, and `len()` panics on invariant-violating values.~~ **Resolved** — fields are private with `start()`/`end()`/`step()` accessors; deserialization and `from_ranges` re-validate through `IntRange::new`, so the construction invariants hold everywhere.
 17. **Fix the spec/code contradictions** A1, T1, V1, F1, F2, FS1, FS2, R1, PP1 (§1) and the stale `default_library.rs` module doc; decide whether `copy_symbol_value` should be public, and make `set_table` dotted-path aware (or reject dotted keys).
 18. **Unify stringly-typed `Result<_, String>` returns** (`coerce`, `from_str_coerce`, `to_symtab`, `ExprType::parse`, `register_sig`) on structured error types.

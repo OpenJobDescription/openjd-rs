@@ -14,6 +14,10 @@ use std::collections::HashMap;
 /// §4 Environment
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct Environment {
     pub name: String,
     pub description: Option<Description>,
@@ -24,6 +28,10 @@ pub struct Environment {
 /// §4.1 EnvironmentScript
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct EnvironmentScript {
     #[serde(rename = "let")]
     pub let_bindings: Option<Vec<String>>,
@@ -34,6 +42,10 @@ pub struct EnvironmentScript {
 /// §6 EmbeddedFile
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct EmbeddedFile {
     pub name: String,
     #[serde(rename = "type")]

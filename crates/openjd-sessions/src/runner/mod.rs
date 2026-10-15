@@ -40,6 +40,10 @@ use crate::subprocess::{run_subprocess, SubprocessConfig, SubprocessResult};
 /// assert!(matches!(method, CancelMethod::NotifyThenTerminate { .. }));
 /// ```
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum CancelMethod {
     /// Immediately terminate via SIGKILL.
     Terminate,
@@ -60,6 +64,10 @@ impl std::fmt::Display for CancelMethod {
 
 /// State of a script runner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ScriptRunnerState {
     Ready,
     Running,

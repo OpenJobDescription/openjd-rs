@@ -14,6 +14,10 @@ use serde::Deserialize;
 /// §1.1 JobTemplate
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobTemplate {
     pub specification_version: String,
     #[serde(rename = "$schema")]
@@ -27,14 +31,26 @@ pub struct JobTemplate {
 }
 
 impl JobTemplate {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn name(&self) -> &FormatString {
         &self.name
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn description(&self) -> Option<&str> {
         self.description.as_ref().map(|d| d.0.as_str())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn parameter_definitions_list(&self) -> &[JobParameterDefinition] {
         match &self.parameter_definitions {
             Some(defs) => defs,

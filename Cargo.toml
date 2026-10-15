@@ -26,6 +26,18 @@ authors = ["Amazon Web Services"]
 keywords = ["openjd", "openjobdescription", "render-farm", "job-template", "rendering"]
 categories = ["command-line-utilities", "parser-implementations"]
 
+# Lints every workspace crate opts into with `[lints] workspace = true`. CI
+# runs clippy (all crates but openjd-for-js) and `cargo doc` (all crates)
+# with `-D warnings`, so a `warn` here fails the build.
+#
+# `missing_docs` enforces quality-criteria Q2's "every public item has a `///`
+# doc comment". Items that predate the lint carry an item-level
+# `allow(missing_docs, reason = "missing-docs burn-down ...")` attribute;
+# documenting them and deleting that attribute is tracked debt, and new code
+# must not add one.
+[workspace.lints.rust]
+missing_docs = "warn"
+
 [workspace.dependencies]
 shlex = "2"
 serde = { version = "1", features = ["derive"] }
