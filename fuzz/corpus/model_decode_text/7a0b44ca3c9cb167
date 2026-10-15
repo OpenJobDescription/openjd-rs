@@ -1,0 +1,3 @@
+{
+        "srDefinitions": [{"na": {"attributes": [{"name": "attr.os.family", "allOf": ["linux",A"windows", "{{ Param.Foo }}"]}]}}]
+    }

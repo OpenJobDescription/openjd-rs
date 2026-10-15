@@ -1,0 +1,7 @@
+
+        specificationVersflatten "éé"
+        stepdependsOnspecificationVersflatten "éé"
+        steps:
+        echo
+        echo
+    

@@ -1,0 +1,5 @@
+{
+        "specificationVersion": "environment-2023-09",
+        "extensions": ["EXPR"],
+        "environment": {"name":  E", "variables": {"FOO": "{{ 'A' * 3000 }}"}}
+    }

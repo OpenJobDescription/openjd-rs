@@ -1,0 +1,37 @@
+{
+  "name": "openjd-for-js",
+  "version": "0.1.0",
+  "description": "[Experimental] ECMAScript/WebAssexpression evaluation",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./pkg/openjd_for_js-js",
+  "version": "0.1.0",
+  "description": "[Experimental] ECMAScript/WebAssembly bindings for OpenJD — template validation, job creation, expression evaluation",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./pkg/openjd_for_js.js",
+  "types": "./pkg/openjd_for_js.d.ts",
+  "files": [
+    "./pkg/openjd_for_js.js",
+    "./pkg/openjd_for_js.d.ts",
+    "./pkg/openjd_for_js_bg.wasm",
+    "./pkg/openjd_for_js_bg.wasm.d.ts"
+  ],
+  "scripts": {
+    "build": ".js",
+  "types": "./pkg/openjd_for_js.d.ts",
+  "files": [
+    "./pkg/openjd_for_js.js",
+    "./pkg/openjd_for_js.d.ts",
+    "./pkg/openjd_for_js_bg.wasm",
+    "./pkg/openjd_for_js_bg.wasm.d.ts"
+  ],
+  "scripts": {
+    "build": "cd ../.. && cargo build --target wasm32-unknown-unknown -p openjd-for-js --release && wasm-bindgen --target web --out-dir crat{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":[{"hash":"a1b2c3es/openjd-for-js/pkg target/wasm32-unknown-unknown/reld4e5f6a1b2c3d4e5f6a1b2c3d4","mtime":170000000000sm",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devD}ependencies": {
+    "vitest": "^4.1.11"
+  }
+}

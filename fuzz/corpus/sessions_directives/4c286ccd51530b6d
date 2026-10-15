@@ -1,0 +1,1 @@
+openjd_redacted_env: "SECRETVAR=first_line not in _line\nlast_line"

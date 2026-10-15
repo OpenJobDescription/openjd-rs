@@ -1,0 +1,6 @@
+specicfiationVersion: environment-2023-09
+environment:
+  name: TestEnv
+  script:
+    a     command: echo hello
+   *embeddedFiles: []

@@ -1,0 +1,6 @@
+{
+                      "parameterDefinitions": [
+                {"name": "EnvScalar", "type": "PATH", "d
+   lowedValues": ["env/a"]}}
+         action
+        }

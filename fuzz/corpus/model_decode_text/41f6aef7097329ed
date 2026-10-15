@@ -1,0 +1,4 @@
+{
+        "specificationVersion":            {"name": "A", "script": {"actions": {"onRun": {"command": "foo"}}}, "dependencies": [{"dependsOn": "A"}]}
+        ]
+    }

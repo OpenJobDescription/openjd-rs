@@ -1,0 +1,6 @@
+specificationrunOn: [posix]
+
+# 2.1ause a defautemplate:
+  specificationVersion: jobtemplate-2024-09
+  extensions:Version: env
+  i

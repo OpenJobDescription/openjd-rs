@@ -1,0 +1,5 @@
+snodm:
+    script :|
+      c :|
+      consolerelative_to.log('hellopt :|
+      cnole.log('hello')')

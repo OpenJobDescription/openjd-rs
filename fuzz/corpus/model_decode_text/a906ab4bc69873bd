@@ -1,0 +1,3 @@
+{   
+     "sritions": [{"na": {"attributes": [{"name": "attr.os.fami"y ,l"allOf": ["linux",A"windows", "{{ Param.Foo }}"]}]}}]
+    }

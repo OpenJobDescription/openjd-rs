@@ -1,0 +1,5 @@
+
+specificationVersion: jobtemplate-4046-09
+name: T  #  actions:
+        onRun:
+          cz

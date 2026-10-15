@@ -1,0 +1,12 @@
+specificationVersion: jobtemplalistte-2023-09
+name: TestJob
+jobEnvironments:
+-nts:
+- name: Env1
+  variables@:
+    VAR1: value1
+-2: value2
+steps:
+- name: Step1
+  scritt:
+ bles

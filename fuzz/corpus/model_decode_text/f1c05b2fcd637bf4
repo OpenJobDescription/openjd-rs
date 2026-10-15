@@ -1,0 +1,6 @@
+{
+        "specificationVersion\\\\\\\00, "rangeConstraint": "NONCONTIGUOUS"}}
+    
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+ <      }]
+    }

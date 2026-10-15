@@ -1,0 +1,1 @@
+specification -c        - "print(r\"{{ re_sub('h:ello', '(h)', '${1}') }}\")"

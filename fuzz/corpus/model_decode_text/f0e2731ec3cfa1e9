@@ -1,0 +1,5 @@
+{
+        "specificationVersion": "environment-2023-09",
+        "parameterDefiniti": [],
+        "environment": {"na-e": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}}
+    }

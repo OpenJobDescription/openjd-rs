@@ -1,0 +1,9 @@
+specificationVersion: jobtemplate-2023-09
+name: TestJob
+parameterDefinitions:
+- name: MyParam
+  type: FLOAT
+  userInterface:
+    label: My Label
+steps:
+- name: St

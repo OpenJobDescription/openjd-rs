@@ -23,6 +23,9 @@ build = "build.rs"
 
 [features]
 test-utils = []
+# Exposes crate-internal parsers (`openjd_sessions::fuzzing`) to the
+# out-of-tree fuzz harness in `fuzz/`. Not part of the public API.
+fuzzing = []
 
 [dependencies]
 openjd-expr = { path = "../openjd-expr", version = "0.11.0" }

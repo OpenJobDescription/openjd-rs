@@ -1,0 +1,2 @@
+{
+        "speicficatiparameterDefinitions": [{"name": "Foo", "\ntype": "STRING"llOf": ["linux",A"windows", "{{ Param.foo  }

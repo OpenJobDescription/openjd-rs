@@ -1,0 +1,1 @@
+ → {{ 'y' if P.aram.TEXTN ==5 else 'n' }} → 

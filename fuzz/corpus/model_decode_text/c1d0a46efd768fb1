@@ -1,0 +1,8 @@
+
+        specificationVersinitions:
+          - name: Val
+            type: FLOAT
+            default: .inf
+        st    
+                  command: echo
+    

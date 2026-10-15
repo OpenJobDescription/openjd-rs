@@ -1,0 +1,4 @@
+{
+        "script": {"actions": {"onRun": {"command": "foo"}}}, "dependencies": [{"dependsOn": "Bar"}, {"dependsOn": "Fuz"}]}
+       ]
+    }

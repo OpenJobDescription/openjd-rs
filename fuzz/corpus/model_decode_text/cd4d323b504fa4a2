@@ -1,0 +1,2 @@
+# §3.3.1 annotates the amount requirement name `@fmtstring.`. The name is resolved at job
++ creation, so template validation mustprint(r'RESULT:created')

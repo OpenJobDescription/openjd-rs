@@ -1,0 +1,3 @@
+{
+        "specificationVersion": [{"name": "S", "bash": {"script": "echo hello"}}]
+    }

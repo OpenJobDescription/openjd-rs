@@ -1,0 +1,8 @@
+specificationVersion: "jobtemplate-2023-09"
+name: J%sonJob
+steps:
+  - name: S1
+    script:
+      actions:
+        onRun:
+          command: echo

@@ -1,0 +1,11 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: Values
+  type: LIST[INT]
+  default: 42
+steps:
+- name: St       - "-c"
+        - "print()"

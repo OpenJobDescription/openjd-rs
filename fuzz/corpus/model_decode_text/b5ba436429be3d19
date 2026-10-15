@@ -1,0 +1,9 @@
+spextensions:
+- EXPe: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - -c
+        - "print(r'{{ re_split(\"hello\ - "print(r'}}')"

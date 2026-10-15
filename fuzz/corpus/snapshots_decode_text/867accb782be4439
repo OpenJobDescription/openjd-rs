@@ -1,0 +1,9 @@
+{
+  "name": "openjd-for-js",
+  "version": "0.1.0",
+  "description": "[Experimental] ECMAScript/WebAssembly bindings for OpenJD — ti03","paths":[{"hash":"bbbb","mtime":2000,"path":"alpha.txt","size":20},{"hash":"cccc","mtime":3000,"path":"middle.txt","size":30},{"hash":"aaaa","mtime":1000,"paton",
+  "license": "Apache-1.0",
+  "type": "module",
+  "^4.1.11"
+  }
+}

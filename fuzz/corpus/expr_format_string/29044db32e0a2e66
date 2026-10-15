@@ -1,0 +1,1 @@
+{{ sum(um([1] `*0) [1] openjd_status: *0) #}) #}}

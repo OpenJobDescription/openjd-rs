@@ -1,0 +1,2 @@
+{{ rmpr if x > 1 els=partsn0 $ane [T > 1 else [T=partsn0 $angge(Parns:
+  ) }}

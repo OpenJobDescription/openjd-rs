@@ -1,0 +1,7 @@
+spec1ficpt:
+    actions:
+     &onEnter:
+        command: python
+        args:
+        - "-c"
+        - "print()"

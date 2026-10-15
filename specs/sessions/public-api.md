@@ -48,8 +48,34 @@ openjd_sessions                 — crate root (most public items re-exported he
 ├── session_user                — SessionUser trait, PosixSessionUser, WindowsSessionUser
 ├── tempdir                     — TempDir, StickyBitPolicy, openjd_temp_dir
 ├── win32 (Windows only)        — Windows helpers (mostly crate-internal; get_process_user is public)
-└── win32_permissions (feature = "test-utils")
-                                — DACL helpers for integration tests
+├── win32_permissions (feature = "test-utils")
+│                               — DACL helpers for integration tests
+└── fuzzing (feature = "fuzzing", #[doc(hidden)])
+                                — crate-internal parsers re-exported for fuzz/
+```
+
+The `fuzzing` feature exists only for the out-of-tree fuzz harness in
+`fuzz/` and is not part of the stable API. It exposes the subprocess-output
+parsers, which are the most attacker-controlled input the runtime sees but
+are otherwise crate-private:
+
+```rust
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub mod fuzzing {
+    pub use crate::action_filter::{
+        redact_openjd_redacted_env_requests, ActionFilter, ActionMessageKind,
+        ActionMessageValue, FilterCallback,
+    };
+    pub const LOG_LINE_MAX_LENGTH: usize;
+    pub fn decode_backslashreplace(bytes: &[u8]) -> Cow<'_, str>;
+    pub fn truncate_line(line: &str) -> &str;
+    /// One output line through the filter, as the subprocess reader runs it:
+    /// (display line, passes through to the log, messages, saw openjd_fail).
+    pub fn process_line(
+        line: &str, filter: &mut ActionFilter, session_id: &str,
+    ) -> (String, bool, Vec<ActionMessage>, bool);
+}
 ```
 
 SubprocessResult is re-exported at the crate root. The `subprocess`,

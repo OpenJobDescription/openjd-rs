@@ -1,0 +1,1 @@
+(range_expr, int | nulltype, int | nulltype, int | nulltype) -> range_expr | list[int]

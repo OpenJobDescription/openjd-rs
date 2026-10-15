@@ -1,0 +1,8 @@
+specificationVersion: jobtemplate-2023e9
+-0xtensions:
+  - FEATURE_BUNDLE21is_absolute
+name: TestJob
+stepS:
+- name: Step1
+  script:
+    embeddedFi      e        - "print()"
