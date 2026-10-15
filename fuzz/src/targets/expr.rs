@@ -79,19 +79,58 @@ fn value_dependent(kind: &ExpressionErrorKind) -> bool {
             // `range_expr('a')`: a value that fails to parse as a range.
             | ExpressionErrorKind::ParseError(_)
             | ExpressionErrorKind::Other(_)
-            | ExpressionErrorKind::TypeError { .. }
     )
 }
 
 /// Errors that a statically accepted expression must never raise at run
-/// time: the static pass already resolved every name and function.
-fn static_class(kind: &ExpressionErrorKind) -> bool {
+/// time: the static pass already resolved every name and function and
+/// checked every operand type. (Value-dependent conversion failures such as
+/// `int('x')` are `Other`, not `TypeError`.)
+pub(crate) fn static_class(kind: &ExpressionErrorKind) -> bool {
     matches!(
         kind,
         ExpressionErrorKind::UndefinedVariable { .. }
             | ExpressionErrorKind::UnknownFunction { .. }
             | ExpressionErrorKind::UnsupportedSyntax { .. }
+            | ExpressionErrorKind::TypeError { .. }
     )
+}
+
+/// The ordering operators' cross-type refusal is a run-time check only
+/// (`do_compare`; specs/expr/function-library.md): known issue
+/// `expr-ordering-runtime-type-check`.
+pub(crate) fn is_ordering_type_error(e: &ExpressionError) -> bool {
+    match e.kind() {
+        ExpressionErrorKind::TypeError { message } => ["<", "<=", ">", ">="]
+            .iter()
+            .any(|op| message.starts_with(&format!("Cannot use '{op}' operator with "))),
+        _ => false,
+    }
+}
+
+/// A statically accepted `src` failed at run time with `e`. Fails the
+/// oracle when the static pass should have rejected it, unless the
+/// disagreement is a known issue (`unbound_return`: the generator went
+/// through a signature with an unbound return type variable).
+pub(crate) fn check_static_miss(
+    e: &ExpressionError,
+    src: &str,
+    unbound_return: bool,
+    msg: impl FnOnce() -> String,
+) {
+    if !static_class(e.kind()) {
+        return;
+    }
+    let is_type_error = matches!(e.kind(), ExpressionErrorKind::TypeError { .. });
+    if is_ordering_type_error(e) {
+        crate::known::hit("expr-ordering-runtime-type-check", msg);
+    } else if uses_boolop(src) {
+        crate::known::hit("expr-boolop-static-type", msg);
+    } else if unbound_return && is_type_error {
+        crate::known::hit("expr-unbound-return-typevar", msg);
+    } else {
+        oracle!(false, "{}", msg());
+    }
 }
 
 /// The evaluation environment: each symbol with a concrete value and the
@@ -390,19 +429,10 @@ pub fn check_expression(
                 }
             }
             (Ok(sv), Err(e)) => {
-                if uses_boolop(src) {
-                    known_issue!(
-                        "expr-boolop-static-type",
-                        !static_class(e.kind()),
-                        "{src:?}: accepted statically ({sv:?}) but run-time evaluation fails with {e}"
-                    );
-                } else {
-                    oracle!(
-                        !static_class(e.kind()),
-                        "{src:?}: accepted statically ({sv:?}) but run-time evaluation fails with {e}"
-                    );
-                }
-                if well_typed {
+                check_static_miss(e, src, unbound_return, || {
+                    format!("{src:?}: accepted statically ({sv:?}) but run-time evaluation fails with {e}")
+                });
+                if well_typed && !static_class(e.kind()) {
                     oracle!(
                         value_dependent(e.kind()),
                         "{src:?}: accepted statically ({sv:?}) but fails at run time: {e}"
@@ -860,10 +890,9 @@ pub fn format_string(data: &[u8]) {
                     "{text:?}: static resolved_type {} but resolution gives {rv:?}",
                     sr.resolved_type
                 ),
-                Err(e) => oracle!(
-                    !static_class(e.kind()),
-                    "{text:?}: validates but resolution fails with {e}"
-                ),
+                Err(e) => check_static_miss(e, text, false, || {
+                    format!("{text:?}: validates but resolution fails with {e}")
+                }),
             }
         }
         Err(e) => {

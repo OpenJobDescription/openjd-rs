@@ -905,10 +905,12 @@ impl<'a> Evaluator<'a> {
         let mut left = self.eval_node(first, None)?;
         // An unresolved operand still goes through dispatch: the library
         // matches the operand types against the operator's signatures and
-        // returns `unresolved[bool]` on success, so a comparison whose types
-        // can never match (`Param.Name in [1, 2]` with a STRING parameter,
-        // or `Param.Path < 1`) is refused at validation time rather than on
-        // the worker. Only the value is deferred, not the type check.
+        // returns `unresolved[bool]` on success, so a membership test whose
+        // types can never match (`Param.Name in [1, 2]` with a STRING
+        // parameter) is refused at validation time rather than on the
+        // worker. The ordering operators are `(T1, T2)`, so their cross-type
+        // refusal (`Param.Path < 1`) is still a run-time one (see
+        // specs/expr/function-library.md).
         let mut seen_unresolved = false;
         let last_index = c.ops.len().saturating_sub(1);
         for (index, (op, right_node)) in c.ops.iter().zip(comparators.iter()).enumerate() {

@@ -92,6 +92,13 @@ pub mod known {
              `skip_deep_unclosed_brackets`).",
         ),
         (
+            "expr-ordering-runtime-type-check",
+            "The ordering operators are registered `(T1, T2) -> bool` and refuse mismatched \
+             operand types only at run time (`do_compare`; documented in \
+             specs/expr/function-library.md), so `Param.Path < 1`, `A > 5 > 5` with a BOOL \
+             parameter, or two `range_expr`s validate and then fail on the worker.",
+        ),
+        (
             "expr-boolop-static-type",
             "`a or b` / `a and b` return an operand, but with an unresolved operand the static \
              pass types the result `bool` (and may fold to a later operand), so validation \

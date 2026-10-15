@@ -73,7 +73,7 @@ formats, and requires:
   equals the run-time value (type soundness — the most frequent bug class in
   this repo's history: #300, #316, #329, #396, #434, ...);
 - a statically accepted expression never fails at run time with an
-  undefined-symbol, unknown-function, or unsupported-syntax error;
+  undefined-symbol, unknown-function, unsupported-syntax, or type error;
 - determinism; evaluation metrics within their limits; a target-typed result
   satisfies its target; the result survives the template → session transport
   boundary unchanged;

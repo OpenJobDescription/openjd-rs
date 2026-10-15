@@ -27,8 +27,8 @@ use crate::targets::text_and_control;
 use crate::{known_issue, oracle};
 use arbitrary::Unstructured;
 use openjd_expr::{
-    ExprValue, ExpressionError, ExpressionErrorKind, FormatString, FormatStringOptions,
-    FunctionLibrary, HostContext, PathFormat, SymbolTable,
+    ExprValue, ExpressionError, FormatString, FormatStringOptions, FunctionLibrary, HostContext,
+    PathFormat, SymbolTable,
 };
 use openjd_model::job::{Job, Step};
 use openjd_model::template::{EnvironmentTemplate, JobTemplate};
@@ -64,13 +64,14 @@ fn hash_of<T: Hash>(v: &T) -> u64 {
     h.finish()
 }
 
+/// An error template validation should have caught. Known gaps that the
+/// model only inherits from openjd-expr are recorded and not reported.
 fn is_static_error(e: &ExpressionError) -> bool {
-    matches!(
-        e.kind(),
-        ExpressionErrorKind::UndefinedVariable { .. }
-            | ExpressionErrorKind::UnknownFunction { .. }
-            | ExpressionErrorKind::UnsupportedSyntax { .. }
-    )
+    if crate::targets::expr::is_ordering_type_error(e) {
+        crate::known::hit("expr-ordering-runtime-type-check", || e.to_string());
+        return false;
+    }
+    crate::targets::expr::static_class(e.kind())
 }
 
 fn model_static_error(e: &ModelError) -> Option<&ExpressionError> {
