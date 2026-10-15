@@ -106,7 +106,7 @@ because the module already provides that namespace.
 | `suffixes(s)` | All extensions (e.g., `.tar.gz` → `[".tar", ".gz"]`) |
 | `stem(s)` | Filename without extension |
 | `parts(s)` | Split into components: `[authority, seg1, seg2, ...]` |
-| `join(s, child)` | Append a child component to a URI path |
+| `join(s, child)` | Append a child component to a URI path. One trailing slash is dropped first, and a bare authority gives `scheme://host/child`. Interior empty segments are kept |
 | `from_parts(parts)` | Reconstruct URI from `parts(...)` output |
 
 ### Scheme must be at least two characters
