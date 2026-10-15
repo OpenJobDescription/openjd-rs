@@ -67,6 +67,14 @@ impl TempDir {
 4. If `user` is provided and not the process user:
    - `chown(path, None, Some(group_gid))` — set group ownership
    - This allows the cross-user subprocess to read/write in the directory
+5. If step 3 or 4 fails, remove the directory created in step 2 and return
+   `SessionError::PathPermissions`
+
+Step 5 matters because the failure happens after the directory exists but before
+the `TempDir` value does, so the `Drop` safety net below cannot clean it up. A
+`chown` to a group the process user does not belong to is the ordinary way to
+reach it. The constructor therefore leaves no directory behind when it returns
+an error.
 
 ### Drop implementation — best-effort cleanup
 

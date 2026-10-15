@@ -266,6 +266,7 @@ PRs run these checks (all must pass):
 | **Documentation** | `cargo doc --no-deps --workspace` with `-D warnings` |
 | **Compliance** | Copyright header check |
 | **Cross-User (Linux)** | Docker-based cross-user tests: localuser and LDAP variants |
+| **Cross-User (macOS)** | POSIX cross-user tests with `sysadminctl`-provisioned users and a world-traversable `TMPDIR` override |
 | **Cross-User (Windows)** | Windows cross-user and permissions tests with a temporary test user |
 | **openjd-for-js** | Builds the wasm32 crate with `wasm-bindgen` and runs the vitest suite |
 

@@ -159,7 +159,7 @@ macOS-specific provisioning differences (encoded in the CI job):
 |---|---|---|
 | Create users/groups | `useradd`/`groupadd` | `sysadminctl -addUser` / `dseditgroup -o create` |
 | Self-named user group | Created automatically by `useradd` | Must be created explicitly (`sysadminctl` assigns primary group `staff`); the tempdir cleanup test chowns to `user:user` |
-| Temp root | `/tmp` (world-writable) | The default per-user `TMPDIR` (`/var/folders/<hash>/T`) is mode `0700`, so the target user cannot traverse to the session working directory or execute the extracted helper binary. Tests set a world-traversable `TMPDIR`. |
+| Temp root | `/tmp` (world-writable) | The default per-user `TMPDIR` (`/var/folders/<hash>/T`) is mode `0700`, so the target user cannot traverse to the session working directory or execute the extracted helper binary. The CI job sets a world-traversable `TMPDIR`; running the suite locally on macOS needs the same override. |
 | Resolve new users | immediate | `dscacheutil -flushcache` after provisioning |
 
 > **Deployment note:** the `TMPDIR` constraint applies to real macOS hosts too — the

@@ -622,12 +622,21 @@ async fn test_cross_user_tempdir_disjoint_fails() {
     // Err. Snapshot the parent so we can also assert the just-created directory
     // is removed on failure (the TempDir struct, and its Drop cleanup, never
     // exist when chown fails, so TempDir::new must remove it explicitly).
-    let parent = openjd_sessions::tempdir::openjd_temp_dir(None).unwrap();
+    //
+    // The parent is private to this test, not the shared openjd_temp_dir(None).
+    // The before/after comparison below is only sound if nothing else writes to
+    // the parent, and the shared one is used by every other TempDir in this test
+    // binary -- including test_tempdir_default_parent, which is not #[ignore]d.
+    // The Linux cross-user container runs the suite without --test-threads=1, so
+    // against the shared parent an unrelated test's directory would appear in
+    // `after` and be reported as an orphan this test had leaked.
+    let private_parent = tempfile::tempdir().expect("failed to create a private parent dir");
+    let parent = private_parent.path().to_path_buf();
     let before: std::collections::HashSet<PathBuf> = std::fs::read_dir(&parent)
         .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect())
         .unwrap_or_default();
 
-    let result = TempDir::new(None, None, Some(&*user));
+    let result = TempDir::new(Some(&parent), None, Some(&*user));
     match result {
         Err(SessionError::PathPermissions { .. }) => {}
         Err(other) => panic!("Expected PathPermissions error, got {other:?}"),
