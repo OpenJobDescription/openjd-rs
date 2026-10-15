@@ -1653,8 +1653,15 @@ impl<'a> Evaluator<'a> {
         // consumed here like everywhere else below.
         if iterable.is_unresolved() {
             let inner = unwrap_unresolved(&iterable.expr_type());
-            let elem_type = inner.list_element_type().cloned().unwrap_or(ExprType::INT);
             self.current_memory = comprehension_baseline;
+            // A type that can never be iterated (`[x for x in Param.Name]`
+            // with a STRING parameter) fails every run, so it is refused
+            // here with the run-time error rather than on the worker.
+            let Some(elem_type) = unresolved_iteration_element(&inner) else {
+                return Err(ExpressionError::type_error(format!(
+                    "Cannot iterate over {inner}"
+                )));
+            };
             return self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type);
         }
 
@@ -1937,6 +1944,37 @@ fn unwrap_unresolved(t: &ExprType) -> ExprType {
 /// `T` is the element type that list has (a union when different
 /// resolutions give different types). Used by list literal evaluation and
 /// by list comprehensions whose body produced unresolved elements;
+/// The element type a comprehension binds when iterating a value of the
+/// (unresolved) type `t`, or `None` if no value of that type is iterable.
+/// Unknown types (`any`, type variables, an unresolved placeholder) keep the
+/// historical `int` binding; a union iterates as its iterable members.
+fn unresolved_iteration_element(t: &ExprType) -> Option<ExprType> {
+    use crate::types::TypeCode;
+    match t.code() {
+        TypeCode::List => Some(t.list_element_type().cloned().unwrap_or(ExprType::INT)),
+        TypeCode::RangeExpr => Some(ExprType::INT),
+        TypeCode::Union => {
+            let elems: Vec<ExprType> = t
+                .params()
+                .iter()
+                .filter_map(unresolved_iteration_element)
+                .collect();
+            match elems.len() {
+                0 => None,
+                1 => elems.into_iter().next(),
+                _ => Some(ExprType::union(elems)),
+            }
+        }
+        TypeCode::NullType
+        | TypeCode::Bool
+        | TypeCode::Int
+        | TypeCode::Float
+        | TypeCode::String
+        | TypeCode::Path => None,
+        _ => Some(ExprType::INT),
+    }
+}
+
 /// `ExprValue::make_list` itself rejects unresolved elements, since it
 /// constructs concrete lists.
 fn unresolved_list_from_elements(

@@ -101,6 +101,8 @@ pub struct ExprGen<'a, 'b> {
     /// or return, or omits an optional argument (known issues
     /// `expr-union-arg-overload`, `expr-flatten-union-static-type`).
     pub used_union: bool,
+    /// Set when the output has a conditional (`a if c else b`).
+    pub used_conditional: bool,
 }
 
 impl<'a, 'b> ExprGen<'a, 'b> {
@@ -114,6 +116,7 @@ impl<'a, 'b> ExprGen<'a, 'b> {
             used_unbound_return: false,
             used_boolop: false,
             used_union: false,
+            used_conditional: false,
         }
     }
 
@@ -138,6 +141,7 @@ impl<'a, 'b> ExprGen<'a, 'b> {
             0..=1 => self.leaf(&ty),
             2..=6 => self.call(&ty, depth).unwrap_or_else(|| self.leaf(&ty)),
             7 => {
+                self.used_conditional = true;
                 let c = self.of_type(&ExprType::BOOL, depth - 1);
                 let a = self.of_type(&ty, depth - 1);
                 let b = self.of_type(&ty, depth - 1);

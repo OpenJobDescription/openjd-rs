@@ -112,9 +112,20 @@ pub(crate) fn is_ordering_type_error(e: &ExpressionError) -> bool {
 /// it builds, and a `null` element fails it at run time. Value-dependent,
 /// though reported as a `TypeError` (list literals report the same case as
 /// `Other`).
-fn is_null_element_error(e: &ExpressionError) -> bool {
+///
+/// Likewise iterating an optional result (`re_search(...)` is `null` on no
+/// match): `Cannot iterate over nulltype` depends on the value.
+pub(crate) fn is_null_element_error(e: &ExpressionError) -> bool {
     matches!(e.kind(), ExpressionErrorKind::TypeError { message }
-        if message == "Cannot create list from null elements")
+        if message == "Cannot create list from null elements"
+            || message == "Cannot iterate over nulltype")
+}
+
+/// A list built from elements of different types fails at run time with
+/// one of these (concatenation, comprehension, literal).
+pub(crate) fn is_list_element_mix_error(e: &ExpressionError) -> bool {
+    matches!(e.kind(), ExpressionErrorKind::TypeError { message }
+        if message.starts_with("make_list expected ") || message.starts_with("Cannot concatenate "))
 }
 
 /// What, per known issue, may void static/run-time agreement for one
@@ -131,6 +142,11 @@ pub struct Facts {
     /// A signature with an unbound return type variable
     /// (`expr-unbound-return-typevar`).
     pub unbound_return: bool,
+    /// A list concatenation (`+`), whose `(list[T1], list[T2]) -> list[T3]`
+    /// signature accepts mismatched element types.
+    pub list_add: bool,
+    /// A conditional (`expr-conditional-list-element-join`).
+    pub conditional: bool,
 }
 
 impl Facts {
@@ -139,6 +155,8 @@ impl Facts {
             boolop: g.used_boolop,
             union: g.used_union,
             unbound_return: g.used_unbound_return,
+            list_add: g.used_unbound_return,
+            conditional: g.used_conditional,
         }
     }
 
@@ -157,6 +175,8 @@ impl Facts {
                     "flatten",
                 ]),
             unbound_return: src.contains(" + ") && has(&["min(", "max(", "sum("]),
+            list_add: src.contains('+'),
+            conditional: src.contains(" if "),
         }
     }
 }
@@ -176,6 +196,10 @@ pub(crate) fn check_static_miss(e: &ExpressionError, facts: Facts, msg: impl FnO
         crate::known::hit("expr-boolop-static-type", msg);
     } else if facts.unbound_return && is_type_error {
         crate::known::hit("expr-unbound-return-typevar", msg);
+    } else if is_list_element_mix_error(e) && facts.list_add {
+        crate::known::hit("expr-unbound-return-typevar", msg);
+    } else if is_list_element_mix_error(e) && facts.conditional {
+        crate::known::hit("expr-conditional-list-element-join", msg);
     } else {
         oracle!(false, "{}", msg());
     }
@@ -508,7 +532,11 @@ pub fn check_expression(
                         | ExpressionErrorKind::UndefinedVariable { .. }
                         | ExpressionErrorKind::UnknownFunction { .. }
                 );
-                if facts.unbound_return && matches!(e.kind(), ExpressionErrorKind::TypeError { .. })
+                if is_null_element_error(e) {
+                    // Dead code that fails whenever evaluated (a list of
+                    // `None`) is rightly refused statically.
+                } else if facts.unbound_return
+                    && matches!(e.kind(), ExpressionErrorKind::TypeError { .. })
                 {
                     known_issue!(
                         "expr-unbound-return-typevar",
@@ -1286,7 +1314,9 @@ pub fn types(data: &[u8]) {
             ExprType::union(vec![t.clone(), t.clone()]) == t || t.code() == TypeCode::Signature,
             "union[{shown}, {shown}] != {shown}"
         );
-        if t.is_concrete() && t != ExprType::NORETURN {
+        // A type containing `noreturn` denotes no values, so nothing (not even
+        // itself) satisfies it.
+        if t.is_concrete() && !shown.contains("noreturn") {
             oracle!(t.satisfies(&t), "{shown} does not satisfy itself");
             oracle!(t.satisfies(&ExprType::ANY), "{shown} does not satisfy any");
         }

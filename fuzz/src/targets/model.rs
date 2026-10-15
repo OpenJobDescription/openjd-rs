@@ -27,8 +27,8 @@ use crate::targets::text_and_control;
 use crate::{known_issue, oracle};
 use arbitrary::Unstructured;
 use openjd_expr::{
-    ExprValue, ExpressionError, ExpressionErrorKind, FormatString, FormatStringOptions,
-    FunctionLibrary, HostContext, PathFormat, SymbolTable,
+    ExprValue, ExpressionError, FormatString, FormatStringOptions, FunctionLibrary, HostContext,
+    PathFormat, SymbolTable,
 };
 use openjd_model::job::{Job, Step};
 use openjd_model::template::{EnvironmentTemplate, JobTemplate};
@@ -71,14 +71,15 @@ fn is_static_error(e: &ExpressionError) -> bool {
         crate::known::hit("expr-ordering-runtime-type-check", || e.to_string());
         return false;
     }
+    // Value-dependent: a null element / iterating an optional result.
+    if crate::targets::expr::is_null_element_error(e) {
+        return false;
+    }
     // `__add__: (list[T1], list[T2]) -> list[T3]` accepts lists of different
     // element types statically; the concatenation fails at run time.
-    if let ExpressionErrorKind::TypeError { message } = e.kind() {
-        if message.starts_with("make_list expected ") || message.starts_with("Cannot concatenate ")
-        {
-            crate::known::hit("expr-unbound-return-typevar", || e.to_string());
-            return false;
-        }
+    if crate::targets::expr::is_list_element_mix_error(e) {
+        crate::known::hit("expr-unbound-return-typevar", || e.to_string());
+        return false;
     }
     crate::targets::expr::static_class(e.kind())
 }

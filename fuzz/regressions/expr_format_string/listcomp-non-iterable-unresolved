@@ -1,0 +1,8 @@
+specificationVersion: jobtempla,te-2023-09
+extensions:
+- EXPR
+- FEATURE_BUNDLE1, 2, 3]
+steps:
+- n
+    - x = 10
+    script: "echo {{ [x for x in Param.Items] }}"

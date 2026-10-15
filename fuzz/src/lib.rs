@@ -99,6 +99,13 @@ pub mod known {
              openjd-for-js, which uses `{:?}`) does not use the spec spelling.",
         ),
         (
+            "expr-conditional-list-element-join",
+            "A list element whose type depends on a conditional is typed with the numeric \
+             join of its branches, dropping the others: `[1 if c else (2.5 if d else 'a') for x \
+             in xs]` is `list[float | int]` statically, and the elements mix (`make_list \
+             expected float element, got string`) at run time.",
+        ),
+        (
             "expr-ordering-runtime-type-check",
             "The ordering operators are registered `(T1, T2) -> bool` and refuse mismatched \
              operand types only at run time (`do_compare`; documented in \

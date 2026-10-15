@@ -126,7 +126,10 @@ Each check below is executable, and each was verified to fail when broken:
   input and check a property, never with constant arguments just to satisfy
   the gate. Not covered: Windows-only code (rustdoc runs on Linux),
   `#[doc(hidden)]` items, and the CLI binary (its argument parsers are fuzzed
-  by `cli_args`).
+  by `cli_args`). Known imprecision: functions are keyed by definition path
+  without generic arguments, so several impls of one trait for a type
+  (`From<A>`, `From<B>`) or same-named methods of `impl Foo<A>` / `impl
+  Foo<B>` count as one entry.
 
 ## Known issues
 

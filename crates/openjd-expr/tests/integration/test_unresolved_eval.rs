@@ -2193,3 +2193,38 @@ fn join_always_null_unresolved_element_reports_null_element() {
         assert_err_w(expr, st, &lines);
     }
 }
+
+#[test]
+fn listcomp_over_non_iterable_unresolved_is_refused() {
+    // Found by the expr_eval_text fuzz target: the static pass bound the
+    // loop variable to `int` for any non-list unresolved iterable, so
+    // `[x for x in Param.X]` with a STRING (PATH, INT, ...) parameter
+    // validated and then failed on the worker. It now fails validation with
+    // the run-time error.
+    let expr = "[x for x in Param.X]";
+    for t in ["string", "path", "int", "float", "bool"] {
+        let st = st_unresolved(vec![("Param.X", t)]);
+        assert_err_w(
+            expr,
+            &st,
+            &[
+                &format!("Cannot iterate over {t}\n"),
+                &format!("  {expr}\n"),
+                &format!("  ^{}", "~".repeat(expr.len() - 1)),
+            ],
+        );
+    }
+    // Iterable types still iterate statically.
+    for (t, elem) in [
+        ("list[string]", "string"),
+        ("range_expr", "int"),
+        ("list[path]?", "path"),
+    ] {
+        let st = st_unresolved(vec![("Param.X", t)]);
+        assert_eq!(
+            eval_u(expr, &st).expr_type(),
+            tp(&format!("unresolved[list[{elem}]]")),
+            "{t}"
+        );
+    }
+}

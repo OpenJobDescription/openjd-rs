@@ -500,6 +500,11 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
 - Single generator only (no nested `for` clauses)
 - Creates a local scope per iteration (loop variable doesn't leak)
 - Handles unresolved iterables by evaluating the body once with an unresolved loop variable
+  of the iterable's element type (`list[T]` binds `T`, `range_expr` binds `int`, a union
+  binds its iterable members' elements). An unresolved iterable of a type no value of which
+  is iterable (`string`, `path`, `int`, `float`, `bool`, `nulltype`) is refused with the
+  run-time error `Cannot iterate over {type}`, so `[x for x in Param.Name]` with a STRING
+  parameter fails validation rather than every run
 - A filter condition that evaluates to an *unresolved* value on a
   concrete element concludes the same way: per-element inclusion is
   undecidable, so any accumulated elements are abandoned and the
