@@ -4,12 +4,21 @@
 
 //! Cross-user tests for openjd-sessions.
 //!
-//! All tests are `#[ignore]` — they require a Docker container with sudo
-//! configured and the following env vars set:
+//! All tests are `#[ignore]` — they require a provisioned multi-user POSIX
+//! environment with passwordless sudo. CI provides that two ways: a Docker
+//! container on Linux, and users provisioned on the runner itself on macOS
+//! (see `specs/sessions/cross-user-testing.md`).
+//!
+//! Required environment:
 //!   OPENJD_TEST_SUDO_TARGET_USER / OPENJD_TEST_SUDO_SHARED_GROUP
 //!   OPENJD_TEST_SUDO_DISJOINT_USER / OPENJD_TEST_SUDO_DISJOINT_GROUP
+//!   TMPDIR — must be world-traversable. The target user has to traverse it to
+//!     reach the session working directory and execute the extracted helper
+//!     binary, so the macOS default (`/var/folders/<hash>/T`, mode 0700) fails
+//!     with "Helper process closed stdout unexpectedly".
 //!
-//! Run with: cargo test -p openjd-sessions --features test-utils -- --include-ignored
+//! Run with: cargo test -p openjd-sessions --features test-utils --test integration \
+//!   -- --include-ignored test_cross_user::
 //!
 //! These tests are POSIX-only (sudo, process groups, file ownership).
 #![cfg(unix)]
