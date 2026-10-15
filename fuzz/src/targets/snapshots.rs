@@ -37,8 +37,16 @@ fn same<P, K>(a: &Manifest<P, K>, b: &Manifest<P, K>) -> bool {
         v.sort_by(|x, y| x.path.cmp(&y.path));
         v
     };
+    // A decoded manifest's stated total may disagree with its files (decode
+    // accepts it); encoders write the computed total, so compare totals only
+    // when `b` (the original) is self-consistent.
+    let computed = b
+        .files
+        .iter()
+        .filter(|f| !f.deleted)
+        .try_fold(0u64, |acc, f| acc.checked_add(f.size.unwrap_or(0)));
     sorted(a) == sorted(b)
-        && a.total_size == b.total_size
+        && (computed != Some(b.total_size) || a.total_size == b.total_size)
         && a.parent_manifest_hash == b.parent_manifest_hash
         && a.file_chunk_size_bytes == b.file_chunk_size_bytes
         && a.hash_alg == b.hash_alg
@@ -57,7 +65,18 @@ fn roundtrip<P, K>(
     if m.validate().is_err() {
         return;
     }
-    let Ok(text) = encode(m) else { return };
+    let text = match encode(m) {
+        Ok(t) => t,
+        Err(e) => {
+            // v2023 has no chunking: it requires fileChunkSizeBytes = -1.
+            let unrepresentable = what.contains("v2023") && m.file_chunk_size_bytes != -1;
+            oracle!(
+                unrepresentable,
+                "{what}: a valid manifest fails to encode: {e}"
+            );
+            return;
+        }
+    };
     let again = encode(m).ok();
     oracle!(
         again.as_deref() == Some(text.as_str()),
@@ -65,7 +84,7 @@ fn roundtrip<P, K>(
     );
     match decode_manifest(&text).map(&unwrap) {
         Ok(Some(back)) => {
-            if what.contains("v2025") {
+            {
                 let first_diff = m.files.iter().zip(&back.files).find(|(x, y)| x != y);
                 oracle!(
                     same(&back, m),
@@ -117,6 +136,62 @@ fn roundtrip<P, K>(
                 .collect::<Vec<_>>(),
             m.dirs
         ),
+    }
+}
+
+/// A diff the v2023 encoder accepts decodes back through
+/// `decode_v2023_as_diff` to its live entries: v2023 has no deletions, so the
+/// encoder drops deleted entries (documented) and the format has no
+/// `runnable` flag. Symlinks are collapsed by the encoder, so with symlinks
+/// only the regular files' survival is checked.
+fn v2023_diff_roundtrip(m: &openjd_snapshots::SnapshotDiff, what: &str) {
+    let Ok(text) = encode_snapshot_diff_v2023(m) else {
+        return;
+    };
+    let back = match openjd_snapshots::decode_v2023_as_diff(&text) {
+        Ok(back) => back,
+        Err(e) => {
+            oracle!(
+                false,
+                "{what}: v2023-encoded diff does not decode: {e}\n{text}"
+            );
+            return;
+        }
+    };
+    // v2023 entries carry no `runnable` flag either.
+    let mut live = m.clone();
+    live.files.retain(|f| !f.deleted);
+    for f in &mut live.files {
+        f.runnable = false;
+    }
+    let has_symlinks = live.files.iter().any(|f| f.symlink_target.is_some());
+    if has_symlinks {
+        let paths = |x: &openjd_snapshots::SnapshotDiff| {
+            let mut v: Vec<String> = x.files.iter().map(|f| f.path.clone()).collect();
+            v.sort();
+            v
+        };
+        // Collapsing adds a symlinked directory's files under the link, so
+        // only require every live regular file to survive.
+        let back_paths = paths(&back);
+        let lost: Vec<&FileEntry> = live
+            .files
+            .iter()
+            .filter(|f| f.symlink_target.is_none() && !back_paths.contains(&f.path))
+            .collect();
+        oracle!(
+            lost.is_empty(),
+            "{what}: v2023 round trip lost regular files {lost:?}\n{text}"
+        );
+    } else {
+        oracle!(
+            by_path(&back.files) == by_path(&live.files),
+            "{what}: v2023 round trip changed the live entries: {:?}",
+            by_path(&live.files)
+                .into_iter()
+                .zip(by_path(&back.files))
+                .find(|(x, y)| x != y)
+        );
     }
 }
 
@@ -189,9 +264,7 @@ pub fn decode_text(data: &[u8]) {
                     },
                     "diff v2025",
                 );
-                if let Ok(t) = encode_snapshot_diff_v2023(&m) {
-                    let _ = openjd_snapshots::decode_v2023_as_diff(&t);
-                }
+                v2023_diff_roundtrip(&m, "diff");
             }
         }
     }
@@ -341,12 +414,17 @@ pub fn ops_gen(data: &[u8]) {
                         c.files
                     );
                 }
-                known_issue!(
-                    "snapshots-compose-dirs",
-                    c.validate().is_ok(),
-                    "compose produced an invalid manifest: {:?}",
-                    c.validate()
-                );
+                match c.validate() {
+                    Ok(()) => {}
+                    // The known shape: synthesized ancestor dirs repeat a
+                    // path ("/" twice).
+                    Err(e) if e.to_string().contains("duplicate path: ") => {
+                        crate::known::hit("snapshots-compose-dirs", || {
+                            format!("compose produced an invalid manifest: {e}")
+                        })
+                    }
+                    Err(e) => oracle!(false, "compose produced an invalid manifest: {e}"),
+                }
             }
             Err(e) => oracle!(false, "compose(a, [diff(a, b)]) failed: {e}"),
         }
@@ -427,9 +505,7 @@ pub fn ops_gen(data: &[u8]) {
                 },
                 "generated diff v2025",
             );
-            if let Ok(t) = encode_snapshot_diff_v2023(&rel) {
-                let _ = openjd_snapshots::decode_v2023_as_diff(&t);
-            }
+            v2023_diff_roundtrip(&rel, "generated diff");
             let _ = openjd_snapshots::join_snapshot_diff(&rel, ABS_ROOT);
             let _ = openjd_snapshots::join_snapshot_diff_rel(&rel, "pre");
             let _ = openjd_snapshots::subtree_rel_snapshot_diff(&rel, "a", SymlinkPolicy::Preserve);

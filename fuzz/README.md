@@ -122,7 +122,7 @@ in `regressions/*/known-*`). A gated violation is ignored so CI stays green;
 `OPENJD_FUZZ_KNOWN=1` turns every gate back into a hard failure:
 
 ```bash
-OPENJD_FUZZ_KNOWN=1 cargo test --manifest-path fuzz/Cargo.toml --no-default-features replay_regressions
+OPENJD_FUZZ_KNOWN=1 cargo test --manifest-path fuzz/Cargo.toml --no-default-features --test replay replay_regressions
 ```
 
 When a known issue is fixed, change its `known_issue!` to `oracle!` and delete

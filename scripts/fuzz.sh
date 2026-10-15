@@ -74,10 +74,14 @@ case "$cmd" in
         ;;
 
     run)
-        cargo_fuzz build --debug-assertions
+        # `cargo fuzz run` builds only the target it runs. A failing target
+        # does not stop the rest of the list; the exit status reports it.
+        failed=()
         while IFS= read -r t; do
             [[ -z "$t" ]] && continue
             mkdir -p "$FUZZ_WORK_DIR/$t" "$FUZZ_DIR/corpus/$t"
+            seeds=("$FUZZ_DIR/corpus/$t")
+            [[ -d "$FUZZ_DIR/regressions/$t" ]] && seeds+=("$FUZZ_DIR/regressions/$t")
             echo "::group::fuzz $t (${FUZZ_SECONDS}s x ${FUZZ_JOBS})"
             parallel=()
             # Fork mode: N worker processes, stops (non-zero) on the first
@@ -87,11 +91,16 @@ case "$cmd" in
                 parallel=(-fork="$FUZZ_JOBS" -ignore_timeouts=0 -ignore_ooms=0)
             # shellcheck disable=SC2046
             cargo_fuzz run --debug-assertions "$t" \
-                "$FUZZ_WORK_DIR/$t" "$FUZZ_DIR/corpus/$t" -- \
+                "$FUZZ_WORK_DIR/$t" "${seeds[@]}" -- \
                 "${LIBFUZZER_ARGS[@]}" $(dict_args "$t") \
-                -max_total_time="$FUZZ_SECONDS" ${parallel[@]+"${parallel[@]}"}
+                -max_total_time="$FUZZ_SECONDS" ${parallel[@]+"${parallel[@]}"} ||
+                failed+=("$t")
             echo "::endgroup::"
         done < <(targets_or_all "$@")
+        if [[ ${#failed[@]} -gt 0 ]]; then
+            echo "fuzzing found failures in: ${failed[*]} (inputs in fuzz/artifacts/)" >&2
+            exit 1
+        fi
         ;;
 
     replay)

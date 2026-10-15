@@ -214,23 +214,27 @@ pub mod known {
         if std::env::var_os("OPENJD_FUZZ_KNOWN").is_some_and(|v| v == "1") {
             return false;
         }
-        if text.len() > 320 {
-            return true;
-        }
-        let mut depth = 0i32;
-        for c in text.chars() {
-            match c {
-                '(' | '[' | '{' => {
-                    depth += 1;
-                    if depth > 12 {
-                        return true;
+        let deep = || {
+            let mut depth = 0i32;
+            for c in text.chars() {
+                match c {
+                    '(' | '[' | '{' => {
+                        depth += 1;
+                        if depth > 12 {
+                            return true;
+                        }
                     }
+                    ')' | ']' | '}' => depth = (depth - 1).max(0),
+                    _ => {}
                 }
-                ')' | ']' | '}' => depth = (depth - 1).max(0),
-                _ => {}
             }
+            false
+        };
+        let skip = text.len() > 320 || deep();
+        if skip {
+            record("expr-parser-exponential-recovery");
         }
-        false
+        skip
     }
 
     /// [`skip_deep_unclosed_brackets`] applied to each `{{ ... }}`
@@ -249,12 +253,33 @@ pub mod known {
         false
     }
 
-    /// Record a known-issue violation.
-    pub fn hit(id: &str, msg: impl FnOnce() -> String) {
+    thread_local! {
+        static RECORDED: std::cell::RefCell<std::collections::BTreeSet<String>> =
+            const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+    }
+
+    fn record(id: &str) {
         assert!(
             KNOWN_ISSUES.iter().any(|(k, _)| *k == id),
             "known_issue! id {id:?} is not listed in KNOWN_ISSUES"
         );
+        RECORDED.with(|r| {
+            if !r.borrow().contains(id) {
+                r.borrow_mut().insert(id.to_string());
+            }
+        });
+    }
+
+    /// The known-issue ids hit on this thread since the last call (a set,
+    /// so it stays bounded over a long fuzzing run). The replay tests use
+    /// it to check that each `known-<id>` reproducer still reproduces.
+    pub fn take_recorded() -> std::collections::BTreeSet<String> {
+        RECORDED.with(|r| std::mem::take(&mut *r.borrow_mut()))
+    }
+
+    /// Record a known-issue violation; with `OPENJD_FUZZ_KNOWN=1`, fail.
+    pub fn hit(id: &str, msg: impl FnOnce() -> String) {
+        record(id);
         if std::env::var_os("OPENJD_FUZZ_KNOWN").is_some_and(|v| v == "1") {
             panic!("KNOWN ISSUE [{id}]: {}", msg());
         }

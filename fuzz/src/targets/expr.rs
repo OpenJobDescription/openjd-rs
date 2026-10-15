@@ -108,6 +108,15 @@ pub(crate) fn is_ordering_type_error(e: &ExpressionError) -> bool {
     }
 }
 
+/// `[f(x) for ...]` where `f` returns `T?`: the list is `list[T]` whenever
+/// it builds, and a `null` element fails it at run time. Value-dependent,
+/// though reported as a `TypeError` (list literals report the same case as
+/// `Other`).
+fn is_null_element_error(e: &ExpressionError) -> bool {
+    matches!(e.kind(), ExpressionErrorKind::TypeError { message }
+        if message == "Cannot create list from null elements")
+}
+
 /// A statically accepted `src` failed at run time with `e`. Fails the
 /// oracle when the static pass should have rejected it, unless the
 /// disagreement is a known issue (`unbound_return`: the generator went
@@ -118,7 +127,7 @@ pub(crate) fn check_static_miss(
     unbound_return: bool,
     msg: impl FnOnce() -> String,
 ) {
-    if !static_class(e.kind()) {
+    if !static_class(e.kind()) || is_null_element_error(e) {
         return;
     }
     let is_type_error = matches!(e.kind(), ExpressionErrorKind::TypeError { .. });
@@ -296,6 +305,16 @@ fn eq_by_range_values(a: &ExprValue, b: &ExprValue) -> bool {
     }
 }
 
+/// Does `t` still contain a type variable? A static result typed
+/// `list[T3]` means the checker lost the element type through a signature
+/// whose return variable no parameter binds (`expr-unbound-return-typevar`).
+fn has_type_var(t: &ExprType) -> bool {
+    matches!(
+        t.code(),
+        TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3
+    ) || t.params().iter().any(has_type_var)
+}
+
 /// Static type of a static evaluation result.
 fn static_type(v: &ExprValue) -> ExprType {
     match v {
@@ -432,10 +451,11 @@ pub fn check_expression(
                 }
             }
             (Ok(sv), Err(e)) => {
-                check_static_miss(e, src, unbound_return, || {
+                let lost = unbound_return || has_type_var(&static_type(sv));
+                check_static_miss(e, src, lost, || {
                     format!("{src:?}: accepted statically ({sv:?}) but run-time evaluation fails with {e}")
                 });
-                if well_typed && !static_class(e.kind()) {
+                if well_typed && !static_class(e.kind()) && !is_null_element_error(e) {
                     oracle!(
                         value_dependent(e.kind()),
                         "{src:?}: accepted statically ({sv:?}) but fails at run time: {e}"

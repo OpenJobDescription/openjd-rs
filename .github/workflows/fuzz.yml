@@ -30,8 +30,10 @@ on:
         description: Seconds to fuzz each target
         default: "600"
 
+# One group per event type, so a long nightly run never queues main's push
+# run (or the reverse).
 concurrency:
-  group: fuzz-${{ github.workflow }}-${{ github.ref }}
+  group: fuzz-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -52,6 +54,7 @@ jobs:
   replay:
     name: Fuzz corpus replay (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -161,6 +164,7 @@ jobs:
   api-coverage:
     name: Fuzz API coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Install rust stable + nightly

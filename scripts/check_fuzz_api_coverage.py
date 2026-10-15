@@ -211,6 +211,9 @@ def generate(out_dir: Path) -> tuple[Path, Path]:
             # not members of its workspace, so name them explicitly.
             "--dep-coverage", ",".join(c.replace("_", "-") for c in CRATES),
             "--json", "--output-path", str(cov), "--test", "replay",
+            # Only the corpus and regression replays count, not the harness
+            # self-checks that run in the same test binary.
+            "--", "replay_",
         ],
         cwd=REPO,
         check=True,

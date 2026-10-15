@@ -191,6 +191,45 @@ fn replay_regressions() {
     replay("regressions");
 }
 
+/// Every `regressions/<target>/known-<id>[--note]` file still reproduces
+/// known issue `<id>`, and every known issue has such a reproducer. A fixed
+/// bug therefore fails here until its gate becomes an `oracle!`.
+#[test]
+fn known_issue_reproducers_reproduce() {
+    use openjd_fuzz::known::{take_recorded, KNOWN_ISSUES};
+    install_hook();
+    let mut problems = Vec::new();
+    let mut reproduced = BTreeSet::new();
+    for (name, target) in TARGETS {
+        for file in files_in(&root().join("regressions").join(name)) {
+            let stem = file.file_name().unwrap().to_string_lossy().to_string();
+            let Some(rest) = stem.strip_prefix("known-") else {
+                continue;
+            };
+            let id = rest.split("--").next().unwrap().to_string();
+            let data = std::fs::read(&file).unwrap();
+            take_recorded();
+            IN_REPLAY.with(|r| r.set(true));
+            let _ = catch_unwind(AssertUnwindSafe(|| target(&data)));
+            IN_REPLAY.with(|r| r.set(false));
+            let hit = take_recorded();
+            if hit.contains(&id) {
+                reproduced.insert(id);
+            } else {
+                problems.push(format!("{name}/{stem}: records {hit:?}, not {id:?}"));
+            }
+        }
+    }
+    for (id, _) in KNOWN_ISSUES {
+        if !reproduced.contains(*id) {
+            problems.push(format!(
+                "known issue {id:?} has no reproducing regressions/*/known-{id}* file"
+            ));
+        }
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
 #[test]
 fn expression_dictionary_covers_the_library() {
     let dict = std::fs::read_to_string(root().join("dicts/expr.dict")).unwrap();
