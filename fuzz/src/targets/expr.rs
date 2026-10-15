@@ -380,7 +380,10 @@ pub fn check_expression(
                         "{src:?}: static type {st} but run-time value {cv:?} has type {ct}"
                     );
                 } else if !fits(cv, &st)
-                    && (src.contains(" if ")
+                    // A conditional makes a union only when its branches
+                    // differ in type; in generated (same-typed-branch)
+                    // output that takes an untyped `[]`.
+                    && ((src.contains(" if ") && src.contains("[]"))
                         || src.contains("::")
                         || ["re_findall", "re_match", "re_search", "round", "**"]
                             .iter()

@@ -92,16 +92,21 @@ jobs:
     timeout-minutes: 150
     strategy:
       fail-fast: false
+      # At most 5 targets per group, so the nightly run (FUZZ_SECONDS_NIGHTLY
+      # per target) stays well inside timeout-minutes. tests/replay.rs checks
+      # that every target is in exactly one group.
       matrix:
         include:
           - group: expr-eval
             targets: expr_eval_text expr_eval_gen expr_format_string expr_function_call
           - group: expr-values
-            targets: expr_parse expr_range expr_int_range expr_type expr_value expr_path expr_symbol_table
+            targets: expr_parse expr_range expr_int_range expr_type
+          - group: expr-data-cli
+            targets: expr_value expr_path expr_symbol_table cli_args
           - group: model
             targets: model_decode_text model_job_gen model_env_gen model_misc
-          - group: sessions-snapshots-cli
-            targets: sessions_directives sessions_framer sessions_embedded_files snapshots_decode_text snapshots_ops_gen cli_args
+          - group: sessions-snapshots
+            targets: sessions_directives sessions_framer sessions_embedded_files snapshots_decode_text snapshots_ops_gen
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Install rust nightly

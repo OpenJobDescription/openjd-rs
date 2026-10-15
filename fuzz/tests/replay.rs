@@ -88,6 +88,30 @@ fn registry_matches_bins_files_and_corpus() {
     }
 }
 
+/// Every target is fuzzed in CI: it appears in exactly one `targets:` line
+/// of the fuzz.yml matrix, and that line names no unknown target.
+#[test]
+fn every_target_is_in_one_ci_group() {
+    let wf = std::fs::read_to_string(root().join("../.github/workflows/fuzz.yml")).unwrap();
+    let mut seen: Vec<String> = Vec::new();
+    for line in wf.lines() {
+        if let Some(list) = line.trim().strip_prefix("targets: ") {
+            seen.extend(list.split_whitespace().map(str::to_string));
+        }
+    }
+    let registry = names(TARGETS.iter().map(|(n, _)| n.to_string()));
+    let in_ci = names(seen.iter().cloned());
+    assert_eq!(
+        registry, in_ci,
+        "targets::TARGETS vs fuzz.yml matrix targets"
+    );
+    assert_eq!(
+        seen.len(),
+        in_ci.len(),
+        "a target is listed in more than one fuzz.yml group: {seen:?}"
+    );
+}
+
 thread_local! {
     static LAST_PANIC: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
     static IN_REPLAY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
