@@ -257,6 +257,12 @@ pub struct Evaluator<'a> {
     /// validation gives it, not a type that depends on the values of the
     /// symbols it reads. Inherited by nested children.
     symbols_as_types: bool,
+    /// Set on a child that types a comprehension's element expression
+    /// without running it (the body may never run). An operation that
+    /// fails on every run where it is evaluated (indexing an always-empty
+    /// list) is then typed `noreturn`, not reported: the comprehension is
+    /// `list[nulltype]` (2026-02 §1.3.7). Inherited by nested children.
+    typing_unrun_body: bool,
 }
 
 static EMPTY_KEYWORD_RENAMES: std::sync::LazyLock<std::collections::HashMap<String, String>> =
@@ -290,6 +296,7 @@ impl<'a> Evaluator<'a> {
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
             symbols_as_types: false,
+            typing_unrun_body: false,
         }
     }
 
@@ -1732,7 +1739,10 @@ impl<'a> Evaluator<'a> {
         // (`list[nulltype]`): indexing it fails on every run. Report it
         // here, where it happens, rather than as a `noreturn` operand of
         // whatever uses the element.
-        if receiver_unresolved && result.expr_type() == ExprType::unresolved(ExprType::NORETURN) {
+        if receiver_unresolved
+            && !self.typing_unrun_body
+            && result.expr_type() == ExprType::unresolved(ExprType::NORETURN)
+        {
             let err = ExpressionError::index_out_of_bounds(
                 "Index out of bounds: the list is always empty".to_string(),
             );
@@ -1766,6 +1776,7 @@ impl<'a> Evaluator<'a> {
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
             symbols_as_types: self.symbols_as_types,
+            typing_unrun_body: self.typing_unrun_body,
         }
     }
 
@@ -1858,6 +1869,8 @@ impl<'a> Evaluator<'a> {
         let mut combined: Vec<&SymbolTable> = self.symtabs.to_vec();
         combined.push(&tmp);
         let mut child = self.child_evaluator(&combined);
+        // The body is typed, not run: the iterable may be empty.
+        child.typing_unrun_body = true;
         // Check filter clause type if present
         if let Some(if_clause) = if_clause {
             let cond = child.evaluate(if_clause);
@@ -1983,6 +1996,7 @@ impl<'a> Evaluator<'a> {
         combined.push(&tmp);
         let mut child = self.child_evaluator(&combined);
         child.symbols_as_types = true;
+        child.typing_unrun_body = true;
         let body_val = child.eval_node(&lc.elt, elem_target);
         self.absorb_spend_and_reset(&child, memory_baseline);
         let list_type = self.comprehension_type(lc, &body_val?.expr_type())?;

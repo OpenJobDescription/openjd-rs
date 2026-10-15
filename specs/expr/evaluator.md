@@ -695,8 +695,12 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 - Slices return the same type as the input (string→string, list→list)
 - Out-of-bounds index raises an error; out-of-bounds slice clamps silently
 - Indexing an unresolved receiver every form of which is the empty list
-  (`list[nulltype]`, e.g. `[None for x in L]`) fails on every run, and is
-  reported at the index: "Index out of bounds: the list is always empty"
+  (`list[nulltype]`, e.g. `[None for x in L]`) fails on every run that
+  evaluates it, and is reported at the index: "Index out of bounds: the list
+  is always empty". Inside a comprehension body that is typed without being
+  run (`typing_unrun_body`: an empty result, or an unresolved iterable or
+  filter), the index may never be evaluated, so it is typed `noreturn` (its
+  `__getitem__(list[nulltype], int) -> noreturn` signature) instead.
 - The receiver and the index/slice bounds are evaluated unconstrained (see
   [Target Type Propagation](#target-type-propagation)): the caller's
   target describes the subscript's *result*, so `[10, 20, 30][0]` with

@@ -639,3 +639,28 @@ fn empty_result_types_the_loop_variable_from_the_iterable_static_type() {
         "the empty run has the type validation gives it"
     );
 }
+
+// ── Audit round 4 ──
+
+#[test]
+fn always_empty_index_in_a_body_that_never_runs_is_noreturn() {
+    // F2: indexing an always-empty list is reported where it runs, but in
+    // a comprehension body it may never run: the element is `noreturn`
+    // (§2.1.7) and the comprehension `list[nulltype]` (§1.3.7). Validation
+    // rejected this, though every run builds `[]`.
+    assert_stages(
+        "[[None for y in Param.L][0] for x in Param.L if x > 100]",
+        "unresolved[list[nulltype]]",
+        "list[nulltype]",
+        "list[nulltype]",
+        "[]",
+    );
+    // Outside a comprehension body it still fails where it happens.
+    let [p8, _, _] = states();
+    assert_err_in(
+        "[None for y in Param.L][0]",
+        &p8,
+        "pass 8",
+        &["Index out of bounds: the list is always empty\n"],
+    );
+}
