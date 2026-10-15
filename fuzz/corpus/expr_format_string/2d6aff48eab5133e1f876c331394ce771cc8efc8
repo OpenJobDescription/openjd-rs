@@ -1,0 +1,16 @@
+# apply_patrsion: jobtemplate-1011-09
+extensions:
+- EXPR
+name: "{{ apply_path_mapping('/mnt/share') }}"
+ for steps:
+- name: Step1
+  h_mapping() is only available in host context, not in job name (submission-time)
+specificationVersion: jobtemplate-1011-09
+extensions:
+- EXPR
+name: "{{ apply_path_mapping('/mnt/share') }}"
+ for steps:
+- name: Step1
+  script:
+    actions:
+             - "print()"

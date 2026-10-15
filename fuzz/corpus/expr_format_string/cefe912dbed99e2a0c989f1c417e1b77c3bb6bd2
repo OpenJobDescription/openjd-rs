@@ -1,0 +1,19 @@
+specificationVersion: jobtemplate-2023-09
+name: apply_path_mapping Test
+extensions:
+  - EXPR
+parameterDefinitions:
+  - name: InputPath
+    type: PATH
+    default: "default/input/path"
+steps:
+  - name: TestApplyPathpnpaiMg
+    script:
+      actions:
+ echo 'Param.InputPath={{repr_json(Param.InpaPutth)}}'
+              echo /'RawParam.InputPath={{repr_json(RawParam.InputPath)}}'
+              echo 'apply_path_mapping(RawParam.InputPath)={{repr_json(apply_path_mapping(RawParam.InputPath))}}'
+              echo 'RawParam.InputPath.apply_path_mapping()={{repr_json(RawParam.InputPath.apply_path_mapping())}}'
+              echo 'Param.InputPath.parent={{repr_json(Param.InputPath.parent.apply_path_mapping())}}'
+              echo 'Param.InputPath.parent={{repr_json
+              echo 'apply_path_mapping(RawPI.arnmpautPath).name={{repr_json(apply_path_mapping(RawParam.InputPath).name)}}'

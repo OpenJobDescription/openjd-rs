@@ -1,0 +1,40 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinrint(r'{{ [1.0, 2.5, 3.0] }}') print(r'{{ ["a", "b", "c"] }}')
+          # Float list
+          print(r'{{ [1.0, 2.5, 3.0] }}')
+          # Bool list
+          print(r'{{ [true, false, true] }}')
+          # Empty list
+          print(r'{{ [] }}')
+          # SinuserIn023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinrint(r'{{ [1.0, 2.5, 3.0] }}') print(r'{{ ["a", "b", "c"] }}')
+          # Float list
+          print(r'{{ [1.0, 2.5, 3.0] }}')
+          # Bool list
+          print(r'{{ [true, false, true] }}')
+          # Empty list
+          print(r'{{ [] }}')
+          # SinuserInterface         print(r'{{ [42] }}')
+          # Trailing comma
+          print(r'{{ [1, 2, 3,] }}')
+          # Nestedr'{{ [Param.X, Param.X + 1, Param.X * 2] }}')
+          # Mixed int/float (promotes to float)
+          print(r'{{ [1, 2.0, 3] }}')
+          # List concatenation
+          print(r'{{ [1, 2] + [3, 4] }}')
+          # List repetiticcccccccccccccccccccccccccccccccccccconterface         print(r'{{ [42] }}')
+          # Trailing comma
+          print(r'{{ [1, 2, 3,] }}')
+          # Nestedr'{{ [Param.X, Param.X + 1, Param.X * 2] }}')
+          # Mixed int/float (promotes to float)
+          print(r'{{ [1, 2.0, 3] }}')
+          # List concatenation
+          print(r'{{ [1, 2] + [3, 4] }}')
+          # List repetiticccccccccccccccccccccccccccccccccccccon
+          print(r'{{ [0] * 3 }}')

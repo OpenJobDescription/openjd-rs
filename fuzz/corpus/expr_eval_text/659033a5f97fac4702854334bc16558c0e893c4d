@@ -1,0 +1,1 @@
+Path(path('33://bucket/a//b/fileendOfLine.txt').parts) == path('s1://bucket/a//bf/iel.txt')

@@ -1,0 +1,16 @@
+template:
+  specificationVersion: joscript:      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'UPPER:{{ upper("hello") }}')
+            print(r'LOWER:{{ lower("HELLO") }}')
+            print(r'CAP:{{ capitalize("hello world") }}')
+            print(r'TITLE:{{ title("hello world") }}')
+expected:
+  output:
+  - UPPER:HELLO
+  - LOWER:hOWER:{{ lower("HELLO") }}')
+      :Hello World

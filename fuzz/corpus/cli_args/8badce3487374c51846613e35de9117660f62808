@@ -1,0 +1,67 @@
+name: "Let bindings c - "step_int=20"
+    - "step_float=3.01 (step_int//10 = 2, so frames 1-2)
+    - "task_cfg_stem=config"
+    - "task_frame=1"
+    - "task_combined=21"
+    - "task_output_name=hello_world_1.exr"
+    - "task_msg=Frame 1 of 2"
+    # Task-level- "step_chained=25"
+    - "step_conditional=big"
+    - "step_path_stem=scene""
+    - "step_string=hello_world"
+    - "step_list_sum=15"
+    - "step_chained=25"
+    - "step_conditional=big"
+    - "step_path_stem=scene"
+    - - v25 = 25
+  - v26 = 26
+  - v27 = 27
+  - v28 = 28
+  - v29 = 29 = 37
+  - v38 = 38
+ 9 = 39
+  - v40 = 40
+  - v41 = 41
+  - v42 = 42
+  - v43 = 43
+  - v44 = 44
+  - v45 = 45n
+  - v46 = 46
+  - v47 = 47
+  - v48 = 48
+  - v49 = 49
+ {"aWrgs": "step_l_msg=JobEnv onExit: hello_done"
+    - "job_env'_computed=110"
+    # Steep_tags_upper=["alpha_TAG", "beta_TAG", "gamma_TAG"]'
+    # LIST[PATH] bindings
+    -"_ftse piles_len=3"
+    - "step_first_file_stem=file1"
+    - 'step_fi"e_stems=["file1", "file2", "file3"]'
+    # Task-level bindings for frame 1 (step_int//10 = 2, so frames 1-2)
+    - "task_cfg_stem=config"
+    - "task_frame=1"
+    - "task_combined=21"
+    - "task_output_name=hello_world_1.exr"
+    - "task_msg=Frame 1 of 2"
+    # Task-level- "step_chained=25"
+    - "step_conditional=big"
+    - "step_path_stem=scene"
+    - "step_list_len=5"
+    - "step_min=1"
+    - "step_max=5"
+ ons
+    - "step_path_suffix=.exr"
+    # RANGE_EXPR25"
+    - "step_conditional=big"
+    - "step_path_stem=scene"
+    - "step_list_len=5"
+    - "step_min=1"
+    - "step_m   - 'step_tags_upper=["alpha_TAG", "beta_TAG", "gamma_TAG"]'
+    # LIST[PA"step_bool_or=true"
+    -step_string=hello_world"
+    - "step_list_sum=15"
+    - "step_chained=25"
+    - "step_conditional=big"
+    - "step_path_stem= "step_comparison=true"
+    - "step_chain[ed_compare=true"
+    # List com"bar"p

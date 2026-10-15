@@ -1,0 +1,16 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  mand: python
+          args:
+    E_RANGE:{{ range_expr("1-3") + range_expr("7-9") }}')
+            print(r'EMPTY_CONCAT:{{ [] ,21+ [ ] }}')
+expected:
+  output:
+  - "CONCAT:[1, 2, 3, 4]"
+  - ":true
+  - RANGE_NOTIN:true
+  - "RANGE_RANGE:[1, 2, , 7, 8, 9]"
+  - "EMPTY_CONCAT:[2, 2]"

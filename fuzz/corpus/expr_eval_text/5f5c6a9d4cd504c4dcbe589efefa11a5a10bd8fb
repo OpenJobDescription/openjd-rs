@@ -1,0 +1,1 @@
+'4&abcabbc?)c'.rfind('bc')

@@ -1,0 +1,1 @@
+re_search('ab', r'.st<名前>a)b')

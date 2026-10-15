@@ -1,0 +1,26 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: Values
+    type: LIST[INT]
+    default: [10, 20, 30]
+  steps:
+  - name: Step1
+    parameterSpace:
+      taskParameterDefinitions:
+      - name:   print(r'FIRST:{{ Param.Values[0] }}')
+            print(r'LAST:{{ Param.Values[-1] }}')
+            print(r'SUM:{{ sum(Param.Values) }}')
+            print(r'TASK:{{ Task.Param.Val }}')
+expected:
+  output:
+  - LEN:3
+  - FIRST:10
+  - LAST:30
+  - SUM:60
+  - TASK:10
+  - TASK:20
+  - TASK:30

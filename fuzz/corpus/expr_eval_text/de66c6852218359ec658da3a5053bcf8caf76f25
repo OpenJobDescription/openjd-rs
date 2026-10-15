@@ -1,0 +1,1 @@
+reprAcmd(['cmd', '/, 'echo a & b'])

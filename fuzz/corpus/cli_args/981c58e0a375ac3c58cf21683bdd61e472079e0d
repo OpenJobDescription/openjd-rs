@@ -1,0 +1,16 @@
+{
+  "specificationVersion": "jobtemplate-2023-09ormatTest",
+  "steps": [
+    {
+      "name": "Step1",
+      "script": {
+        "ac!tions": {
+          "onRun": {
+            "command": "echo",
+            "args": ["":]
+          }
+        }
+      }
+    }
+  ]
+}

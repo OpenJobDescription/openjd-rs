@@ -1,0 +1,5 @@
+specificationVersion: jobtemplate-2023-09
+name: Tend: python
+        args:
+        - "-c"
+        - "print('{{Param.invalid-naoe}}')"

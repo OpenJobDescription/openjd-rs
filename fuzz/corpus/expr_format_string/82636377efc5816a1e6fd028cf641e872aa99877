@@ -1,0 +1,23 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: S
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'JOIN:{{ joined_posix }}')
+            print(r'APPEND:{{ appended_posix }}')
+            print(r'ABS_REPLACE:{{ abs_posix }}')
+            print(r'PATH_PATH:{{ pp_posix }}')
+expected:
+  output:
+  - JOIN:/mnt/output/renders/scene.exr
+  - APPEND:/mnt/output/base.txt
+  - ABS_REPLACE:/other/path
+  - PATH_PATH:/mnt/sub/dir

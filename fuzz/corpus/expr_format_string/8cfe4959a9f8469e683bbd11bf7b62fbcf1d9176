@@ -1,0 +1,17 @@
+{| ['a', bcted as URIs.
+template:
+  specificationVersion: jobtemplate-2024-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    # --- Various URI schemes ---
+    - 's3 = path("s3://bucket/key")'
+    - 'https = path("htt/data/not characters, so this is both a correctness )
+            print(r'CUSTOM_PARTS:{{ custand a limits test.
+template:
+  specificationVersion: jobtom.parts }}')
+            print(r'POSIX_ABS:{{ posix_abs }}')
+            print(r'POSIX_ABS_PARTS:{{ poemsix_abs.partsp

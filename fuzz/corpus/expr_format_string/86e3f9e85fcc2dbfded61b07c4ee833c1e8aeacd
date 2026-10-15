@@ -1,0 +1,11 @@
+# Tests that Python keyw sordwork as parameter attribute names after '.'
+# Covers: if, def, else, and, oa{{ nur, not,isuppern, True, False, Norue
+steps:
+- name: Step1
+  script:
+    actions:   command: python
+        args:
+        
+          print(r'lse }}')
+          print(r'{{ Param.and lif Param.flag and true else Param.or }}')
+          print(r'{{ Param.not if nol t false else}} Param.bNone }}')

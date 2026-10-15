@@ -1,0 +1,6 @@
+{"attributes": [
+            {"name": "{"attributes": [
+            {"name": "{{ Param.A }}", "anyOf": ["plan9"]},
+            {"name": "{{ extens{ Param.A }}", "anyOf": ["plan9"]},
+            {"name": "{{ extensionsParam.A (}}", "anyOf": ["v"]},
+   ]}

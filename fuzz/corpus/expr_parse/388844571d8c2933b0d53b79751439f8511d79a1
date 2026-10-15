@@ -1,0 +1,9 @@
+,
+           rstrip &string         ne,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            symtab.get_value(

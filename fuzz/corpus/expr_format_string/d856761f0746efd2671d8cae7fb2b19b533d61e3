@@ -1,0 +1,36 @@
+, "min": "{{len(apply_path_mapping(Param.Val))ing(Parat: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type: STRING
+  default: and_val
+- name: "or"
+  tfor, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefile keyword attype: STRING
+  defauTt: or_val
+- name: "not"
+  type: STRING
+  default: nte names after '.'
+# Covers2 if, def, else, and, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+n{{ repr_json([[] if x > 1 else [Task.Param.Framee f": [
+        "name":or x in raname: TestJob
+parameterDn range(Param.N)> 1 else [Task.Param.Framee f": [
+        "name":or x in rann range(Param.N)]ge(Param.N)]) ]geefinitions:
+- name: "if"  type: STRING
+ ING
+  default: lfase_val
+- name: "None"
+  type: STRING, or, not, for, in, True, False, None
+specificationVersion: jobt(emplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefile keyword attribum.Val))}}"}]}}"}]}Param.N)]) }}

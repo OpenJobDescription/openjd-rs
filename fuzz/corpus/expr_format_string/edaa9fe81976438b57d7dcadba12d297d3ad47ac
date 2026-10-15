@@ -1,0 +1,16 @@
+template:
+  spec       - |
+            print(r'STOP:{{ range(5) }}')
+            print(r'START_STOP:{{ range(1, 5) }}')
+            print(r'STEP:{{ range(0, 10, 2) }}')
+            print(r'NEG:{{ range(5, 0, -1) }}')
+            print(r'EMPTY:{{ range(0) }}')
+            print(r'EMPTY2:{{ range(5, 5) }}')
+expected:
+  output:
+  - "STOP:[0, 1, 2, 3, 4]"
+  - "START_STOP:[1, 2, 3, 4]"
+  - "STEP:[0, 2, 4, 6, 8]"
+  - "NEG:[5, 4, 3, 2, 1]"
+  - "EMPTY:[]"
+  - "EMPTY2:[]"

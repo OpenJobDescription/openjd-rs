@@ -1,0 +1,10 @@
+# Nested list comprehensions that exceed the default 10 million operation limit.
+# The expression evsteps:
+- name: Step1
+ #script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - -c
+        - "print(r'{{ [len([i for i in [len(range(150)) for j in range(600)]]) for k in range(300)] }}')"

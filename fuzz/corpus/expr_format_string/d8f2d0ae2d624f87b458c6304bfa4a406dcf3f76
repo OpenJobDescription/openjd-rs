@@ -1,0 +1,16 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefiefault: 5
+  steps:
+  - name: Step1
+    parameterSpace:
+      taskParameterDefinitions:
+      - name: Value
+        type: FLOAT
+        range: "{{ [float(x) / Param.Steps for x in range(Param.Steps + 1)] }}"
+    script:
+      let:
+      - padded = 0"

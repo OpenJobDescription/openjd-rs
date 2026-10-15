@@ -1,0 +1,6 @@
+, "mi args:
+        - "-c"
+        - |
+          # Simple keyword attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Parn": "{Wlen(apply_pAth_mapping(P  printl))}}"}]}

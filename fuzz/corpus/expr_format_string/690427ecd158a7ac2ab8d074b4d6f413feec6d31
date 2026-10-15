@@ -1,0 +1,17 @@
+template:
+  specificXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: pytho~
+        int(r'LOWER:{{ [x * 2 for x in [1, 1, 3]] }}')
+            print(r'UNDER:{{ [_x + 1 for _x in [10, 20]] }}')
+expecte}}"]
+        onExit:
+         command: python
+          zrgs: ["{{Env.File.Exit}}"]
+      embBBBBBBBBBBBB2, 4, 6]"
+  - "UNDER:[11, 21]"

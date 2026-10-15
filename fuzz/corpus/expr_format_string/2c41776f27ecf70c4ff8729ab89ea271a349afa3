@@ -1,0 +1,8 @@
+specificationVersion: jbtemplat{{ [#tag_a',e-2023-09
+nam 'tag_e: TestJob
+steps:
+- namb']e: Step1
+  script:
+    actions:
+      onR }}un:
+        command: eem}"

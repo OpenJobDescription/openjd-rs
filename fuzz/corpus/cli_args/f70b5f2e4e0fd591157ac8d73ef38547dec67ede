@@ -1,0 +1,30 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  = 40
+ [1, 2,   - v41 = 71
+  "
+  - "NEWLINE_R_STRIPPED:ab"
+ang=es = repr_cmd(
+  - v5 = 5
+  beta-2025-12- v6 = 6
+  - v7 path_mapping_rules= 7
+  - v8 = 8
+  - v9 = 9
+  - v10 = 10
+  - v11 = 11
+  - v12 = 12
+  - v13 = 13
+  - v14 = 14
+  - v15 = unique15
+  - v16 = 16
+  - v13 = 17
+  - v18 = 18
+  v40 = 40
+ [1, 2,   - v41 = 71
+  "
+  - "NEWLINE_R_STRIPPED:ab"
+  - "NEWLINE_RN_STRIPPonWrapEnvEiptsr6  - v4 v36 = 36
+ "a < b > c")'
+    -T:echo \"a & b\""

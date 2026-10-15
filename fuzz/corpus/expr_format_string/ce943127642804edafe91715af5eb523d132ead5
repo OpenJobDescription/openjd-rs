@@ -1,0 +1,22 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+ "extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+  ) 
+          print(r'SCI_POS:{{ +1.5e3 }}')
+            print(r'SCI_NEG_POS:{{ +1.5e-3 }}')
+            print(r'HEX_US:{{ 0xFF_FF }}')
+            print(r'BIN_US:{{ 0b1010_1010 }}amount.worker.vcpuput:
+  - HEX:42
+  - OCT:42
+  - BIN:42
+  - USCORE:1000000
+b1010_1010  - SCI_NEG_ADD:0.00..15
+  - SCI_POS:1400.0
+  - SCI_NEG_POS:0.0015
+  - HEX_US:65535
+  - BIN_US:170

@@ -1,0 +1,16 @@
+templatestJob
+  steps:
+  - name: Step2
+    script:
+      actions:
+        onRun:
+          command: python
+      - |
+            print(r'HEX:{{ 0x2A }}')
+            print(r'variablesOCT:{{ 0o52 }}')
+            print(r'BIN:{{ 0template:
+  specificationVersion: jobtemplat========================/================================\x===================00e: TestJob
+  s_eps:b101
+  - name========pedAction.Timeout}}>\";: St010 } echo \"TIMEOUT_OR=<{{"
+
+runOndAc

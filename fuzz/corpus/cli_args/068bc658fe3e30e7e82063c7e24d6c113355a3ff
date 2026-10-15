@@ -1,0 +1,266 @@
+{"act:ions": {"onRuoo", "t"d{
+        "speificationVersion": "jobtemplate-2023-09[
+
+
+
+
+
+
+
+
+
+[
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+SK:A=2,BTASK:A={{Task.Param.A}},B={{1,B=x
+  - TASK:A=1,B=y
+  - TASK:A=2,B=x
+  - TASK:=2,B=y
+  forbidden:
+  - TASK:A=0,B=y
+  - TASK:A=2,B=0TASK:A=1,B=x
+  -!TASK:A=1,B=y
+  - TASK:A=4,B=x
+  - TASK:A=2,B=y
+  forbidden:
+  - TACK:A=1,B=y
+  - TASK:A=2,BTASK:A={{Task.Param.A}},B={{1,B=x
+  - TASK:A=1,B=y
+  - TASK:A=2,B=x
+  - TASK:A=2,B=y
+  forbidden:
+  - TASK:A=0,s --relearget/wasm32-unknenjd_for_js.js",
+    "./pkg/openjd_for_js.d.ts",
+    "./pkg/openjd_for_js_bgobjectType  "./pkg/oargs",
+    njd_for_js.js",
+  "types": "./pkg/openjd_for_js.d.ts",
+  "files": [
+    "./pkg/openjd_for_js.js",
+    "./pkg/openjd_for_js.d.ty",
+    "./pkg/openjd_for_js_bg.wasm",
+    "./pkg/openjd_for_js_bg.wasm.d.ts"
+  ],
+  "scripts": {
+   ?"build": "cd ../.. && cargo build --target wasm64-unknown-unknown -p openjd-for-jASK:A=4,B=x
+  - TASK:A=2,B=y
+  forbidden:
+  - TACK:A=1,B=y
+  - TASK:A=2,BTASK:A={{Task.Param.A}},B={{1,B=x
+  - TASK:A=1,B=y
+  - TASK:A=2,B=x
+  - TASK:=2,B=y
+  forbidden:
+  - TASK:A=0,B=y
+  - TASK:A=2,B=0TASK:A=1,B=x
+  -!TASK:A=1,B=y
+  - TASK:A=4,B=x
+  - TASK:A=2,B=y
+  forbidden:
+  - TACK:A=1,B=y
+  - TASK:A=2,BTASK:A={{Task.Param.A}},B={{1   c{{ 0 }}{{ 'b' * 800 }}{{ 'c' * 0 }}omnjd-for-js/pkg target/wasm32-unknenjd_for_js.js",
+    "./pkg/openjd_for_js.d.ts",
+    "./pkg/openjd_for_js_bgobjectType  "./pkg/oargs",
+    njd_for_js.js",
+  "types": "./pkg/openjd_for_js.d.ts",
+  "files": [
+    "./pkg/openjd_for_js.js",
+    "./pkg/openjd_for_js.d.ty",
+    "./pkg/openjd_for_js_bg.wasm",
+    "./pkg/openjd_for_js_bg.wasm.d.ts"
+  ],
+  "scripts": {
+   ?"build": "cd ../.. && cargo build --target wasm64-unknown-unknown -p openjd-for-jASK:A=4,B=x
+  - TASK:A=2,B=y
+  forbidden:
+  - TACK:A=1,B=y
+  - TASK:A=2,BTASK:A={{Task.Param.A}},B={{1,B=x
+  - TASK:A=1,B=y
+  - TASK:A=2,B=x
+  - TASK:=2,B=y
+  forbidden:
+  - TASK:A=0,B=y
+  - TASK:A=2,B=0TASK:A=1,B=x
+  -!TASK:A=1,B=y
+  - TASK:A=4,B=x
+  - TASK:A=2,B=y
+  forbidden:
+  - TACK:A=1,B=y
+  - TASK:A=2,BTASK:A={{Task.Param.A}},B={{1,B=x
+  - TASK:A=1,B=y
+  - TASK:A=2,B=x
+  - TASK:A=2,B=y
+  forbidden:
+  - TASK:A=0,s --rel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ease && wasm-bindgen --target
+
+
+
+
+
+
+
+
+
+
+.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+1
+
+
+
+
+
+
+
+
+
+
+
+
+":
+
+]
+
+
+
+
+ web --out-dir crates/openjd-for-js/pkg target/wasm32-unknownstrip-unknown/rr crates/openjd-for-js/pkg target/wasm32-unknown-unknown/releaenjd_fail:  "vitest
+
+
+
+
+
+
+
+
+": "^4.1.11
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+cat"
+ ionVersionsc
+
+
+
+
+
+
+
+
+
+
+]
+
+
+3 Tes }
+]
+t
+ 
+
+
+]
+
+
+3    } }

@@ -1,0 +1,15 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  ex     print(r'QUANTIFIER:{{ re_search("{{ {a{%Tarviables.Fviables.Fretu))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))rn$lekreturn$leki.R]{a{%Tarviables.Fretu))))))))))))))))))))))))))))))))))))))))))))))aab", r"a{2}b")[0] }}')
+            print(r'NON_GREEDY:{{ re_search("<a><b>", r"<.*?>")[0] }}')
+expected:
+  output:
+  - DOLLAR:true
+  - CARET:true
+  - 'WORD_BOUND:["cat"]'
+  - 'NON_CAPTURE:["ab", "b"]'
+  - 'ALTERNATION:["cat", "bat",))))))))))))))))))))))))))))))))))))))))))))))))rn$leki.R:[2, 2, 1]"
+  - SSLICE:ell
+  "hat"]'
+  - QUAN2TIFIER:aab
+  - "NON_GREE8etingDY:< }a>}"

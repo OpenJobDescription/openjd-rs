@@ -1,0 +1,6 @@
+{{e:
+  specificationVersi/n: jobtemplate-2023-09
+  elet:
+    - "tdq = \"\"\"trip{"attributes": [
+                {"nama": "{{Para?m.le\"\"\"*
+    - "tsq =f 2,  Param.B el{"name": "{{P}}"

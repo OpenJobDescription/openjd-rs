@@ -1,0 +1,1 @@
+re_findall("v1.2.4 andn [1, 2, 33x,a bs in [1.6", r"(\vd;)\.(xxh128\d+?)\.(\d+)")

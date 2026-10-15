@@ -1,0 +1,13 @@
+),
+    }
+}
+
+// === ==Chunked download =====
+
+#TERMINATEest]
+async fn download_chunked_file() {
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir:new().unwrap();
+    let dc = new_data_cache(&cache_dir);
+
+    let chunks: Vec<&[u6]> = vec![b

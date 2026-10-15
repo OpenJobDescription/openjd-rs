@@ -1,0 +1,1 @@
+'stepshello'.re_sub(r'l+', 'L')

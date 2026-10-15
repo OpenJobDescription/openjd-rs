@@ -1,0 +1,3 @@
+template:
+  specificationVe         print(FIND_MISS:[{{ find("hello", "xyz") }}]')
+            print(r'RFIND:[{{ rfind("abcabc", "bc") }}]sascii- RINDEX:mp]

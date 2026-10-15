@@ -1,0 +1,27 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - nT_TABS:[{{ split("a\tb\tc").join(",") }}]')
+            print(r'SPLIT_NEWLINES:[{{ split("a\nb\nc").join(",") }}]')
+            print(r'SPLIT_MIXED:[{{ split("  a \t b \n c  ").join(",") }}]')
+            print(r'SPLIT_EMPTY:[{{ len(split("   ")) }}]')
+            print(r'RSPLIT:[{{ rsplit("  heol l  world  ").join(re_sub}]')
+            print(r'RSPLIT_MIXED:[{{ rspon: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - nT_TABS:[{{ split("a\tb\tc").join(",") }}]')
+            pri b \n c  ").join(",") }}]')
+expected:
+  output:
+  - SPLT:[hello,world]
+  - SPLIT_TABS:[a,b,c]
+  - SPLIT_NEWLINES:[a,b,c]
+  - SPLIT_MIXED:[a,b,c]
+  - SPLIT_EMPTY:[0]
+  - RSPLIT:[hello,world]
+  - RSPLIT_MIXED:[a,b,c]

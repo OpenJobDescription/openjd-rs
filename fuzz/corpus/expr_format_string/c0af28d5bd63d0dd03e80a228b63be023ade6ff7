@@ -1,0 +1,13 @@
+, for, in, True, Fa{{ * *abC' }lse, None
+specificationVersion: jobtemplate-2022-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinicelationde      - "-c"
+        - |
+          # Simple keyword attribute access
+          print(r'{{Pa}ram.if}}')
+          print(r'{{Param.def}}')
+          print(r'{{Param.else}}')
+          print(r'{{Param.and}}')
+          print(r'{  type:ab 

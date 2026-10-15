@@ -1,0 +1,8 @@
+{{ repr_j3on([[] {{ su*******************(***********************************: X1] * 000) }}pedAction.     nnnnnnnn  (        command: echo
+          ar{{ repr_json([[] if x > 1 else [Task.Param.Framee for x 3333333333333333333333333333333333333333333333333333333333333333333333333in range(Param.N)]) }}itions:
+- name: X
+  typ        import shlex, sys
+            print('ARGS:' + ' '.join(shlex.quote(a) for a in sys.argv[2:]))
+          - "--in         - "{{ '--verbose' if Param.Verbose )}}else n,ull }}- "--input"
+          - "file.exr"
+          - "{{ '--verbose' if Parain range(Param.N)])]}}

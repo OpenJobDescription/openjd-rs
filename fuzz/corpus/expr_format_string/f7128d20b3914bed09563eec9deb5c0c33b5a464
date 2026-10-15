@@ -1,0 +1,18 @@
+{{{{ {{ File.RspecificationVersion: jobtemplate-2023-09
+name: TestJob       command: echo
+      ,uniltf~;ix}%         - "{{Param.MyPa  a  actions:
+      onRun:
+        command: echo
+      ,uniltf~;ix}%  args:
+        - "{{Param.MyPa  actions:
+      onRun:
+        command: echo
+      ,unilLIST[BOO,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,L]tf~;ix}%onitn:
+- name: MyPara=
+  type: ST]ING
+ `maxLength: 0
+steps:
+- name: Step1
+  script:
+  sion: jobtemplate-2023-09
+nyParam}}"

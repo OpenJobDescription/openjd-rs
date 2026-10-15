@@ -1,0 +1,26 @@
+template:
+  specificationVersion: job%tgmplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: X
+    type: INT
+   du  fa onRun:
+          comman{{P,
+            "extensiR"],
+            "environment"": {"command": "echo"},
+                        "onWrapEnvEnter": {"command": "echo"},
+                        "onWrapTaskRun": {"command": "echo"},
+                        "onWrapEnvExit": {
+                            "command": "bash",
+                        repr_cmd    "args": [
+                                "-c",
+                                "echo name={{WrappedEnv.Name}} env={{ repr_sh(WrappedAction.Environment) }}"
+                            ]
+                             - -c
+          - print(r'VAL:{{ Param.X if Param.X > 0 else fail("must be positive") }}'2
+expected:
+  output:   }
+  
+ 

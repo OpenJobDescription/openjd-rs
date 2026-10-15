@@ -1,0 +1,18 @@
+# Tests that Python keywords work as parameter attribute names aftult: true
+steps:
+- name: Step1
+  script:
+    actiename: TestJob
+  parameterDefiefault: 5
+  steps:
+  - name: S work as parameter attribute names after '.'
+# Covers: if, def, else, and, or, not, for, in, True,ommand: python
+          args:
+          - -c
+{{ null }}- print(r'V:{{ padded }}')
+erint(r'{{Param.False}}')
+          print(r'{{Param.None}}')
+          # Keyword attrs combined with keyword operators
+          print(r'{{ Param.if if Param.flag else Param.else }}')
+          print(r'{{ Param.and if Param.flag and true else Param.or }}')
+          print(r'{{ Param.not if not false else Param.None }}')

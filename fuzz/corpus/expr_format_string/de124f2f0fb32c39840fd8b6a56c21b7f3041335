@@ -1,0 +1,11 @@
+template:
+  specificationons:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+   :{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d$)\.(\d+)") }}')
+            print(r'NO_MATCH:1", "2", "3"]'
+  - 'ONE
+  - "NO_MATCH:[]"

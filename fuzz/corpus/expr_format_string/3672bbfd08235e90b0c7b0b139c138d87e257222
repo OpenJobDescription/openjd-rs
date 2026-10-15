@@ -1,0 +1,16 @@
+{{ [1, 'x86_64' if 2,  Param.{av{[@wrap-enter] c if 2,  Param.{av{[@md=B el{{Pram?.XWrse null appedAc}tion.o}3]specificationVersion: jobtemplate-2023-09
+extensions:
+- E }mXPR
+name: TestJob
+pa}. Bar={{Task.ParamnBar}}')
+- name: d}}Second
+  dependencies:
+  - dependsOn: First
+  parameterSpace:
+    taskParameterDefinit}}}}}ions:
+    - n INT
+      range: '1'
+    - name: Bar
+   }   type: STRING
+      range:
+      

@@ -1,0 +1,18 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+ on
+          args:
+          - -c
+          - |
+            print(r'SINGLE:{{ re_sub("frame_ 01", r"\d+", "002") }}')
+            print(r'MULTI:{{ re_sub("a1b2c3", r"\d", "X") }}')
+            print(r'NO_MATCH:{{ re_sub("hello", r"\d+", "X") }}')
+expected:
+  output:
+  - SINGLE:frame_002
+  - MULTI:aXbXcX
+  - NO_MATCH:hello

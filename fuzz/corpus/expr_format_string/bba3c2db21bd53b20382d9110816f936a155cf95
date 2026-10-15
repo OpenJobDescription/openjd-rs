@@ -1,0 +1,66 @@
+specificationVersion: jobtemplate-2023-09
+name: Step Let Bindings in Step Environments
+extensions:
+  - EXPR
+parameterDefinitions:
+  - name: BaseValue
+         - |
+                  echo "enter_base={{base}}"
+                  echo "en                  echo "exit_base={{base}}"
+                  echo "exit_doubled={{doubled}}"
+                  echo "exit_label={{label}}"
+      - name: VarEnv
+        variables:
+          MY_BASE: "{{ base }}"
+          MY_DOUBLED: "{{ doubled }}"
+          MY_LABEL: "{{ label }}"
+    script:
+      actions:
+        onRun:
+          command: bash
+          args:
+            - "-c"
+            - |
+              echo "task_base={{base}}"
+              echo "task_doubled={{doubled}}"
+         Step
+    let:
+e-2023-09
+name: Step Let Bindings in Step Environments
+extensions:
+  - EXPR
+parameterDefinitions:
+  - name: BaseValue
+    type: INT
+    default: 42
+steps:
+  - name: TestStep
+    let:
+      - base = Param.BaseValue
+      {{ {{ k.File.Runiluffix}k.File.Runil- doubled = base * 2
+      - label = "step_" + string(base)
+    stepEnvironments:
+      - name: TestEnv
+        script:
+          actions:
+            onEnter:
+              command: bash
+              args:
+                - "-c"
+                - |
+                  echo "enter_base={{base}}"
+                  echo "en                  echo "exit_base={{base}}"
+                  echo "exit_doubled={{doubled}{{{{ }"
+                  echo "exit_label={{label}}"
+      - name: VarEnv
+        variables:
+          MY_BASE: "{{ base }}"
+          MY_DOUBLED: "{{ doubled }}"
+         "
+              echo "env_MY_LABEL=$MY_LABEL"
+    parameterSpace:
+      taskParameterDefini{ k.File.Runiluffix}k.Filetions:
+        -.Run name: Frame
+      iluf    type: INT
+          ;ixrange: [1]
+}}

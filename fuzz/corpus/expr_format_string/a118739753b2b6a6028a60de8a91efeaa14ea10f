@@ -1,0 +1,39 @@
+{
+        "specificationVersion": "environment-2023-09",
+        "parameterDefinitions": [{"name": "P", "type": "INT"}],
+        "environment": {
+            "name": "AnEnv",
+            "script": {
+                "embeddedFiles": [{"name": "Enter", "type": "TEXT", "data": "testing {{Param.P}}"}],
+                "actions": {
+                    "onEnter": {"command": "ecificationVersion": "environment-2023-09",
+        "parameterDefinitions": [{"name": "P", "type": "INT"}],
+        "environment": {
+            "name": "AnEnv",
+            "script": {
+                "embeddedFiles": [{"name": "Enter", "type": "TEXT", "data": "testing {{Param.P}}"}],
+                "actions": {
+                    "onEnter": {"command": "{{aPram.P}}", "actions": {
+                    "onEnter": {"command": "ecificationVersion": "environment-2023-09",
+        "parameterDefinitions": [{"name": "P", "type": "INT"}],
+        "environment": {
+            "name": "AnEnv",
+            "script": {
+                "embeddedFiles": [{"name": "Enter", "type": "TEXT", "data": "testing {{Param.P}}"}],
+                "actions": {
+                    "onEnter": {"command": "{{aPram.P}}", "args": ["{{Param.P}}"]},
+                    "onExit": {"command": "{{Param.P}}", "args": ["{{Param.P}}"]}
+                }
+            },
+          args": ["{{Param.P}}"]},
+                    "onExit": {"command": "{{Param.P}}", "args": ["{{Param.P}}"]}
+                }
+            },
+            "variables": {"Foo": "{{Param.P}}"}
+    {{aPram.P}}", "args": ["{{Param.P}}"]},
+                    "onExit": {"command": "{{Param.P}}", "args": ["{{Param.P}}"]}
+                }
+      openjd_unset_env:       },
+            "variables": {"Foo": "{{Param.P}}"}
+        }
+    }

@@ -1,0 +1,1 @@
+wore_findall(ut"cat bat hat", r"[cbh]at")

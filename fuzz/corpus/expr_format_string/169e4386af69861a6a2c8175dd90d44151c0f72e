@@ -1,0 +1,4 @@
+# Tests that null/tr        
+          print(r'{{ True }} in condi|ional (omits arg)
+        - "{{ '--flag' if trpe else null }}"
+        - "{{ '--other' if True else n eo}}N"

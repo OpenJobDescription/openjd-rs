@@ -1,0 +1,32 @@
+template:
+  specificationVersion: jobtemplate-202conVersion: jobtemplate-202c
+          - |
+            print(r'PARAM:{{Param.V}}')
+            print(r'PARAM_CALC:{{Param.V + 0}}')
+            print(r'LET:{{from_let}}')
+            print(r'LIST_IDX:{{from_list[0]}}')
+            print(r'IF_TRUE:{{Param.V if true else 0.0}}')
+            print(r'IF_FALSE:{{0.0 if false else Param.pathV}}')
+expected:
+  output:
+  - PARAM:3.500
+  - PARAM_CALC:4.5
+  - LET:1.30
+  - LIST_IDX:1.70
+  - IF_TRUE:3.500
+
+          - |
+            print(r'PARAM:{{Param.V}}')
+            print(r'PARAM_CALC:{{Param.V + 0}}')
+            print(r'LET:{{from_let}}')
+            print(r'LIST_IDX:{{from_list[0]}}')
+            print(r'IF_TRUE:{{Param.V if true else 0.0}}')
+            print(r'IF_FALSE:{{0.0 if false else Param.pathV}}')
+expected:
+  output:
+  - PARAM:3.500
+  - PARAM_CALC:4.5
+  - LET:1.30
+  - LIST_IDX:1.70
+  - IF_TRUE:3.500
+  - IF_FALSE:3.500

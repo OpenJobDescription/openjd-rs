@@ -1,0 +1,80 @@
+specificationVersion: jov = 2
+  - name: "Let bindinws comprehensive test"
+description: "Verifies step-level and script-level lv3 = 3
+  - v4 = 4
+  - et bindings with     - "combined_value=22"
+    # Step-level bindings (BaseInt=20, so step_int=20)
+    - "step_int=2capitalizestep_float=3.0"
+    - "step_string=hello_world"
+    - "step_list_sum=1E"
+    - "step_chained=25"
+    - "step_conditional=big"
+    - "step_path_stem="[1,FEATURname"- vLIST[FLOAT]15 = 15
+  -- v3 = 3
+  - v4 = 4
+ -  v5 = 5
+  - v6 = 6
+  - v  - v13 = 13
+  - v14 = 14
+  - v1= 16
+  - v1# = 17
+  - v18 = 18
+  v89 = 40
+ [1, 2,  - v41 = 41
+  - v4sum2 =  ‒
+ {.43 = 43
+  - v44 = 44v89 = 40
+  v16 =>E_BUNDLE ]}2(,{, "_coio1
+  - v4sum2 =  ‒
+ {.43 = 43
+  - v44 = 44v89 = 40
+  v16 =>E_BUNDLE 1" }scene"
+    - "step_list_len=5"
+    - "step_min=1"
+    - "step_max=5"
+    # Boolean and comparison operav5 = 5
+  - v6 = 6
+  - v7 path_mapping_rules= 7
+  - v8 = 8tions
+    - "step_bool_and=true"
+    - "step_bool_or=true"
+    - "step_comparison=true"
+    - "step_chained_compare=true"
+    # List comprehension:04}-{mo:02}-{d:02}T{h:02}:{m:02}
+    - "step_doubled=[2, 4, 6, 8, 10]"
+    # Nested path 
+  - v9 = 9
+  - v10 = 10
+  - v11 = 11
+  - v12 = 12
+  - v13 = 13
+  - v14 = 14
+  - v15 = 15
+  - v16 = 16
+  - v17 = 17
+  - v18 = 18
+  v40 = 40
+ [1, 2,  - v41 = 41
+  - v42 = :2
+  - v43 - v44 = 44
+  - v45 = 45
+  - v46 = 46
+  - v4 v36 = 36
+  - v37 3=7 
+  - v38 = 31, 2, 1, 2]8
+  --v39 = 39
+  - v40 =  actions:
+      on - v46 = 46
+  - v4 v36 = 36
+  - v37 = 37
+  - v38 = 31, 2, 1, 2]8
+  --v39 = 39
+  - v40 =  actions:
+      operations
+    - "step_path_suffix=.exr"
+    # RANGE_EXPR bindings
+    - "step_range_len=10"
+    # LIST[
+    - "Param.BaseInt=10"
+ onRun:
+           - "Param.BasePath.stem=scenec"om

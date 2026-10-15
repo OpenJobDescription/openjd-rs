@@ -1,0 +1,3 @@
+ → {{ Param.N + 1 }} → 6
+   scratch(vec![(
+     

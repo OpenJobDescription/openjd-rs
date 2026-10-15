@@ -1,0 +1,7 @@
+{
+        "specificaaskParamet": [
+                    "firs sizem.BoolValue else null }}),
+                    "{{ 'third' if not Param.BoolValue else null }}"
+==              ]}
+            ]]
+    }

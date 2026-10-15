@@ -1,0 +1,7 @@
+# NesteCHUNK[INT]ppresscon name: Step1
+  script:
+   nd: python
+        args:
+        - -c
+        - "print(r'{{ [len([i for i i not rs:
+- naj in range(300)]]) for k in range(300)] }}')"specificationVersion

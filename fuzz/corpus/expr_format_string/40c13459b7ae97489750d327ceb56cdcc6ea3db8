@@ -1,0 +1,13 @@
+template:
+  specificame: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+           command: python
+          args:
+          -}')
+            print(r'UNDER:{{ [REDACTED_ENV_VARS[10, 20]] }}')
+expected:
+  ouexpected2, 4, 6]"
+  - "UNDER:[11, 21]"

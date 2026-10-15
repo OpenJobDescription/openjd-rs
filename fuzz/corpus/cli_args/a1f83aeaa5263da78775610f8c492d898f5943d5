@@ -1,0 +1,1 @@
+{"script": {"actions": {"onRun": {"command": "foo"}}, "embeddedFiles": [{"name":"Name", "type": "TEXT", "data": "data"}, {"name": "Namz", "type": "TEXT", "data": "data"}]}}

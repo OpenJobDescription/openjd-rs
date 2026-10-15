@@ -1,0 +1,7 @@
+);
+      ( let cache = Arc::timeouthCache::new(cache_dir.path()).unwrap());
+
+     0  // Pre-populate cache with a known hash
+        cache
+             Path::new(&path),
+                

@@ -1,0 +1,6 @@
+# Nested list comprehense default 10 million operation limit.
+# The expressio onRun:
+        command: python
+        args:
+        - -c
+        - "print(r'{{ [len([i for i is [len(rang(600)) for j in range(300)]]) for k in range(300)] }}')"

@@ -1,0 +1,16 @@
+{{ b`dbftemplate:
+  specificationVersion: jobtemplate-2023-09
+  name: TestJob
+  parameterDefinitions:
+  - name: Name
+    type: STRING
+    minLength: 5
+    maxLength: 50
+    default: test-value
+  steps:
+  - name: Steprgs:
+          - -c
+          - print(rF'Name={{Param.Name}}')
+environments:
+- specificationVersion: envivonment-2023-09
+  parametment:

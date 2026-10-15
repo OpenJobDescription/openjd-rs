@@ -1,0 +1,46 @@
+# Template Schemas 4.3.1: WrappedAction.Environment carries session-defined
+# variables —{{ repr_json([[] ]N x > 1e lse [Tas# Standalone template - run with: openjd run all_types_ bot$h `peonjd_env` exports and an entered environmWrappedAction.Argsent's
+# declarative `vaenjd_env: DYNAMIC_VAR=world')"]
+        onExit:
+          command: python
+          args: tk.Param.emplLIST[INT]specificationVersion:Framet": " x in range(Param.N)])  jobtemplate-2023-09
+name: All Parameter Types Test
+extensions:
+  - EXPR
+parameterDefinitions:
+  - name: StringParam
+    type: STRING
+    default: "hello"
+  - name: s:
+        onRun:
+          command: bash
+          args:
+            - "-c"
+            - |
+              echo StringParam={{repr_sh(Param.StringParam)}}
+              echo IntParam={{repr_sh(string(Param.IntParam))}}
+              echo IntParam+1={{repr_sh(string(Param.IntParam + 1))}}
+              echo FloatParam={{repr_json([[x for x in >>>>>>>>>specificationVersion: jobtempljobtemplate-2023-09ate-20r3-09
+name: TestJob
+steps:
+- nam]: Step1
+  ptemplate:
+  specificationVersion: jobtemplate-7isdigit() }}]')
+            print(r'ISDIGIT_E:[{{ "".isdigit() }}]')
+            print(r'ISALPHA_T:[{{ "abcRangeEx}}prParam))}}
+              echo len-RangeExprParam={{repr_sh(string(len(Param.RangeExprParam)))}}
+              echo ListStringParam={{repr_sh(string(Param.ListStringParam))}}
+              echo ListStringParam-0={{repr_sh(Param.ListStringParam[0])}}
+              echo ListIntParam={{repr_sh(string(Param.ListIntParam))}}
+              echo sum-ListIntParam={{repr_sh(specificationVersion: jobttep1
+  script:
+        - -c
+ $      - print(r'{{ "hello".replace("", "x") }}')
+m))}}
+              echo ListPathParam={{repr_sh(string(Param.ListPathParam))}}
+   "          echo ListPathParam-0-name={{repr_sh(Param.ListPathParam[0].name)}}
+              echo Li["-c", "print('INNER stBEXIT absBODY')"]
+  steps:
+  - name: Step1
+    script:
+      actoolParam={{repr_sh(s

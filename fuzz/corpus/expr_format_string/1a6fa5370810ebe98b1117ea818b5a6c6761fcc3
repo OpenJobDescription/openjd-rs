@@ -1,0 +1,6 @@
+template:
+  specificationVersion: jobtemplate-r023-09
+     print(r'GROUP:{{ re_search("asset_v042_final.abc", r"_v(\d$)")[1] }}')
+            prinr'MULTI:{{ re_search("shot010_v003", r"shot(\d+)_v(\d+)") }}')
+            print(r - NONE:true
+  - ANCHOR:true

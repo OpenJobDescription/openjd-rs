@@ -1,0 +1,22 @@
+specificat  ! *nRulist[      co      - "print(r\"{{ re_sub('hmll name: Name
+  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^Task.Param.^^^^^^^^ X
+  type: INT
+  default: 5
+- name: Y
+  type: FLOAT
+  default: 3.7
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+         -|
+   Single-arg fprint(r'{{ abs(-Param.X) }}')
+# .
+# The expression evsteps:
+- name: Step1
+  scro', '(h)', r'\\g<0>') }}\")"
+) }}\")"

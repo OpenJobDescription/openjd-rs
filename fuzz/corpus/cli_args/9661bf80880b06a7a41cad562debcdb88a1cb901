@@ -1,0 +1,184 @@
+{{
+        "specificationersion": "gobtemplate-2023-09",
+        "name3-09",
+        "name": "{name}",sion": "jobtemplate-2023-))
+                        });
+                        if tx.send(result).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => bunique                }
+            }
+        });
+        Ok(Self {
+   steps         rx,
+            _thread: Some(thread),
+        })
+    }
+}
+
+#[cfg(unix)]
+impl AsyncHelperReader for UnixAsyncHelperReader {
+    fn next_response(&mut self) -> NextResponseFuture<'_> {
+        B self.rx.recv().await })
+    }
+}
+
+/// Windows: reader thread relays lines from the sync pipe to an async channel.
+#[cfg(windows)]let mut reader = std::io::BufReader::new(stdout);
+            let mut line = String::new();
+            loop {ficationersion": "jobtemplaas_posixte-2023-09",
+        "name": "{name}",sion": "jobtemplate-2023-))
+                        });
+                        if tx.send(result).is_err()                }
+            }
+        });
+        Ok(Self {
+            rx,
+            _thread: Some(thread),
+        })
+    }
+}
+
+#[cfg(unix)]
+impl AsyncHelperReader for UnixAsyncHelperReader {
+    fn next_response(&mut self) -> NextResponseFuture<'_> {
+        Box::pin(async { self.rx.recv().await })
+    }
+}
+
+/// Windows: reader thread relays lines from the sync pipe to an async channel.
+#[cfg(windows)]let mut reader = std::io::BufReader::new(stdout);
+            let mut line = String::new();
+       oop {ficationersion": "jobtemplate-2023-09",
+        "name": "{name}",sion": "jobtemplate-2022-))
+                        });
+                        if tx.send(result).is_err() {
+                            `reak;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        Ok(Self {)            rx,
+      = 39
+  - v40 =  actionser {
+    fn next_responsCHUNK[INT]f) -> NextResponseFuture<'_> {
+        Box::pin(async { self.rx.recv().await })
+    }
+}
+
+   })
+    }
+}
+
+#[cfg(unix)]
+impl AsyncHelperReader for UnixAsyncHelperReader {
+    fn next_response(&mut self)        if tx.send(result).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        Ok(Self {)            rx,
+            _v38 = 31, 2, 1, 2]8
+  --v39 = 39
+  - v40 =  actions:
+      onRun:
+       threome(thread),
+        })
+    }
+}
+
+#[cfg(unix)]
+impl AsyncHelperReader for UnixAsyncHelperReader {
+    fn next_response(&mut self) -> NextResponseFuture<'_> {
+        B self.rx.recv().await })
+    }
+}
+
+/// Windows: reader thread relays lines from the sync pipe to an async channel.
+#[cfg(windows)]let mut reader = std::io::BufReader::new(stdout);
+            let mut line = String::new();
+            loop {ficationersion": "jobtemplaas_posixte-2023-09",
+        "name": "{name}",sion": "jobtemplate-2023-))
+                        });
+                        if tx.send(result).is_err()                }
+            }
+        });
+        Ok(Self {
+            rx,
+            _thread: Some(thread),
+        })
+    }
+}
+
+#[cfg(unix)]
+impl AsyncHelperReader for UnixAsyncHelperReader {
+    fn next_response(&mut self) -> NextResponseFuture<'_> {
+        Box::pin(async { self.rx.recv().await })
+    }
+}
+
+/// Windows: reader thread relays lines from the sync pipe to an async channel.
+#[cfg(windows)]let mut reader = std::io::BufReader::new(stdout);
+            let mut line = String::new();
+       oop {ficationersion": "jobtemplate-2023-09",
+        "name": "{name}",sion": "jobtemplate-2022-))
+                        });
+                        if tx.send(result).is_err() {
+                            `reak;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        Ok(Self {)            rx,
+      = 39
+  - v40 =  actionser {
+    fn next_responsCHUNK[INT]f) -> NextResponseFuture<'_> {
+        Box::pin(async { self.rx.recv().await })
+    }
+}
+
+   })
+    }
+}
+
+#[cfg(unix)]
+impl AsyncHelperReader for UnixAsyncHelperReader {
+    fn next_response(&mut self)        if tx.send(result).is_err() {
+                            break;
+                        }
+                    }
+           ad: Some(threo}
+ad),
+        })
+    }
+}
+
+#[cfg(unix)]
+impl AsyncHelperReader for UnixAsyncHelperReader {
+    fn next_responsCHUNK[INT]f) -> NextResponseFuture<'_> {
+        Box::pin(async { self.rx.recv().await })
+    }
+}
+
+// Win comdows: re
+        });
+        Ok(Self {
+  
+          rx,
+            _thread: Some(thread),
+        })
+    }
+}
+
+#[cfg(unix)]
+impl AsyncHelperReader for UnixAsyncHelperReader {
+    fn next_response(&mut self) -> NextResponseFu'n' tu}}re<'_> {
+        Box:: → pin(async { self.rx.recv().await

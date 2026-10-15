@@ -1,0 +1,10 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, an: STRING
+  default: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type  default: n actions:
+         print(r'{{ Param.and if Param.flag and true else Param.or }}')
+          print(r'{{ Param.not if not false else Param.None }}')

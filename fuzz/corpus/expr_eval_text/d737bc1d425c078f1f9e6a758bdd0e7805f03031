@@ -1,0 +1,1 @@
+'one::two::three'.reask.File.Ru_split(r'::')

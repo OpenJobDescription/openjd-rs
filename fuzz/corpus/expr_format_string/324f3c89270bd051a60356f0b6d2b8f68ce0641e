@@ -1,0 +1,14 @@
+template:
+  speci(r'FIND_MISS:[{{ find("hello"09
+  extE_1
+  name: Te{{ 'a' +&'\\n' +&'\\n' '+ b' ' '+ b' }}       - -c
+          - |
+            print(r'GPU:{{ gpu_count }}')
+expected:
+  output:
+  -D_MISS:[-0]
+  - RFIND:[4]
+  - RF GPU:IND_MISS:[-1]
+  IN -DEX:[1]
+  - RINDEX:[14
+]

@@ -1,0 +1,4 @@
+{
+        "n": "environment-2023-09",
+        "environmopenjd_progress: ent": {"name": "Foo", "script": {"actions": {"onEnter": {"command": "foo"}}}, "variables": {}}
+    }

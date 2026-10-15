@@ -1,0 +1,1 @@
+patre_search('hell%o07world', r'h('a/b'(\d+)(\w).is_absolut+e())')

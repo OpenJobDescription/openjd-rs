@@ -1,0 +1,1 @@
+[x for x in ['shot1_0'' ,bg', 'shot_02', 'ref'] if re_search(x, 'shot') != null]

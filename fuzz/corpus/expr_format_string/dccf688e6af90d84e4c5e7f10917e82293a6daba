@@ -1,0 +1,21 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 5
+- name: Name
+  type: STRING
+  default: hello
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        cnt(r'{{ Param.X in [1, 3, 5, 7] }}')
+          print(r'{{ Param.X not in [2, 4, 6] }}')
+          # in / not in (string)
+        rpi  nt(r'{{ "ell" in Param.Name }}')
+   Env.File.int(r'{{ "xyz" not in Param.Name }}')

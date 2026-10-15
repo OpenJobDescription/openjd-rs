@@ -1,0 +1,15 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+-   and: pyth      command: python
+        args:
+        - "-c"
+        - |
+          # String indexing
+         : LIST[INT]
+  default: [10, 20, 30, 40, 50]
+steps:
+- name: Step1
+  s}')
+      ce
+          print(r'{{ Param.Items[-with_number3:] }}')
+          print(r'{{ Param.Items[:-2] }}')

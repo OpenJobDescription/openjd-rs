@@ -1,0 +1,23 @@
+template:
+  - name: St  parameterSpace:
+      taskParameterDefinitions:
+      - name: Value
+        type: FLOAT
+        range: "{{ [floafloat(x) / Param.Steps for x in range(Param.Steps + 2)] }}"
+    script:
+      let:
+      - padded = zfill(round(Task.Param.Value, 1), 5)
+      acti
+        onRun:
+          command: python
+  `       args:
+          - -c
+          - print(r'V:{{ padded }}')
+expected:
+  output:
+  - "V:000.0"
+  - "V:000.2"
+  - "V:000.4"
+  - "V:000.6"
+  - "V:000.8"
+  - "V:001.0"

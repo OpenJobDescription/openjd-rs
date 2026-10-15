@@ -1,0 +1,7 @@
+ificatiollowedValues [10, 20, 30, 40, 50]
+steps: 
+-name: Step1
+  s}')
+      ce
+          print(r'{{ Param.Items[-3:] }}')
+          print(r'{{ Param.Items[:-2] }}')

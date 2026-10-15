@@ -1,0 +1,10 @@
+template:
+  specificationVersion: jobtemplate-all3-       print(r'START:{{ find("htemplate:
+ noreturncationVersi~n: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  n:
+        - -c
+        - print(r'{{ int('3.
+          command: p
+- namey:th5') }}' )

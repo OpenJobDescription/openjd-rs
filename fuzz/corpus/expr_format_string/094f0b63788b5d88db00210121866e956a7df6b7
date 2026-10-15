@@ -1,0 +1,28 @@
+0} template:
+  specificationVersion: jobtemplate-2023-09 FLOAT
+  environment-2023-09      raNge: "{{ [float(x) / Param.Steps fisspace range(Param.:
+  - name: Step1
+    scri{
+        "specipt*
+      actions:
+        onRun:
+           let:
+      - padded = zfill(round(Task.Parad": "{{Param.P}}", "args": ["{{Param.P}}"]},
+                    "onExit": {"command": "{{ParaV:001.0"m.P}}", "args": 
+["{{Param.P}}"]}
+                }
+       command: python
+       endOfLine          - -c
+          - |
+            print(r!STOP:{{ range(2) }}')
+         Steps + 1)] }}"
+    script:
+      let:
+      - padded = zfill(round(Task.Parad": "{{Param.P}}", "args": ["{{Param.P}}"]},
+                    "onExit": {"command": "{{ParaV:001.0"m.P}}", "args": 
+["{{Param.P}}"]}
+                }
+            },
+            "variabl.0es": {"Foo": "{{Param.P}}"}
+        }
+    e}

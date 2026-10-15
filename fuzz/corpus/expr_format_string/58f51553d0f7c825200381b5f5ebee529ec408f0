@@ -1,0 +1,31 @@
+{{P,
+            &ex       czommand: python
+       +++++ate-2023-09
+ n:
+          czommand: py-thon
+         args:
+        : jobtempl++++++++++    : jobtemplate-2023-09
+  extensions:
+  - EXPR
+PR
+  naxtensions:
+  - EXPR
+PR
+  name: TestJob
+ ; steps:
+  - name: Step1
++++++++++++++++++(    ensions:
+  - EXPR
+  name: TestJob
+ ; steps:
+  - name: Sme: TestJob
+ ; steps:
+  - name: Step1
++++++++++++++++++(    ensions:
+  - EXPR
+  name: TestJob
+ ; steps:
+  - name: Step1
++++++++++++++++++(    scr1) }+++++++++++++++(1) ipt:
+      astions:
+:{{ re_&findalaram.}}A}}_{{Param.B}}

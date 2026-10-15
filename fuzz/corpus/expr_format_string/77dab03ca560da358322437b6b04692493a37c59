@@ -1,0 +1,44 @@
+specicifationVersion: lstripjobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        Version: jobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]aths
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: render
+          args:
+          - "--scene"
+          - "/projects/映画/シーン01/レンダー.exr"
+          - "--emoji"
+          - "🎬"
+
+environments:
+- specificationVersion: environment-2023-09
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  environment:
+    name: WrapEnv
+    script:
+      actions:
+        onWrapEnvEnter:
+          command: bash
+          args:
+          - "-c"
+          - "{{ repr_sh(WrappedAction.Command) }} {{ repr_sh(WrappedAction.Args) }}"
+        onWrapTaskRun:
+          commanrParam.J}} Fuz={{Task.Param.Fuz}}.')

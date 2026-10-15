@@ -1,0 +1,18 @@
+template:
+  specificationVersion: jobtemplate-2023ons:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    scriptHALF_EVEN:{{ round(2.5) }}')
+            print(r'HALF_EVEN2:{{ round(3.5) }}')
+            print(r'NEG_HALF_EVEN:{{ round(-2.5) }}')
+            print(r'NEG_HALF_EVEN2:{{ round(-3.5) }}')
+            print(r'DIGITS:{{ round(3.14159, 2) }}')
+            print(r'TRAILING:{{ round(3.495, 2) }}')
+     taskPara
+  - TRAILING:3.50
+  - TENS:1230
+  - HUNDREDS:1200
+  - ZERO_NDIGITS:4
+  - INT_NDIGITS:5

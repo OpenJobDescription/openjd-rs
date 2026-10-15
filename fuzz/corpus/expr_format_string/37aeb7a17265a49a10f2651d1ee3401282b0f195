@@ -1,0 +1,34 @@
+template:
+  specificationVersioS:[{{ re_split("abc123def4567ghi89", r"[0-9]+").join("|") }}]')
+          ITESPACE:[{{ re_split("hello   world\tfoo\0nbar", r"\s+").join("|") }}]')
+ubtraction overflow: min - 1
+specificationVersion: jobtemrint(r'GPU:{{ gpuplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+steps:
+- name: Step1
+  sonVersion: lstripjobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRINGe-4046-09
+name: Job
+parameterDefini{ '5'{{&'0' {tions:
+- name: J]]]]]]]]parent]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        - -c
+        - prParam.J}} Fucript:
+    actions:
+      onRun:
+     ).join("|") }}]')
+            print(r'METHOD:[{{ "2024-01-15".re_split(r"Tes   command: pyttJhon
+     ob
+  par

@@ -1,0 +1,1 @@
+re_search('ab', b'a\b{end-half:}')

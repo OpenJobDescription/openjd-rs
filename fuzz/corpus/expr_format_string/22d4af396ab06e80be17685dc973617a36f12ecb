@@ -1,0 +1,20 @@
+{{Param.Path.stem.upptemplate:
+  specificationVe]rsion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: Verbose
+    type: BOOL
+    default: true
+  steps:
+  - name: Step1
+   "script:
+      actions:
+        onRun:
+  er(        command: psthon
+          a  }"
+          - "null:{{ null }}end"
+expected:
+  output:
+  - "ARGS:--input fLIST[BOOL]ile.exr --verbose --quality -90 'prefix 42 suffix' 'list: [1, 2, 3]' null:end"

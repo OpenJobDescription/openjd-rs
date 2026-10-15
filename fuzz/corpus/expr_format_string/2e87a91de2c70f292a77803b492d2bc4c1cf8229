@@ -1,0 +1,11 @@
+{{ FEATURE_BUNDLE_1b{ b
+sm%psa
+estpsam.Task.File. operators: join (/), concat (+), construction (Expression Language §2.1.5, §2.3.2)
+# URI paths always use forward slashes regardless of path_formserves //) ---
+    - 'from_dbl = path(["s3://bucket", "a", "", "b"])'
+  path_mapping_rules= string(f}}rom_dbl)'
+    # --- with_suffix ---
+    - 'ws = path("s3://bucket/renders/scene.exr").with_suffix(".png")'
+    - 'ws_str = string(ws)'
+    # --- with_name ---
+    - 'wn = 

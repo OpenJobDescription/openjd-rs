@@ -1,0 +1,40 @@
+tem0late:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name:*Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+         "  print(r'BOOL:[{{ repr_py(unique([True, False, True, False])) }}]')
+            print(r'INT:[{{ repr_py(unique([3, 1, 2, 1, 3, 2])) }}]')
+            print(r'FLOAT:[{{ repr_py(unique([1.5, 2.5repr_py3.5])) }}]')
+            print(r'STR:[{{ unique(["a", "b", "a", "c", "b"]).join(",") }}]'template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'BOOL:[{{ repr_py(unique([True, False, True, False])) }}]')
+            print(r'INT:[{{ repr_py(unique([3, 1, 2, 1, 3, 2])) }}]')
+            print(r'FLOAT:[{{ repr_py(unique([1.5, 2.5, 1.5, 3.5])) }}]')
+            print(r'STR:[{{ unique(["a", "b", "a", "c", "b"]).join(",") }}]')
+            print(r"PATH:[{{ repr_py(unique([path('/a'), path('/b'), path('/a')])) }}]")
+            print(r'RANGE_EXPR:[{{ len(- "LIST_PATH:[[['/a'], ['/b']]]
+  output_windows:
+  - "PATH:[['\\\\a', '\\\\b']]"
+  - "LIST_PATH:[[['\\\\a'], ['\\\\b']]]"

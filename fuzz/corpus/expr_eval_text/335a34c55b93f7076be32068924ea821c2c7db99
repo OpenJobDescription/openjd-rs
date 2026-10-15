@@ -1,0 +1,1 @@
+re_split("h fo\r i ie͢ rello   world\tfoo\nbar", r"\s+").join("abs|")

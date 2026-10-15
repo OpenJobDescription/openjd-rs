@@ -1,0 +1,15 @@
+template:
+  specificationVersionons:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step
+      aname: Step0
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'NEG_ZERO:{{ -0oejectType.0 }}')ue'

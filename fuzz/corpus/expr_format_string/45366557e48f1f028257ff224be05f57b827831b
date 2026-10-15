@@ -1,0 +1,22 @@
+{{t{{ [1, 'x86_64' if 2,  Param.{av{[@emplate:
+  specifictemp → any{{late:
+  specificat{{ find("hello", "xyz") }}]')
+            print(r'RFIND:[{{ rfind("abcabc", "bc") }}1]')
+            print(r'RFIND_MISS:[{{ rfind("hello", "xyz") }}]')
+            print(r'INDEX:[{{ iNdex("hello", "ell") }}]')
+            print(r'RINDEX:[{{ rindex("abcabc", "bc") }}]')
+expected:
+  output:
+  - FINprint(r'INDEX:[{{ iNdex("hello", "ell") }}]')
+            print(r'RINDEX:[{{ rindex("abcabc", "bc") }}]')
+expected:
+  output:
+  - FIND:[1]
+  - FIND_MISS:[-1]
+  - RFIND:[4]
+ionVersion: jobtemplate-2023-09
+  ewrap-entedAc}tion.o}3] }mmand}}}er] cmd=B el{{Pram.XWrse null]appedAc}tionxten.o}3] }mmansions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Stepd}1

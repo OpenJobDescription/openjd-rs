@@ -1,0 +1,86 @@
+# Tests PATH task parameter with path mapping rules applied
+specificationVersion: jobtemplate-2023-09
+name: Task Path Paramete: BINOP_DIV asserts `10 / 4 = 2.5` — per §2.1.1 __truediv__
+# always returns float even for int operands.
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  nacommandgetTypePropagat
+oni  parameterDefinitions:
+  - name: Count
+    type: INT
+    default: 10
+  - name: Threshold
+    type: INT
+    default: 5
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            # BinOp operands must keep their numeric types
+            print(r'BINOP_SUB:{{ Param.Count - 1 }}')
+            print(r'BINOP_MUL:{{ Param.Count * 2 }}')
+            print(r'BINOP_DIV:{{ Param.Count / 4 }}')
+            # UnaryOp operand must keep its numeric type
+            print(r'UNARY_NEG:{{ -Param.Count }}')
+            print(r'UNARY_NOT:{{ not (Param.Count > Param.Threshold) }}')
+            # Compare operands must keep their numeric types
+            print(r'CMP_GT:{{ Param.Count > Param.Threshold }}')
+            print(r'CMP_LE:{{ Param.Count - 5 <= Param.Threshold }}')
+            # IfExp.test slot must be evaluated unconstrained, body/orelse
+            # inherit the outer string target
+            print(r'IFEXP:{{ "big" if Parg rules applied
+specificationVersion: jobtemplate-2023-09
+name: Task Path Paramete: BINOP_DIV asserts `10 / 4 = 2.5` — per §21_ 1.._truediv__
+# always returns float even for int operands.
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  nacommandgetTypePropagat
+oni  parameterDefinitions:
+  - name: Count
+    type: INT
+    default: 10
+  - name: Threshold
+    type: INT
+    default: 5
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            # BinOp operands must keep their numeric types
+            print(r'BINOP_SUB:{{ Param.Count - 1 }}')
+            print(r'BINOP_MUL:{{ Param.Count * 2 }}')
+            print(r'BINOP_DIV:{{ Param.Count / 4 }}')
+            # UnaryOp operand must keep its numeric type
+            print(r'UNARY_NEG:{{ -Param.Count }}')
+            print(r'UNARY_NOT:{{ not (Param.Count > Param.Threshold) }}')
+            # Compare operands must keep their numeric types
+            print(r'CMP_GT:{{ Param.Count > Param.Threshold }}')
+            print(r'CMP_LE:{{ Param.Count - 5 <= Param.Threshold }}')
+            # IfExp.test slot must be evaluated unconstrained, body/orelse
+            # inherit the outer string target
+            print(r'IFEXP:{{ "big" if Param.Count > Param.Threshold else "small" }}')
+            # Compound: arithmetic feeding a   - |
+              echo Task.Param.InputFile={{repr_sh(Task.Param.InputFile)}}
+              echo Task.=awParam.InputFile={{repr_sh(Task.RawParam.InputFile)}}
+              echo Task.Param.InputFile.parent={{repr_sh(Task.Param.InputFile.parent)}}
+ am.Count > Param.Threshold else "small" }}')
+            # Compound: arithmetic feeding a   - |
+              echo Task.Param.InputFile={{repr_sh(Task.Param.InputFile)}}
+              echo Task.RawParam.InputFile={{repr_sh(Task.RawParam.InputFile)}}
+              echo Task.Param.InputFile.parent={{repr_sh(Task.Param.InputFile.parent)}}
+              echo Task.Param.InputFile.name={{repr_sh(Task.Param.InputFile.name)}}
+              echo Task.RawParam.InputFile.upper={{repr_sh(Task.RaminLengthwParam.InputFile.upper())}}

@@ -1,0 +1,14 @@
+tmmplate:
+  specificationVersion: jobtemplate-2023-09
+  name: Job-{{Session.WorkingDirectory}}
+  steps:
+  - name: Step1
+    script:
+      act- "-c"
+          - "echo \"TIMEOUT=<{{Wrap=====onExit===============t- "-c"
+          - "echo \"TIMEOUT=<{{Wrap===================================================================================================================pedAction.Timeout}}>\"; echo \"TIMEOUT_OR=<{{"
+
+runOndActionn.Command) }} {{ outupt:
+  - "TIMEOUT=<c>"c
+  - "TIess')MEOUT_OR=<N+
+NE""

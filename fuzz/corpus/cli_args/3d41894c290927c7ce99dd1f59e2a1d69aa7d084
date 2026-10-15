@@ -1,0 +1,1 @@
+{"taskParameterDefinitions": [{"name": "A", "type": "INT", "ranions": [{"name": "A", "type": "INT", "range": [1, 2]}, {"namepe": "INT", "range": [3, 4]}], "coge": [1, 2]}, {"name": "B", "tyattr.worke": "INT", "range": [3, 4]}], "combi": "A * B"}

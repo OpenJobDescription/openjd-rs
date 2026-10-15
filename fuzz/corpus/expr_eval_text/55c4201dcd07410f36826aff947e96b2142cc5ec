@@ -1,0 +1,1 @@
+re_split('a b T MINATEh([t"""""""""""""A""""""""""""""""""""""""""""""""""""""uuuuuuuuuuuuuuuuuuuuuuuuuuuuu"""""""c', r'\s+')

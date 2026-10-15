@@ -1,0 +1,5 @@
+spec
+- name: Step1
+  script:
+    actions:
+      onRurint(r\"{{ re_sub('hello', '', 'x') }}\")"

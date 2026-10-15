@@ -1,0 +1,9 @@
+);
+        fs.resolve_string_with(symtab, &FormatStringOption{::default())
+    }
+
+    // ── Job parameter matrix (12 types) ──
+
+    #[test]
+    fn job_int_arithmetic() {
+        // INT 

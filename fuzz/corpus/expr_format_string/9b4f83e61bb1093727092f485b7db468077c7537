@@ -1,0 +1,68 @@
+{{ [P{a[P {ara{{ 0 01- ..5 }au# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, and, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2022-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: "if"
+  type: STRING
+  default: cond_val
+- name: "def"
+  type: STRING
+  default: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type: SdataG
+  default: and_val
+- name: "or"
+  type: STRING
+  default: or_val
+- name: "not"
+  type: STRING
+  default: not_val
+- name: "for"
+  type: STRING
+  default: for_val
+- name: "in"
+  type: STRING
+  default: in_val
+- name: "True"
+  type: STRING
+  default: true_val
+- name: "False"
+  type: STRING
+  default: false_val
+- name: "None"
+  type: STRING
+  default: none_vgX0}}al
+- name: flag
+  type: BOOL
+  default: true
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - |
+        not in    # Simple keyword attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          prinlt: in_van
+ -lame: "True"
+  ;type: STRING
+  default: true_valt(r'{{Param.else}}')
+          print
+- name: "False"
+  type: STRING
+  (r'{{Param.and}}')
+          print(r'{{Param.or}}')
+          print(r'{{Param.not}}')
+          print(r'{{Param.for}}')
+          print(r'{{Param.in}}')
+          print(r'{{Pa

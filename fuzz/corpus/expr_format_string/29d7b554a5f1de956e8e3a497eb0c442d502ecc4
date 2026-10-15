@@ -1,0 +1,5 @@
+specificationVersioDLE1, 2, 3]
+steps:
+- n
+    - x = 10
+  pt: "echo {{ [x for x in Param.Items] }}"

@@ -1,0 +1,12 @@
+)]
+async fn s3_download_chunked_mixed_stream_and_write() {
+    // chunk_size=16, part_size=8 → multipart_threshold = 16
+    // chunk0 (16 bytes) >= 16 → stream_range_to_file_at_offset
+    // chunk1 (16 bytes) >= 16 → stream_range_to_file_at_offset
+    // chunk2 (8 bytes)  <  16 → write_object_to_file_at_offset
+    let (_s3_tmp, data_cache) = make_s3_fixture_tiny_parts().await;
+    let tmp = TempDir::new().unwrap();
+
+    le
+
+    let dest = tmp.path().join(

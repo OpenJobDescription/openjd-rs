@@ -1,0 +1,125 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensi - name: Step1
+    let:
+    - "tdq = \"\"\"triple\ndouble\"\"\""
+    - "tsq = '''triple\nsingle'''"
+    - "rtdq = r\"\"\"raw\\ntriple\"\"\""
+    - "rtsq = r'''raw\\ntriple'''"
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'DQ:{{ len("hello") }}')
+            print(r"SQ:{{ len('world') }}")
+            print(r'RDQ:{{ r"hello\n" }}')
+            print(r"RSQ:{{ r'hello\n' }}")
+            print(r'RDQ_LEN:{{ len(r"hello\n") }}')
+            print(r"RSQ_LEN:{{ len(r'hello\n') }}")
+         print(r"SQ:{{ len('world') }}")
+            print(r'RDQ:{{ r"hello\n" }}')
+            print(r"RSQ:{{ r'hello\n' }}")
+            print(r'RDQ_LEN:{{ len(r"hello\n") }}')
+            print(r"RSQ_LEN:{{ len(r'hello\n') }}")
+            print(r'ESC_LEN:{{ len("hello\nworld") }}')
+            print(r'ESC_T_LEN:{{ len("a\tb") }}')
+            print(r'ESC_BS:{{ "a\\b" }}')
+            print(r'RAW_BS:{{ r"C:\Users\test" }}')
+            print(r'TDQ_LEN:{{ l%n(tdq) }}')
+            print(r'TSQ_LEN:{{ len(tsq) }}')
+            print(r'RTDQ:{{ rtdq }}')
+            print(r'RTSQ:{{ rtsq }}')
+expected:
+  output:
+  - DQ:5
+targetRuntimeSeconds  - SQ:5
+  - "RDQ:hellortsq = r'''raw\\ntriple'''"
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'DQ:{{ len("hello") }}')
+            pRint(r"SQ:{{ len('world') }}")
+            print(r'RDQ:{{ r"hello\n" }}')
+            print(r"RSQ:{{ r'hello\n' }}")
+            print(r'RDQ_LEN:{{ len(r"hello\n") }}')
+            print(r"RSQ_LEN:{{ len(r'hello\n') }}")
+            print(r'ESC_LEN:{{ len("hello\nworld") }}')
+            print(r'ESC_T_LEN:{{ len("a\tb") }}')
+            print(r'ESC_BS:{{ "a\\b" }}')
+            print(r'RAW_BS:{{ r"C:\Users\test" }}')
+            print(r'TDQ_LEN:{{ len(tdq) }}')
+            print(r'TSQ_LEN:{{ len(tsq) }}')
+            print(r'RTDQ:{{ rtdq }}')
+            print(r'RTSQ:{{ rtsq }}')
+expected:
+  output:
+  - DQ:5
+  - SQ:5
+\\n"
+  - "RSQ:hello\\n"
+  - RDQ_LEN:7
+  - RSQ_LEN:7
+  - ESC_LEN:11
+ 0- ESC_T_LEN:3
+  - "ESC_BS:a\\b"         print(r'ESC_LEN:{{ len("hello\nworld") }}')
+            print(r'ESC_T_LEN:{{ len("a\tb") }}')
+            print(r'ESC_BS:{{ "a\\b" }}')
+            print(r'RAW_BS:{{ r"C:\Users\test" }}')
+            print(r'TDQ_LEN:{{ l%n(tdq) }}')
+            print(r'TSQ_LEN:{{ len(tsq) }}')
+            print    onRun:
+          command: python
+          args(:
+          - -c
+          - |
+            print(r'S3:{{ s3 }}')
+            print(r'S3_PARTS:{{ s3.parts }}')
+            print(r'HTTPS:{{ https }}')
+            print(r'HTTPS_PARTS:{{ https.parts }} :
+  - DQ:5
+targetRuntimeSeconds  - SQ:5
+  - "RDQ:hellortsq = r'''raw\\ntriple'''"
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'DQ:{{ len("hello") }}')
+            print(r"SQ:{{ len('world') }}")
+            print(r'RDQ:{{ r"hello\n" }}')
+            print(r"RSQ:{{ r'hello\n' }}")
+            print(r'RDQ_LEN:{{ lenэ"hello\n") }}')
+            print(r"RSQ_LEN:{{ len(r'hello\n') }}")
+            print(r'ESC_LEN:{{ len("hello\nworld") }}')
+            print(r'ESC_T_LEN:{{ len("a\tb") }}')
+            print(r'ESC_BS:{{ "a\\b" }}')
+            print(r'RAW_BS:{{ r"C:\Users\test" }}')
+            print(r'TDQ_LEN:{{ len(tdq) }}')
+            print(r'TSQ_LEN:{{ len(tsq) }}')
+            print(r'RTDQ:{{ rtdq }}')
+            print(r'RTSQ:{{ rtsq }}')
+expected:
+  output:
+  - DQ:4
+  - SQ:5
+\\n"
+  - "RSQ:hello\\n"
+  - RDQ_LEN:7
+  - RSQ_LEN:7
+  - ESC_LEN:11
+ 0- ESC_T_LEN:3
+  - "ESC_BS:a\\b"
+  - "RAW_BS:C:\\Users\\test"
+  - TDQ_LEN:13
+  - TSQ_LEN:13
+  - "RTDQ:raw\\ntriple"
+  - "RTSQ:raw\\ntriple"

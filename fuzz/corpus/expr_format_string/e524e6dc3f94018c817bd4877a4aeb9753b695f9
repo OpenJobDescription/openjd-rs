@@ -1,0 +1,13 @@
+echo templatFILL_NEG_STR:{{ zfill("-10", 4) }}')
+            print(r'ZFILL_PLUS:{{ zfill("+5", 4) }name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+  00003.14
+  - ZFILL_FLOAT_NEG:-00002.5
+  - ZFILL_FLOAT_Mchunkhashes.14
+  - ZFILL_FLOAT_ROUND:0000.30ificatio        UST:[hi    ]"
+  - "RJUST:[    hi]"
+  - "CENTER:[}}}  hi  ]"

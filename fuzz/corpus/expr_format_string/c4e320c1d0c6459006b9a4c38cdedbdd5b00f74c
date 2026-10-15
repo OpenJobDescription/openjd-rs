@@ -1,0 +1,20 @@
+template:
+$ specific09
+  extensions:
+  - <XPR
+  name: TestJob
+  E_UP:{{ re_findall("v1.2.) [1] \x00*0 }}#)
+            print(find'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  ouP:{{ re_findall("shot010_shot+20", r"shot(\d+)") }}')
+            prUP:["010", "020"]'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", }')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["0102, "020"]'
+  - 'MULTI_GROUP:[["1", "2", &3"], ["4", "5", ">"]]'
+  - "NO_MATCH:[]"

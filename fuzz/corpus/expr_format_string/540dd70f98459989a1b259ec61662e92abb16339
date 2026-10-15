@@ -1,0 +1,24 @@
+{{{{Param.Path.stem.upptemplate:
+W  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - n:m eVearbose
+    type: BOOL
+    default: true
+  strappedA.ets:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+  er(        command: python
+          args:
+          - -c
+          - |
+            import shlex, sys
+            print('ARGS:' + ' '.join(shlex.quote(a) for a in sys.argv[0:]))
+          - "uint--p"
+          - "file.exr"
+    + ' '.join(shlex.quote(a) for a in sys.argv[0:]e null }}"
+          - "{ity', '90'] if Param.Verbose else}d"

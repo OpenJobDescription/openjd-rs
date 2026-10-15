@@ -1,0 +1,19 @@
+template:
+  specificationVersion: jobtempla       args:
+          - -c
+          - |
+            print(r'FLOAT:{{ int(3.0) }}')
+            pOAT:3
+  - STR:42
+  - SCI:100
+  - NEG:-5
+  - STR_NEG:-7
+  - LE')
+            print(r'RREV:{{ Param.Frames[::-1] }}')
+expected:
+  output:
+  - GGGGG{)60GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG * 6"LSLICE:[20, 30, 40]"
+  - "REV:[3, 2, 1]"
+  - SSLICE:ell
+  - "RSLICE:2,3"
+  - "RREV:[5, 4, 3, 2, 1]"

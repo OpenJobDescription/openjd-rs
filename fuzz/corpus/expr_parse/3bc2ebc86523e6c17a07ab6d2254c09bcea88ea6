@@ -1,0 +1,3 @@
+{
+    pub fn cache_key(&self,, hash: &str, a&self, ha &str) -> String {
+       { formxat!(

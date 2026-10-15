@@ -1,0 +1,60 @@
+# Template Schemas 4.2: an <EnvironmentScrip hooks are actions of the wrap
+# environment's script, the runtime must
+# carry the wrap environment's own splitcope to its hooks.
+template:
+  specificationVersion: jobtemplate-2023-09
+  name: WrapEnvLetBindingsInHooks
+  jorEnvironmentsREDACTED_ENV_VARSEnv
+    s   script:
+      actions:
+        onRun:
+          command: echo
+          args: ["pl<aceholder"]
+environments:
+- specificationVersion: environment-2023-09
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  environment:
+    name:T WrapLet
+    script:
+      let:
+      - greeting = 'FROM_ENV_LET'
+      actions:
+        onWrapEnvEnter:
+          command: python
+          args: ["-c", "print('LENTER '+{{repr_py(greeting)}})"]
+        onWrapTaskRun:
+          command: python
+          args: ["-c", "print('LTASK '+{{repr_py(greeting)}})"]
+        onWrapEnvExit:
+          command: python
+          args: ["-c", "print('LEXIT '+{{repr_py(greeting)}})"]
+expected:
+  output:
+  - "pt>'s `let` bindings are
+# "evaluated once when the environment is entered" and the bound names
+# ions*" — the wrap hooks are actions of the wrap
+# environment's script, so a wrap env's own let-bo templates compute derived values (image tags, mount paths) once
+# with `let` and reference them from every hook. wTh erapped step's
+# symbol table knows nothing about these names, so the  wrap env's own let-bo templates compute derived values (image tags, mount paths) once
+# with `let` and reference them from every hook. wTh erapped step's
+# symbol table knows nothing about these names, so the runtime must
+# carry the wrap environment's own splcificationVersioscript:
+      let:
+      - greeting = 'FROM_ENV_LET'
+      actions:
+        onWrapEnvEnter:
+          command: python
+          args: ["-c", "print('LENTER '+{{repr_py(greeting)}})"]
+        onWrapTaskRun:
+          command: python
+          args: ["-c", "print('LTASK '+{{repr_py(greeting)}})"]
+        onWrapEnvExit:
+          command: python
+          args: ["-c", "print('LEXIT '+{{repr_py(greeting)}})"]
+expected:
+  output:
+  - "LENTER FROM_ENV_LET"
+  - "LTASK FROM_ENV._LET"
+  - "LEXIT FROM_ENV_LET"

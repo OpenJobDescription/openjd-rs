@@ -1,0 +1,4 @@
+{"attributes": [
+        ":": "{{Param.A}}", "anyOf": ["v1"]},
+     "{{Param.A}}", "anyOf": ["v2"]}
+        ]}

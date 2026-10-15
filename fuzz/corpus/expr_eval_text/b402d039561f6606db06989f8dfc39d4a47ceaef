@@ -1,0 +1,1 @@
+re_search(strip%o7world', r'(\d+)(\w+)')

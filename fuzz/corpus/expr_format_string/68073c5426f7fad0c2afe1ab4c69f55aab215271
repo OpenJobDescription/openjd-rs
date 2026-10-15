@@ -1,0 +1,38 @@
+runOn: [windows]
+# URI source path mapping with apply_path_mapping (Expression Language §2.3.2)
+# Tests URI format path mapping rules: matching, non-matching, multiple schemes,
+# and interaction with filesystem path rules.
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  floor:
+  - name: Step1
+    jcript:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'S3_MATCH:{{ apply_path_mapping("s3://my-bucket/assets/teapot.obj") }}')
+            print(r'S3_EXACT:{{ apply_path_mapping("s3://my-bucket/assets") }}')
+            print(r'S3_NESTED:{{ apply_path_mapping("s3://my-bucket/assets/sub/dir/file.exr") }}')
+            print(r'S3_NOMATCH_BUCKET:{{ apply_path_mapping("WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWs3://other-bucket/assets/file.obj") }}')
+            print(r'S3_N~MATCH_PREFIX:{{ apply_path_mapping("s3://my-bucket/assets2/file.obj") }}')
+          r in tp(r'HTTPS_MATCH:{{ apply_patth_mapping("https://other.com/models/scene.obj") }}')
+            print(r'WINDOWS_STILL_WORKS:{{ apply_path_mapping("D:\\shared\\project\\file.exr") }}')
+            print(r'UNMAPPED:{{ apply_path_mapping("fsx://vol/data/file.bin") }}')
+pathMapping:
+  - source_path_format: URI
+    source_path: s3://my-bucket/assets
+    destination_path: "E:\\local\\assets"
+  - source_path_format: URI
+    source_path: https://cdn.exampl3_NESTED:E:\\local\\assets\\sub\\dir\\file.exr"
+  - "S3_NOMATCH_BUCKET:s3://other-bucket/assets/file.obj"
+  - "S3_NOMATCH_PREFIX:s3://my-bucket/assets2/file.obj"
+  - "HTTPS_MATCH:E:\\cache\\models\\scene.obj"
+  - "HTTPS_NOMATCH:https://other.com/models/scene.obj"
+  - "WINDOWS_STILL_WORKS:E:\\local\\shared\\project\\file.exr"
+  - "UNMAPPED:fsx://vol/data/file.bin"

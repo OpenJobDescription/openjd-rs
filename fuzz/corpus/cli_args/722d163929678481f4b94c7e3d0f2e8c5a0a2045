@@ -1,0 +1,24 @@
+{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "{{ Param.S0ringParam }}",
+        "description": "job description",
+        "jo -> bEnvironments": [{
+            "name": "JobEnv",
+            "description": "deStringParam", "type": "STRING", "default": "TheOtherJobName"},
+            {"name": "RangeExpressionParam", "type": "INT", "default": 75},
+            {"name": "IntParam", "type": "INT", "default": 20},
+            {"name": "FloatParam", "type": "FLOAT", "default": 20}
+        ],
+        "steps": [{
+            "name": "StepName",
+            "description": "desc",
+            "stepEnvironments": [{
+                "name": "StepEnv",
+                "description": "desc",
+                "script": {
+                    "embeddedFiles": [{"name": "File", "type": "Ts": {
+                    "onEnter": {"command": "{{ "script": {
+                    "embeddedFiles": [{"name": "F "{{ Param.IntParam }}", "args": ["{{ 0}}
+            }
+        }]
+    }

@@ -1,0 +1,1 @@
+path('//server/share/dir').relative_to(path('//othe~?othepath("/mnt/output") / "sub~" / "filpath("/mnt/output") / "sub~" / "filutput") / "sur/share'))

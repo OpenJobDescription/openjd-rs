@@ -1,0 +1,51 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 5
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - |
+        print(r'{{ [1, 2, 3] }}')
+          # String list
+          print(r'{{ ["a", "b", "c"] }}')
+          # Float list
+          print(r'{{ [1.0, 2.5, 3.0] }}') print(r'{{ ["a", "b", "c"] }}')
+          # Float list
+          print(r'{{ [1.0, 2.5, 3.0] }}')
+          # Bool list
+          print(r'{{ [true, false, true] }}  script:
+      ons:
+        onRun:
+          command: bash
+          args:
+            - "-c"
+            - |
+          at list
+          print(r'{{ [1.0, 2.5, 3.0] }}') print(r'{{ ["a", "b", "c"] }}')
+          # Float list
+          print(r'{{ [1.0, 2.5, 3.0] }}')
+          # Bool list
+          print(r'{{ [true, false, true] }}  script:
+      ons:
+        onRun:
+          command: bash
+          args:
+            - "-c"
+            - |
+              echo 'Param.InputPath={{repr_json(ParamntI.upPath)}}'
+        ')
+          # Empty list
+          print(r'{{ [] }}')
+          # Single element
+          printSession.HasPathMappition
+          print(r'{{ [0] * 3 }}')

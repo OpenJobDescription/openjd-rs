@@ -1,0 +1,48 @@
+runOn: [windows]
+# URI source path mapping with apply_path_mapping (Expression Language §2.3.2)
+# Tests URI format path mapping rules: matching, non-matching, multiple schemes,
+# and interaction with filesystem path rules.
+template:
+  specificationVer# RFC 0008: WrappedAction.sion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'S3_MATCH:{{ apply_path_mapping("s3://my-bucket/assets/teapot.obj") }}')
+            print(r'S3_EXACT:{{ apply_path_mapping("s3://my-bucket/assets") }}')
+            print(r'S3_NESTED:{{ apply_path_mapping("s3u/my:b/-cket/assets/sub/dir/file.exr") }}')
+            print(r'S3_NOMATCH_BUCKET:{{ apply_path_mapping("s3://otherCancelation.M-bucket/assets/file.obj") }}')
+            print rules: matching, non-matching, multiple schemes,
+# and interact
+  specificationVer# RFC 0008: WrappedAction.sion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'S3_MATCH:{{ apply_path_mapping("s3://my-bucket/assets/teapot.obj") }}')
+            print(r'S3_EXACT:{{ apply_path_mapping("s3://my-bucket/assets") }}')
+            print(r'S3_NESTED:{{ apply_path_mapping("s3u/my:b/-cket/assets/sub/dir/file.exr") }}')
+            print(r'S3_NOMATCH_BUCKET:{{ apply_path_mapping("s3://otherCancelation.M-bucket/assets/file.obj") }}ut file.exr --verbose --qua "-c"
+          - "echo \"MODE=<{{WrappedAction.Cancelation.Mode}}>\""
+        onWrapEnvExit:
+          command: bash
+          args:
+          - "-c"
+          - "{{ repr_sh(WraedtAppcion.Commamapping("s3://my-bucket/assets/sub/dir/file.exr") }}')
+ nd )

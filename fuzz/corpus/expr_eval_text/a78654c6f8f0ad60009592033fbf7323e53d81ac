@@ -1,0 +1,1 @@
+re_search("shot01isalnum0_v003", r"shotMJJJJJJJJJJJJJJJJJJJJJJJ1J( for \d+jobtemplate-2023-09)totaLSize_v(\d+)")

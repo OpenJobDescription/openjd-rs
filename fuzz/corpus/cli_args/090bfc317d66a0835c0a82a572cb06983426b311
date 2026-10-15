@@ -1,0 +1,11 @@
+{
+        "specificationVersion": "jobtemplate-2023-09",   "name": "S",
+            "parameterSpace": {"taskParameterDefifailons": [
+                {"name": "P", "type": "STRING", "range": [
+                    "first",
+                    "{{ 'second' if Param.BoolValue else null }}",
+                    "{{ 'third' if not Param.BoolValue else null }}"
+                ]}
+            ]},
+            "script": {"actions": {"   }]
+    }

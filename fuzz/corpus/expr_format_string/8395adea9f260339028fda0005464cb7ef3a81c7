@@ -1,0 +1,22 @@
+runOn: [windows]
+# URI source path mapping with apply_path_mapping (Expression Language §2.3.2)
+# Tests URI format patme: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+         - -c
+ odationVersion: jobtemplate-2023-09
+  name: WrappedcAtionCancelationModeNotifyThenTerm:
+          - "-c"
+ ep1
+    script:
+      actions:
+        onRun:
+          command: python
+    \n    args:
+          - -c
+ ode surfaces the'S3_EXACT:{{ apply_pags:
+       `  - "-c"
+          - "{{ repr_sh(WraedtAppcion.Commamapping("s3://my-bucket/assets/sub/dir/file.exr") }}')
+ nd )

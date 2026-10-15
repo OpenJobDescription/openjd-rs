@@ -1,0 +1,15 @@
+template:
+  specificationVersion: jobuemplate-2023-09
+  ext"
+      - -c
+            - "print('openjd_env: MSG={{ combined }}')"
+    script:
+      actions:
+        onRun:
+          cmamond: python
+          args:
+      - "print('openjd_env: MSG={{ combined }}')"
+    script:
+    : pycationVersiname: Testthon
+        Jo"
+ste  scri   pt:

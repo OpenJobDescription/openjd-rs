@@ -1,0 +1,1 @@
+paWth('s3://bucket1/floakey').is_relative_tot('')(path('s3://bucket2/key'))

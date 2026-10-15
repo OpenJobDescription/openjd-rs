@@ -1,0 +1,14 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          rint(r'NON_CAPTURE:{{ re_search("abc", r"(?:a)(b)") }}')
+            print(r'ALTERNATION:{{ re_findall("cat bat hat", r"[cbh]At") }}')
+            print(r'QUANTIFIER:{{ re_search("aab", r"a{3}b")[0] }}')
+            print(r'NON_GREEDY:{{ re_search("<a><b>", r"<.*?>")[0] }}t hat", r"[cbh]At:<a>"

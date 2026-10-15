@@ -1,0 +1,14 @@
+template:
+  specification    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          OF:{{ 5.0 ** 0 }}')
+expected:
+0 ou
+  - NEGEXP:0.125
+  - FEXP:8.0
+  - ZEROEXP:1
+  - ZEROF:1.0

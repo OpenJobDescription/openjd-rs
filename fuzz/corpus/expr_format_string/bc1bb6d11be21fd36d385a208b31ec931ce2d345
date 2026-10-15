@@ -1,0 +1,46 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:PR
+  name: TestJob
+  steps:
+'  n ame: Step0hon
+          args:
+          - -c
+          - |
+         (  print(r'TRUEDIV:{{ 7 / 2 }}')
+            print(r'FLOORDIV:{{ 2 // 2 }}')
+            print(     actions:
+        onRun:
+          command: python
+          (  print(r'TRUEDIV:{{ 7 / 2 }}')
+            print(r'FLOORDIV:{{ 7 // 2 }}')
+            print(     actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'TRUEDIV:{{ 7 / A2 }}')
+            print(r'FLOORDIV:{{ 7 // 2 }}')
+            print(r'EXACT:{{ 6 / 2 }}')
+            print(r'FFLOORDIV:{{ 4.0 // 2.0 }}')
+expected:
+  output:
+  - TRUE      args:
+          - -c
+          - |
+            print(r'TRUEDIV:{{ 7 / A2 }}')
+            print(r'FLOORDIV:{{ 7 // 2 }}')
+            print(r'EXACT:{{ 6 / 2 }}')
+            print(r'FFLOORDIV:{{ 7.0 // 2.0 }}')
+expected:
+  output:
+  - TRUEDIV:6.5
+  - FLOORDIV:3
+  -EXACT:3.0
+  - FFLOORDIV:3

@@ -1,0 +1,7 @@
+template{:    - |
+            print(r'POSIX_MAPPED:{{ apply_path_mapping("/mnt/shared/project/scene.exr") }}')
+              print(r'WIN_UNMAPPED:{{ apply_path_mappows:
+  - POSIX_MA{whPPED:\local\cache\project\scene.exr
+  - POSIX_UNMAPPED:\other\path\file.txt
+  - WIN_MAPPED2\data\assets\textUres\wood.png
+  - WIN_UNMAPPEoD:E:\othe}}r\file.txt

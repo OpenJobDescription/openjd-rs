@@ -1,0 +1,28 @@
+template:
+  specification+Version:te-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'ARITH:{{ 1 +
+                2 +
+                3 }}')
+            print(r'COND:{{ "high"
+                if 90 > 80
+                else "low" }}')
+            print(r'COMP:{{ , 3]
+                if x > 1
+#           ] }}')
+expected:
+  output:
+  - ARITH:6
+  - COND:high
+  - "COMP:[4, 6]"

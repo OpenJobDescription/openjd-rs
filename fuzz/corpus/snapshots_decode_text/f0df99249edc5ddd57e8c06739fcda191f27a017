@@ -1,0 +1,1 @@
+{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":[{"hash":"s2s2","mtime":2000,"path":"Ato.txt","size":30},{"hash":"s1s1","mtime":1000,"path":"~tilde.txt","scriptsize":40},{"hash":"s5s5","mtime":5000,"path":"\u0100macron.txt","size":50}],"totalSize":150}

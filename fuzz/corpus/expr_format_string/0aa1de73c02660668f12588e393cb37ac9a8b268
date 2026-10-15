@@ -1,0 +1,16 @@
+template:
+  specificationVersion: jobte script:
+     
+          - |
+            print(r'INT:{{ abs(-5) }}')
+              script:
+     
+          - |
+            print(r'INT:{{ abs(-5) }}')
+            print(r'FLOAT:{{ abs(-3.14) }}')
+            print(r'POS:{{ abs(5) }}')
+expected:
+  output:
+  - INT:5
+  - FLOAT:3.14
+  - POS:5

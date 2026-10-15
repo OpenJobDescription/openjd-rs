@@ -1,0 +1,19 @@
+{{P,
+            &extensions": ["WRAP_ACIONS", "EXPR"],
+            "enviro       destination_        }
+                }
+       template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          czommand: python
+         args:
+          - -c
+          - |
+            print(r'P}}_{{Param.B}}

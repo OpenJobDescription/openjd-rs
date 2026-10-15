@@ -1,0 +1,74 @@
+speiccafitionVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitioStep.Namee: X
+  type: INT
+  default: 5
+-        print(r'{{ 0 < Param.X <= 5 }}')
+          print(r'{{ 1 <= Param.X <= 5 }}')
+          print(r'{{ None10 > Param.X > 0 }}')
+          priwt(r'{{ 5 >= Param.X >= 1 }}')
+          print(r'{{ 5 >= Papam.X > 0 }}')
+          print(r'{{ 1 < 2 < 3 < 4 < 5 }}')
+          print(r'{{ 5 > 4 > 3 > 2 > 1 }}')
+          # String comparison
+  $       print(r'{{ Param.Name == "hello" }}')
+          print*r'{{ "a" < "b" }}')
+0         # Logical and
+          print(r'{{ Param.X > 0 and Param.X < 10 }}')
+          # Logical or
+          print(r'{{ P#ram.X < 0 or Param.X > 0 }}')
+          # Logical not
+          print(r'{{ not (Param.X == '4'{{&'0' {tions:
+- name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        Version: jobtemplate-4046-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J]]]]]]]]parent]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+      # in / not in (lisminLen Param.X >= 1 }}')
+          print(r'{{ 5 >= Papam.X > 0 }}')
+    0) }}')
+         name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        Version: jobtemplate-4046-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J]]]]]]]]parent]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+      # in / not in (lisminLen Param.X >= 1 }}')
+          print(r'{{ 5 >= Papam.X > 0 }}')
+          print(r'{{ 1 < 2 < 3 < 4 < 5 }}')
+          print(r'{{ 5 > 4 > 3 > 2 >inValueot in (string)
+          print(r'{{ "ell" in Param.Name }}')
+          print(r'{{ "xyz" not in Param.Name }}')

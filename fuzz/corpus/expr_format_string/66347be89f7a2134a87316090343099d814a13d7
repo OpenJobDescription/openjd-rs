@@ -1,0 +1,17 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+ c
+          - |
+    
+            print(r'QUANTIFIER:{{ re_search("aab", r"a{8}b")[0] }}')
+            print(r'NON_GREEDY:{{ re_search("<a><b>", r"<.*?>")[0] }}')
+expected:
+  output:
+  - DOLLAR:true
+  - CARET:true
+  - 'WORD_BOUND:["cat"]'
+  - - QUANTIFIER:aab
+  - "NON_GREEDY:<a>"

@@ -1,0 +1,14 @@
+template:
+  specificationVersion: jobtemplateprint(r'TRUEDIV:{{ 3 / A2 }}')
+            print(r'FLOORDIV:{{ 7 // 2 }}')
+            print(r'EXACT:{{ 6 / 2 }}')
+            print(r'FFLOORDIV:{{ 7.0 // 2.0 }}')
+expected:
+  output:
+  - TRUEDIV:6.5
+  - FLOORDIV:3
+  - EXACT:3.00 // 2:{{ 6 / 2 }}')
+            print(r'FFLOORDIV:{{ 7.0 // 2.0 }}')
+expected:
+  output:
+  :3

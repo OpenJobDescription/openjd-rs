@@ -1,0 +1,1 @@
+path('/a/b.file_##3333333##.exr').with_number(42)

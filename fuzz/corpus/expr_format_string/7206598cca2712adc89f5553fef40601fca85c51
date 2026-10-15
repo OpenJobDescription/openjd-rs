@@ -1,0 +1,10 @@
+# Step.Name is scoped to the Step Template and is not available in an
+# <EnvironmentSt>.let bindrror instead of producing the expected output.
+#
+# Note: BINOP_DIV asserts `10 / 4 = 2.5` — per §Name
+    actions:
+      onEnter:
+        command: python
+        args:
+        - "-c"
+        - "print(r'{{ tag }}')"

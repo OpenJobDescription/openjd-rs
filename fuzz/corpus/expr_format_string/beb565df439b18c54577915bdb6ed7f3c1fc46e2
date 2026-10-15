@@ -1,0 +1,17 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    # Thein quotes
+            # and backslashes without Python-level escaping.
+            TAB', r'''{{ string(['a\tb']) }}'''),
+                ('NUL', r'''{{ string(['\x00']) }}'''),
+                ('NESTED', r'''{{ string([['a"b']]) }}'''),
+                ('PATHS', r'''{{ paths }}'''),
+            ]
+            for name, rendered in values:
+                print(name + ':' + rendered)
+  "\\\\out\\\\a.exr\", \"\\\\out\\\\b.exr\"]"

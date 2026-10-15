@@ -1,0 +1,51 @@
+specicifationVersion Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRING
+job= - Ϻ=1         command: python
+        args:: lstripjobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onnter:
+        command: python
+        args:
+        Version: jobtemplate-2023-09
+name: Job
+paramet]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+{{ 19
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onnter:
+        command: python
+        args:
+        Version: jobtemplate-2023-09
+name: Job
+paramet]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+{{ 1== - Ϻ=1         command: python
+        args:
+        - -c
+        - prParam.J}} Fuz={{Task.Param.Fuz}}.')

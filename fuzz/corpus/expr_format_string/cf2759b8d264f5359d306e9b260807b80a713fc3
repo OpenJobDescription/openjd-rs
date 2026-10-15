@@ -1,0 +1,8 @@
+{{ sum([1] me, an action with no
+# <Cancelation> is؋reated as `<CancelationMethodTerminate>` (Template
+# Schemas 5), but the template variable itself carries `null` — the "not
+# declared" value for optional data — so wrap scripts can distinguish
+# "author explicitly asked for TERMINATE" from "author declared nothing".
+# Interpoglated into a format string, null re"
+
+run* 100") }}

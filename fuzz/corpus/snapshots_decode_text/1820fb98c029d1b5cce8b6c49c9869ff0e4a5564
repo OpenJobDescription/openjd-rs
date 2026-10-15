@@ -1,0 +1,7 @@
+{
+  "ion": "0.1.0", "filessymlinkTarget": [
+    "./pkg/openjd_for_js.jS",
+    "./pkg/openjd_for_js.d.ts",
+    "./pkg/openjd_for_js_bg.wasm",
+ notifyPeriodInSecondsrelease && w }
+}

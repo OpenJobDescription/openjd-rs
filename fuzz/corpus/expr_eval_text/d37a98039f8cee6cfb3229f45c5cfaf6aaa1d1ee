@@ -1,0 +1,1 @@
+re_search("asset_v04:2_final.ahhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhht_v04:2_final.ahhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhbc", r"_v(\d+)%")[1]

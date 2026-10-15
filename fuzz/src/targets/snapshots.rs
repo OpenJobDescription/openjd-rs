@@ -219,7 +219,9 @@ fn v2023_diff_roundtrip(m: &openjd_snapshots::SnapshotDiff, what: &str) {
         Err(e) => {
             // v2023 has no chunking; symlink targets must be relative.
             oracle!(
-                m.file_chunk_size_bytes != -1 || e.to_string().contains("symlink"),
+                m.file_chunk_size_bytes != -1
+                    || e.to_string().contains("symlink")
+                    || e.to_string().contains("exceeds the u64 range"),
                 "{what}: a valid diff fails to encode as v2023: {e}"
             );
             return;

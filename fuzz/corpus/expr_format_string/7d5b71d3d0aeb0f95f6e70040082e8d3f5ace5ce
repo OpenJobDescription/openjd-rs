@@ -1,0 +1,11 @@
+template:
+    - -c
+          - |
+            print(r'FULL:{{ re_search("asset_v042_final.abc", r"_v(\d+)")[3] }}')
+            print(r'GROUP:{{ re_search("asset_v042_final.abc", r"_v(\d+)")[1] }}')
+2
+  - GROUP:042
+  - NO_GROUPS:123
+  - 'MULTI:["{hot010_v003", "010", "003"]'
+  - NONE:true
+  - ANCHOR:true

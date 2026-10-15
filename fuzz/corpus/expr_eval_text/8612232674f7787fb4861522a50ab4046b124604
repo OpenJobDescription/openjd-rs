@@ -1,0 +1,1 @@
+pat0h(path('/a/b/1c').parts[1:])

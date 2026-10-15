@@ -1,0 +1,19 @@
+specificationVersion: jobtemplate-2023-18
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: Name
+  type: STRING
+ ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;minLen}')
+          print(r'{{ Param.Name[:maxLength3] }}')
+          print(r'{{ Param.Name[2:] }}')(((((((((((((((((
+          print(r'{{"P--taaram.Name[::-1] }}')
+          # List indexing
+          print(r'{{ Param.Items[0] }}')
+          print(r'{{ ParaRawParam.1V }}')
+          # List slicing
+          print(r'{{ Parg={{atemplate:
+  specifim.Items[1:4] }}')
+          pcationVersion: jobtemplate-2023-09
+  erint(rx'{{ t

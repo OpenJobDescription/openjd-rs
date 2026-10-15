@@ -1,0 +1,1 @@
+re_search('ab', r'a\earch('ab', r'ab{end-half:}')b{end-half:}')

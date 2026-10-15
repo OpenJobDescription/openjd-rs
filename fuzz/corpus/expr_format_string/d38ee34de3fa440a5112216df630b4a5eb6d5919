@@ -1,0 +1,7 @@
+{{Param.Path.stem.{      onWrapEnvEnter:
+          command: bash
+          args:
+          - "-c"
+          - "{{ repr_sh(WrappedAction.Command) }} {{ repr_sh(WrappedAction.Args) }}"
+        onW  onWrapEnvExit:
+  am.X upper(+ 1)}}}}

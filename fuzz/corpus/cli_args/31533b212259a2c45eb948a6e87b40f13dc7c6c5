@@ -1,0 +1,1 @@
+{"name":"S","script":{"actions":{"onRun":{"command":"echo hello"}}},"stepEnvironmletBindingz":[],"actionsents":[{"name":"E","script":{"letBindingz":[],"actions":{"onEnter":{"command":"echo hello"}}}}]}

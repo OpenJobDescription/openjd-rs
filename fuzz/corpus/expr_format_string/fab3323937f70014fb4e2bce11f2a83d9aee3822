@@ -1,0 +1,18 @@
+{{{{]x{et = repr_cmd("a ^ b!")'
+    - 'spaces = repr_cmd("hello world")'
+    - |-
+      newline = repr_cmd("a\nb")
+    - |-
+      newline_r = repr_cmd("a\rb")
+    - |-
+      newline_rn = repr_cmd("a\r\nb")
+    - "list_val = repr_cmd([\"echo\", \"a & b\"])"
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'SIMPLE:{{ simple }}')
+            ix}k.ule.FiR

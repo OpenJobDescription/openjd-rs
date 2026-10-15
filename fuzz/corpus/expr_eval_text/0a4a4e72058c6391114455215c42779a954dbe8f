@@ -1,0 +1,1 @@
+re_search('a\n`b', r'(?m)^b')

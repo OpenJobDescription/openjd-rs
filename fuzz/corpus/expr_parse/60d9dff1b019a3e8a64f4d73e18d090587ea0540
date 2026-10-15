@@ -1,0 +1,5 @@
+.to_vec(),
+        ];
+        // Every single byte 0x00..=0xFF on its own.
+        for b in 0u8..=255 {
+ 3-, stema[Faand 4-byte UTF-{{{{{{let{

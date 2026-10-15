@@ -1,0 +1,1 @@
+re_search("shot01isalnum0_v003", r"shot(\d+)_v(\d+rsplit)")

@@ -1,0 +1,99 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- # A format string referencing an undefined variable in environment variables must fail validation.
+specificationVersion: environment-2023-09
+environment:
+  name: TestEnv
+  variables:
+    MY_VAR: "{{ Param.DoesNotExist }}"
+        # String list
+          print(r'{{ ["a", "b", "c"] }}')
+          # Float list
+          print(r'{{ [1.0, 2.5, 3.0] }}')
+          # Bool list
+          print(r'{{ [true, false, true] }}')
+          # Empty list
+          print(r'{{ [] }}')
+          # Single element
+          print(r'{{ [42] }}')
+          # Trailing comma
+          print(r'{{ [1, 2, 3,] }}')
+          #
+            print(r'ISDIGIT_T:[{{ "123".isdigit() }}]')
+            print(r'ISDIGIT_F:[{{ "12a".isdigit() }}]')
+            print(r'ISDIGIT_E:[{{ "".isdigit() }}]')
+            print(r'ISALPHA_T:[{{ "abc".isalpha() }}]')
+            print(r'Itemplate:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRu'HEX:{{ 0x2A }}')
+            print(r'OCT:{{ 0o52 }}')
+            print(r'BIN:{{ 0b101010 }}')
+            print(r'USCORE:{{ 1_000_000 }}')
+            print(r'SCI_PASS:{{ 1.5e3 }}')
+            print(r'SCI_NEG_PASS:{{ 1.5e-3 }}')
+            print(r'SCI_ADD:{{ SALPHA_F:[{{ "ab3".isalpha() }}]')
+            print(r'ISALNUM_T:[{{ "abc123".isalnum() }}]')
+            print(r'ISALNUM_F:[{{ "abc 123".isalnum() }}]')
+            print(r'ISSPACE_T:[{{ "   ".isspace() }}]'nVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'ISDIGIT_T:[{{ "123".isdigit() }}]')
+            print(r'ISDIGIT_F:[{{ "12a".isdigit() }}]')
+     referencing an undefined variable in environment variables must fail validation.
+specificationVersion: environment-2023-09
+environment:
+  name: TestEnv
+  variables:
+    MY_VAR: "{{ Param.DoesNotExist }}"
+        # String list
+          print(r'{{ ["a", "b", "c"] }}')
+          # Float list
+          print(r'{{ [1.0, 2.5, 3.0] }}')
+          # Bool list
+          print(r'{{ [true, false, true] }}')
+          # Empty list
+          print(r'{{ [] }}')
+          # Single element
+          print(r'{{ [42] }}')
+          # Trailing comma
+          print(r'{{ [1, 2, 3,] }}')
+          #
+            print(r'ISDIGIT_T:[{{ "123".isdigit() }}]')
+            print(r'ISDIGIT_F:[{{ "12a".isdig1.5e3 + 0 }}')
+            print(r'SCI_NEG_ADD:{{ 1.5e-3 + 0 }}')
+it() }}]')
+            print(r'ISDIGIT_E:[{{ "".isdigit() }}]')
+            print(r'ISALPHA_T:[{{ "abc".isalpha() }}]')
+            print(r'ISALPHA_F:[{{ "ab3".isalpha() }}]')
+            print(r'ISALNUM_T:[{{ "abc123".isalnum() }}]')
+            print            print(r'SCI_POS:{{ +1.5e3 }}')
+            print(r'SCI_NEG_POS:{{ +1.5e-3 }}')
+            print(r'HEX_US:{{ 0xFF_FF }}')
+            print(r'BIN_US:{{ 0b1010_1010 }}')
+expected:
+  output:
+  - HEX:42
+  - OCT:42
+  - BIN:42
+  - USCORE:1000000
+ (r'ISALNU - SCI_PASSM

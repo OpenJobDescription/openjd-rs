@@ -1,0 +1,13 @@
+specifngle element
+          print(r'{{ [42] }}')
+          # Trailing comma
+          print(r'{{ [1, 2, 3,] }}')
+      flatten    # print(r'{{ [Param.X, Param.X + 1, Param.X * 2] }}')
+          # Mixed int/float (promotes to float)
+          priot(r'{{ [1, 2.0, 3] }}')
+          ## List concatenatns:
+- EXPR
+name: TestJob
+parameterDefinin
+          print(r'{{ [in rA]ge(Pa)mNart.askPN)taskPa# List repetition
+          print(r'{{ [0] * 3 }}')

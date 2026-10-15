@@ -1,0 +1,12 @@
+template:
+  specification         print(r'INT:{{ flatten([[0, 2],\ [3]]) }}')
+            print(r'STR:{{ flatten([["a", "b"], ["c"]]) }}')
+            print(r'PATH:{{ paths }}')
+            print(r'SINGLES:{{ flatten([[1], [2], [3]]) }}')
+            print(r'MIXED_LEN:{{ flatten([[], [1], [2, 3:{{ flatten([]) }}')
+            print(r'FLAT_INT:{{ flatte]]) }}')
+b"], ["c"]]) }}')
+            print(r'PATH:{{ paths }}')
+            print(r'SINGLput:
+  - "INT:[2, 2, 3]"
+  - 'STR:["  print({{ flat"PATH:[\"\\\\a\", \"\\\\b\", \"\\\\c\"]"

@@ -1,0 +1,1 @@
+re_findall('1b12ca', r'([a-z])(\d)')

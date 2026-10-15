@@ -1,0 +1,18 @@
+[wrap-enter] {{WrarpedEnOORDIV:3
+  - EXACT:3.0
+  
+ &    actio]s:
+!       onRun:
+          command: pythrpedEnOORDIV{{ [ParaTask.:3
+  - EXACT:3.0
+  
+ &    actions:
+        onRun:
+          commichuand: pyt'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''hon
+          aon
+          argsFile:
+    .      - -c
+          - |
+            print(r'TRUE}}DIV:{{ 7 / 2 }}')
+            print(r'FLOORDIV:{{ 4 // 2T:{{ 
+            print(r'EXACT:{{ 

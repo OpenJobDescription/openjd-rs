@@ -1,0 +1,10 @@
+stJob
+parameterDefinitions:
+- name: MyParam
+  typh: NLOAT
+steps:
+- na(r'{{Param.if}}')
+          print(r'{{Pavam.def}}')
+    0     print(r'{{Param.else}}')
+          argsns:
+- ney Mm     - "print('{{Param.MyParam}}')"

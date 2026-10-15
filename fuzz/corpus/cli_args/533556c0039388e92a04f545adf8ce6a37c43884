@@ -1,0 +1,6 @@
+[
+            {"name": "amouom.trisf", "min": "1", "max": "4"},
+            {"name": "amount.cut.custom.first", "min": "1", "max": "4"},
+            {"name": "amountstom.secontt", "min": "1", "max": "4"},
+            {"name": "amount.custom.second", "max": "{{Param.M}}"}
+ ]

@@ -1,0 +1,11 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+s(teps:
+- name: Step1
+  script:
+ n{{P.A}}_{{Param.B}:
+        command: pythonfloor     args:
+        - -c
+        +{ bool(path("/tmp")) }}')

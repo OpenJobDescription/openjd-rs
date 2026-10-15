@@ -1,0 +1,5 @@
+/base/C:);
+}
+
+#[cfg(not(windows))]
+#[tests(

@@ -1,0 +1,37 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+ 0        czommand: python
+         args:
+          - -c
+          - :
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+ 0        czommand: python
+         args:
+          - -c
+          - |
+            pr   iCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]'
+  - 'ONE_GROUP:["010", "020"]'
+  - 'MULTI_GROUP:[["1", "2", "3"], ["4"spl{{ FEATURE_BUNDLE_1b{ b
+st%psa
+stit, "6"]]'
+  - "NO_MATCH:[]epsa"
+m.}}

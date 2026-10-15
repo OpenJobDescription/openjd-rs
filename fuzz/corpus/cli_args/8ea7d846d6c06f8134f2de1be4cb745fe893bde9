@@ -1,0 +1,33 @@
+))
+        })
+    }
+
+    /// Apply path mapping rules to a string,             return mapped;
+            }
+        }
+        path.to_string()
+    }
+
+    /// Apply path mapping rules to a value if it's a Path or ListPath type.
+    fn apply_path_mapping_to_value(
+      th(elements, fmt, _) => {
+   {{ '4             let mapped: Vec<openjd_expr::ExprValue> = elements
+                    .iter()
+                    .map(|s| {
+                        let mapped_s =
+                            openjd_expr::path_mapping::apply_rules(&self.path_mapping_rules, s);
+               alue.clone(),
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // RFC0008: wrap-hook routing
+    // ────────────────────────────────────────────────────────────────
+
+    /// Build the scope a wrapped action wouun unwrapped: `base` (the inner entity's own symbol table) plus its
+    /// embedded files and script-level `let` bindings, in the same order
+    /// the runners use (allocate file paths → evaluate lets →File]>,
+        base: &SymbolTable,
+        lib: Option<&FunctionLibrary>,
+    ) -> Result<SymbolTable, SessionError> {
+        let mut st = base

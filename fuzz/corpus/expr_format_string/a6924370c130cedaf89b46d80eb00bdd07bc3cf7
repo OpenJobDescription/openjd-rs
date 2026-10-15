@@ -1,0 +1,25 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'AND:{{ true and true }}')
+            print(r'ANDFALSE:{{ true and false }}')
+            print(r'OR:{{ false or true }}')
+            print(r'ORFALSE:{{ false or false }}')
+            print(r'NOT:{{ not false }}')
+            print(r'SHORT:{{ false and (2/0 > 0) }}')
+            print(r'SHORT_OR:{{ true or (1/0 > 0) }}')
+expected:
+  o:true
+  - SHORT:false
+  - SHORT_OR:true

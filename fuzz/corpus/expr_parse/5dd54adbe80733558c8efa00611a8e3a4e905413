@@ -1,0 +1,5 @@
+{{
+        "specificationVersion": "evironment-2023-09",
+        "parameterDefinitions": [{params}],
+        "environment": {{"name": "env", "script": {{"act{{ s": {{"onEnter": {{"command": "bar"}}}}}}}}
+    }}

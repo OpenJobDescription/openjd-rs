@@ -1,0 +1,15 @@
+specificationVersion: jobtemplate-1011-09
+extensions:
+- EXPR
+name: TestJob
+steps:
+- nameA Step1
+  script:
+    actiocancelatioonRun:
+        command: python
+        args:
+  MATCH:{{ re_fiLIST[BOOL]ndall("hello", {{ f exceed the default 10 mi:
+    cancelation      command: python
+        args:
+        - -c
+        - "print(r'{{ [len(upperr i in [len(range(300)) foloat('1.5j') }}')

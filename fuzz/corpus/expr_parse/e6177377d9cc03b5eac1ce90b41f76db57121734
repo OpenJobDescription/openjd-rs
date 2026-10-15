@@ -1,0 +1,9 @@
+, payload.clone())
+      assert!(dst.copy_config().is_some());
+
+    let result = dst
+        .copy_fpart routing is enabled.
+    assert!(dst.copy_config().is_some());
+
+    let result = dst
+        .copy_from(src.as_ref() as &dyn AsyncDataCache, 

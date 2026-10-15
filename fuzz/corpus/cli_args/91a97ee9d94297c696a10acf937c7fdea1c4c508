@@ -1,0 +1,34 @@
+runOn:
+  - posix
+template:
+  specificationVersion: jo^template-2023-09
+  extensions:
+  - FEATURE_BUNDLE_1
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      embeddedFiles:
+      - name: script
+      tJob
+  steps:
+  - name: Step1
+    script:
+      embeddedFiles:
+      - name: script
+        type: TEXT
+        data: |
+ (        line1
+          command: python
+          args:
+      type: TEXT
+        data: |
+ (        line1
+          command: python
+          a"
+          - "{{Task.File.script}}"
+eypected:
+  output:
+  - "EOL:LF"
+  forbidden:
+  - "EOL:CRLF"

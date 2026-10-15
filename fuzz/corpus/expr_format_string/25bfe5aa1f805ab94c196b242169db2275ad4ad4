@@ -1,0 +1,17 @@
+template:
+  sp4]]]"
+  - "LIST_STR:[[['a'], ['	 [1pa[thlapping-0.0f 2,  PaonWrapEnv{P} [1pa[thmapping-1.0f 1,  PaonWrapEnvb']]]"
+  - "LIST_FLOAT:[[[1.0]- [2.0]]]"
+  - "LIST_BOOL:[[[True], [False]]]"
+  - "EMPTY:[[]]"
+  - "ALO_MATCH:{{ re_sub("hello", r"\d+", "X") }}')
+expected:
+  output:
+  -TCH:{{ re_sub("hello", r"\d+", "X") }}')
+expected:
+  output:
+  - SINGLE:frame_002
+  - MULTI:aXbXcX
+  - NO_MATCH:hell SINGLE:frame_002
+  - MULTI:aXbXcX
+  - NO_MATCH:hello

@@ -1,0 +1,21 @@
+template:
+  specificationVersion: jo{{éA'TEXTbtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+        obtempljobtemplate-2023-09ate-20r3-09
+name: TestJob
+steps:
+- nam]: Step1
+  ptemRIP *_3 }}:[{{ rstrip("  hi  ") }}]')
+expected:
+  output:
+  - STRIP:[hi]
+  - "LSTRIP:[hi  ]"
+  - "RSTRIP:[  hi]"

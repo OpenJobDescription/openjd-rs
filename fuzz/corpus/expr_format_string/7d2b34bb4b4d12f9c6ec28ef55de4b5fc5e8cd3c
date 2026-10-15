@@ -1,0 +1,29 @@
+template:
+  specificationVersion: jonRun:
+          command: python        print(r'TWO:{{ min(3, 1) }}')
+            print(r'THREE:{{ min(3, 1, 2) }}')
+            print(r'LIST:{{ min([5, 2, 8]) }}')
+            print(r'RANGE:{{ min(range_expr("3-7")) }}')
+            print(r'     print(r'LIST:{{ min([5, 2, 8]) }}')
+            print(r'RANGE:{{ min(range_expr("3-7")) }}')
+            print(r'MIXED:{{ min(1, 2.5) }}')
+expected:
+  output:
+  - TW
+          args:
+          - -c
+          - |
+            print(r'TWO:{{ min(3, 1) }}')
+            print(r'THREE:{{ min(3, 1, 2) }}')
+            print(r'LIST:{{ min([5, 2, 8]) }}')
+            print(r'RANGE:{{ min(range_expr("3-7")) }}')
+            print(r'     print(r'LIST:{{ min([5, 2, 8]) }}')
+            print(r'RANGE:{{ min(range_expr("3-7")) }}')
+            print(r'MIXED:{{ min(1, 2.5) }}')
+expected:
+  output:
+  - TWO:1
+  - THREE:1
+  - LIST:2
+  - RANGE:3
+  - MIXED:1.0

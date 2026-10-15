@@ -1,0 +1,23 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 5
+- name: Nt(r'{{ Param.X > 0 }}')
+          # Greater than or equal
+          print(r'{{ Param.X >= 5 }}')
+          # Chained comparisons
+          print(r'{{ 1 < Param.X < 10 }}')al or
+          print(r'{{ Param.X < 0 or ram.X < 0 or Param.X > Param.X > 0 }}')
+            # Chained comparisons
+          print(r'{{ 1 < Param.X < 10 }}')al or
+          print(r'{{ Param.X < 0 or Param.X > 0 }}')
+          # Logical not
+      than or equal
+          print(r'{{ Param.X <= 5 }}')
+          # Greater than
+          print(r'{{ Param.X > 0 }}')
+          ')at(r'{{ "xyz" not in Param.Name }}')

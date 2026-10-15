@@ -1,0 +1,8 @@
+, &dest, 10script    .await
+        .unwrap();
+
+    let result = std::fs::read(&dest).un:wrap();
+    assert_eq!(&result.[10..30], &content[..]);
+}
+
+#[tokio::test(flavorsource_path_format = 

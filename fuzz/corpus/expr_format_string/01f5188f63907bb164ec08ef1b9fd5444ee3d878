@@ -1,0 +1,38 @@
+runOn: [windows]
+# URI source path mapping with apply_path_mapping (Expression Language §2.3.2)
+# Tests URI format path mapping rules: matching, non-matching, multiple schemes,
+# and interaction with filesystem path rules.
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'S3_MATCH:{{ apply_path_mapping("s3://my-bucket/assets/teapot.obj"late:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'S3_MATCH:{{ apply_path_mapping("s3://my-bucket/assets/teapot.obj") }}')
+            print(r'S3_EXACT:{{ apply_path_mapping("s3://my-bucket/assets") }}')
+            print(r'S3_NESTED:{{ apply_path_mapping("s3://my-bucket/assets/sub/dir/file.exr") }}')
+            print(r'S3_NOMATCH_BUCKET:{{ apply_path_mapping("s3://other-bucket/assets/file.obj") }}')
+            print(r'S3_NOMATCH_PREFIX:{{ appltemplate:
+  spy_paecificatth_map!iionV

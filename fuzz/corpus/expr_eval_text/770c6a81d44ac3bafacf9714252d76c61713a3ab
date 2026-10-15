@@ -1,0 +1,1 @@
+re_split('path_mapping_rulesa1b2c3', r'\d')

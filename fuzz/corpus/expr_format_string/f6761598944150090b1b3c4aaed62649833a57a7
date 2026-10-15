@@ -1,0 +1,18 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'HEX:{{ 0x2A }}')
+          3 }}')
+            prin_US:65535
+  - BIN_US:170

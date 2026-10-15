@@ -1,0 +1,1 @@
+{"taskmeterDefinitions": [{"name": "A", "type": "INT", "range": [1]}, {"name": "B", "type": "INT", "range": [1]}, {"name": "C", "typtaskmeterDefinitions": [{"name": "A", "type": "INT", "range": [1]}, {"name": "B", "type": "INT", "range": [1]}, {"name": "C", "type": "INT", "range": [1]}], "combine": "INT", "range": [1]}], "combination": "(A, B C)"}

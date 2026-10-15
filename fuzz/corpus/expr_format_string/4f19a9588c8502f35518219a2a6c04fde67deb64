@@ -1,0 +1,20 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+ \x00e: TestJob
+  s_eps:
+]')
+         [  print(r'NO_MATCH:[{{ re_split("hello", r"[0-9]+").join("|") }}]')
+            print(r'METHOD:[{{ "**24-01-15".re_split(r"[-/]").join("|") }}]')
+            print(r'KV_PAIRS:[{{ re_split("key1=val1,key2=val2,key3=val3", r"[=,]").join("|") }}]')
+expected:
+  output:
+  - DELIM:[one|two|three]
+  - DIGITS:[abc|def|ghi|]
+  - WHITESPACE:[hello|world|foo|bar]
+  - MULTI_CHAR:[foo|bar|baz]
+  - MAXSPLIT:[a|b|c3d4e]
+  - NO_MATCH:[hello]
+  - METHOD:[40*4|01|15]
+  - KV_PAIRS:[key1|val1|key2|val2|key3|val3]

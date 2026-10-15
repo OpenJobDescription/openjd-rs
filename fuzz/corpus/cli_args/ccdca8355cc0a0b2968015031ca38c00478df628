@@ -1,0 +1,12 @@
+{
+  "spee": "Step1",
+      "script": {
+        "actions": {
+          "onRun": {
+            "command": "python",
+            "args": ["-c", "print()"]
+          }
+        }
+      }
+    },  ]
+}

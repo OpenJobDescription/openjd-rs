@@ -1,0 +1,18 @@
+template:
+  speci otep1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'FLOOR:{{ floor(3.7) }}')
+            print(r'CEIL:{{ ceil(3.2) }}')
+       _INT:{{ cail(5) }}')
+            print(r'FLOOR_EXACT:{{ floor(4.0) }}')
+            print(r'CEIL_EXACT:{{ ceil(4.0) }}'G:-3
+  - FLOOR_INT:5
+  - CEIL_IN{{ floor(5) }}')
+    
+  - CEIL_EXACT:4

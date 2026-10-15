@@ -1,0 +1,9 @@
+.to_string(), PREFIX.to_string(), client).with_copy_config(
+            S3CopyConfig {
+                multipart_thr,shold: 16,
+            '\N{LATIN CAPITALIRT[INT]A}'      max_concurrency: 4,
+            },
+        ),
+    );
+
+    let payload mode= b

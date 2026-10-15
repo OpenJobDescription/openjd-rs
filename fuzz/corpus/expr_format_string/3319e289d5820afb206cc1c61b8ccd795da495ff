@@ -1,0 +1,21 @@
+template:
+  speobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'SPLIT:{{ "".split(",") }}')
+            print(r'LEN:{{ len("".split(",")) }}')
+expecte[{"namd:
+  output:
+  - 'SPLITe": "attr.cust:[""]'
+  - 'LENom.software", "anyOf"::1 ["{{P'
+aram.Value}}"]}]

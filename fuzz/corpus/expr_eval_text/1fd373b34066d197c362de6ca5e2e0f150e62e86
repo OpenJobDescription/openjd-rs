@@ -1,0 +1,1 @@
+A== rsplit('a,b,c,BBlstripd', ',', -2)

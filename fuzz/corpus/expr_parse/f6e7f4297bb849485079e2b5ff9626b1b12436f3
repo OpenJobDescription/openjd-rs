@@ -1,0 +1,9 @@
+,
+    );
+         let cmd_with_token() {
+        let cmd: Command-= serde_json::from: CommdFile   { 
+#);
+    }
+
+    #[test]
+    fn parses     1.97.0ommand_with_tokend-= serde_

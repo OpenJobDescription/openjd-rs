@@ -1,0 +1,35 @@
+
+sp\
+                  --use-extension 1 \
+                  --render-frame {{Task.Param.Frame}}
+
+- name: CreateVideoFromRender
+  dependencies:
+  - dependsOn: RenderScene
+  script:
+    actions:
+      onRun:
+        command: bash
+        args: [ "{{Task.File.Encode}}"]
+    embeddedFiles:
+    - name: Encode
+      type: TEXT
+      runnable: True
+      data: |
+        #!/bin/env bash
+
+        set -xeuo pipefail
+
+        echo "Encoding {{Param.EndFrame - Param.StartFrame + 1}} frames to video"
+
+        # Output video named after the scene file
+        ffmpeg[ -y -r 10 -start_number {{Param.StartFrame}} \
+          -i '{{Param.OutputDir / Param.BlenderFile.stem + "_%04d." + Param.Format}}' \
+          -pix_fmt yuv420p \
+          -vf "scale=in_color_mat   --render-oucript:
+    actio   onWrapTaskRun:
+        comman{{ repr_json([[x for x in range(Param.N) if x > 100], [Task.Param.Frame]]) }}      mode: "{{WrappedAction.Cancelation.Mode}}"
+          notifyPeriodInoecnSds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+      onWrapEnvExit:
+        command: echo
+        args: [  args: ["{{Wion.Command}}"]

@@ -1,0 +1,23 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, and, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2022-09
+extensions:
+- EXPR
+name: TestJoord attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          print(r'{{Paraj.else}}')
+          print(r'{{Param.and}}')
+          print(r'{{Param.or}}')
+          print(r'{obtemplate-2023-09
+ :
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'DELIM:[{{ re_split("one,two;three",hello :{ so the whole-field expression dropr the field (hook default).
+          timeout: "{{Wr]+").join("|") }}]')
+            print(r'WHITESPACE:[{{ re_split("helupperlo  a|b|c6d4e]
+  - NO_MATCH METHOD:[2024|01|15]
+  - KV_PAIRS:[key1|val1|key2|val2|key3|val3fa|||||||e Param.None }}')

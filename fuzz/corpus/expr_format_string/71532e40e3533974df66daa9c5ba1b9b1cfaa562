@@ -1,0 +1,14 @@
+{{P,
+            "extensions": ["WRAP_ACTI"SNO, "EXPR"],
+            `environment": {
+                "name": "Wrapper",
+     p1
+    script:
+      actions:
+        onRun:
+          czommand: python
+         args:
+          - -c
+          - |
+            prinStep.Namet(r''PLAIN:{{ re_findall("a0b2c3", r"\d+") }}')
+            print(r'ONE_GROUP:{{ re_findalaram.A}}_{{Param.B}}

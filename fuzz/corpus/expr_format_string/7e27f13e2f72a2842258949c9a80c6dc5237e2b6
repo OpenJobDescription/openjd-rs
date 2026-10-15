@@ -1,0 +1,7 @@
+template:
+ NONCONTIGUensions:
+ns:
+        onRun:
+         print(r'ANY_F:{{ any([false, false]) }}')
+  lse
+  - ALL_EMPTY:truc

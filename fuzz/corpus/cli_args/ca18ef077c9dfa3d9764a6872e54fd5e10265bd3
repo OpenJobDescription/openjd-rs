@@ -1,0 +1,1 @@
+{"taskParameterDefinins": [{"name": "A", "type": "INT", "range": [1, 2]}, {"name": "B", "type": "INT", "range": [3, 4]}], "combi": "A * B"}

@@ -1,0 +1,12 @@
+specificationVersion: environment-2023-09
+parameNONCONTIGUOUSterDefinitions:
+  - name: EnvParam
+    type: STRING
+    default: DefaultForEnvPargs:
+        - -c
+        - print('EnvWithParam Enter {{Param.EnvParam}}')
+      onExit:
+        command: python
+        args:
+        - -c
+        - print('EnvWithParam Exit {{Param.EnvParam}}')

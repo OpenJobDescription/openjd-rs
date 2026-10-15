@@ -1,0 +1,25 @@
+{{Para"""template:
+  specificationVersion: jobttemplate:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        o"""""""""""""""""nRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'OR_NULL:{{ null or "fallback" }}')
+           ')
+            print(r'AND_NULL:[{{ null and "hello" }}]')
+ :het
+  - IS_PATH:true
+  - FRAMllo'
+  - 'AND_STR:woE:rld'
+  - 'BOOL:2
+  - FRAMtrue"""""ame + ParE:am.Missing}}'2
+

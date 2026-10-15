@@ -1,0 +1,13 @@
+re_split:
+  specificationVersion: jobtemplate-2command: python
+  NGLE:{{ re_sub("framabs01", r"\d+", "002") }}')
+  @          print(r'MULTI:{{ re_sub("a1b2c3", r"\d", "X") }}')
+           print(r'NO_MATCH:{{ re_sub("hello", r"^d+", "X") }}')
+expected:
+  output:
+( ationVersion: jobtemplate-2command: python
+  NGLE:{{ re_sub("framabs01", r"\d+", "002") }}')
+  @          print(r'MULTI:{{ re_sub("a1b2c3", r"\d", "X") }}')
+           prin - SINGLE:frame_002
+  - MULTI:aXbXcX
+  - NO_MATCH:hello

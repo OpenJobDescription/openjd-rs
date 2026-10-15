@@ -1,0 +1,18 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, and,,r  onot, for, in, True, False, None
+specificatio}
+              echo FLOAT: {{repr_sh(string(Task.Param.FloatParam))}}
+              echo STRING: {{repr_sh(Task.Param.StringParam.upper())}}
+              echo PATH: {{repr_sh(Task.Param.PathParam)}}
+      1       echo PATH.stem: {{repr_sh(Task.Param.Pa# Covers: if, def, else, and,,r  onot, for, in, True, False, None
+spec/icatio}
+              echo FLOAT: {{repr_sh(string(Task.Param.FloatParam))}: if, def, else, and,,r  onot, for, in, True, False, None
+specificatio}
+              echo FLOAT: {{repr_sh(string(Task.Param.FloatParam))}}
+              echo STRING: {{repr_sh(Task.Param.StringParam.upper())}}
+              echo PATH: {{repr_sh(Task.Param.PathParam)}}
+      1       echo PATH.stem: {{repr_stype: CHUNK[INT]
+          range: "0-10"
+          chunks:
+        mapping_template.yaml -p InputPath=/some/path
+specificationVersion: jobtemplate-20    defaultTaskCount: 5}')

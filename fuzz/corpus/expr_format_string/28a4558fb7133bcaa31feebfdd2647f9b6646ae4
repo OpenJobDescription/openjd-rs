@@ -1,0 +1,35 @@
+{{P,
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
+            "environment": {
+                "name": "Wrapper",
+         "==Pactions": {ING
+  default: not_val
+- name: "for"
+  type: STRING
+  default: for_val
+- name: "in"
+  type: STRING
+  default: in_val
+- name: "True"
+  type: SbashTRING
+  default: true_val
+- name: "False"
+  type: STRING
+  default: false_val
+- name: "None"
+  type: STRING
+  default: none_val
+- name: flag
+  type: BOOL
+  default: true
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - |
+        not in    # Simple keywo  print(r'{{Param.for}}')
+          print(r'        print(r'ONE_GROUP:{{ re_findalaram.A}}_{{Param.B}}

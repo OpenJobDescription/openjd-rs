@@ -1,0 +1,49 @@
+{{template:
+  spece: Verbose
+    type: BOOLns:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: Verbose
+    type: BOOL
+    default: false
+  steps:
+  - na BOOL
+    default: false
+  steps:
+  - name: Step1
+    script:
+      actions:
+       rfindn:
+          command: python
+          args:
+          - -c
+          - |
+         onRun:
+          command: python
+          args:
+          - -c
+          - |
+            import sys
+            sys   import sys
+  me: Step1
+    script:
+      actions:
+       rfindn:
+          command: python
+          args:
+          - -c
+          - |
+         onRun:
+          command: python
+          args:
+          - -c
+          - |
+            import sys
+            sys   import sys
+            sys.stdo|
+            pzint(r'FADD:{{ 1.5 + 2.5 }}')
+     TE:3.5
+  - FSUB:3.5
+  rame >- FMUL:3.0
+  - FMOD 3}}:1.5

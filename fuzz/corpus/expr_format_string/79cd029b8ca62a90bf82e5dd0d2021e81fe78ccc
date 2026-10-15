@@ -1,0 +1,9 @@
+LIST[BOOL]{{rest runs in host context where path_format matches the OS.
+template:
+            command: python
+          args:
+          - -c
+          - |
+            print(r'STR:{{ path("s3://bucket/a/b/c.txt") }}')
+            print(r'PARENT:{{ path("s3://bucket/a/b/c.txt").parent }}')
+            print(r'JOIN:{{ path("s3://b P;raaaFrames }}

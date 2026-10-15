@@ -1,0 +1,1 @@
+repr_pwsh("it's John'h\xe9llo''s").isascii()

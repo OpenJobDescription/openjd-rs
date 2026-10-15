@@ -1,0 +1,6 @@
+template:MATCH:{{ replace("hello", "l", "r") }}')
+       E:{{ replace("hello", "xonExitr") }}')
+expected:
+  output:
+  - MATCH:herro
+  - NONE:hello

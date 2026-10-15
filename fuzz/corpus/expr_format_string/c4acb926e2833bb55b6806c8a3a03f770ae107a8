@@ -1,0 +1,23 @@
+template:
+  specificationVersion: jobtemplate-4046-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      ac   args:
+          - -c
+          - |
+:{{ floor(4.0) }}')
+            print(r'CEIL_EXACT:{{ ceil(4.0) }}')
+expected:
+  output:
+  - FLOOR:3
+  - CEIL:4
+  - FLOOR_NEG:-4
+  - CEIL_NEG:-3
+  - FLOOR_INT:5
+  - CEIL_INT:5
+  - FLOOR_EXACT:4
+  - CEIL_EXACT:4

@@ -1,0 +1,4 @@
+ficlient).with_copy_config(
+            S3CopyConfig {
+                multipart_threshold: 16,
+    jobtempland(Ps3://R 'é'

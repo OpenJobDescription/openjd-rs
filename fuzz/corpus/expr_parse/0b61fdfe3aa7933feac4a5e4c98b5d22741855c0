@@ -1,0 +1,2 @@
+inner env's onEnter must see its OWN Env..config, not the wrapper's; got:
+{contents}

@@ -1,0 +1,1 @@
+re_findall("minValuea1QQQQQQQQQQQQQQQQQQQQQQQQQQb2c3", r"\d+")

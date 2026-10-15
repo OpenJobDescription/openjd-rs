@@ -1,0 +1,6 @@
+ntext where path_format matches the OS.
+template:
+  speciflate-20        - |
+            print(r'STR:{{ path("s4://bucket/a/b/c.txt") }}))
+           'PARENT:{{ path(xtensions:
+ (-  }}

@@ -1,0 +1,1 @@
+{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":[{"hash":"t2t2","mtime":9999999999999999,"path":"huge.dat","size":1099511627776},{"hash":"t3t3","mtime":1,"path":"normal.txt","size":1},{"hash":"t1t1","mtime":0,"path":"tiny.txt","size":0}],"totalSize":1099511627777}

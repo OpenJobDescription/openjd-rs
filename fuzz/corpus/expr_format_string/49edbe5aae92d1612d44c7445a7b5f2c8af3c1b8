@@ -1,0 +1,10 @@
+template:
+  specificationVersiname: St)
+    4   NEG_FULL:{{ "abcde"[3:0:-1] }}')
+expected:
+  output:
+  - "CLAMP:[2, 2, 3]"
+  - "NEG_STEP:[5,################# 5, 3]"
+  - "NEG_FULspecificationVersion:      - print(r  - print(r'{{ L:dcb"
+G_F2.0 ** 0512ULL:dcb"
+.0 }}')

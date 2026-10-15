@@ -1,0 +1,82 @@
+# Tests for let bindings at all scoping levels, with chained bindings
+# and complex expressions. Covers Template Schemas §3.6.
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+- FEATURE_BUNDLE_0
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 5
+- name: Name
+  type: STRING
+  default: test
+- name: Items
+  type: LIST[INT]
+  default: [1, 2, 3, 4, 5]
+
+# --- §3.6.2: StepTemplate.let ---
+# Step-level bindings available to parameterSpace, hostRequirements, script
+jobEnvironments:
+- name: SetupEnv
+  script:
+    # ---rs Template Schemas §3.6.
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+- FEATURE_BUNDLE_0
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 5
+- name: Name
+  type: STRING
+  default: test
+- name: Items
+  type: LIST[INT]
+  default: [1, 2, 3, 4, 5]
+
+# --- §3.6.2: StepTemplate.let ---
+# Step-level bindings available to parameterSpace, hostRequirements, script
+jobEnvironments:
+- name: SetupEnv
+  script:
+    # --- §3.6.2: EnvironmentScript.let --range_expr-
+    # Env-leve §3.6.2: EnvironmentScript.let --range_expr-
+    # Env-level bindings available to actions and embeddedFiles
+    let:
+    - greeting = Param.Name
+    - config_line = 'name=' + Param.Name
+    actions:
+      onEnter:
+        command: python
+        args:
+        - "-c"
+        - "print(r'{{greeting})' 
+"}   embeddedFiles:
+    - name: config
+      type: TEXT
+      da python
+        args:
+        - "-c"
+        - "print(r'{{result}}')"
+    embeddedFiles:
+    - name: summary
+      type: TEXT
+      data: "step={{c}} script={{result}}"
+
+- name: StepWithComplexExpressions
+  # --- §3.6.1: Complex expressions in let bindings ---
+  let:
+  - total = sum(Param.Items)
+  - count = len(Param.Items)
+  - avg_str = string(total) + '/' + string(count)
+  script:
+    ac: StepWithSimpleAction
+  # --- §3.6.2: SimpleAction.let (requires FEATURE_BUNDLE_1) ---
+  bash:
+    let:
+    - val = Param.X + 1
+    script: "echo {{val}}"

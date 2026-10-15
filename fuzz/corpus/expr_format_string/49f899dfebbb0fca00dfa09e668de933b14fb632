@@ -1,0 +1,19 @@
+{{ 'A' *   }
+                    }
+                }
+       template:
+  specificationVersion: job                        }
+                    }
+                }
+       template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          czommand: python
+          5 }}

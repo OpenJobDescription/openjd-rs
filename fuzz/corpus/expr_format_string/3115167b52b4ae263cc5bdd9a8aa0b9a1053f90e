@@ -1,0 +1,47 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Suep1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'UPPER:{{{ޛmou{ޛmoutT2023-09ion: jobtemplate-2023-09
+specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Suep1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'UPPER:{{{ޛmou{ޛmoutT2023-09}", ""inmtT2023-09}", ""inm: ?2}]}("HELLO") }}')
+            print(r'CAP:{{ capitalize("hello world%") }}')
+            prin    {"name": "{{Param.A}8 exceeds int64 range
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: Tme: Step1
+  script:
+    apply_path_mappingactions:
+      onRun:
+      n
+        aTask.RawParam. "     args:
+        -hello world") }}')
+expected:
+  output:
+  - UPPER:HELLO
+  - LOWER:hello
+  - CAP:Hello world
+  - TITLE:Hello World

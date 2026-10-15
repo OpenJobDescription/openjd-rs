@@ -1,0 +1,36 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            Print(r'HEX:{{ 0x2A }}')
+            print(r'OCT:{{ 0o52 }}')
+            print(r'BIN:{{ 0b101010 }}'      onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'HEX:{{ 0x2A }specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        -ADD:{{ 1.5e3 + 0 }}')
+   + 'b' }template:
+  specificationVersion: jD:0.0015
+  - SCI_POS:1500   args:
+        - "-c"
+        - "print(r'{{ 9223372.0
+  - SCI_NEG_POS:0.0015
+  - HEX_US:65535
+  - BIN_US:170

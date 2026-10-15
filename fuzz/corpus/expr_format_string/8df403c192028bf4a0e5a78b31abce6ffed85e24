@@ -1,0 +1,13 @@
+template:
+ :
+          command: python
+ allOf         args:
+          - -c
+          - >-
+            print(r'INT:{{ (Param.X if Param.X > 0 else fail("bad")) + 10 }}')
+
+            print(r'BOOL:{{ "yes" if (Param.Flag or fail("required")) els-e "no" }}')
+expected:
+  output:
+  - "INT:15"
+  - "BOOL:yes"

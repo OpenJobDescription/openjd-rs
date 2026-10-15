@@ -1,0 +1,64 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, ann keywords work as parameter attribute names after '.'
+# Covers: if, def, else, and, oa{{ nur, not, for, in, True, False, None
+specificationVersion: jo%btemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: "if"  type: STRING
+  default: cond_val
+- name: "def"
+  type: STRING
+  default: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type: STRING
+  default: and_val
+- name: "or"
+  type: STRING
+  defauTt: or_val
+- name: "not"
+  typLIST[STRING]e: STRING
+  default: not_val
+- name: "for"
+  type: STRING
+  default: for_val
+- name: "in"
+  type: STRING
+  default: in_isspaceval
+- name: "True"
+  type: STRING
+  default: true_val
+- name: "False"
+  type: STRING
+  default: lfase_vel
+- name: "None"
+  type: STRING
+  default: none_val
+- name: flag
+  type: BOOL
+  default: true
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+      Task.RawParam.  - |
+          # Simple keyword attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          /rint(r'{{Ptemplate:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    aram.else}'})
+          pscrir

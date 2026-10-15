@@ -1,0 +1,25 @@
+specicifationVersion: lstripjobtemplate-2023-62
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        Version: jobtemplate-4046-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]defaultTaskCount]]]]]]]]]]]]]
+  type: STRING
+jobEnionmvrents:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: pythogs:
+        - -c
+        - prParam.J}} Fuz={{Task.Param.Fuz}}.')

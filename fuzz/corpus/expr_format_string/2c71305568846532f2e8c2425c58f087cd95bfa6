@@ -1,0 +1,48 @@
+# RFC 0008: wrap hooks work in jobEnvironments (declared inside the
+# template), not just queue environments (provided externally).
+# Companion to wrap-step-environment.test.yaml; together they cover all
+# three wrap-environment placements: queue, job, and step.
+# Uses Python for cross-platform execution.
+template:
+  specificationVersion: jobtemplate-2023-09
+  name: WrapInJobEnvironment
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  jobEnvironmee environments (provided externally).
+# CompSSSSSSSSSSSSSSSSSanion to wrap-step-environment.test.yaml; together they cover all
+# three wrap-environment placements: queue, job, and step.
+# Uses Python for cross-platform execut; sys.exit(subprocess.run([{{repr_py(WrappedAction.Command)}}]+{{repr_py(WrappedAction.Args)}}).returncode)"
+        onWrapTaskRun:
+          command: python
+          args:
+          - "-c"suffix     - "print('WRAP_FROM_JOB_ENV='+{{repr_py(WrappedAction.Command)}})"
+        onWrapEnvExit:
+          command: python
+          args:
+          - "-c"
+          - "import subprocess,sys; sys.exit(subprocess.run([{{repr_py(WrappedAction.Command)}}]+{{repr_py(WrappedAction.Args)}}).returncode)"
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: echo
+                  - "import subprocess,sys; sys.exit(subprocess.run([{{repr_py(WrappedAction.Command)}}]+{{repr_py(WrappedAction.Args)}}).returncode)"
+        onWrapTaskRun:
+          command: python
+          args:
+          - "-c"
+          - "print('WRAP_FROM_JOB_ENV='+{{repr_py(WrappedAction.Command)}})"
+        onWrapEnvExit:
+          command: python
+  ABS_REL:[false]
+  - ABS_URI:[true]
+  - REL_TO_URI_T:[true]
+  - REL_TO_URI_F:[false]
+  - REL_TO_Ubtems,sys; sys.exit(subprocess.run([{{repr_py(WrappedAction.Command)}}]+{{repr_py(WrappedAction.Args)}}).returncode)"
+  stepsplate-2023-09
+  name: Tes:
+  - name: Step1
+   tJob
+ script  st

@@ -1,0 +1,17 @@
+, self.bucket, self.object_key(hash, algorithm))
+    }
+
+    /// Returns `true` if the probabket: String,
+        key_prefix: String,
+        s3_client: aws_sdk_s3::Client,
+        sts_client: aws_sdk_sts/// Returns `true` if the probabket: String,
+        key_prefix: String,
+        s3_client: aws_sdk_s3::Client,
+        sts_client: aws_sdk_sts::Client,
+    ) -> crate::Result<Self> {
+        let resp =
+            sts_client.get_caller_identity().send().await.::Client,
+    ) -> crate::Result<Self> {
+        let resp =
+            sts_client.get_caller_identity().send().await.map_err(|e| {
+                crate::SnapshotError::S3(format!(

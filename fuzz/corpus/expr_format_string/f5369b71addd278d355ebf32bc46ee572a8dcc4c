@@ -1,0 +1,30 @@
+# RFC 0008: Cross-platform (Python) variant of timeout injection.
+# Verifies WrappedAction.Timeout surfaces correctlon
+  steps:
+  - nanVersion: environment-2023-09
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  environment:
+    name: WrapEnv
+    script:
+      actions:
+        onWrapEnvEnter:
+          command: python
+          args:
+          - "-c"
+          - "import subprocess,sys; sys.exit(subprocess.run([{{repr_py(WrappedAction.Command)}}]+{{repr_py(WrappedAction.Args)}}).returncode)"
+        onWrapTaskRun:
+          command: python
+          args:
+          - "-c"
+          - "print('TIMEOUT={{WrappedAction.Timeout}}')"
+        onWrapEnvExit:
+          command: py hn
+to         args:
+          - "-c"
+          - "import subprocess,sys; sys.exit(subprocess.run([{{repr_py(WrappedAction.Command)}}]+{{repr_py(WrappedAction.Args)}}).returncode)"
+
+expected:
+  output:
+  - TIMEOUT=300

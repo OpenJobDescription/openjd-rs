@@ -1,0 +1,16 @@
+template:
+  specificationVersion: jobtemplate-4046-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+   :{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d$)\.(\d+)") }}')
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]'
+  - 'ONE_GROUP:["010", "020"]'
+  - 'MULTI_GROUP:[["1", "2", "3"], ["4", "5", "6"]]'
+  - "NO_MATCH:[]"

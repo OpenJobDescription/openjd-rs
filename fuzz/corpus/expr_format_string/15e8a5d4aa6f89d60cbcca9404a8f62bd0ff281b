@@ -1,0 +1,6 @@
+template:
+  specificationVersion: jobtemplate-8366-09
+  name: Job-{{Session.WorkingDirectory}}
+  steps:
+  - name: Step1 \"TIMEOUT=<{{Wrap===================================================================================================================pedAction.Timeout}}>\"; echo \"TIMEOUT_OR=<{{ WrappedAction po)MEOUT_OR=<N+
+NE""

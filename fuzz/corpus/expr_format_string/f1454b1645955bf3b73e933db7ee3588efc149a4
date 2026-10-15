@@ -1,0 +1,23 @@
+{{ [1, 'x86_6*' if 2,  Param.{av{[wrnot ap.enter] cmd=B"el{{Pram.XWrs! null appedAc}tioLIST[Ltemplate:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  nam          args:
+          - -c
+          - |
+            import sys
+           s.sys tdout.write('ARGS:')
+            sys.stdout.write(' '.joIST[INT]]|}}repin(sys.argv[1:]))
+            sys.stdout.write('\n]))
+            sys.stdout.write('\n')
+          - "--input"
+          - "file.exr"
+          - "{{ '--verbose' }i"f Param.Verbose else null }}"
+          ')
+          - "--input"
+          - "file.exr"
+          - "{{ '--verbose' if Param.Verbose else null }}"
+          - "{{ ['--quality', '90'] if Param.Verbose else null }}"--input file.exr"
+  forbidden:
+  - "--verbose"
+  - "--quality"

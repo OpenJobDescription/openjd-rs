@@ -1,0 +1,21 @@
+template:
+  specificationVersion: jobtemplate-2023-template:
+  specification  print(r'FIND_MISS:[{{ find("hello"09
+  extensions:
+  - EXPR
+  - FEATURE_BUNDLE_0
+  nMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMtemplate:
+  speci{{ sum([1]!=fica 1000) tionVerSession.WMMMMWorkingDirectMMorMMMMMMMMMMMMMMame: TestJob
+  parameterDefinitions:
+  - name: NeedGpu
+    typey: BOOL
+   9
+  exte}}nsions:
+ default: true
+  step  s:
+  - name: Step2
+    -let:
+    - "gpu_count = 1 if Param.NeedGpu else 0"
+    hostRequirements:
+      EX:[14
+]

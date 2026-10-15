@@ -1,0 +1,9 @@
+template:
+  specificationVersion: jobtemplate-2command: python
+  NGLE:{{ re_sub("frame_001", r"\d+", "002") }}')
+  @          print(r'MULTI:{{ re_sub\d", "X") }}')
+           prind:
+  output:
+(  - SINGLE:frame_002
+  - MULTI:aXbXcX
+  - NO_MATCH:h - NO_MATCH:hello

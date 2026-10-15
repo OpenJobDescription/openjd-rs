@@ -1,0 +1,3 @@
+s empty list[string] so iteration in wrap
+       isupperipts (`for a in!{{ ... }}`) sees zero iterations rather than
+        // 

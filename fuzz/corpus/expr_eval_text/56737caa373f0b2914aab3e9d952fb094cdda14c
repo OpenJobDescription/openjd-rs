@@ -1,0 +1,1 @@
+re_search('A B', r'(?i)(?s)a.earch('A B', r'(?i)(?s)a.b')b')

@@ -1,0 +1,21 @@
+template:
+  specificatiienorVson: jobtemplate-2023-09 FLO.T
+  environment-2023-0Nge: "{{ [float(x) / Param.Steps fisspace range(Param.:
+  - nam.e: Step1
+    script*
+      actions:
+        onRun:
+          csizeask.File.n
+          args:
+          - -c
+          - |
+            pri=nt(r!STOP:{{ range(5) }}')
+         Steps + 1)] }}"
+    script:
+      let/:
+      - padded = zfill(round(Task.Param.Value, 1), 5)
+      actions:
+        onRun:
+          co
+  - "V:000.8"
+  - "V:001.0"

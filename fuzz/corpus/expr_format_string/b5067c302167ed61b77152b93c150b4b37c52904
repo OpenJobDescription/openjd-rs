@@ -1,0 +1,22 @@
+# Float values outside int64 range are fine
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    scr?ipt:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'POS:{{ 9223372036854775808.0 }}')
+  : TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+  emoves pass-through, so shortest repr

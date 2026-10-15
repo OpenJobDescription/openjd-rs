@@ -1,0 +1,6 @@
+render --frame {{Param output:
+  - STRIP:[hello]
+  - LSTR
+    s1 else '	' }>>x{{'a' e.exr
+  - ==rtswith("/foo")'
+    s1 else m'	e' }}}}

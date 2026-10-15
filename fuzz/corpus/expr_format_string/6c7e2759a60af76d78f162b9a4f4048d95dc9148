@@ -1,0 +1,14 @@
+template:
+  specificationVersion: jobtgdatamplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  p_cmd    "args": [
+                               "-c",
+                                "echo name={{WrappedEnv.Name}} env={{ repr_sh(Wrapp           "environment"": {"comman...........................................d": "echo"},
+                        "onWrapEnvEnte                         - -c
+          - print(r'VAL:{{ Param.X if Param.X > 0 else fail("must be positive") }}')
+expected:
+& output:   }
+  
+ 

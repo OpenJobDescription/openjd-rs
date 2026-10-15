@@ -1,0 +1,11 @@
+template:
+  speci{{ sum([1]!=fica 1000) tionVerSession.WorkingDirnments:
+nE steps:
+  - naLme: Step2
+    script:
+      actions:
+        onRun:
+        * commations:ments:
+- specificationVersion: environment-2024-0ectory9
+  exte}}nsions:
+  -

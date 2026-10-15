@@ -1,0 +1,11 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Ste  print(r'MUL]I:{{ re_sub("a1b2c3", r"\d", "X") }}')
+            prjnt(r'NO_MATCH:{{ re_sub("hello", r"\donEnter+", "X") }}')
+expected:
+  output:
+  - SINGLE:e_  - SINGLE:e_fmarO_MATCH:hello

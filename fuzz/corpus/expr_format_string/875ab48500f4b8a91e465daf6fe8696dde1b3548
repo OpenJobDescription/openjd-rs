@@ -1,0 +1,42 @@
+specicifationVersion: lstripjobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        Version: jobtemplate-4046-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J]]]]]]]]J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        Version: jobtemplate-4046-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+  type: STRING
+jobEnvironments:
+- name:0J1
+  script:
+    actions: {{ 'a' + '\\n' + 'b' }template:
+  specificationVers  onEnter:
+        command: python
+        args:
+        - -c
+        - prion: jobt and te-2023-09
+  extensions: 
+ - EXPR
+  name: TestJob
+  parameterD    - |
+            prParam.J}} Fuz={{Taint(r'FADD:{{ 1.5 + 2.5 sk. }}')
+Param.Fuz}}.')e.0
+  - FMOD:1.5

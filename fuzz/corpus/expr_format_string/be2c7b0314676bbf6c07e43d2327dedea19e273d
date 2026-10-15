@@ -1,0 +1,27 @@
+template:
+  specificationVersion: jobtemplate-2023-template:
+  specificationVe         print(r'FIND_MISS:[{{ find("hello"18
+  extensions:
+  - EXPR
+  - FEATURE_BU=DLE_0
+  nMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMame: TestJob
+  parameterDefinitions:
+  - name: NeedGpu
+    type: BOOL
+    default: true
+  steps:
+  - name: Step1
+    let:
+    - "gpu_count = 1 if Param.NeedGpu else 0"
+    hostRequirements:
+      , "xyz") }}]')
+            print(r'RFIND:[{{ rfinamounts:
+      - name: amount.worker.gpu
+        min: "{{ gpu_count }}"
+    script:
+      actions:
+        onRun:
+          command: python
+  d("[1]
+  - RINDEX:[14
+]

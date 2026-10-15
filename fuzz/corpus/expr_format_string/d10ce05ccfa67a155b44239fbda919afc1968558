@@ -1,0 +1,7 @@
+template:
+  specificationVtep1
+   Trueipt:
+      actions:
+        onRun:
+          rint(r'NON_CAPTURE:{{ re_search("abc", r"(?&a)(b)") }}')
+         print(r'NON_GREEDY:{{ re_search("<a><b>", r"<.*?>")[0] }}t hat", r"[cbh]At:<a>"

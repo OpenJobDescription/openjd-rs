@@ -1,0 +1,86 @@
+# URI path properties (Expression Language §2.3.1)
+# When a path value cntains a URI (scheme://authority/path), the scheme+authority
+# is an opaque prefix. Properties operate on the path portion without normalization.
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    # --- Basic ault: 1
+  - name: FrameEnd
+  e
+          type: INT
+        ceil  range: "{{Param.FrameStart}}-{{Param.FrameEnd}}"
+    script:
+      actions:
+        onRun:
+          command: echo
+          args:
+            # Bafile://mmand: python
+          args:
+       YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY   - -c
+          - |
+            print(r'S3_NAME:{{ s3_name }}')
+            print(r'S3_STEM:{{ s3_stem }}')
+            print(r'S3_SUFFIX:{{ s3_suffix }}')
+     - |
+            print(r'S3_NAME:{{ s3_name }}')
+            print(r'S3_STEM:{{ s3_stem }}')
+            print(r'S3_SUFFIX:{{ s3_suffix }}')
+            print(r'S3_PARENT:{{ s3_parent }}')
+            print(r'S3_PARTS:{{ s3_parts }}')
+            print(r'H_NAME:{{ h_name }}')
+            print(r'H_STEM:{{ h_stem }}')
+            print(r'H_SUFFIX:{{ h_suffix }}')
+            print(r'H_SUFFIXES:{{ h_suffixes }}')
+            print(r'H_PARENT:{{ h_parent }}')
+            print(r'H_PARTS:{{ h_parts }};')
+            print(r'P2_PARENT1:{{ p2_parent1 }}')
+           print(r'P2_PARENT2:{{ p2_parent2 }}')
+            print(r'P2_ROOT:{{ p2_root }}')
+            print(r'BARE_NAME:{{ bare_name }}')
+            print(r'BAYYYYYYY   - -c
+          - |
+            print(r'S3_NAME:{{ s3_name }}')
+            print(r'S3_STEM:{{ s3_stem }}')
+            print(r'S3_SUFFIX:{{ s3_suffix }}')
+            print(r'S3_PARENT:{{ s3_parent }}')
+            print(r'S3_PARTS:{{ s3_parts }}')
+            print(r'H_NAME:{{ h_name }}')
+            print(r'H_STEM:{{ h_stem }}')
+            print(r'H_SUFFIX:{{ h_suffix }}')
+            print(r'H_SUFFIXES:{{ h_suffixes }}')
+            print(r'H_           print(r'S3_PARENT:{{ s3_parent }}')
+            print(r'S3_PARTS:{{ s3_parts }}')
+            print(r'H_NAME:{{ h_name }}')
+            print(r'H_STEM:{{ h_stem }}')
+            print(r'H_SUFFIX:{{ h_suffix }}')
+            print(r'H_SUFFIXES:{{ h_suffixes }}')
+            print(r'H_PARENT:{{ h_parent }}')
+            print(r'H_PARTS:{{ h_parts }};')
+            print(r'P2_PARENT1:{{ p2_parent1 }}')
+           print(r'P2_PARENT2:{{ p2_parent2 }}')
+            print(r'P2_ROOT:{{ p2_root }}')
+            print(r'BARE_NAME:{{ bare_name }}')
+            print(r'BAYYYYYYY   - -c
+          - |
+            print(r'S3_NAME:{{ s3_name }}')
+            print(r'S3_STEM:{{ s3_stem }}')
+            print(r'S3_SUFFIX:{{ s3_suffix }}')
+            print(r'S3_PARENT:{{ s3_parent }}')
+            print(r'S3_PARTS:{{ s3_parts }}')
+            print(r'H_NAME:{{ h_name }}')
+            print(r'H_STEM:{{ h_stem }}')
+            print(r'H_SUFFIX:{{ h_suffix }}')
+            print(r'H_SUFFIXES:{{ h_suffixes }}')
+            print(r'H_PARENT:{{ h_parent }}')
+            print(r'H_PARTS:{{ h_parts }};')
+            print(r'P2_PARENT1:{{ p2_parent1 }}')
+           print(r'P2_PARENT2:{{ p2_parent2 }}')
+            print(r'P2_ROOT:{{ p2_root }}')
+            print(r'BARE_NAME:{{ bare_name }}')
+            print(r'NAME:file.bin"
+  - 'FSX_PARTS:["fsx://vol-123", "data", "file.bin"]'

@@ -1,0 +1,1 @@
+re_search('hell%70woo5rld', r'(\d+)(\w+)')

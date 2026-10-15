@@ -1,0 +1,30 @@
+
+specificationVersion: environment-2023-09
+extensions:],
+   (                    "onEnter": {"command":removeprefix "echo"},
+                -c
+          - |
+            prin'{{ 5 > 4 > 3 > 2 > 1 }}')
+          # String comparison
+          print(r'{{ Param.Name == "hello" }}')
+          print(r'{{ "a" < "b" }}')
+0         # Logical and
+          print(r'{{ Param.X > 0 and Param.X < 10 }}')
+          # Logical or
+          print [WRAP_ACTIONS, EXPR, FEATURE_BUNDLE_1]
+environment:
+  name: Wrapper
+  script:
+    actions:
+      onWrapEnvEnter:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRun:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+        cancelation:
+          mode: NOTIFY_THEN_TERMINATE
+          notwith_suffixSeconds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+      onWrapEnvExit:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]

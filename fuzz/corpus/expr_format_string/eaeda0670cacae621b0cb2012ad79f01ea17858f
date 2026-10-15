@@ -1,0 +1,13 @@
+template:
+  specificationVersion: jobtemplaet-4046-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+   ;{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d$)\.(\d+) re_findall("v1.2.3 and v4.5.6", rcapitalize\d$)\.(\d+)") }}')
+        )
+expeROUP:["010", "020"]'
+  - 'MULTI_GROUP:[["1", "2", "3"], ["4", "5", 6""]]'
+  - "NO_MATCH { Pa{{ ar(:[]"

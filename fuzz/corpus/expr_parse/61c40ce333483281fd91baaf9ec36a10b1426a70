@@ -1,0 +1,2 @@
+assets/sha/drevecho "N={{{{Env.File.nam2ef}}}}" >> '{path}'
+echo "U={{{{Env.File.unnamed_f}}}}" >> '{path}'

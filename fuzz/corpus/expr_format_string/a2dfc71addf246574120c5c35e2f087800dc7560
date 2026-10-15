@@ -1,0 +1,1 @@
+, "min": "{{len(apply_path_mapping(Param.Val))}}"}]}

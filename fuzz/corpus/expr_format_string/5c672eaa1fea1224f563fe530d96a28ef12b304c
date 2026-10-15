@@ -1,0 +1,14 @@
+{{ repr_json([[] if x > 1 else [Task.Param.Fr eame`for x in ranspecificationVersion: jobtemplate-2023-09
+name: TestJob
+parameterDefinitions:
+- name: MyParam
+  type: STRING
+ge(Param.N)])  dXefault: value
+steps:
+- name: Step1
+  s }cript:
+    actions:
+      onRun:
+        command: echo
+        args:
+        - "{{param.My}Param}}"

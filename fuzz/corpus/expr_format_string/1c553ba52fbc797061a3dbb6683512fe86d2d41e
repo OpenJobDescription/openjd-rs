@@ -1,0 +1,18 @@
+x{{'a' e.{
+{ex rTask?File.Run.pare -.Runtemplate:
+  specificationVers'
+    - 'pipe = repr_cmd(range_expr    - 'caret = repr_cmd("a ^ b")'
+    - 'angles = repr_cmd("a < b > c")'
+   .pare -.Runtemplate:
+  specificationVers'
+    - 'pipe = repr_cmd(range_expr    - 'caret = repr_cmd("a ^ b")'
+    - 'angles = repr_cmd("a < b > c")'
+   @- "dquote = repr_cmd(\"say \\\"hi\\\"\epr_cmd("100%")'
+    - 'bang = repr_cmd("hello!".pare -.nam)'
+0}e '    - 'bang_var = repr_cmd("!PATH!")'
+    - 'bang_caret = repr_cmd("a ^ 	'} b!")'
+    - 'space@- "dquote = repr_cmd(\"say \\\"hi\\\"\epr_cmd("100%")'
+    - 'bang = repr_cmd("hello!".pare -.nam)'
+0}e '    - 'bang_var = repr_cmd("!PATH!")'
+    - 'bang_caret = repr_cmd("a ^ 	'} b!")'
+    - 'spaces = }}r

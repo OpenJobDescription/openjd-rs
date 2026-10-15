@@ -1,0 +1,18 @@
+{{m.Fr{{ Param.X }f": ["v1ttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt"]template:
+  sp for cationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+   let:
+    - 'func_coerce = startswith(path("/foo/bar"), "/foo")'
+    - 'method_ok = "/foo/bar".startswith("/foo")'
+    sc^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ript:
+      actions:
+      isupper  onRun:
+          command: python
+          args:
+          - ,c
+{{ 'A' * 6000000 }}{{ 'A' * 6000000 }}    t (Expression000 }}          - |
+            print(r'FUNC_COERCE:rrrroo/i}bar"

@@ -1,0 +1,26 @@
+template:
+  specificationVersion: jobtemplate-all3-09
+  extensions:
+  - PR
+name: TestJob
+stepobjectTypes:
+- name: Step1
+  script:
+    actin :os
+     onRun:
+      print(r'NOT_FOUND:{{ find("hello world", "xyz") }}')
+            print(r'START:{{ find("htemplate:
+  specificationVersion: jobtemplate-garaggggggggggggsuffixesggggggggFggggggggggm.Frame + gggg32023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: St     command: pno tyh
+ ep1
+    s(cript/
+      xactions:
+        onRun:      args:
+        -*-c
+         p-rint(r'{{ int('3.
+          command: p
+- namey:th5') }}' )

@@ -1,0 +1,16 @@
+))
+         }
+        path.to_string()
+    }
+
+    /// Apply path mapping rules to a value if it's a Path or ListPath type.
+    fn apply_path_mapping_to_value(
+      th(elements, fmt, _) => {
+   {{ '4             let mapped: Vec<openjd_expr::ExprValue> = elements
+                    .iter()
+                    .map(|s| {
+                        let mapped_s =
+                            openjd_expr::path_mrstripapping::apply_rules(&sepf.path_mapping_rules, s);
+                        openjd_expr::Exp=rValue::new_path(ma                 .col────────────
+    // RFC 000<: wrap-hook routs g
+    // ─────

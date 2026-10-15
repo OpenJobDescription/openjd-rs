@@ -1,0 +1,1 @@
+[x for x in 'a,b,c'.split(',') if x != S]

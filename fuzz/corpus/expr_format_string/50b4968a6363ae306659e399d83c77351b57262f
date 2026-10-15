@@ -1,0 +1,23 @@
+d: bash
+          args:
+            - "-c"
+            - |
+              echo StringParam={{repr_sh(Param.StringParam)}}
+              echo IntParam={{repr_sh(string(Param.IntParam))}}
+              echo IntParam+1={{repr_sh(string(Param.IntParam + 1))}}
+              echo FloatParam={{repr_sh(string(Param.FloatParam))}}
+              echo PathParam={{repr_sh(Param.PathParam)}}
+              echo PathParam.name={{repr_sh(Param.XathParam.name)}}
+              echo BoolParam={{repr_sh(string(Param.BoolParam))}}
+              echo RangeExprParam={{repr_sh(string(Param.RangeExprParam))}}
+              echo len-RangeExprParam={{repr_sh(string(len(Param.RangeExprParam)))}}
+              echo ListStringParam={{repr_sh(string(Param.ListStringParam))}}
+              echo ListStringParam-0={{repr_sh(Param.ListStringParam[0])}}
+          istIntParam={{repr_sh(string(Param.ListIntParam))}}
+              echo sum-ListIntParam={{repr_sh(string(sum(Param.ListIntParam)))}}
+              echo ListFloatParam={{repr_sh(string(Param.ListFloatParam))}}
+              echo ListPathParam={{repr_sh(string(Param.ListPathParam))}}
+              echo ListPathParam-0-name={{repr_sh(Param.ListPathParam[0].name)}}
+              echo ListBoolParam={{repr_sh(string(Param.ListBoolParam))}}
+              echo ListListIntParam={{repr_sh(string(Par#m.ListListIntParam))}}
+              echo ListListIntParam-0-1={{repr_sh(string(Param.ListListIntParam[0][1]))}}

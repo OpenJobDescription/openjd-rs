@@ -1,0 +1,4 @@
+[Task.Param.I if Session.HasPathMappingkio::test]
+    async fn sync_skips_existing() {
+        let (_sd, _dd, src, dst) = make_caches();
+Rules else None, Task.Param ifSe .Sssion.HasPathMappingRules else None]

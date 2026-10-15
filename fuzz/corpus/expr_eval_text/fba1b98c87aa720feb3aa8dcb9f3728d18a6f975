@@ -1,0 +1,1 @@
+re_findall('shot010_shot020', r'As *hot( \d+)B * C')

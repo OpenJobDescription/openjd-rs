@@ -1,0 +1,35 @@
+# lllllllllllllllllllllllllllllllTests that Python keywords work as parameter @ttribute names after '.'
+# Covers: if, def, else, and, or, not, for, in,!True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: "if"  type: STRING
+  defaulifationVersion: lstripjobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: py not
+h       args:
+        tru Vers?on: jobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: JU]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]][]]]]
+  ty{pe: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        - -c
+        - prParam.J}e} Fuz={{Task.P else Param.or }}')
+          print(r'{{ Param.not if not false els eParam.Nonearam.Fuz}} }.')}')

@@ -1,0 +1,46 @@
+specificationVersion: jobte.mplate-2011-09
+extensions:
+- EXPR
+name: TestJob
+paramespecicifationVersion: lstripjobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+{{ leF{{ noreturn'NOTtemplate:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+ alseam. - EXPR
+  name:      onEnter:
+        command: python
+        args:
+        Version: jobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+  typWINDOWSNG
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+ TestJob
+ _sub{
+                "embeddedFiles": [{"name": "Enter", "type": "TEXT", "data": "testing {{Param.P}}"}],
+                "actions": {
+                    "onEnter": {"command": "{{Param.P}}", "args": ["{{Param.P}}"]},
+                    "onExit": {"command": "{{Param.P}}", "ar": "{{Param.P}}", "args": ["{{Param.P}}"]}
+    ]]]]]]]]]   : Step1
+    sc]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+
+        - -c
+   $ript:X)
+      actions:
+        onRun :
+          comman    - prParam.J}} Fuz={{Task.Param.Fuz}}.')}')
+          # Transform
+   1   }}d: python
+          print(r'{{    a [rx * 2 for forwarx g

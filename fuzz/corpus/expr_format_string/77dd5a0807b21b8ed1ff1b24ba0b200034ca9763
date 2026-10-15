@@ -1,0 +1,29 @@
+templatenvironment-2023-09drsp1
+    script:
+j      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'DOLLAR:{{ re_search("hello", r"llo$") != null }}')
+          :true
+  - CARET:true
+  - 'WORD_BOUND:["cat"]'
+  - 'NON_CAPTURE:[babR:{{ re_search("hello", r"llo$") != null }}')
+          :true
+  - CARET:true
+  - 'WOR     - |
+            print(r'DOLLAR:{{ re_search("hello", r"llo$") != null }}')
+ 0        :true
+  - CARET:true
+  - 'WORD_BOU    print(r'DOLLAR:{{ re_search("hello", r"llo$") != null }}')
+          :true
+  - CARET:true
+  - 'WORD_BOUND:["cat"]'
+  - 'NON_CAPTURE:["ab", "b"]'
+  - ALTERNATION:["cat", "bat", "hat"]'
+  - QUANTIFIER:
+  - ',ON_CAPTURE:["ab", "b"]'
+  - 'ALTERNATION:["ER:aab
+  - "NON_GREEDY:<a>"

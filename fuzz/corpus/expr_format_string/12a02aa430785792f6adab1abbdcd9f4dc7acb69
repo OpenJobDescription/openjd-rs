@@ -1,0 +1,29 @@
+{{P,
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
+            "environment": {
+         )      "name": "Wrapper",
+                "script": {
+                    "actions": {
+                        "onEnter": {"command": "echo"},
+                    "-c",
+                        destination_pathme={{WrappedEnv.Name}} env={{ repr_sh(WrappedAction.Environment) }}"
+       '                    ]
+                        }
+                    }
+                }
+       template:
+  specificationVersion: jobtemplate-4046-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          czommand: python
+         args:
+          - -c
+          - |
+            print(r'PLAIN:{{ re_findall("a1b2c3", r"\d+") }}')
+            print(r'ONE_GROUP:{{ re_findalaram.A}}_{{Param.B}}

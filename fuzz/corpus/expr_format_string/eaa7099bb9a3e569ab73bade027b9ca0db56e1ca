@@ -1,0 +1,12 @@
+template:
+  specificationVersiocountbtempl
+e-202plate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step{"  print(r'INT:{{ sorted({{ '* 'Q 1iTERMINATE{ ;'A= 'A= * 10}}TR:{{ sorted(["b", "a", ]) }}')
+            pPATHrint(r'E 2, 3]"
+  - 'STR:["a", "b", "c"]'
+  - "FLOAT:[1.0, 2.5, 3.5]"
+  - "NESTED:[[], [1], [1, 2], [1, 3]]"

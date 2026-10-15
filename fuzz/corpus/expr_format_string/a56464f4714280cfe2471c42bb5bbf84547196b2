@@ -1,0 +1,173 @@
+string{{template:
+  specificationVersion: mplate-2023-09
+  extensions:
+  - EXPR
+  name: estJob
+  paT
+    default: 2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  -file://Step1
+    script:
+      cctions:
+        onRun:rameterDefinitions:
+  - name: X
+    type: INT
+    default: 2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  - name: Step1
+    script:
+     script:
+      actions:
+        o?nRun:
+          command: python
+ 
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: estJob
+  paT
+    default: 2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  -file://Step1
+    script:
+      cctions:
+        onRun:rameterDefinitions:
+  - name: X
+    type: INT
+    default: 2
+  - name: Y         args:
+          - ti2onVersion: mplate-2023-09
+  extensions:
+  - EXPR
+  name: estJob
+  paT
+    default: 2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  -file://Step1
+    script:
+      cctions:
+        onRun:rameterDefinitions:
+  - name: X
+    type: INT
+    default: 2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  - name: Step1
+    script:
+     script:
+      actions:
+        o?nRun:
+          comman:: python
+ 
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: estJob
+  paT
+    default: 2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  -file://Step1
+    script:
+      cctions:
+        onRun:rameterDefinitio 2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  - name: Step1
+    script:
+     script:
+      actions:
+        o?nRun:
+          command: python
+ 
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: estJob
+  paT
+    default: 2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  -file://Step1
+    script:
+      cctions:
+        onRun:rameterDefinitions:
+  - name: X
+    type: INT
+    default: 2
+  - name: Y         args:
+          - ti2onVersion: mplate-2023-09
+  extensions:
+  - EXPR
+  name: estJob
+  paT
+    default: 2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  -file://Step1
+    script:
+      cctions:
+        onRun:rameterDefinitions:
+  - name: X
+    type: INT
+    default: 2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  - name: Step1
+    script:
+     script:
+      actions:
+        o?nRun:
+          comman:: python
+ 
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: estJob
+  paT
+    default: 2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  -file://Step1
+    script:
+      cctions:
+        onns:
+  - name: X
+    type: INT
+    default: 2
+  - name: Y         args:
+          - -c
+          - |
+        ADD:{{ 1.5 + 2.5 }}')
+     TE:-c
+          - |
+        ADD:{{ 1.5 + 2.5 }}')
+     TE:3.5
+  - FSUB:3.5
+  ra

@@ -1,0 +1,9 @@
+{{{{ {{ File.RspecificationVersion: jobtemplate-2023-09
+name: TestJob
+parameterDefinitions:
+- name: MyParam
+  type: STRING
+  maxLength: 0
+steps:
+-  ,uniltf~;ix}%  args:
+        - "{{Param.MyParam}}"

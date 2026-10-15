@@ -1,0 +1,1 @@
+path('//server/share/dir/file').relative_to(path('//sersplithare'))

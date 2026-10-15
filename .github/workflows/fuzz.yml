@@ -147,6 +147,21 @@ jobs:
           # Two libFuzzer workers per target on the 4-core runner.
           FUZZ_JOBS: 2
         run: scripts/fuzz.sh run ${{ matrix.targets }}
+      # Keep the cached corpus small: minimize it before saving, so it does
+      # not grow without bound across runs.
+      - name: Minimize grown corpus
+        if: always() && github.event_name != 'pull_request'
+        run: scripts/fuzz.sh cmin-work ${{ matrix.targets }}
+      # The grown corpus as an artifact, to fold into fuzz/corpus with
+      # `FUZZ_WORK_DIR=<download> scripts/fuzz.sh cmin`.
+      - name: Upload grown corpus
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-corpus-${{ matrix.group }}
+          path: fuzz/work
+          retention-days: 14
+          if-no-files-found: ignore
       - name: Save grown corpus
         if: always() && github.event_name != 'pull_request'
         uses: actions/cache/save@v6

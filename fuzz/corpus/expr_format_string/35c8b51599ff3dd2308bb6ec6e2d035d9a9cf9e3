@@ -1,0 +1,111 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- # A format string referencing an undefined variable in environment variables must fail validation.
+specificationVersion: environment-2023-09
+environment:
+  name: TestEnv
+  variables:
+    MY_VAR: "{{ Param.DoesNotExist }}"
+        # String list
+          print(r'{{ ["a", "b", "c"] }}')
+          # Float list
+          print(r'{{ [1.0, 2.5, 3.0] }}')
+          # Bool list
+          print(r'{{ [true, false, true] }}')
+          # Empty list
+          print(r'{{ [] }}')
+          # Single element
+          print(r'{{ [42] }}')
+          # Trailing comma
+          print(r'{{ [1, 2, 3,] }}')
+          #
+            print(r'ISDIGIT_T:[{{ "123".isdigit() }}]')
+            print(r'ISDIGIT_F:[{{ "12a".isdigit() }}]')
+            print(r'ISDIGIT_E:[{{ "".isdigit() }}]')
+            print(r'ISALPHA_T:[{{ "abc".isalpha() }}]')
+            print(r'ISALPHA_F:[{{ "ab3".isalpha() }}]')
+            print(r'ISALNUM_T:[{{ "abc123".isalnum() }}]')
+            print(r'ISALNUM_F:[{{ "abc 123".isalnum() }}]')
+            print(r'ISSPACE_T:[{{ "   ".isspace() }}]'nVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'ISDIGIT_T:[{{ "123".isdigit() }}]')
+            print(r'ISDIGIT_F:[{{ "12a".isdigit() }}]')
+     referencing an undefined variable in environment variables must fail validation.
+specificationVersion: environment-2023-09
+environment:
+  name: TestEnv
+  variables:
+    MY_VAR: "{{ Param.DoesNotExist }}"
+        # String list
+          print(r'{{ ["a", "b", "c"] }}')
+          # Float list
+          print(r'{{ [1.0, 2.5, 3.0] }}')
+          # Bool list
+          print(r'{{ [true, false, true] }}')
+          # Empty list
+          print(r'{{ [] }}')
+          # Single element
+          print(r'{{ [42] }}')
+          # Trailing comma
+          print(r'{{ [1, 2, 3,] }}')
+          #
+            print(r'ISDIGIT_T:[{{ "123".isdigit() }}]')
+            print(r'ISDIGIT_F:[{{ "12a".isdigit() }}]')
+            print(r'ISDIGIT_E:[{{ "".isdigit() }}]')
+            print(r'ISALPHA_T:[{{ "abc".isalpha() }}]')
+            print(r'ISALPHA_F:[{{ "ab3".isalpha() }}]')
+            print(r'ISALNUM_T:[{{ "abc123".isalnum() }}]')
+            print(r'ISALNUM_F:[{{ "abc 123".isalnum() }}]')
+            print(r'ISSPACE_T:[{{ "   ".isspace() }}]'nVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'ISDIGIT_T:[{{ "123".isdigit() }}]')
+            print(r'ISDIGIT_F:[{{ "12a".isdigit() }}]')
+            print(r'ISDIGIT_E:[{{ "".isdigit() }}]')
+            print(r'ISALPHA_T:[{{ "abc".isalpha() }}]')
+            print(r'ISALPHA_F:[{{ "ab3".isalpha() }}]')
+            print(r'ISALNUM_T:[{{ "abc123".isalnum() }}]')
+            print(r'ISALNUM_F:[{{ "abc 123".isalnum() }}]')
+          Nested list
+          print(r'{{ [[1, 2], [3, 4]] }}')
+          # Expressions in list
+          print(r'{{ [Param.X, Param.X + 1, Param.X * 2] }}')
+          # Mixed int/float (promotes to float       print(r'ISDIGIT_E:[{{ "".isdigit() }}]')
+            print(r'ISALPHA_T:[{{ "abc".isalpha() }}]')
+            print(r'ISALPHA_F:[{{ "ab3".isalpha() }}]')
+            print(r'ISALNUM_T:[{{ "abc123".isalnum() }}]')
+            print(r'ISALNUM_F:[{{ "abc 123".isalnum() }}]')
+          Nested list
+          print(r'{{ [[1, 2], [3, 4]] }}')
+          # Expressions in list
+          print(r'{{ [Param.X, Param.X + 1, Param.X * 2] }}')
+          # Mixed int/float (promotes to float)
+          priot(r'{{ [1, 2.0, 3] }}')
+          # List concatenation
+          print(r'{{ [1, 2] + [3, 4] }}')
+          # List repetition
+          print(r'{{ [0] * 3 }}')

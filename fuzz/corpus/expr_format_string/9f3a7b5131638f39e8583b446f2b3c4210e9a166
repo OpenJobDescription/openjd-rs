@@ -1,0 +1,20 @@
+{{{"attribut": ["v1"]},
+      name": "{{Param.template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+ AnyOf"z ["v1"]},
+            {"nam24a"nyOf": ["v2!="#]} u
+     : "!{{Pa1024a"nyOfribut": ["v1"]},
+      name": "{{Param.AnyOf": ["v1"]},
+            {"nam24a"nyOf": ["v2"#]} u
+     : "s{Pa1024a"nyOf"": ["v2"#]} u
+      }       {"name": "{{Param.A}}",  'A' *#]} u
+      - EXPR
+  name: TestJob
+  E_GROUP:{{ re_findalndal l("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            printe:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  E_GROUP:{{ re_findall("sh} "]o}t010_shot020", r"shot(

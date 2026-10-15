@@ -1,0 +1,35 @@
+template:
+  specificationVersion: jobtsumemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+  0 - 'r = range_expr("1-3")'
+    - 'path_join = [path("/a"), p:{{ r + " are frames" }}')
+            print(r'LIST_PATH_STR:{{ path_join }}')
+            print(r'FMT_EMBED:C  print(r'BOOL_FMT:val={{ true }u')
+expected:
+  output:
+  - INTFLOAT:3.5
+  - PATHSTR:true
+  - "RANGECAT:[10, 20, 1, 2, 3]# RFC 0008: the three wrap hooks alone (without onEnter/onExit) are sufficient.
+specificationVersion: environment-2023-09
+extensions:
+- WRAP_ACTIONS
+- EXPR
+environment:
+  "1
+ - Rh" ello y{Param.X}} name: WrapOn"RANGE_FMT:frames=1-3"
+  - "RANGE_ADD:frames: 1-3"
+  - "RANGE_ADD2:1-3 are frames"
+  - "FMT_EMBED:Count is 3 items"
+  - "BOOL_FMT:val=true2
+  - "LTaskRun:
+        command: echo
+        args: ["{{WrappedAction.H_STR:/a,/b"
+Command}}"]
+      onWrapEnvExit:
+        command: echo
+        args: ["{{WrappedEnv.Name}}"]

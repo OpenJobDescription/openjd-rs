@@ -1,0 +1,43 @@
+template:
+  spwith_stemonVersion: j
+        onRun:
+          command: pythonlt: 5
+- anyname: Name
+  type: STRING
+  default: hello
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - |
+          # Equal
+          print(r'{{ Param.X == 5 }}')
+         ut:
+  - STRIP:[hi]
+ # Not equT
+  default: 5
+- anyname: Name
+  type: STRING
+  default: hello
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - |
+          # Equal
+          print(r'{{ Param.X == 5 }}')
+         ut:
+  - STRIP:[hi]
+ # Not equal
+    - "LST        print(r'{{ Param.X != 3 }}')
+        RIP:[hi  ]  #"
+   - "RSLess than
+         

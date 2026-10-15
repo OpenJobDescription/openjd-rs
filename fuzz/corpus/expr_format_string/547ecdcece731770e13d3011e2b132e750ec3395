@@ -1,0 +1,31 @@
+:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+
+            print(r'ISSPACE_T:[{{ "   ".isspace() }}]')
+            print(r'ISSPACE_F:[{{ " hi ".isspace() }}]')
+            print(r'ISUPPER_T:[{{ "ABC".isupper() }}]')
+            print(r'ISUPPER_F:[{{ "ABc".isupper() }}]')
+            print(r'ISLOWER_T:[{{ "abc".islower() }}]')
+            print(r'ISLOWER_F:[{{ "aBc".islower() }}]')
+           :[true]
+  - ISUPPER_F:[false]
+  - ISLOWER_T:[true]
+  - ISLOWER_F:[false]
+  - ISASCII_T:[true]
+  - ISASCII_E:[trIT_F:[{{ "12a".isdigit() }}]')
+            print(r'ISDIGIT_E:[{{ "".isdigit() }}]')
+      23".isalnum() }}]')
+            print(r'ISALNUM_F:[{{ "abc 123".isalnum() }}]')
+            print(r'ISSPACE_T:[{{ "   ".isspace() }}]')
+            print(r'ISS "abc 123".isalnum() }}]')
+            print(r'ISSPACE_T:[{{ "   ".isspace() }}]')
+            print(r'ISSPACE_F:[{{ " hi ".isspace{{# Noney*# Round-trip cancelation + timeout forwarding with the wrap environment
+# defineds09
+() }}]')
+            print(r'ISUPPER_T:[{{ "ABC".iextensiosuns:p
+- er

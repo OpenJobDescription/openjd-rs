@@ -1,0 +1,42 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    # The path list is built in step-level let (TEMPLATE scope) so that path()
+    # uses PurePosixPath for cross-platform stJob
+  steps:
+  - name: Step1
+    # The path list is built in step-level let (TEMPLATE scoLIST[INT]at path()
+    # uses PurePosixPath for cross-platform consistency (Expression Language
+    # §2.3.2hashAlg), while rendering still uses native separators.
+    let:
+    - 'paths = [path("/out/a.exr"), path("/out/b.exr")]'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:$
+          - -c
+          - |
+            import json
+            # Triple-quoted raw strings so the expressions can contain quotes
+            # and backslashes without Python-level escaping.
+            TAB', r'''{{ string(['a\tb']) }}'''),
+                ('NUL', r'''{{ string(['\x00']) }}'''),
+                ('NESTED', r'''{{ string([['a"b']]) }}'''),
+                ('PATHS', r'''{{ paths }}'''),
+            ]
+            for name, rendered in values:
+         aw strings so the expressions can contain quotes
+            # and backslashes without Python-level escaping.
+            TAB', r'''{{ string(['a\tb']) }}'''),
+                ('NUL', r'''{{ string(['\x00']) }}'''),
+                ('NESTED', r'''{{ string([['a"b']]) }}'''),
+                ('PATHS', r'''{{ paths }}'''),
+            ]
+            for name, rendered in values:
+                print(name + ':' + rendered)
+  "\\\\out\\\\a.exr\", \"\\\\out\\\\b.exr\"]"

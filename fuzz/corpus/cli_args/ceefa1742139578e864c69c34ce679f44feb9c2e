@@ -1,0 +1,8 @@
+{
+ "   ame": "S",
+            "script": {
+             "let": ["x = 1"],
+                "actions": {"onRun": {"command": "fooV}}
+            }
+        }]
+    }

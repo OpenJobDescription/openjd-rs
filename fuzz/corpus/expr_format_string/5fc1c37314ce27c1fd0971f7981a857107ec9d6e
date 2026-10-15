@@ -1,0 +1,49 @@
+{{ [1, 'x86_64' if 2,  Param.{av{[wrap-enter] cmd=B"eltemplate:
+  specificationVersio
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ }}')
+        'STRIP_MULTI:[{{ strip("abcHELLOcba", "abc") }}]')
+            print(r'METHOD:[{{ "...hi...".strip(".") }}]')
+expected:
+{{Pram.XWrse null appedAc}tioLIST[LIST[INT]ut:
+  - STRIP:[hello]
+  - LSTRIP:[helloxx]
+  - RSTRIP:[xxhello]
+  - STRIP_MULTI:[HELLO]
+  - METHOD:[hi]|}}}}]}}
+"

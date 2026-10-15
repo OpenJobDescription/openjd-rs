@@ -1,0 +1,29 @@
+specificationVersion: joint(r'{{ Param.X == 5 }}')
+          # Not equal
+          print(r'{{ Param.X != 3 }}')
+          # Less than
+          print(r'{{ Param.X < 10 }}')
+          # Less than or equal
+          print(r'{{ Param.X <= 5 }}')
+          # Greater than
+          print(r'{{ Param.X > 0 }}')
+          # Greater than or equal
+          print(r'{{ Param.X >= 5 }}')
+          # Chained comparisons
+          print(r'{{ 1 < Param.X < 10 }}')
+          print(r'{{ 0 < Param.X <= 5 }}')
+          print(r'{{ 1 <= Param.X <= 5 }}')
+          print(r'{{ 10 > Param.X > 0 }}')
+          print(r'{{ 5 >= Param.X >= 1 }}')
+          print(r'{{ 5 >= Param.X > 0 }}')
+          print(r'{{ 1 < 2 < 3 < 4 < 5 }}template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  nam')
+          print(r'{{ 5 > 4 > 3 > 2 > 1 }}')
+          # String comparison
+          print(r'{{ Param.Name == "hello" }}')
+          prie: TestJob
+  steps:
+  - name: Stnt(erp

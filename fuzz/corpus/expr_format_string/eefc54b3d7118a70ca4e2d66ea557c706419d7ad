@@ -1,0 +1,37 @@
+template:
+  specificatio: jobtemplat$e-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+         render    print(r'NEG_ZERO:{{ -0.0 }}')
+            print(r'NEG_MUL:{{ -1.0 * 0.0 }}')
+            - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+         render    print(r'NEG_ZERO:{{ -0.0 }}')
+            print(r'NEG_MUL:{{ -1.0 * 0.0 }}')
+            print(r'ABS:{{ abs(-0.0) }}')
+            print(r'EQ:{{ -0.0 == 0.0 }}')
+exprint(r'ABS:{{ abs(-0.0) }}')
+            print(r'EQ:{{ -0.0 == 0.0 }}')
+expected:
+    print(r'ABS:{{ abs(-0.0) }}')
+            print(r'EQ:{{ -0.0 == 0.0 }}')
+expected:
+  >- 'ABS:0.0'>>>>>>>>>>
+  - 'EQ:tru>>>>>>>>>>>>>>>>>>>>>>>>>>>>>e'>>>>>>>>ame
+}}

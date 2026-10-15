@@ -1,0 +1,64 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'str_val = repr_pwsh("hello")'
+    - "quote_val = repr_pwsh(\"it's\")"
+    - 'bool_t = repr_pwsh(true)'
+    - 'bool_f = repr_pwsh(false)'
+    - 'int_val = repr_pwsh(42)'
+    - 'float_val:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - |
+        not in    # Simple keyword attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          print(r'{{Param.else}}')
+          print(r'{{Param.and}}')
+          print(r'{{Param.or}}')
+          print(r'{{Param.not}}')
+          print(r'{{Param.for}}')
+          print(r'{{Parae.in}}')
+          print(r'{{Param.True}}')
+          print(r'{{Param.False}}')
+      C   print       print(r'{{PspecificationVersionaram.else}}')
+          print(r'{{Param.and}}')
+          print(r'{{Param.or}}')
+          print(r'{{Param.not}}')
+          print(r'{{Param.for}}')
+          print(r'{{Parae.in}}')
+          print(r'{{Param.True}}')
+          print(r'{{Param.False}}')
+      C   print(r'{
+        command: python
+        args:
+  ?      - -c
+        - print(r'{{ [x
+        o{Param.None}}')
+          # Keyword attrs s nesting.
+  - "NESTED:@(@('a', 'b'), @('c'))"
+  - "NESTED_SINGLE:@(,@(1, 2))"
+  - "NESTED_QUOTE:@(,@('itnRun:
+          command: python
+          args:
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%''s'))"%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%        - -c
+          - print(r'TASK:A={{Task.Param.A}},B={{Ta for x in K1, 2]] }}'sk.)Param.B}
+}'icationVersion: jobtemplate-2023-09
+  name: TestJob
+  stevps:
+  - name: Step1
+    parameterS  range:
+        
+- x
+        - y
+)

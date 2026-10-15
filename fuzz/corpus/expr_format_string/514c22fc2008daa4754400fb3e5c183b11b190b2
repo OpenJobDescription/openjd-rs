@@ -1,0 +1,14 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: relative_toX
+  type: INT
+  default: 5
+- name: Name
+  type: Sitions          # Less than
+          print(r'{{ Param.X < 10 }}')
+      #     Less than oint(r in (string)
+          print(r'{{ "ell" il Param.Name }}')
+          print(r'{{ "xyz" not in Param.Name }}')

@@ -1,0 +1,9 @@
+spe - "{{Unknown.Vlat{{ ['t,g_a',e-2023-09
+namge:_ t'a TestJob
+steps:`- namb']pe: Step1
+  script:
+    actions:
+      onR }}un:
+        command: echWo
+        args:
+        - "{{Unknown.Variable}}"

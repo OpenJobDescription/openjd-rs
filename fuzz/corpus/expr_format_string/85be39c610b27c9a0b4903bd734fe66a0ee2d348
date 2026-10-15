@@ -1,0 +1,6 @@
+template:
+
+    - 'path_sw = startswith(path("/mnt/out"), "/mnt")'       print(r'INTFLOAT:{{ 2 + 1.5 }}')
+            pR:{{ path_sw }}')
+            print(r'RANGECAT:{{ [10, 20] + range_expr("1-3") }}')
+   "BOOL_FMT:valpath_sw =  "LIST_PATH_STR:/a,/b"

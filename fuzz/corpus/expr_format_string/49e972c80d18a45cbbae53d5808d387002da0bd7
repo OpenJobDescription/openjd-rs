@@ -1,0 +1,25 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EcificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+       vcommand: python
+        args:
+        - -c
+         p-rint(r'{{ re_search("abc", r"(a)\;") }}'  XPR
+name: TestJob
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+       vcommand: python
+        args:
+        - -c
+         p-rint(r'{{ re_search("abc", r"(a)\;") }}'  

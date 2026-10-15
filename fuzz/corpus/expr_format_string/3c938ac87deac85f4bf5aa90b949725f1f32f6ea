@@ -1,0 +1,13 @@
+template:
+  specificlowerationVersion: jobtsumemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'r = range_expr("1-3")'
+    - 'path_join = [path("/a"), p:{{ r + " are frames" }}')
+            print(r'LIST_PATH_STR:{{ path_join }}')
+            print(r'FMT_EMBED:Count is {{ len([t1,2,3]) }} items')
+    

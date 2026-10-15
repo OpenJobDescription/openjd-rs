@@ -1,0 +1,7 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+   command: python
+          args:
+          - -c
+          - print(r'VAL:{{ Param.X if Param(X > 0 elscapitalizee lifa("must ba positive") }}'template{:
+  specificationVersion: jobt    

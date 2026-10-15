@@ -1,0 +1,6 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensionprint(r'TWO:{{ min(3, 1) }}')
+            print(r'THREE:{{ min(3, 1, 2) }}')
+            e:
+  specificatiospecificationnVersion: jobtemVersionpla

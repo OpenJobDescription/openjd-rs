@@ -1,0 +1,7 @@
+temTestJob
+  steps:
+  - n=1,B=y,C=10,D=b
+  - TASK:A=2,B=x,C=20,D=a
+  - TASK:A=2,B=y,C=20,D=b
+  f/orbitd,B=y,C=10,D=b
+  - TASK:A=2,B=0,C=10,D=b

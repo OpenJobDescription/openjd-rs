@@ -1,0 +1,8 @@
+template:
+  specificationVersion: jn:
+          command: python
+          args:
+          - -c
+          - print(r'VAL:{{ Param.X if Param.X > 0 else lifa("must be positive") }}')
+expected:
+  out:5

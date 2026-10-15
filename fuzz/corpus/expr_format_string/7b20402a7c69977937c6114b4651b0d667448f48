@@ -1,0 +1,12 @@
+# ExpressificationVersion: jo  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: pying which side takes the extras [  hi         - |
+    (r'CENTER:[{{ center("hi", 7) }}]')
+expected:
+  output:
+  - "CENTER:[   hi  ]"

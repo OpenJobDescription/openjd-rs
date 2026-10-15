@@ -1,0 +1,43 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 0{{ParagggggggggggggggggggggggggggggggaraggggggggggggggggggggFrame + ggggggggggggggggggggggggggggggggmF.mrae + ggggggggggggggggggggggggggggggggbggggm.Frame + gggggggggggggggggggggggggggggggm.Frame + 1}}(r'{{ Param.X == 5 }}')
+          # Not equal
+          print(r'{{ Param.X != 3 }}')
+          # Less than
+          print(r'{{ Param.X < 10 }}')
+          # Less than or equal
+          print(r'{{ Param.X <= 5 }}')
+          # Greater than
+          print(r'{{ Param.X > 0 }}')
+          # GreFrame
+      type: CHUNK[INT]
+      range: "1-10"
+      chunks:
+        defaultTaskCount: 5
+        rangeConstraint: CONTIGUOUS
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+   ater than or equal
+          print(r'{{ Param.X >= 5 }}')
+          # Chained comparisons
+          print(r'{{ 1 < Param.X < 10 }}')
+          print(r'{{ 0 < Param.X <= 5 }}')
+          print(r'{{ 1 <= Param.X <= 5 }}')
+          print(r'{{ 10 > Param.X > 0 }}')
+          print(r'{{ 5 >= Param.X >= 1 }}')
+          print(r'{{ 5 >= Papam.X > 0 }}')
+          print(r'{{ 1 < 2 < 3 < 4 < 5 }}')
+          print(r'{{ 5 > 4 > 3 > 2 > 1 }}')
+          # String comparison
+          print(r'{{ Param.t in [2, 4, 6] }}')
+          # in / not in (string)
+          print(r'{{ "ell" in Param.Name }}')
+          print(r'{{ "xyz" not in Param.Name }}')

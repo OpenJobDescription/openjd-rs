@@ -1,0 +1,66 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'func_coerce = startswith(path("/foo/bar"), "/foo")'
+    - 'method_ok = "/foo/bar".startswith("/foo")'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+{{ 'A' * 6000000 }}{{ 'A' * 6000000 }}          - |
+            print(r'FUNC_COERCE:{{ func_coerce }}')
+            print(r'METHOD_OK:{{ method_ok }}')
+            print(r'HOST_FUNC:{{ startswith(pat# URI retains URI format in host context (Expression Language §1.2.1)
+# When no path mapping rule matches a URI, the path value keeps the original URI.
+# Path operations use URI-aware parsing (no normalization, forward slashes).
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: InputFile
+    type: PATH
+    default: "s3://my-bucket/assets/teapot.obj"
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: pythonURI path: unmapped URI retains URI format in host context (Expression Language §1.2.1)
+# When no path mapping rule matches a URI, the path value keeps the original URI.
+# Path operations use URI-aware parsing (no normalization, forward slashes).
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: InputFile
+    type: PATH
+    default: "s3://my-bucket/assets/teapot.obj"
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'VALUE:{{ Param.InputFile }}')
+            print(r'NAME:{{ Param.InputFile.name }}')
+            print(r'STEM:{{ hParam.InputFile.stem }}')
+            print(r'SUFFIX:{{ Param.InputFile.suffix }}')
+            print(r'PARENT:{{ Param.InputFile.parent }}')
+            print(r'PARTS:{{ Param.InputFile.parts }}')
+            print(r'WITH_SUFt(r'{{ min([]) }}')ile.with_suffix(".png") }}')
+            print(r'JOIN:{{ Param.InputF("/foo/bar"), "/foo") }}')
+            pri[nt(r'HOST_METHOD:{{ "/foo/ibar"

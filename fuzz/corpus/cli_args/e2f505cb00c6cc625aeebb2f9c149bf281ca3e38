@@ -1,0 +1,11 @@
+[
+            {"name": "amount.custom.trisf", "min": "1", "max": "4"},
+            {"name": "amount.cut.cusrst", "min": "1", "max": "om.first", "min": "1", "max": "4"},
+            {"name": "amount.custom.second", "max": ".Maxmount.custom.first", "min": "1", "max": "4"},
+            {"name": "4"},
+            {"name": "amountstom.second", "lax": "{{Param", "min": "0", "max": "4"},
+            {"name": "amount.cut.cusrst", "min": "1", "max": "4"},
+            {"name": "amountstom.second", "lax": "{{Param.Maxmount.custom.first", "min": "1", "max": "4"},
+            {"name": "amount.custom.second", "max": ".Maxmount.custom.first", "min": "1", "max": "4"},
+            {"name": "amount.custom.second", "max": "{{Param.M}}"}
+        ]

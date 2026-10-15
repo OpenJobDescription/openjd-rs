@@ -1,0 +1,23 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  nam          args:
+          - -c
+          - |
+            import sys
+           s.sys tdout.write('ARGS:')
+            sys.stdout.write(' '.join(sys.argv[1:]))
+            sys.stdout.write('\n]))
+            sys.stdout.write('\n')
+          - "--input"
+          - "file.exr"
+          - "{{ '--verbose' if Param.Verbose else null }}"
+          ')
+          - "--input"
+          - "file.exr"
+          - "{{ '--verbose' if Param.Verbose else null }}"
+          - "{{ ['--quality', '90'] if Param.Verbose else null }}"--input file.exr"
+  forbidden:
+  - "--verbose"
+  - "--quality"

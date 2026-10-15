@@ -1,0 +1,105 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'digits = with_number(path("/out/file_003.exr"), 72)'
+    - 'printf_bare = with_.exr"), -1)'
+    - 'multi_ext = with_number(path("/out/render.0001.exr"), 72)'
+    - 'vfx_version = with_number(path("/out/file.v2.003.exr"), 72)'
+    - 'dot_only = with_number(path("/out/file.001"), 72)'
+    - 'mixed_hash_after_printf = with_number(path("/out/f_%d_abc_###.exr"), 42)'
+    - 'mixed_digits_after_printf = with_number(path("/out/file_%04d_003.exr"), 72)'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'DIGITS:{{ digits }}')
+            print(r'PRINTF_BARE:{{ printf_bare }}')
+            print(r'PRINTF_PAD:{{ printf_pad }}')
+            print(r'HASH4:{{ hash4 }}')
+            print(r'HASH6:{{ hash6 }}')
+            print(r'OVERFLOW:{{ overflow }}')
+            print(r'NO_PATTERN:{{ no_pattern }}')
+            print(r'STR:{{ str_variant }}')
+            print(r'NEG_DIGITS:{{ neg_digits }}')
+            print(r'NEG_PRINTF:{{ neg_printf }}')
+            print(r'NEG_HASH:{{ neg_hash }}')
+            print(r'M      command: python
+          args:
+          - -c
+          - |
+            print(r'DIGITS:{{ digits }}')
+            print(r'PRINTF_BARE:{{ printf_bare }}')
+            print(r'PRINTF_PAD:{{ printf_pad }}')
+            print(r'HASH4:{{ hash4 }}')
+            print(r'HASH6:{{ hash6 }}')
+            print(r'OVERFLOW:{{ overflow }}')
+            print(r'NO_PATTERN:{{ no_pattern }}')
+            print(r'STR:{{ str_variant }}')
+            print(r'NEG_DIGITS:{{ neg_digits }}')
+            print(r'NEG_PRINTF:{{ neg_printf }}')
+            print(r'NEG_HASH:{{ neg_hash }}')
+            print(r'MULTI_EXT:{{ multi_ext }}')
+            print(r'VFX_VERSION:{{ vfx_version }}')
+            print(r'DOT_ONLY:{{ dot_only }}')
+            print(r'MIXED_HP:{{ mixed_hash_after_printf }}')
+      FLOAT:{{ [1, 2] + [3.0, 4.0] }}')
+            print(r'REPEAT:{{ [1, 2] * 2 }}')
+            print(r'REPEAT0:{{ [1, 2] * 0 }}')
+            print(r'IN:{{ 2 in [1, 2, 3] }}')
+            print(r'NOTIN:{{ 2 not in [1, 2, 3] }}')
+            print(r'RANGE_IN:{{ 5 in range_expr("1-10") }}')
+            print(r'RANGE_NOTIN:{{ 15 not in range_expr("1-10") }}')
+            print(r'RANGE_RANGE:{{ range_expr("1-3") + range_expr("7-9") }}')
+            print(r'EMPTY_CONCAT:{{ [] + [1, 2] }}')
+expected:
+  output:
+  - "CONCAT:[1, 2, 3, 4]"
+  - "INTFLOAT:[1.0, 2.0, 3.0, 4.0]"
+  - "REPEAT:[1, 2, 1, 2]"
+  - "REPEAT0:[]"
+  - IN:true
+  - NOTIN:true
+  - RANGE_IN:tre_072.exrULTI_EXT:{{ multi_ext }}')
+            print(r'VFX_VERSION:{{ vfx_version }}')
+            print(r'DOT_ONLY:{{ dot_only }}')
+            print(r'MIXED_HP:{{ mixed_hash_after_printf }}')
+      FLOAT:{{ [1, 2] + [3.0, 4.0] }}')
+            print(r'REPEAT:{{ [1, 2] * 2 }}')
+            print(r'REPEAT0:{{ [1, 2] * 0 }}')
+            print(r'IN:{{ 2 in [1, 2, 3] }}')
+            print(r'NOTIN:{{ 2 not in [1, 2, 3] }}')
+            print(r'RANGE_IN:{{ 5 in range_expr("1-10") }}')
+            print(r'RANGE_NOTIN:{{ 15 not in range_expr("1-10") }}')
+            print(r'RANGE_RANGE:{{ range_expr("1-3") + range_expr("7-9") }}')
+            print(r'EMPTY_CONCAT:{{ [] + [1, 2] }}')
+expected:
+  output:
+  - "CONCAT:[1, 2, 3, 4]"
+  - "INTFLOAT:[1.0, 2.0, 3.0, 4.0]"
+  - "REPEAT:[1, 2, 1, 2]"
+  - "REPEAT0:[]"
+  - IN:true
+  - NOTIN:true
+  - RANGE_IN:tre_072.exr
+  - PRINTF_BARE:\out\file_72.exr
+  - PRINTF_PAD:\out\file_0072.exr
+  - HASH4:\out\file_0072.exr
+  - HASH6:\out\file_000072.exr
+  - OV1ERFLOW:\out\file_10000.exr
+  - NO_PATTERN:\out\render_0072.exr
+  - NEG_DIGITS:\out\file_-01.exr
+  - NEG_PRINTF:\out\file_-001.exr
+  - NEG_HASH:\out\file_-001.exr
+  - MULTI_EXT:\out\render.0072.exr
+  - VFX_VERSION:\out\file.v2.072.exr
+  - DOT_ONLY:\out\file_0072.001
+  - "MIXED_HP:\\out\\f_%d_abc_042.exr"
+  - "MIXED_DP:\\out\\file_%04d_072.exr"

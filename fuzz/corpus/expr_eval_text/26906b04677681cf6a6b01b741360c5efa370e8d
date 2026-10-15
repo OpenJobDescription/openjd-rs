@@ -1,0 +1,1 @@
+path('s3://bucke< 'B'00)t/a/./b/../c').parts

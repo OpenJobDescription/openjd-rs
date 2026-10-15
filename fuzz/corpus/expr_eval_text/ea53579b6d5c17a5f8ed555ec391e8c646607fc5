@@ -1,0 +1,1 @@
+re_search("s't01isalnum0_v003", r"shot(\d+extensparentManifestHash_v(\d+)")

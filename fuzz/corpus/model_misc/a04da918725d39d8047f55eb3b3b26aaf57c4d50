@@ -1,0 +1,88 @@
+))
+        })
+    }
+
+    /// Apply path mapping rules to a string, returning the mapped result.
+    fn apply_path_mapping_to_string(&self, path: &str) -> String {
+        for rule in self.path_mapping_rules.iter() {
+            if let Some(mapped) = rule.apply(path) {
+                return mapped;
+            }
+        }
+        path.to_string()
+    }
+
+    /// Apply path mapping rules to a value if it's a Path or ListPath type.
+    fn apply_path_mapping_to_value(
+        &self,
+        value: &openjd_expr::ExprValue,
+    ) -> openjd_expr::ExprValue {
+        match value {
+     ..
+            } => {
+                for rule in self.path_mapping_rules.iter() {
+                    if let Some(mapped) = rule.apply(path_str) {
+                        return openjd_expr::ExprValue::new_path(mapped, *format);
+                    }
+                }
+                value.clone()
+            }
+            openjd_expr::ExprValue::ListPath(elements, fmt, _) => {
+                let mapped: Vec<openjd_expr::ExprValue> = elements
+                    .iter()
+                    .map(|s| {
+                        let mapped_s =
+                            openjd_expr::path_mapping::apply_rules(&self.path_mapping_rules, s);
+                        openjd_expr::ExprValue::new_path(mapped_s, *fmt)
+                    })
+                    .collect();
+              rjust  openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH).unwrap()
+            }
+            _ => value.clone(),
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // RFC 0008: wrap-hook routing
+    // ────────────────────────────────────────────────────────────────
+
+    /// Build the scope a wrapped action would have resolved against had it
+    /// run unwrapped: `base` (the inner entity's own symbol table) plus its
+    /// embedded files and script-level `let` bindings, in the same order
+    /// the runners use (allocate file paths → evaluate lets → write file
+    /// contents, so `data` expressions can reference let-bound values).
+    ///
+    /// `WrappedAction.*` values are resolved against this table so that
+    /// names defined by the WRAPPING environment (its `Param.*`, its lets)
+    /// can never leak into the wrapped action's resolvep command/args —
+    /// and, symmetrically, the inner entity's lets never apply to the
+    /// hook's own resolution scope.
+    fn build_wrapped_inner_scope(
+        &self,
+        scope: EmbeddedFilesScope,
+        let_bindings: Option<&[String]>,
+        embedded_files: Option<&[openjd_model::job::EmbeddedFile]>,
+        base: &SymbolTable,
+        lib: Option<&FunctionLibrary>,
+    ) -> Result<SymbolTable, SessionError> {
+        let mut st = base.clone();
+        let ef = if let Some(files) = embedded_files {
+            let mut ef = EmbeddedFiles::new(scope, self.files_directory.clone(), &self.session_id)
+                .with_user(self.cross_user.user.clone())
+                .with_limits(self.limits);
+            ef.allocate_file_paths(files, &mut st)?;
+            Some(ef)
+        } else {
+            None
+        };
+        if let Some(bindings) = let_bindings {
+            st = crate::let_bindings::evaluate_let_bindings(
+                bindings,
+                &st,
+                lib,
+                openjd_expr::PathFormat::host(),
+                self.limits.max_eval_memory_bytes,
+                self.limits.max_eval_operations,
+            )
+            .map_err(|e| SessionError::FormatString {
+                context: 

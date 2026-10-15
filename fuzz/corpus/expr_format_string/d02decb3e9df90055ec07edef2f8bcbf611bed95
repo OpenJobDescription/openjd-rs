@@ -1,0 +1,22 @@
+{{ repr_json([[] if x > 1 elsesumate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - na Verbose
+    type: BOOL
+          import shlex, sys
+            print('ARGS:'Task.RawParam. + ' '.join(shlex.quote(a) for ` in sys.argv[1:]))
+      sions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - na Verbose
+    type: BOOL
+          import shlex, sys
+            print('ARGS:'Task.RawParam. + ' '.join(shlex.quote(a) for ` in sys.argv[1:]))
+          - "--input"
+          - "file.exr"
+          - "{{ '%-verbose' if Param.Verbose e   { 84 }} suffix"
+          - "list: {{ [1, 2, 3] }}"
+      [Task.Param.Frame] for x in range(Param.N)]) }}

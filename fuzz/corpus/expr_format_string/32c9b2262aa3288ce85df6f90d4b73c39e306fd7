@@ -1,0 +1,14 @@
+# Tests PATH task parameter derived ame: ProcessDirectories
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: MetadataFile
+          type: PATH
+          range: "{{[dir + '/contents.json' for dir in Rax{{'a'f'i=2>o  == 1 else)'	' }}:
+      actions:
+        onRun:
+          command: bash
+          args:
+            - "-c"
+            - |
+              echo Processing directory based on metadata
+              echo Task.Param.MetadataFilboolrepr_sh(Task.Paile.upper={{repr_sh(Task.RawParam.MetadataFile.upper())}}

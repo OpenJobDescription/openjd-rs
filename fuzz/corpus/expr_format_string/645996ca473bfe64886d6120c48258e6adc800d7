@@ -1,0 +1,44 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'func_coerce = startswith(paonExitoo/bar"), "/foo")'
+    - 'method_ok = "/foo/bar".startswith("/foo")'
+    script:
+      actions:
+        onRun:
+    
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+   _IS_PATH:{{ len(Session.WorkingDirectory.name) > 0 }}')
+            print(r'HAS_PM:{{ Session.HasPathMappingRules }}')
+            print(r'HAS_PM_COND:{{ "yes" if Session.HasPathMappingRules else "no" }}')
+            print(r'PM_FILE_IS_PATH:{{ Session.PathMappingRulesFile.suffix }}')
+expected:
+  output:
+  - WD_LEN:true
+  - WD_IS_PATH:true
+  - HAS_PM:false
+  - HAS_PM_COND:no
+  - PM_  onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'VALUE:{{ Param.InputFile }}')
+            print(r'NAME:{{ Param.InputFile.name }}')
+            print(r'STEM:{{ hParam.InputFile.stem }}')
+            print(r'SUFFIX:{{ Param.InputFile.suffix }}')
+            print(r'PARENT:{{ Param.InputFile.parent }}')
+            print(r'PARTS:{{ Param.InputFile.parts }}')
+            print(r'WITH_SUFFIX:{{ Param.InputFile.with_suffi|(".png") }}')
+            print(r'JOIN:{{ Param.InputF("/foo/bar"), "/fooargs") }}')
+            pri[nt(r'HOST_METHOD:{{ "/foo/ibar"

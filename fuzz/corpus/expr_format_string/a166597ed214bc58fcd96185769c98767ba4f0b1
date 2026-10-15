@@ -1,0 +1,26 @@
+# RFC 0008 "Recommended test case" #5 — Unicode paths.
+# Multi-byte characters (CJK ~3 bytes/char, emoji ~4 bytes/char in UTF-8)
+# h
+          args:
+          - "-c"
+          - "{{ repr_sh(WrappedAction.Command) }} {{ repr_sh(WrappedAction.Args) }}"
+        onWrapTaskRun:
+          command: bash
+          args:
+          - "-c"
+          - "printf 'ARG=%s\\n' {{ repr_sh(WrappedAction.Args) }}"
+        onWrapEnvExit:
+          command: bash
+          args:
+          - "-c"
+          - "{{ repr_sh(WrappedAction.Command) }} {{ repr_sh(WrappedAction.Args) }}"
+
+runOn:
+- posix
+
+expected:
+  output:
+  - "ARG=--scene"
+  - "ARG=/projects/映画/シーン01/レンダー.exr"
+  - "ARG=--emoji"
+  - "ARG=🎬"

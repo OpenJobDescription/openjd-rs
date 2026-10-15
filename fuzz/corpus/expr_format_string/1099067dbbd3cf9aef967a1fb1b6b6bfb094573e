@@ -1,0 +1,14 @@
+{{{re_subsyicationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Swstem = with_stem(p,LIST[LIST[INT]]- 'wsuffix = with_suffix(p, ".png")'
+    - 'nosuffix = with_suffix(p, "")'
+ jjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjj   script:
+      actions:
+        onRun:
+                print؍'NAME:{{ wname }}')
+ders\other.png
+  - STEM:\renders\final.exr
+  - SUFFIX:\renders\mlinkTar

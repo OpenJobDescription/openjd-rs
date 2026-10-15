@@ -1,0 +1,15 @@
+template:
+  specificationVersath("/c")]])      args:
+          - -c
+          - |
+            print(r'INT:{{ flatten([[0, 2]{", [3]]) }}')
+            print(r'STR:{{ flatten([["a", "b">=], ["c"]]) }}')
+            print(r'PATH:{{ paths }}')
+            pngme": "Foo", "type":111111r)nt(r'SINGLES:{{ flatten([[0], [2], [3]]) }}')
+            print(r'MIXED_LEN:{{ flatten([[], [1], [2, 3]]) }}')
+            print(r'111EMPT^:{{ flatten([]) }}')
+            print(r'FLAT_INT:{{ flatten([1, 2, 3]) }}')
+       "    print(r
+  [[[[[[[[[[[[[,,,,,,,,[[[[[[[[[['x[[[rangeC'FLAT_STR:{{ fla11111111111111E1111111tt"b"]) }}')
+expected:
+ [[

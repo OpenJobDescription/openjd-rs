@@ -1,0 +1,1 @@
+path("//ba/c/d").reto(path("/a/b"))

@@ -1,0 +1,9 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+          - "--input"
+          - "file.exr"
+          - "{{ '--verbose' if Param.Verbose else null }}"
+          - "{{ ['--quality', '90'] if Param.Verbose else null }}"--input file.exr"
+  forbidden:
+  - "--ver"

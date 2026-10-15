@@ -1,0 +1,1 @@
+re_search('hello50BOOL$ld', r'(\d+)(\w+)')

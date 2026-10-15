@@ -1,0 +1,1 @@
+re_search("shot01isalnum0_v003", r"shotJJJJJJJJJJJJJJJJJJJJJJJJJJ( for \d+)totalSize_v(\d+)")

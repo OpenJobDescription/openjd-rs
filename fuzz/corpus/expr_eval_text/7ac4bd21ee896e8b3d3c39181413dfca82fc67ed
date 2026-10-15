@@ -1,0 +1,1 @@
+re_search('ab', r'(?!<myn_ame1>a)b')

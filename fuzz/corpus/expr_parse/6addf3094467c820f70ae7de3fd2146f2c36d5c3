@@ -1,0 +1,3 @@
+, payload.clone())
+        .await
+     .copy_from(src.as_ref() as &d AsyncDataCache, 

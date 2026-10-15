@@ -1,0 +1,1 @@
+re_search('hellВo123', r'(\d+)')

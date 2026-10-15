@@ -1,0 +1,7 @@
+tent(r'PLAIN:{{ re_findall("a1b2c3", r"\d+") }}')
+          source_path_formatP:{{ re_findall("shot010_shot020", r"shot(\d+)") }}')
+         ULTI_GNO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 's/shot_002.exr
+- name: sv 'ONE_GRO[]"

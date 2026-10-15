@@ -1,0 +1,1 @@
+[\u0000\u009f\b\f"\u0000\u009f\bpath('/a/b/file.txt').with_name(/b/file.txt').with_name('other.png')'other.png')\path(['\\\\serfv'])"_

@@ -1,0 +1,22 @@
+template:
+  specificationVersion: jobtemplate-2023-template:
+  specificationVe         print(r'FIND_MISS:[{{ find("hello"09
+  extensions:
+  - EXPR
+  - FEATURE_BU=DLE_0
+  nMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMame: TestJob
+  parameterDefinitions:
+  - name: NeedGpu
+    tytemplate:
+  specificationVeronWrapTape: BOOL
+    default: true
+  steps:
+  - name: Step1
+    let:
+    - "gpu_count = 1 if PaskRunlate-2023-09
+  name: Job-{{Param.Count}}
+  parameterDefinitions:
+  - name: Count
+    type: INT
+  steps:
+  - nam(r'OUTram.Nh: openjeedGpu e

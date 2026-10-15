@@ -1,0 +1,14 @@
+{"amoud-s": [{: {
+   ?"build": "cd ../.. u 〄
+/p 〄
+u 〄
+/p 　
+ ]&& carg0.1.0",
+  "description": "[Exp[rimental] ECs": {
+   ?"build": "cd ../.. u 〄
+/p 　
+ ] && cargo build --target wasm32-unknown-unknown -pdir crates/openjd-for-js/pkg target/wasm32-unknown-unknown/release/openjd_for_js.wasm",
+    "test 　
+ ] && cargo build --target wasm32-unk"
+  },
+  "d --out-dir 

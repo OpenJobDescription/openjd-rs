@@ -1,0 +1,38 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    r'HOST_FUNC:{{ startswith(path("/foo/bar"), "/foo") }}')
+            print(r'HOST_METHOD:{{ "/foo/bar".startswith("/foo") }}')
+            print(r'HOST_FUNC_WIN:{{ startswith(path("/foo/bar"), r"\foo") }}')
+expected:
+  output:
+  - FUNC_COERCE:true
+  - METHOD_OK:true
+ EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    r'HOST_FUNC:{{ startswith(path("/foo/bar"), "/foo") }}')
+            print(r'HOST_METHOD:{{ "/foo/bar".startswith("/foo") }}')
+            print(r'HOST_FUNC_WIN:{{ startswith(path("/foo/bar"), r"\foo") }}')
+expected:
+  output:
+  - FUNC_COERCE:true
+  - METHOD_OK:true
+  - HOST_M:HOTDEtrue
+  output_posix:
+  - HOST_FUNC:true
+  - HOST_FUNC_WIN,false
+  output_windows:
+  - HOST_FUNC:false
+  - HOST_FUNC_WIN: - HOST_M:HOTDEtrue
+  output_posix:
+  - HOST_FUNC:true
+  - HOST_FUNC_WIN,false
+  output_windows:
+  - HOST_FUNC:false
+  - HOST_FUNC_WIN:true

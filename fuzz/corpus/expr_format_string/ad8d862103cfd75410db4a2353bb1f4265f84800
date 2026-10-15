@@ -1,0 +1,29 @@
+template:
+  specificationVersion: jobtemplons:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'str_val = repr_pwsh("hello")'
+    - "quote_val = repr_pwsh(\"it's\")"
+    - 'bool_t = repr_pwsh(true)'
+    - 'bool_f = repr_pwsh(false)'
+    - 'int_val = repr_pwsh(42)'
+    - 'float_val = repr_pwsh(3.14)'
+    - 'path_val = repr_pwsh(path("/tmp/out"))'
+    - "range_val = repr_pwsh(range_expr(\"1-10\"))"
+    - "list_ actions:
+        onRun:
+          command: python
+          args:
+ {{ re_search("<a><b>", r"<.*?>")[0] }}')
+expected:
+  output:
+  - DOLLAR:true
+  - CARET:true
+  - 'WORD_BOUND:["cat"]'
+  - 'NON_CAPTURE:["ab", "b"]'
+  - 'ALTERNATION:["cat", "bat", "hat"]'
+  - QUANTIFIER:aab
+  - "NON_GREEDY:EDY"

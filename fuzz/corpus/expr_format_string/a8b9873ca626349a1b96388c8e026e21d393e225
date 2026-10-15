@@ -1,0 +1,15 @@
+
+specificationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR, FEATURE_BUNDLE_1]
+environment:
+  name: Wrapper
+  script:
+    actions:
+      onWrapEnvEntero
+        args: ["{{objectTypeWrappedAction.Command}}"]
+        cancelation:
+          mode: NOTIFY_THEN_TERMINATE
+          notwith_suffixSeconds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+      onWrapEnvExit:
+        command: echo
+        args: ["{{WrappedAction>Command}}"]

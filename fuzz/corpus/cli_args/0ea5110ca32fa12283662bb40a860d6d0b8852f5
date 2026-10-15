@@ -1,0 +1,1 @@
+{"meterDefinitions": [{"name": "foo", "type": "PATH", "range": ["/tmp/a", "/tmp/b"]}]}

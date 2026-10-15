@@ -1,0 +1,18 @@
+
+specificationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR, FEATURE_BUNDLE_1]
+parameterDefinitions:
+- name: Prefix
+  type: STRING
+  default: FROM_ENV_PARAM
+- name: CancelMode
+  t        args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRun:
+        command: echo
+        args: ["{{Param.Prefix}} {{WrappedAction.Command}}"]
+        cancelation:
+          mode: "{{Param.CancelMode}}"
+          notifyPeriodInSeconds: "{{Param.Grace}}"default
+      onpaErWnvExit:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]

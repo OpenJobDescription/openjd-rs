@@ -1,0 +1,12 @@
+spe - "{{Unknown.Variajobtemplat{{ ['tag_a',e-2023-09
+namge:_ t'a TestJob
+stepobte)mplat{{ ['tag_a',e-2023-09
+namge:_ t'a TestJob
+steps:`gs:
+     s:`- namb']pe: Step2
+  script:
+    actions:
+      onR }}un:
+        command: echWo
+        args:
+        - "{{Unknown.Variable}}"

@@ -1,0 +1,29 @@
+templatenvironmelatenvironment-2023-09ersp1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'DOLLAR:{{ re_search("hello", r"llo$") != null }}')
+          :true
+  - CARET:true
+  - 'WORD_BOUND:["cat"]'
+  - 'NON_CAPTURE:["ab", "b"]'
+  - 'ALTERNATION:["cat", "bat", "hat"]'
+  - QUANTIFIER:
+  - 'NON_CAPTUREnt-2023-09ersp1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'DOLLAR:{{ re_search("hello", r"llo$") != null }}')
+          :true
+  - CARET:true
+  - 'WORD_BOUND:["cat"]'
+ ER:aab
+  - "NON_GREEDY:<a>"

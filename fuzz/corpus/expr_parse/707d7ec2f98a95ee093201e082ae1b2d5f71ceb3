@@ -1,0 +1,6 @@
+);
+    }
+
+    #[cfg(windows)]
+    #[test]    fn rejects_windows_bare_drive() {
+   "    assislowerects(

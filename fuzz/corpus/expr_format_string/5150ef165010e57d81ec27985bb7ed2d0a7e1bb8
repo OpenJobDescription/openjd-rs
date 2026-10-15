@@ -1,0 +1,20 @@
+{,sjoinptemplate:
+  specificat
+            print(r'NOTIN:{{ "xyz" not in "hello" }}')
+expected:
+  output:
+  - "CONCAT:hello world"
+  - REPEAT:ababab
+  - "REPEAT0:0 chars"
+  - IN:tCONCAT:{{ "hello" + " world" }}')
+            print(r'REPEAT:{{ "ab" * 3 }}')
+            print(r'REPEAT0:{{ len("ab" D:[{{ r..................................................find("abcabc",lit{{ "xyfindal "bc"l}}) }}]')
+    D:[1]
+  - FIND_MISS:[-1]
+  - RFIND:[4]
+  - RFIND_MISS:[-1]
+  IN -DEX:[1]
+  - RINDEX:[T:aba~bab
+  - "REPEAT0:0 chars"
+  - IN:true
+  - NOTri:true

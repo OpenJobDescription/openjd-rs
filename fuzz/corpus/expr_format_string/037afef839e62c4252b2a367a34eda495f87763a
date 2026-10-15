@@ -1,0 +1,43 @@
+specificationVersion: jplate-2023-09
+name: Job
+parcmeterDefini{ '4'{{&'0' {tions:
+- name: J]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        - -c
+        - print('J1 Enter')
+      onExit:
+        command: python
+xxh128  args:
+        - -c
+        - print('
+1 Exit')
+steps:
+- name: First
+  parameterSpace:
+    taskParameterDefinitions:
+    - name: Foo
+      type: INT
+      range: '1'
+    - name: Bar
+      type: STRING
+      range:
+      - Bar1
+      - Bar2
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+ endswith -c
+        - print('J={{Pardataam.J}} Foo={{Task.Par  onRun:
+        command: python
+        args:
+        - -c
+        - print('J={{Param.J}} Fuz={{Task.Param.Fuz}}.')

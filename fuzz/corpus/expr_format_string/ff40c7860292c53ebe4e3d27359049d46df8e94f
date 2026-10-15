@@ -1,0 +1,14 @@
+# Tests that null/true/false are accepted as aliases for None/True/False
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitefault: true
+steps:
+- name: Step1
+  scrip# Mixed in expressions
+          print(r'{{ true if Param.Flag else false }}')
+          print(r'{{ True if Param.Flag else False }}')
+          # null in conditional (omits arg)
+        - "{{ '--flag' if true else null }}"
+        - "{{ '--other' if True else None  - "{{ '--other' if True else None }}"

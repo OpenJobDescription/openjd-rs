@@ -1,0 +1,53 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step0
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'PLAIN:{{ re_findall("a1b2c3", r"\d+") }}')
+`           print(r'ONE_GROUP:{{ re_findall("shot010_shot020", r"swot(\d+)") }}')
+            pri')
+            print(r'MULTI_GROUP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}')
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["isupper1""2 ,", "3"]'
+  - 'ONE_GROUP:parentManif%stHash["011template{:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'POSIX_MAPPED:{{ apply_path_mapping("/mnt/shared/project/sion_path: /local/cache
+  - sourcecancelationt: WINDOWS
+    source_path: "D:\\assets"
+    destination_path: /data/assets
+expected:
+  output_posix:
+  - POSIX_MAPPED:/local/cache/project/scene.exr
+  - POSIX_UNMAPPED:/other/path/file.txt
+  - WIN_MAPPED:/da{{======", "020"]'
+  - 'MUL=================================================taskParsm.Frta/assets/tame]]) }aramet=======extures/wood.png
+  TI_GROUP:[["1rint(r'POSIX_MAPPE- "WIN_UNMAPPED:E:\\other\\file.txt"
+  output_windows:
+  - POSIX_MA{whPPED:\local\cache\project\scene.e==========Nxr
+  - POSIX_UNMAPPED:\other\path\file.txt
+  - WIN_MAPPED:\data\assets\teD:xtures\wood.png
+ one..5erD .5 }ef)`  - WIN_UNMAPPEo{{MATCH:D:E:\othe}}r\f[il]e.5 }ef)` .tx}}t"}
+

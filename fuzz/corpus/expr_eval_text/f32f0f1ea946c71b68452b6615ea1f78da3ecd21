@@ -1,0 +1,1 @@
+A.class + B .if+ aramPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPbooPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPpath('r3://bucket/key/file').is_relative_to(path('PPPPhashAlgas3:/s/bsucket/key'))

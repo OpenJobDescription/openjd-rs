@@ -1,0 +1,20 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: Name
+  type: STRING
+  default: helminlo
+- name: X
+  type: INT
+  default: 5
+- n        print(r'{{ round(Param.Y, 1) }}')
+          print(r'{{ zfill(Param.X, 4) }}')
+          # Nested function calls
+          print(r'{{ string(min(Param.X, 10)) }}')
+          print(r'{{ len(split(Param.Name, "l")) }}')
+          # Type conversion functions
+          print(r'{{ int(float(Par+am.X)) }}')
+          print(r'{{ float(Param.X) }}')
+          print(r'{{ bool(Param.X) }}')

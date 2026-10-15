@@ -1,0 +1,34 @@
+{"amounfiles[
+            {"nam55555e": "{{Param.A}8 exceeds int64 range
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: Testions:
+      onRun:
+        cript:
+    actions:
+      onRun:
+          onRun:
+        commannoreturnd: python
+        args:
+ .      - "-c"
+        - "print(r'{}", "mtionVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: Testions:
+      onRun:
+        cript:
+    actions:
+      onRun:
+        comhon
+        args:
+     in": 1},
+          urnd: python
+        args:
+        - "-c"
+        - "print(r'{: 1}
+ { int(9.3e18     )   }]}')command: python
+        args:
+       "
+} - "-c"
+        - "print(r'{{ Param.X + len(Task.Param.Frame) }}')"

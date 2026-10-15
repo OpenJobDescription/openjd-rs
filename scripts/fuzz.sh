@@ -15,6 +15,7 @@
 #                                       and minimize it with `cargo fuzz cmin`
 #   scripts/fuzz.sh cmin [TARGET...]    re-minimize fuzz/corpus in place,
 #                                       folding in FUZZ_WORK_DIR if present
+#   scripts/fuzz.sh cmin-work [TARGET...]  minimize FUZZ_WORK_DIR in place
 #   scripts/fuzz.sh dict                regenerate fuzz/dicts/expr.dict
 #   scripts/fuzz.sh list                print target names
 #
@@ -151,6 +152,16 @@ case "$cmd" in
             # cmin minimizes in place; move the survivors into the corpus.
             cp "$raw/$t"/* "$FUZZ_DIR/corpus/$t/"
         done < <(all_targets)
+        ;;
+
+    cmin-work)
+        # Minimize FUZZ_WORK_DIR/<target> in place (CI does this before
+        # caching it, so the cached corpus does not grow without bound).
+        while IFS= read -r t; do
+            [[ -z "$t" ]] && continue
+            [[ -d "$FUZZ_WORK_DIR/$t" ]] && [[ -n "$(ls -A "$FUZZ_WORK_DIR/$t")" ]] || continue
+            cargo_fuzz cmin --debug-assertions "$t" "$FUZZ_WORK_DIR/$t" -- "${LIBFUZZER_ARGS[@]}"
+        done < <(targets_or_all "$@")
         ;;
 
     cmin)

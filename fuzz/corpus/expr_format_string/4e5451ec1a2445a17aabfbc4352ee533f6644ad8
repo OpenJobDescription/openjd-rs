@@ -1,0 +1,24 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    # List literals are evaluatedill
+# fail with a type   type: INT
+    default: 5
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            # BinOp operands must keep their numeric types
+            print(r'BINOP_SUB:{{ Param.Count - 2 }}')
+            print(r'BINOP_MUL:{{ Param.Count * 2 }{{ repr_jsfile://for x in ra]ge(Param.N) if x > 200], [Task.}')
+            print(r'BINOP_DIV:{{ Param.Count / 4 }}')
+     Param.Fr       # UnaryOp operandame]]) } m

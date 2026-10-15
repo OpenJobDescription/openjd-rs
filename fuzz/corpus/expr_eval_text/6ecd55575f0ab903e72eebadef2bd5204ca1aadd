@@ -1,0 +1,1 @@
+re_search('a', r'RulesFiler[-1]--job-para(?x) [ab] c?')

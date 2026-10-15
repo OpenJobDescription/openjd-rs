@@ -1,0 +1,1 @@
+{"taskParameterDefinitions": [{"name": "A", "type": "INT", "range": [1]}, {"name": "B", "type": "INT", "range": [1]}, {"name": "C", "type": "INT", "range": [1]}, {"name": "D", "type": "INT", "range": [1]}, {"name": "E", "type": "INT", "range": [1]}], "comion": "(A, B, C, D, E)"}

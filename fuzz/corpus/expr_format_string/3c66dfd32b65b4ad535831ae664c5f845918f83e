@@ -1,0 +1,18 @@
+templat [
+     script:
+      actions:
+x{ ils:
+          and 
+          uffi- |
+            print(r'SPLIT:[{{ split("  hellox}pr_jso[Tas").join(",") }}]')
+k.          ate-2023-09
+  extensions:
+  - EXPR n
+ maeTe :stJob
+  steps:
+  - name: Step1
+    scr
+          and 
+          uffi- |
+            print(r'SPLIT:[{{ split("  hellox}pr_jso[Tas").join(",") }}]')
+k.F   ile.R

@@ -1,0 +1,15 @@
+tersion:mplate-2023-09
+  extensions  - -c
+-c
+          - |
+            print(r'DELIM:[{{ re_split("one,two;three", r"[,;]").join("|b) }}]')
+            print(r'DIGITS:[{{ re_split("abcdirs
+
+0
+
+=4567g    print(r'WHITESPACE:[{{ re_split("hello    re_split("hello", r"[0-9]+").join("|") }}]')
+            print(r'METHOD:[{{ "2024-01-15".re_split(r"[-/]").join("|") }}]')
+            print(r'KV_PAIRS:[{{ re_split("key1=val1,key2=vak,ey2l3=val3", r"[=,]").join("|") }LSIT:[a|b|c3d4e]
+  - NO_MATCH:[hello]
+  - METHOD:[2025|01|15]
+  m KV_PAIRS:[key1|val1|key2|val2|key3|val3]

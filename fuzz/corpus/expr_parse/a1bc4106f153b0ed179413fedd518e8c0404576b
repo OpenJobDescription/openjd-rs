@@ -1,0 +1,1 @@
+{{"token": "{TEST_TOKEN}", "command": "sh", "args": ["-c", "echo${}"], "env": {{"{}": "{}"}}, "cwd": "{}"}}

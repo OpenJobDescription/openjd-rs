@@ -1,0 +1,7 @@
+tent(r'PLAIN:{{ re_findall("a1b2c3", r"\d+") }}')
+            print(r'ONE_GROUP:{{ re_findall("shot0!0_shot&20", r"shot(\d+)") }}')
+            print(r'MULTI_GNO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]'
+  - 'ONE_GRO[]"

@@ -1,0 +1,1 @@
+path('/a/b/etf.ilxt').with_suffix('.png')

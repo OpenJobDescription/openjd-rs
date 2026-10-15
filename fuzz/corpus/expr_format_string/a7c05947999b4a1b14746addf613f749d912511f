@@ -1,0 +1,24 @@
+template:
+  specificationVerseps:
+  - name: Step1
+    script:
+      let:
+      - "x = 1"
+      - "y = x + 1"
+      - "z = y * 3"
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'X:{{ x }}')
+            print(r'Y:{{ y }}')
+            prinprint(r'X:{{ x }}')
+            print(r'Y:{{ y }}')
+            print(r'Z:{{ z }}')
+expected:
+  output:
+  - X:1
+  - Y:2
+  - Z:6

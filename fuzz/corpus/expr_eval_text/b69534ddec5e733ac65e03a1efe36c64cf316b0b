@@ -1,0 +1,1 @@
+str(Param.TileSize * Pariize * Param.TilleSize)

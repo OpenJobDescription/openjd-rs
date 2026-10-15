@@ -1,0 +1,24 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+ "extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+  ) 
+          print(r'SCI_POS:{{ +1.5e3 }}')
+            print(r'SCI_NEG_POS:{{ +1.5e-3 }}')
+            print(rlate-2024-09
+ "extensions:
+  - EXPR
+  name: TestJob
+  s: Step1
+    script:
+  ) 
+          print(r'SCI_POS:{{ +1.5e3 }}')
+            print(r'SCI_NEG_'HEX_US:{{ 0xFF_F
+  - SCI_POS:1400.0
+  - SCI_NEG_POS:0.0015
+  - HEX_US:65534
+  - BIN_US:170

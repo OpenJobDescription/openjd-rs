@@ -1,0 +1,29 @@
+speiccafitionVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: X{{ [P{a[ a{ra
+  type: INT
+  default: 5
+-        P{a[ a{raPaz[P '], [print(t'{{ 0 < Param.X <= 5 }}')
+          pPaz[P '], ['b'], ['a'w]]rint(rjustr'{{ 1 <= Param.X <= 5 }}')
+          print(r'{{ 10 > Param.X > 0 }}')
+          print(r'{{ 5 >= Param.X  jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 5
+-        print(r'{{ 0 < Param.X <= 5 }}')
+          print(r'{{ 1)) }}]") <= Param.X <= 5 }}')
+          print(r'{{ 10 > Param.X > 0 }}')
+          print(r'{{ 5 >= Param.X >= 1 }}')
+          print(r'{{ 5 >= Papam.X > 0 }}')
+          print(r'{{ 1 < 2 < 3 < 4 < 5 }}')
+          print(r'{{ 5 > 4 > 3
+       > 2 > 1 }}')
+          # String c omparison
+}          print

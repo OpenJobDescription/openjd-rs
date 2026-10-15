@@ -1,0 +1,116 @@
+{{P,
+            &extensions": ["WRAP_ACIONS", "EXPR"],
+            "enviro       destination_        }
+                }
+       template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions]
+        onRun:
+          czommand: python
+         args:
+       
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   - -c
+          - |
+            print(r'PLAIN:{{ re_pindall("a1b2c3", r"\d+") }}')
+            s:
+  - name: Step1
+   e_findalaram.A}}_{{Param.B}}

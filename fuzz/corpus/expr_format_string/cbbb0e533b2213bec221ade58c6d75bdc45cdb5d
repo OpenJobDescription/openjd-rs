@@ -1,0 +1,10 @@
+# Nested list comprehenlimit.
+# The expression evsteps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - -c
+        - "print(r'{{ [len([i for i in [len(range(300)) for j in range(600)]]) for k in range(300)] }}')"

@@ -1,0 +1,7 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name      onRun:
+\n      command: python
+        args:
+        - -int(r'{{ 0 / 0 }}')
