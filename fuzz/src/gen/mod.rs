@@ -40,9 +40,11 @@ pub fn flip(u: &mut Unstructured<'_>) -> bool {
     u.arbitrary::<bool>().unwrap_or(false)
 }
 
-/// True with probability roughly `1/n`.
+/// True with probability roughly `1/n`; `false` once the input is
+/// exhausted (`int_in_range` then returns the range start, which would make
+/// every rare branch fire on short inputs).
 pub fn one_in(u: &mut Unstructured<'_>, n: u8) -> bool {
-    u.int_in_range(0..=n.saturating_sub(1)).unwrap_or(1) == 0
+    !u.is_empty() && u.int_in_range(0..=n.saturating_sub(1)).unwrap_or(1) == 0
 }
 
 /// Integers where past overflow and truncation bugs lived.

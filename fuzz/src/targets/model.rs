@@ -76,6 +76,9 @@ fn is_static_error(e: &ExpressionError) -> bool {
 fn model_static_error(e: &ModelError) -> Option<&ExpressionError> {
     match e {
         ModelError::Expression(x) if is_static_error(x) => Some(x),
+        ModelError::FormatStringError {
+            source: Some(x), ..
+        } if is_static_error(x) => Some(x),
         _ => None,
     }
 }
@@ -282,7 +285,22 @@ fn check_dependencies(job: &Job) {
     }
     for env in job.job_environments.iter().flatten() {
         if let Some(s) = &env.script {
-            let _ = s.actions.iter_named().count();
+            let a = &s.actions;
+            let named = a.iter_named().count();
+            oracle!(
+                named == a.iter_actions().count() && a.has_any_action() == (named > 0),
+                "job environment action helpers disagree: {named} named actions"
+            );
+            // The wrap hooks are a subset of the named actions.
+            let hooks = a
+                .wrap_hooks()
+                .iter()
+                .filter(|(_, h, _)| h.is_some())
+                .count();
+            oracle!(
+                a.has_any_wrap_hook() == (hooks > 0) && hooks <= named,
+                "job environment wrap hooks: {hooks} of {named} named actions"
+            );
         }
     }
     if let Ok(order) = graph.topo_sorted() {

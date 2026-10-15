@@ -45,6 +45,10 @@ openjd-model = { path = "../crates/openjd-model" }
 openjd-sessions = { path = "../crates/openjd-sessions", features = ["fuzzing", "test-utils"] }
 openjd-snapshots = { path = "../crates/openjd-snapshots" }
 
+[dev-dependencies]
+# `examples/demangle.rs`, used by scripts/check_fuzz_api_coverage.py.
+rustc-demangle = "0.1"
+
 [lib]
 # The lib `#[path]`-includes source files from other crates whose own
 # `#[cfg(test)]` modules reference items that only exist there. Never build

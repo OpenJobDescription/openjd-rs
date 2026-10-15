@@ -63,7 +63,7 @@ dict_args() {
     esac
 }
 
-LIBFUZZER_ARGS=(-timeout=60 -rss_limit_mb=3072 -malloc_limit_mb=2048 -max_len=65536 -print_final_stats=1)
+LIBFUZZER_ARGS=(-timeout=20 -rss_limit_mb=3072 -malloc_limit_mb=2048 -max_len=65536 -print_final_stats=1)
 
 cmd="${1:-run}"
 shift || true
@@ -80,8 +80,11 @@ case "$cmd" in
             mkdir -p "$FUZZ_WORK_DIR/$t" "$FUZZ_DIR/corpus/$t"
             echo "::group::fuzz $t (${FUZZ_SECONDS}s x ${FUZZ_JOBS})"
             parallel=()
-            # Fork mode: N worker processes, stops (non-zero) on the first crash.
-            [[ "$FUZZ_JOBS" -gt 1 ]] && parallel=(-fork="$FUZZ_JOBS")
+            # Fork mode: N worker processes, stops (non-zero) on the first
+            # crash. Fork mode ignores timeouts and OOMs by default; keep
+            # them fatal, as they are in single-process mode.
+            [[ "$FUZZ_JOBS" -gt 1 ]] &&
+                parallel=(-fork="$FUZZ_JOBS" -ignore_timeouts=0 -ignore_ooms=0)
             # shellcheck disable=SC2046
             cargo_fuzz run --debug-assertions "$t" \
                 "$FUZZ_WORK_DIR/$t" "$FUZZ_DIR/corpus/$t" -- \

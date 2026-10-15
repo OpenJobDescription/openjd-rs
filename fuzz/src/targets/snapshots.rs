@@ -203,6 +203,23 @@ pub fn decode_text(data: &[u8]) {
 type Content = (Option<String>, Option<u64>, Option<String>, bool);
 
 /// File entries by path, ignoring mtime (diffs are content-based).
+/// The `AbsManifest` / `RelManifest` accessors report the wrapped manifest's
+/// fields.
+macro_rules! wrapper_matches {
+    ($w:expr, $m:expr) => {{
+        let (w, m) = (&$w, &$m);
+        oracle!(
+            w.files() == m.files.as_slice()
+                && w.dirs() == m.dirs.as_slice()
+                && w.hash_alg() == m.hash_alg
+                && w.file_chunk_size_bytes() == m.file_chunk_size_bytes
+                && w.total_size() == m.total_size
+                && w.parent_manifest_hash() == m.parent_manifest_hash.as_deref(),
+            "manifest wrapper accessors disagree with the wrapped manifest"
+        );
+    }};
+}
+
 fn by_path(files: &[FileEntry]) -> BTreeMap<String, Content> {
     files
         .iter()
@@ -391,7 +408,7 @@ pub fn ops_gen(data: &[u8]) {
             "generated abs diff v2025",
         );
         let am = openjd_snapshots::AbsManifest::Diff(d.clone());
-        let _ = am.dirs();
+        wrapper_matches!(am, d);
         // Preserve fails on escaping symlinks; fall back to excluding them.
         let rel = [
             SymlinkPolicy::Preserve,
@@ -416,8 +433,8 @@ pub fn ops_gen(data: &[u8]) {
             let _ = openjd_snapshots::join_snapshot_diff(&rel, ABS_ROOT);
             let _ = openjd_snapshots::join_snapshot_diff_rel(&rel, "pre");
             let _ = openjd_snapshots::subtree_rel_snapshot_diff(&rel, "a", SymlinkPolicy::Preserve);
-            let rm = openjd_snapshots::RelManifest::Diff(rel);
-            let _ = rm.dirs();
+            let rm = openjd_snapshots::RelManifest::Diff(rel.clone());
+            wrapper_matches!(rm, rel);
             let _ = openjd_snapshots::join_manifest(&rm, ABS_ROOT);
             let _ = openjd_snapshots::join_manifest_rel(&rm, "pre");
             let _ = openjd_snapshots::subtree_rel_manifest(&rm, "a", SymlinkPolicy::Preserve);

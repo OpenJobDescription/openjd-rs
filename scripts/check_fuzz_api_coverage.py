@@ -7,11 +7,14 @@
 # corpus, or explicitly excluded with a reason.
 #
 # "Public function" comes from the compiler, not a regex: rustdoc JSON lists
-# every item reachable from each crate root, with exact spans. "Executed"
-# comes from the compiler too: the committed corpus and regressions are
-# replayed (`cargo test` in fuzz/) under llvm source-based coverage, and an
-# item counts as fuzzed only if code inside its span ran. Naming a function in
-# a registry proves nothing; this check cannot be satisfied by a claim.
+# every item reachable from each crate root, with its definition path.
+# "Executed" comes from the compiler too: the committed corpus and regressions
+# are replayed (`cargo test` in fuzz/) under llvm source-based coverage, and a
+# function counts as fuzzed only if llvm's record for that function (matched
+# by demangled definition path, any generic instantiation) has a nonzero
+# execution count. Matching by name, not by source span, keeps functions that
+# share a span (macro-generated methods) apart. Naming a function in a
+# registry proves nothing; this check cannot be satisfied by a claim.
 #
 # Rules (all enforced):
 #   1. Every public free function and inherent method of openjd-expr,
@@ -36,7 +39,6 @@ import os
 import subprocess
 import sys
 import tomllib
-from collections import defaultdict
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -44,25 +46,31 @@ CRATES = ["openjd_expr", "openjd_model", "openjd_sessions", "openjd_snapshots"]
 POLICY = REPO / "fuzz" / "api_coverage.toml"
 
 
-def public_functions(doc: dict) -> dict[str, tuple[str, int, int]]:
-    """Map 'crate::path::fn' -> (file, begin_line, end_line) for every public
-    free function and inherent method reachable from the crate root."""
+def public_functions(doc: dict) -> dict[str, tuple[str, int, str]]:
+    """Map 'crate::public::path::fn' -> (file, begin_line, definition_path)
+    for every public free function and inherent method reachable from the
+    crate root. A re-exported item is listed once, under its shortest public
+    path."""
     index = doc["index"]
-    out: dict[str, tuple[str, int, int]] = {}
+    paths = doc["paths"]
+    # item id -> (public path, file, begin line, definition path)
+    out: dict[int, tuple[str, str, int, str]] = {}
     seen: set = set()
 
-    def span(item):
+    def add(path: str, item, defpath: str | None):
         s = item.get("span")
-        if not s:
-            return None
-        return (s["filename"], s["begin"][0], s["end"][0])
+        if not s or item.get("crate_id") != 0 or not defpath:
+            return
+        prev = out.get(item["id"])
+        if prev is None or len(path) < len(prev[0]):
+            out[item["id"]] = (path, s["filename"], s["begin"][0], defpath)
 
-    def add(path: str, item):
-        sp = span(item)
-        if sp and item.get("crate_id") == 0:
-            out.setdefault(path, sp)
+    def defpath_of(item_id) -> str | None:
+        p = paths.get(str(item_id))
+        return "::".join(p["path"]) if p else None
 
     def methods(type_item, type_path: str):
+        type_def = defpath_of(type_item["id"])
         inner = type_item["inner"]
         kind = next(iter(inner))
         for impl_id in inner[kind].get("impls", []):
@@ -75,7 +83,11 @@ def public_functions(doc: dict) -> dict[str, tuple[str, int, int]]:
             for mid in body["items"]:
                 m = index.get(str(mid))
                 if m and "function" in m["inner"] and m.get("visibility") == "public":
-                    add(f"{type_path}::{m['name']}", m)
+                    add(
+                        f"{type_path}::{m['name']}",
+                        m,
+                        f"{type_def}::{m['name']}" if type_def else None,
+                    )
 
     def walk(item_id, path: str):
         key = (item_id, path)
@@ -108,42 +120,74 @@ def public_functions(doc: dict) -> dict[str, tuple[str, int, int]]:
                 else:
                     walk(child, f"{path}::{c['name']}")
         elif kind == "function":
-            add(path, item)
+            add(path, item, defpath_of(item_id))
         elif kind in ("struct", "enum", "union"):
             methods(item, path)
 
     root = doc["root"]
     walk(root, index[str(root)]["name"])
-    # A re-exported item is reachable under several paths; keep the shortest
-    # (the crate-root re-export) so each function is listed once.
-    by_span: dict[tuple[str, int, int], str] = {}
-    for path, sp in out.items():
-        if sp not in by_span or len(path) < len(by_span[sp]):
-            by_span[sp] = path
-    return {path: sp for sp, path in by_span.items()}
+    return {path: (file, begin, defpath) for path, file, begin, defpath in out.values()}
 
 
-def covered_lines(cov: dict) -> dict[str, list[tuple[int, int, int]]]:
-    """Map repo-relative file -> [(start_line, end_line, count)] for every
-    function llvm-cov reports, instantiations summed by region."""
-    out: dict[str, list[tuple[int, int, int]]] = defaultdict(list)
-    for data in cov["data"]:
-        for fn in data["functions"]:
-            files = fn["filenames"]
-            for r in fn["regions"]:
-                # [line_start, col_start, line_end, col_end, count, file_id, expanded_file_id, kind]
-                ls, _, le, _, count, file_id = r[:6]
-                f = files[file_id]
-                try:
-                    rel = str(Path(f).resolve().relative_to(REPO))
-                except ValueError:
-                    continue
-                out[rel].append((ls, le, count))
-    return out
+def strip_generics(s: str) -> str:
+    """Drop every balanced `<...>` group (generic arguments), then the `::`
+    that introduced a turbofish."""
+    out, depth = [], 0
+    for c in s:
+        if c == "<":
+            depth += 1
+        elif c == ">":
+            depth -= 1
+        elif depth == 0:
+            out.append(c)
+    r = "".join(out)
+    while "::::" in r:
+        r = r.replace("::::", "::")
+    return r.removesuffix("::")
 
 
-def is_covered(regions, begin: int, end: int) -> bool:
-    return any(count > 0 and begin <= ls <= end for ls, _, count in regions)
+def definition_path(demangled: str) -> str | None:
+    """`<crate::m::Type<T>>::method::<U>` -> `crate::m::Type::method`;
+    `crate::m::f::<T>` -> `crate::m::f`. None for closures, shims, and trait
+    impls (`<T as Trait>::f`), which are not public inherent functions."""
+    if "{" in strip_generics(demangled):
+        return None
+    if demangled.startswith("<"):
+        depth = 0
+        for i, c in enumerate(demangled):
+            depth += c == "<"
+            depth -= c == ">"
+            if depth == 0:
+                break
+        inner, rest = demangled[1:i], demangled[i + 1 :]
+        top = strip_generics(inner)
+        if " as " in top or not top.replace("::", "").replace("_", "").isalnum():
+            return None
+        return top + strip_generics(rest)
+    return strip_generics(demangled)
+
+
+def executed_functions(cov: dict) -> set[str]:
+    """Definition paths of every function llvm-cov saw execute."""
+    fns = [fn for data in cov["data"] for fn in data["functions"]]
+    demangled = subprocess.run(
+        [
+            "cargo", "run", "-q", "--manifest-path", "fuzz/Cargo.toml", "--no-default-features",
+            "--example", "demangle",
+        ],
+        cwd=REPO,
+        check=True,
+        input="\n".join(fn["name"] for fn in fns) + "\n",
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    assert len(demangled) == len(fns), "demangler output does not match its input"
+    executed: set[str] = set()
+    for d, fn in zip(demangled, fns):
+        path = definition_path(d)
+        if path is not None and fn["count"] > 0:
+            executed.add(path)
+    return executed
 
 
 def generate(out_dir: Path) -> tuple[Path, Path]:
@@ -191,9 +235,9 @@ def main() -> int:
 
     policy = tomllib.loads(POLICY.read_text(encoding="utf-8"))
     excludes: dict[str, str] = policy.get("exclude", {})
-    regions = covered_lines(json.loads(args.coverage.read_text(encoding="utf-8")))
+    executed = executed_functions(json.loads(args.coverage.read_text(encoding="utf-8")))
 
-    functions: dict[str, tuple[str, int, int]] = {}
+    functions: dict[str, tuple[str, int, str]] = {}
     for crate in CRATES:
         doc = json.loads((args.rustdoc_dir / f"{crate}.json").read_text(encoding="utf-8"))
         functions.update(public_functions(doc))
@@ -203,8 +247,10 @@ def main() -> int:
     rows = []
     n_cov = n_exc = 0
     for path in sorted(functions):
-        file, begin, end = functions[path]
-        covered = is_covered(regions.get(file, []), begin, end)
+        file, begin, defpath = functions[path]
+        # A function with no llvm record was never code-generated (an
+        # uninstantiated generic, or dead code), so it was not executed.
+        covered = defpath in executed
         excluded = [p for p in excludes if fnmatch.fnmatchcase(path, p)]
         for p in excluded:
             pattern_hits[p] += 1
