@@ -224,7 +224,9 @@ pub mod known {
     /// Measured (release build) over the corpus: every parse over 50 ms had
     /// at least 6 brackets still open and over 200 bytes, or nesting deeper
     /// than 12; length alone is not the cause (a 450-byte balanced input
-    /// parses in microseconds). Inputs over 4 KiB are skipped too, as a cap.
+    /// parses in microseconds), but with a few open brackets parse time still
+    /// grows with length (~1.4 s at 4 KiB, opt-level 3, no sanitizer), so
+    /// inputs over 1 KiB are skipped too.
     pub fn skip_deep_unclosed_brackets(text: &str) -> bool {
         if std::env::var_os("OPENJD_FUZZ_KNOWN").is_some_and(|v| v == "1") {
             return false;
@@ -240,7 +242,7 @@ pub mod known {
                 _ => {}
             }
         }
-        let skip = max_depth > 12 || (depth >= 6 && text.len() > 200) || text.len() > 4096;
+        let skip = max_depth > 12 || (depth >= 6 && text.len() > 200) || text.len() > 1024;
         if skip {
             record("expr-parser-exponential-recovery");
         }

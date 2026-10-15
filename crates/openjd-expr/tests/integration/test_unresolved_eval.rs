@@ -2779,6 +2779,10 @@ fn listcomp_over_non_iterable_unresolved_is_refused() {
             ],
         );
     }
+    // An unknown iterable binds `any`, so iterating the loop variable again
+    // is not refused.
+    let st = st_unresolved(vec![("Param.A", "any")]);
+    eval_u("[[y for y in x] for x in Param.A]", &st);
     // Iterable types still iterate statically.
     for (t, elem) in [
         ("list[string]", "string"),

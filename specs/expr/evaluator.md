@@ -567,7 +567,7 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
 - Creates a local scope per iteration (loop variable doesn't leak)
 - Handles unresolved iterables by evaluating the body once with an unresolved loop variable
   of the iterable's element type (`list[T]` binds `T`, `range_expr` binds `int`, a union
-  binds its iterable members' elements). An unresolved iterable of a type no value of which
+  binds its iterable members' elements, an unknown type such as `any` binds `any`). An unresolved iterable of a type no value of which
   is iterable (`string`, `path`, `int`, `float`, `bool`, `nulltype`) is refused with the
   run-time error `Cannot iterate over {type}`, so `[x for x in Param.Name]` with a STRING
   parameter fails validation rather than every run

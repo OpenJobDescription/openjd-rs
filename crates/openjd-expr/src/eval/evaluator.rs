@@ -2227,8 +2227,9 @@ fn unwrap_unresolved(t: &ExprType) -> ExprType {
 /// by list comprehensions whose body produced unresolved elements;
 /// The element type a comprehension binds when iterating a value of the
 /// (unresolved) type `t`, or `None` if no value of that type is iterable.
-/// Unknown types (`any`, type variables, an unresolved placeholder) keep the
-/// historical `int` binding; a union iterates as its iterable members.
+/// Unknown types (`any`, type variables, an unresolved placeholder) bind
+/// `any`, so a nested comprehension over the loop variable is not refused;
+/// a union iterates as its iterable members.
 fn unresolved_iteration_element(t: &ExprType) -> Option<ExprType> {
     use crate::types::TypeCode;
     match t.code() {
@@ -2252,7 +2253,7 @@ fn unresolved_iteration_element(t: &ExprType) -> Option<ExprType> {
         | TypeCode::Float
         | TypeCode::String
         | TypeCode::Path => None,
-        _ => Some(ExprType::INT),
+        _ => Some(ExprType::ANY),
     }
 }
 

@@ -155,6 +155,8 @@ impl Facts {
             boolop: g.used_boolop,
             union: g.used_union,
             unbound_return: g.used_unbound_return,
+            // List `+` is `(list[T1], list[T2]) -> list[T3]`, an
+            // unbound-return signature.
             list_add: g.used_unbound_return,
             conditional: g.used_conditional,
         }
