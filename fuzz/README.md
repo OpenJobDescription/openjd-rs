@@ -110,7 +110,8 @@ Each check below is executable, and each was verified to fail when broken:
 - **Known issues stay honest.** Each `regressions/<target>/known-<id>[--note]`
   must still reproduce `<id>`, and every known issue must have one
   (`known_issue_reproducers_reproduce`), so a fixed bug fails until its gate
-  becomes an `oracle!`.
+  becomes an `oracle!`. A `--posix-host` / `--windows-host` note marks a
+  reproducer that depends on the host's path format; it runs only there.
 - **Every target is fuzzed in CI.** Each registered target appears in exactly
   one `fuzz.yml` matrix group (`every_target_is_in_one_ci_group`).
 - **Public API coverage** (`scripts/check_fuzz_api_coverage.py`). rustdoc JSON

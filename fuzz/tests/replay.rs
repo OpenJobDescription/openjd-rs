@@ -212,6 +212,17 @@ fn known_issue_reproducers_reproduce() {
                 continue;
             };
             let id = rest.split("--").next().unwrap().to_string();
+            // A `--posix-host` / `--windows-host` note marks a reproducer
+            // that depends on the host's path format (static validation
+            // runs in it); elsewhere it is not run, but still counts.
+            let host = openjd_expr::PathFormat::host();
+            let other_host = (stem.contains("--posix-host")
+                && host != openjd_expr::PathFormat::Posix)
+                || (stem.contains("--windows-host") && host != openjd_expr::PathFormat::Windows);
+            if other_host {
+                reproduced.insert(id);
+                continue;
+            }
             let data = std::fs::read(&file).unwrap();
             take_recorded();
             IN_REPLAY.with(|r| r.set(true));
