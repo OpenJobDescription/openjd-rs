@@ -1817,7 +1817,8 @@ impl<'a> Evaluator<'a> {
     /// `unresolved(list[T | nulltype])` for a body of type `T`
     /// ([`crate::types::comprehension_list_type`]). A filter or body that
     /// fails to type — a type error, a value error on concrete operands, a
-    /// non-boolean filter — fails on every run that evaluates it, so the
+    /// non-boolean filter, an undefined symbol or unknown function — fails
+    /// on every run that evaluates it, so the
     /// only run that can succeed keeps no element: the result is
     /// `unresolved(list[nulltype])`, not an error. The failure surfaces at
     /// the stage whose values reach it. Budget exceedances propagate.
@@ -1987,9 +1988,12 @@ impl<'a> Evaluator<'a> {
         let mut result = crate::budgeted_vec::BudgetedVec::new();
         let base_symtabs: Vec<&SymbolTable> = self.symtabs.to_vec();
         // Set when a filter condition evaluates to an unresolved value:
-        // per-element inclusion is undecidable, so the loop is abandoned
-        // and the comprehension concludes unresolved (below, after the
-        // borrowing iterator is dropped).
+        // per-element inclusion is undecidable, so the comprehension
+        // concludes unresolved (below, after the borrowing iterator is
+        // dropped). The remaining elements are still filtered, and those
+        // whose filter is concretely true still have their body
+        // evaluated: every run evaluates it, so its failure is reported
+        // whatever the order of the elements.
         let mut filter_unresolved = false;
         for item in iter {
             self.count_op()?;
@@ -2024,11 +2028,11 @@ impl<'a> Evaluator<'a> {
                     // accumulated elements are abandoned — BudgetedVec
                     // only pre-checks the budget; the finished list
                     // would be tracked by make_list_checked, which is
-                    // never reached.
-                    self.absorb_spend_and_reset(&child, memory_baseline);
-                    self.regex_cache = child.regex_cache;
+                    // never reached. The loop goes on, so that every
+                    // element whose filter is concretely true has its
+                    // body evaluated wherever it is in the iterable.
                     filter_unresolved = true;
-                    break;
+                    include = false;
                 } else {
                     self.absorb_spend_and_reset(&child, comprehension_baseline);
                     self.regex_cache = child.regex_cache;
@@ -2067,7 +2071,10 @@ impl<'a> Evaluator<'a> {
             // child's footprint.
             self.absorb_spend_and_reset(&child, memory_baseline);
             self.regex_cache = child.regex_cache;
-            if let Some(elt) = elt {
+            // Once a filter was unresolved the result is concluded from
+            // types (below): an element's body is evaluated only so that
+            // its failure, which every run reaches, is reported.
+            if let Some(elt) = elt.filter(|_| !filter_unresolved) {
                 if let Err(e) = result.push(self, elt) {
                     // Only a budget exceedance can land here, which no
                     // enclosing construct absorbs — but the exit drops

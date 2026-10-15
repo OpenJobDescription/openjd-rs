@@ -454,10 +454,11 @@ other operand.
 
 ### Speculative evaluation
 
-Two constructs evaluate sub-expressions whose failure they may absorb rather than
-propagate: the branches of an unresolved-test conditional, and the operands of a
-boolop after an unresolved one. Both use one helper, `eval_speculative`, which
-applies two rules:
+Three constructs evaluate sub-expressions whose failure they may absorb rather
+than propagate: the branches of an unresolved-test conditional, the operands of a
+boolop after an unresolved one, and the filter and body of a list comprehension
+typed over an unresolved iterable or filter. All use one helper, `speculate`
+(`eval_speculative` for a single node), which applies two rules:
 
 - A budget error (`MemoryLimitExceeded` / `OperationLimitExceeded`, directly or
   inside a compound error's sub-errors) is never absorbed. The memory and
@@ -472,7 +473,8 @@ applies two rules:
   sub-expression failed.
 
 The caller decides what an absorbed failure means: an `Unresolved` of the other
-branch's type, a runtime short-circuit, or a compound "both branches fail" error.
+branch's type, a runtime short-circuit, a compound "both branches fail" error, or a
+comprehension that only a run keeping no element survives (`list[nulltype]`).
 
 The first rule requires that every construct between the budget failure and
 the absorbing one passes the error through unchanged. Two places replace
@@ -570,10 +572,13 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   concrete element concludes the same way: per-element inclusion is
   undecidable, so any accumulated elements are abandoned and the
   comprehension concludes as over an unresolved iterable (below), with
-  the body's
-  type derived under an unresolved loop variable (evaluating the body
-  on a concrete element the runtime filter may exclude could raise a
-  spurious value error). This state — iterable concrete, filter
+  the body's type derived under an unresolved loop variable (evaluating
+  the body on a concrete element the runtime filter may exclude could
+  raise a spurious value error). The loop still runs to the end: an
+  element whose filter is concretely true, before or after the unresolved
+  one, is kept by every run, so its body is evaluated and its failure is
+  an error (`[x.upper() for x in [2, 1] if x == 1 or Task.Param.C]`
+  fails at every stage, whatever the order). This state — iterable concrete, filter
   unresolved — is exactly what job creation evaluates under when the
   iterable depends on `Param.*` and the filter on `Task.*`/`Session.*`;
   a hard error here would reject templates that both validate and run.
@@ -617,9 +622,13 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     succeed, when no run that keeps an element can: nothing is left of
     `T` (the body can only be `null`), `T` is `noreturn`, every form of `T`
     is a list of lists (the comprehension would nest three levels, which
-    no value can, 2026-02 §1.2.1), or the filter or body fails to type —
+    no value can, 2026-02 §1.2.1; a form holding a type variable, such as
+    the `list[list[T1]]` of `x + [2]` with `x: T3`, does not say what its
+    values are and does not count), or the filter or body fails to type —
     a type error, a value error on concrete operands, a filter that can
-    never be a boolean. The failure is not reported: it surfaces at the
+    never be a boolean, or a reference to an undefined symbol or unknown
+    function, as in a conditional branch that may not run. The failure is
+    not reported: it surfaces at the
     stage whose values reach it. `[x.upper() for x in Param.L]` passes
     template validation and fails at job creation unless `Param.L` is
     empty. The typing runs under `speculate`
@@ -769,8 +778,10 @@ Key differences:
    avoiding the overhead of wrapping each element in a tagged `ExprValue`.
 5. **List comprehension result type** — The Python `expr` branch of
    `openjd-model-for-python` takes a comprehension's element type from its first
-   result and makes an empty result `list[nulltype]`, as the Rust evaluator does.
-   The Rust evaluator follows the 2026-02 Expression Language §1.3.7 rule above
+   result and makes an empty result `list[nulltype]`. The Rust evaluator also makes an
+   empty result `list[nulltype]`, but types a non-empty one by the list-literal join
+   of all its results (`[x if x > 1 else 2.5 for x in [2, 1]]` is `list[float]`). It
+   follows the 2026-02 Expression Language §1.3.7 rule above
    where Python does not: over an unresolved iterable the result is
    `list[T | nulltype]` rather than `list[T]`, and a filter or body that fails to
    type gives `list[nulltype]` rather than an error. The Python mainline is moving

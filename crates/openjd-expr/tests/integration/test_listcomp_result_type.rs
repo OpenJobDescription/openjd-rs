@@ -230,7 +230,11 @@ fn body_type_error_with_an_unresolved_filter() {
         expr,
         &rt,
         "run time",
-        &["upper() is not available for int. Available for: string\n"],
+        &[
+            "upper() is not available for int. Available for: string\n",
+            &format!("  {expr}\n"),
+            "   ~~^~~~~~~",
+        ],
     );
     let mut off = rt.clone();
     off.set("Task.Param.C", ExprValue::Bool(false)).unwrap();
@@ -238,7 +242,68 @@ fn body_type_error_with_an_unresolved_filter() {
 }
 
 #[test]
+fn body_failure_on_an_element_every_run_keeps_is_reported_in_any_order() {
+    // F2 of audit round 5: an element whose filter is concretely true is
+    // kept by every run, so its body's failure is an error at every stage —
+    // also when an element with an unresolved filter comes before it.
+    for expr in [
+        "[x.upper() for x in [1, 2] if x == 1 or Task.Param.C]",
+        "[x.upper() for x in [2, 1] if x == 1 or Task.Param.C]",
+    ] {
+        assert_err_all(
+            expr,
+            &[
+                "upper() is not available for int. Available for: string\n",
+                &format!("  {expr}\n"),
+                "   ~~^~~~~~~",
+            ],
+        );
+    }
+    // Its value does not decide the result: that is concluded from types.
+    let [p8, g2, _] = states();
+    let expr = "[x for x in [2, 1] if x == 1 or Task.Param.C]";
+    for st in [&p8, &g2] {
+        assert_eq!(
+            eval(expr, st).expr_type(),
+            tp("unresolved[list[int | nulltype]]")
+        );
+    }
+}
+
+#[test]
+fn undefined_symbol_in_a_body_surfaces_when_an_element_reaches_it() {
+    // As in a conditional branch that may not run, a name the body cannot
+    // resolve fails only a run that evaluates the body.
+    let expr = "[Param.Typo for x in Param.L]";
+    assert_fails_once_run(
+        expr,
+        "unresolved[list[nulltype]]",
+        &[
+            "Undefined variable: 'Param.Typo'. Did you mean one of: Param.EL, Param.L, Param.LS, Param.R, Param.Z\n",
+            &format!("  {expr}\n"),
+            "   ~~~~~~^~~~",
+        ],
+    );
+}
+
+#[test]
 fn body_value_error_on_concrete_values() {
+    // A body that fails on operands whose values are known fails every run
+    // that keeps an element; template validation does not know whether one
+    // will.
+    let expr = "[1 // 0 for x in Param.L]";
+    assert_fails_once_run(
+        expr,
+        "unresolved[list[nulltype]]",
+        &["Division by zero\n", &format!("  {expr}\n"), "   ~~^~~~"],
+    );
+    assert_stages(
+        "[1 // 0 for x in Param.L if x > 100]",
+        "unresolved[list[nulltype]]",
+        "list[nulltype]",
+        "list[nulltype]",
+        "[]",
+    );
     // `1 // Param.Z` types as `int` at validation; at job creation, where
     // `Param.Z = 0`, the filter keeps nothing and the body never runs.
     assert_stages(
@@ -450,7 +515,53 @@ fn unresolved_iterable_that_cannot_be_iterated() {
     // Was accepted at template validation with the loop variable bound as
     // `int`; every run fails. An error in the iterable is not absorbed.
     let expr = "[x for x in Task.Param.I]";
-    assert_err_all(expr, &["Cannot iterate over int"]);
+    assert_err_all(
+        expr,
+        &[
+            "Cannot iterate over int\n",
+            &format!("  {expr}\n"),
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn unresolved_iterable_that_can_only_be_empty() {
+    // F2 of audit round 5: the body of a comprehension whose iterable can
+    // only be `[]` is neither run nor type-checked, whatever the stage.
+    assert_stages(
+        "[x.upper() for x in ([] if Task.Param.C else [])]",
+        "unresolved[list[nulltype]]",
+        "unresolved[list[nulltype]]",
+        "list[nulltype]",
+        "[]",
+    );
+    // So indexing it fails on every run.
+    let expr = "[x for x in ([] if Task.Param.C else [])][0]";
+    let [p8, g2, rt] = states();
+    let caret = "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~";
+    for (stage, st) in [("pass 8", &p8), ("gate 2", &g2)] {
+        assert_err_in(
+            expr,
+            st,
+            stage,
+            &[
+                "Index out of bounds: the list is always empty\n",
+                &format!("  {expr}\n"),
+                caret,
+            ],
+        );
+    }
+    assert_err_in(
+        expr,
+        &rt,
+        "run time",
+        &[
+            "Index 0 out of bounds for list of length 0\n",
+            &format!("  {expr}\n"),
+            caret,
+        ],
+    );
 }
 
 // ── Lists with a union element type (§1.2.1) ──
@@ -504,7 +615,11 @@ fn calls_match_each_form_of_a_union_element_list() {
         expr,
         &p8,
         "pass 8",
-        &["upper() is not available for list[float | int | nulltype]. Available for: string"],
+        &[
+            "upper() is not available for list[float | int | nulltype]. Available for: string\n",
+            &format!("  {expr}\n"),
+            &format!("  {}^~~~~~~", "~".repeat(39)),
+        ],
     );
 }
 
@@ -534,10 +649,15 @@ fn element_type_that_is_a_list_of_lists_fails_when_an_element_reaches_it() {
         "list[nulltype]",
         "[]",
     );
+    let expr = "[[[x]] for x in Param.L]";
     assert_fails_once_run(
-        "[[[x]] for x in Param.L]",
+        expr,
         "unresolved[list[nulltype]]",
-        &["Lists may be nested at most 2 levels deep"],
+        &[
+            "Lists may be nested at most 2 levels deep\n",
+            &format!("  {expr}\n"),
+            "  ^~~~~~~~~~~~~~~~~~~~~~~",
+        ],
     );
     // A union element type with a form that nests correctly: a run
     // producing only that form builds a valid list.
@@ -545,6 +665,22 @@ fn element_type_that_is_a_list_of_lists_fails_when_an_element_reaches_it() {
     assert_eq!(
         eval("[[[x]] if x > 100 else [x] for x in Param.L]", &p8).expr_type(),
         tp("unresolved[list[list[int | list[int]] | nulltype]]")
+    );
+}
+
+#[test]
+fn type_variable_element_type_is_not_a_list_of_lists() {
+    // F1 of audit round 5: over `Param.EL + [[1]]` (an unresolved
+    // `list[T3]`) the body `x + [2]` types as `list[list[T1]]`, which does
+    // not say what its values are. Counting it as a list of lists made the
+    // comprehension `list[nulltype]` and its index an error, though every
+    // run builds `[[1, 2]]`.
+    assert_stages(
+        "[x + [2] for x in (Param.EL + [[1]])][0]",
+        "unresolved[list[list[T1]]]",
+        "list[int]",
+        "list[int]",
+        "[1, 2]",
     );
 }
 

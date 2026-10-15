@@ -655,7 +655,10 @@ pub(crate) fn comprehension_list_type(body: &ExprType) -> ExprType {
 /// form of `T` (each member of a union `T`, each of their
 /// [`list_forms`], `nulltype` aside) is a list of lists. A form that is
 /// not leaves a run that builds a valid list, which validation must not
-/// reject; with no form left there is nothing to nest.
+/// reject; with no form left there is nothing to nest. A form holding a
+/// type variable (`list[list[T1]]`, from typing an operation on an
+/// element of unknown type) does not say what its values are, so it does
+/// not count.
 pub(crate) fn comprehension_too_deep(t: &ExprType) -> bool {
     fn depth(t: &ExprType) -> usize {
         match (t.code, t.params.as_slice()) {
@@ -673,7 +676,7 @@ pub(crate) fn comprehension_too_deep(t: &ExprType) -> bool {
         .filter(|m| m.code != TypeCode::NullType)
         .flat_map(list_forms)
         .peekable();
-    forms.peek().is_some() && forms.all(|f| depth(&f) >= 2)
+    forms.peek().is_some() && forms.all(|f| depth(&f) >= 2 && !f.is_symbolic())
 }
 
 /// A union of list types as the single list type it equals (§1.2.1: a
