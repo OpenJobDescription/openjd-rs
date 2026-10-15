@@ -461,10 +461,14 @@ jobs:
           # /var/folders/<hash>/T (0700).
           #
           # getconf, not ${TMPDIR}: TMPDIR is already the override at job
-          # scope, so statting it reports 1777 and says nothing about the
-          # default this is here to contrast with.
-          echo "default TMPDIR mode:  $(stat -f '%Lp %N' "$(getconf DARWIN_USER_TEMP_DIR)" 2>/dev/null || true)"
-          echo "override TMPDIR mode: $(stat -f '%Lp %N' "${TMPDIR}" 2>/dev/null || true)"
+          # scope, so statting it reports the override's own mode and says
+          # nothing about the default this is here to contrast with.
+          #
+          # %Mp%Lp, not %Lp: %Lp prints only the low 9 bits, so it shows 777
+          # for the override and cannot confirm the chmod 1777 above set the
+          # sticky bit.
+          echo "default TMPDIR mode:  $(stat -f '%Mp%Lp %N' "$(getconf DARWIN_USER_TEMP_DIR)" 2>/dev/null || true)"
+          echo "override TMPDIR mode: $(stat -f '%Mp%Lp %N' "${TMPDIR}" 2>/dev/null || true)"
           echo "runner default temp: ${RUNNER_TEMP:-unset}"
       - uses: actions/checkout@v7
       - name: Install rust stable

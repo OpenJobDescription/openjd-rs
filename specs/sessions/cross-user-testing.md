@@ -98,8 +98,10 @@ fn require_target_user() -> Arc<PosixSessionUser> {
 ```
 
 Each test is `#[ignore]` and calls `require_target_user()` or `require_disjoint_user()`
-as its first line. Outside Docker, `cargo test` skips them. Inside Docker,
-`cargo test -- --include-ignored` runs them.
+as its first line, so a plain `cargo test` skips them wherever it runs. The
+environments that provision the users run them with
+`cargo test -- --include-ignored`: the Linux containers, and the macOS CI job,
+which provisions the users on the runner itself rather than in a container.
 
 ## Test Inventory
 
