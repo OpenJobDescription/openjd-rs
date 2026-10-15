@@ -1743,23 +1743,20 @@ fn scalar_with_string_target() {
 }
 
 #[test]
-fn empty_listcomp_has_its_element_expression_type() {
-    // 2026-02 Expression Language §1.3.7: the type follows from the
-    // element expression, not from how many elements the filter kept.
+fn empty_listcomp_type_is_nulltype() {
     assert_eq!(
         eval("[x for x in [1, 2, 3] if False]")
             .expr_type()
             .to_string(),
-        "list[int]"
+        "list[nulltype]"
     );
 }
 
 #[test]
-fn flatten_empty_comprehension_reaches_repr_sh() {
-    // Regression: flatten over an empty comprehension result must be accepted
-    // by repr_sh. The comprehension is an empty list[list[string]] (2026-02
-    // §1.3.7: typed by its element expression), and flatten of it is an
-    // empty list.
+fn flatten_empty_comprehension_has_nulltype() {
+    // Regression: flatten over an empty comprehension result must yield list[nulltype],
+    // not list[int], so that functions like repr_sh (which has a list[nulltype] overload)
+    // accept the result.
     let mut st = SymbolTable::new();
     st.set(
         "Env",

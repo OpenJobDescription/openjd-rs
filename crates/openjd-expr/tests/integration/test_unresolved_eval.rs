@@ -221,7 +221,7 @@ fn list_mix_concrete_and_unknown() {
 fn comp_unknown_list_iterable() {
     let st = st_unresolved(vec![("X", "list[int]")]);
     let r = eval_u("[x for x in X]", &st);
-    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(r.expr_type(), tp("unresolved[list[int | nulltype]]"));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -240,7 +240,7 @@ fn comp_concrete_iterable_unresolved_filter() {
     st.set("S", ExprValue::unresolved(ExprType::STRING))
         .unwrap();
     let r = eval_u("[x for x in 'a,b,c'.split(',') if x != S]", &st);
-    assert_eq!(r.expr_type(), tp("unresolved[list[string]]"));
+    assert_eq!(r.expr_type(), tp("unresolved[list[string | nulltype]]"));
 }
 
 #[test]
@@ -248,7 +248,7 @@ fn comp_concrete_range_iterable_unresolved_filter() {
     let mut st = SymbolTable::new();
     st.set("N", ExprValue::unresolved(ExprType::INT)).unwrap();
     let r = eval_u("[x * 2 for x in range(3) if x > N]", &st);
-    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(r.expr_type(), tp("unresolved[list[int | nulltype]]"));
 }
 
 /// The body's type is derived with the loop variable unresolved, not
@@ -260,11 +260,12 @@ fn comp_unresolved_filter_shields_body_value_error_on_excluded_element() {
     let mut st = SymbolTable::new();
     st.set("N", ExprValue::unresolved(ExprType::INT)).unwrap();
     let r = eval_u("[10 // x for x in [0, 2] if x > N]", &st);
-    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(r.expr_type(), tp("unresolved[list[int | nulltype]]"));
 }
 
-/// A filter that can never be a boolean is still refused, matching the
-/// unresolved-iterable path's type check.
+/// A filter that can never be a boolean, on a concrete element that will
+/// be filtered at run time, fails that run: an error, located on the
+/// filter.
 #[test]
 fn comp_concrete_iterable_unresolved_nonbool_filter_rejected() {
     let mut st = SymbolTable::new();
@@ -292,7 +293,7 @@ fn comp_mixed_concrete_then_unresolved_filter_concludes_unresolved() {
     // For x=0: `x > 0 and B` short-circuits to false (concrete).
     // For x=1: `1 > 0 and B` is unresolved — bail out.
     let r = eval_u("[x for x in [0, 1, 2] if x > 0 and B]", &st);
-    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(r.expr_type(), tp("unresolved[list[int | nulltype]]"));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1581,10 +1582,11 @@ fn list_mix_unknown_string_and_concrete_path_type() {
 
 #[test]
 fn comp_unknown_list_with_body_type() {
-    // Python: test_unknown_list_with_body_expr — [x + 1 for x in unresolved[list[int]]] → unresolved[list[int]]
+    // Python: test_unknown_list_with_body_expr — [x + 1 for x in unresolved[list[int]]] → unresolved[list[int]];
+    // here the run may keep no element, so the type covers the untyped empty list (§1.3.7).
     let st = st_unresolved(vec![("X", "list[int]")]);
     let r = eval_u("[x + 1 for x in X]", &st);
-    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(r.expr_type(), tp("unresolved[list[int | nulltype]]"));
 }
 
 #[test]
@@ -1592,7 +1594,7 @@ fn comp_unknown_range_iterable_type() {
     // Python: test_unknown_range_iterable — [x for x in unresolved[range_expr]] → unresolved[list[int]]
     let st = st_unresolved(vec![("X", "range_expr")]);
     let r = eval_u("[x for x in X]", &st);
-    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(r.expr_type(), tp("unresolved[list[int | nulltype]]"));
 }
 
 #[test]
@@ -1600,7 +1602,7 @@ fn comp_unknown_iterable_with_transform_type() {
     // Python: test_unknown_iterable_with_transform — [string(x) for x in unresolved[list[int]]] → unresolved[list[string]]
     let st = st_unresolved(vec![("X", "list[int]")]);
     let r = eval_u("[string(x) for x in X]", &st);
-    assert_eq!(r.expr_type(), tp("unresolved[list[string]]"));
+    assert_eq!(r.expr_type(), tp("unresolved[list[string | nulltype]]"));
 }
 
 // --- TestUnknownCoercion: exact type assertions ---
@@ -1696,32 +1698,30 @@ fn round_float_unresolved_ndigits_returns_union() {
 
 // === List comprehension filter: unresolved type checking ===
 
+/// Over an unresolved iterable, a filter that can never be a boolean fails
+/// every run that evaluates it; only a run that keeps no element succeeds,
+/// so the result is the untyped empty list, not an error (§1.3.7). Over a
+/// concrete non-empty iterable it is an error
+/// (`comp_concrete_iterable_unresolved_nonbool_filter_rejected`).
 #[test]
-fn comp_filter_unresolved_int_is_error() {
+fn comp_filter_unresolved_int_gives_the_empty_list() {
     let st = st_unresolved(vec![("L", "list[int]"), ("P", "int")]);
-    assert_err_w(
-        "[x for x in L if P]",
-        &st,
-        &[
-            "List comprehension filter must be a boolean, got int\n",
-            "  [x for x in L if P]\n",
-            "                   ^",
-        ],
-    );
+    let r = eval_u("[x for x in L if P]", &st);
+    assert_eq!(r.expr_type(), tp("unresolved[list[nulltype]]"));
 }
 
 #[test]
 fn comp_filter_unresolved_bool_succeeds() {
     let st = st_unresolved(vec![("L", "list[int]"), ("P", "bool")]);
     let r = eval_u("[x for x in L if P]", &st);
-    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(r.expr_type(), tp("unresolved[list[int | nulltype]]"));
 }
 
 #[test]
 fn comp_filter_unresolved_unconstrained_succeeds() {
     let st = st_unresolved(vec![("L", "list[int]"), ("P", "unresolved")]);
     let r = eval_u("[x for x in L if P]", &st);
-    assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(r.expr_type(), tp("unresolved[list[int | nulltype]]"));
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1824,9 +1824,8 @@ fn join_gate2_listcomp_empty_list_beside_unresolved_list() {
 
 #[test]
 fn join_gate2_empty_concrete_comprehension_beside_unresolved_list() {
-    // An empty concrete comprehension over `list[int]` is an empty
-    // `list[int]` (2026-02 §1.3.7); it joins the unresolved `list[int]`
-    // sibling, also through enclosing calls.
+    // An empty concrete comprehension is `list[nulltype]`; it yields to
+    // the unresolved `list[int]` sibling, also through enclosing calls.
     let inner = "[[x for x in Param.L if x > 100], [Task.Param.I]]";
     assert_join_types(
         inner,
@@ -2143,7 +2142,10 @@ fn join_gate2_listcomp_null_body_reports_null_element() {
     // the run-time message rather than an int/nulltype type conflict.
     let [p8, g2, rt] = join_states();
     let expr = "[None if x > 2 else Task.Param.I for x in Param.L]";
-    assert_eq!(eval_u(expr, &p8).expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(
+        eval_u(expr, &p8).expr_type(),
+        tp("unresolved[list[int | nulltype]]")
+    );
     for st in [&g2, &rt] {
         assert_err_w(
             expr,

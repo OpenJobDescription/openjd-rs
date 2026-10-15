@@ -577,8 +577,9 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   unresolved — is exactly what job creation evaluates under when the
   iterable depends on `Param.*` and the filter on `Task.*`/`Session.*`;
   a hard error here would reject templates that both validate and run.
-  A filter whose *type* can never be a boolean is still an error on
-  both paths.
+  A filter that evaluates to a concrete non-boolean, or to an unresolved
+  value whose type can never be a boolean, on a concrete element is an
+  error: that element reaches it on every run.
 - Over a concrete iterable, the results build through `make_list`, which
   applies the shared list-element join; an incompatible pair fails with
   "make_list expected `T` element, got `U`" (`T` the join of the elements
@@ -591,17 +592,40 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   builds. `[[x] if x > 2 else [Task.Param.S] for x in Param.L]` fails at
   job creation as it does at run time (`list[int]` beside `list[string]`),
   though template validation, typing the body once as a union, accepts it.
-- Over an unresolved iterable (or an unresolved filter), the result is
-  `unresolved(types::comprehension_list_type(body_type))`, the body typed
-  once under an unresolved loop variable (see the result-type rule below).
-  `[[] if x > 2 else [Task.Param.S] for x in Param.L]` at template
-  validation is `unresolved[list[list[string | nulltype] | nulltype]]`: the
-  body's `list[string] | list[nulltype]` is the one list type
-  `list[string | nulltype]` (type-system.md § Lists with union element
-  types), and indexing it twice gives `string`.
-- **Result type** (2026-02 Expression Language §1.3.7). A comprehension's
-  type follows from its parts' types, not from how many elements the filter
-  keeps, so every evaluation stage agrees on an empty result:
+- **Result type** (2026-02 Expression Language §1.3.7). A run that keeps
+  no element never evaluates the element expression, so nothing types its
+  elements: it is the untyped empty list. Every stage follows from that,
+  and none rejects a comprehension that a later stage's values let
+  succeed:
+  - Over a concrete iterable, a run that keeps elements builds from their
+    values through `make_list`, as above (`[x if x > 1 else 2.5 for x in
+    L]` is `list[int]` or `list[float]`); one that keeps none is
+    `list[nulltype]`, with the body neither run nor type-checked
+    (`[x for x in [1, 2] if x > 5] + ['a']` is `['a']`).
+  - Over an unresolved iterable (or an unresolved filter), the filter and
+    body are typed once, under an unresolved loop variable, and the result
+    is `unresolved(types::comprehension_list_type(body_type))`:
+    `list[T | nulltype]`, where `T` is the body's type without a
+    `nulltype` member and a union of list types reads as one list type.
+    The list type with a union element type stands for each list a run can
+    build, the empty one included (type-system.md § Lists with union
+    element types): `[x for x in Param.L]` is
+    `unresolved[list[int | nulltype]]`, indexing it gives `int`, and
+    `[[] if x > 2 else [Task.Param.S] for x in Param.L]` is
+    `unresolved[list[list[string | nulltype] | nulltype]]`.
+  - The result is `unresolved[list[nulltype]]`, the only run that can
+    succeed, when no run that keeps an element can: nothing is left of
+    `T` (the body can only be `null`), `T` is `noreturn`, every form of `T`
+    is a list of lists (the comprehension would nest three levels, which
+    no value can, 2026-02 §1.2.1), or the filter or body fails to type —
+    a type error, a value error on concrete operands, a filter that can
+    never be a boolean. The failure is not reported: it surfaces at the
+    stage whose values reach it. `[x.upper() for x in Param.L]` passes
+    template validation and fails at job creation unless `Param.L` is
+    empty. The typing runs under `speculate`
+    ([Speculative evaluation](#speculative-evaluation)), so a budget
+    exceedance still propagates, and its spend is absorbed and its
+    footprint reset like an iteration's.
   - The loop variable's type is `types::comprehension_var` of the
     iterable's type: `E` for `list[E]`, `int` for `range_expr`, `any` for
     `any`, and for a union the union of its members' element types (a
@@ -609,54 +633,8 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     `nulltype` element). An iterable that can only be `[]` gives
     `list[nulltype]` with the body neither run nor type-checked
     (`[x * 2 for x in []]`). An unresolved iterable no value of which can be
-    iterated fails with "Cannot iterate over `T`", as a concrete one does.
-  - `T` is the body's type without a `nulltype` member, a union of list
-    types read as one list type (`types::comprehension_list_type`). With no
-    union in `T` the comprehension is `list[T]`; with a union it is
-    `list[T | nulltype]`; with nothing left of `T` (the body can only be
-    `null`, or always fails) it is `list[nulltype]`.
-  - A non-empty result over a concrete iterable builds from its values
-    through `make_list`, as above. Its elements' type is the one the rule
-    gives when `T` is a single concrete type, as far as the body's static
-    type covers its values (the known `flatten` of a typed empty list, which
-    is `list[nulltype]`, does not), and the values decide it otherwise
-    (`[x if x > 1 else 2.5 for x in L]` is `list[int]` or `list[float]`).
-  - An empty result (`empty_comprehension`) types the iterable and then
-    the body once, with `symbols_as_types` set so that every symbol they
-    read is `unresolved(its type)` — the type template validation gives
-    them, never a value. The loop variable takes the element type of the
-    iterable's static type, not of the iterable value that ran
-    (`[x + 1 for x in (Param.L if Task.Param.C else Param.LS)]` with an
-    empty `Param.LS` binds `int | string`, as validation does), falling
-    back to the value's type if the iterable cannot be typed so. A body
-    symbol that is never read at run time cannot fail it
-    (`[1 // Param.Z for x in L if Param.Z != 0]` with `Param.Z = 0` is an
-    empty `list[int]`). The result is the empty `list[T]` when `T` is a
-    single concrete type (`types::is_concrete_element_type`: no union,
-    `any`, or type variable — so a body typed `list[T3]` by `+` gives
-    `list[nulltype]`), so `[x for x in [1, 2] if x > 5] + ['a']` fails as
-    `[1] + ['a']` does, and the untyped empty `list[nulltype]` otherwise.
-    A symbol's static type is approximated by its value's type, which is
-    the same or narrower; a `null` value, whose `T?` type the value does not
-    record, is read as `any` (`[Opt.upper() for x in L if Opt != None]` with
-    `Opt` null is an empty `list[string]`). Where a value's type is narrower
-    than the type template validation gave the symbol (a `let` binding of a
-    union type), the typing can fail where validation's did not, making run
-    time stricter than validation. Reading `null` as `any` can instead make
-    run time laxer than the rule: `[Opt for x in L if Opt != None] + [1]`
-    with `Opt` null types the body `any` and is `[1]`, where the rule, with
-    `Opt: string?`, makes it an empty `list[string]` and an error. Template
-    validation, which sees `string?`, accepts it either way, so no stage
-    rejects a run that succeeds.
-    An error from the typing is an error of the comprehension, and
-    propagates: the body is type-checked even when it never runs. The
-    typing's spend is absorbed and its footprint reset like an iteration's.
-  - An element type `T` that is a list of lists (every form of it, for a
-    union) is an error, "Lists may be nested at most 2 levels deep",
-    located on the comprehension, at every stage and whether or not the
-    result is empty: the comprehension would be a three-level list, which
-    no value can be (2026-02 §1.2.1). `[[x] for x in Param.EL]` fails with
-    `Param.EL` an empty `list[list[int]]`.
+    iterated fails with "Cannot iterate over `T`", as a concrete one does:
+    an error in the iterable is not absorbed.
 - Operation count: +1 per iteration
 - Each iteration's child evaluator hands its *spend* — memory
   high-water mark and operation count — back to the parent on **every**
@@ -697,10 +675,10 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 - Indexing an unresolved receiver every form of which is the empty list
   (`list[nulltype]`, e.g. `[None for x in L]`) fails on every run that
   evaluates it, and is reported at the index: "Index out of bounds: the list
-  is always empty". Inside a comprehension body that is typed without being
-  run (`typing_unrun_body`: an empty result, or an unresolved iterable or
-  filter), the index may never be evaluated, so it is typed `noreturn` (its
-  `__getitem__(list[nulltype], int) -> noreturn` signature) instead.
+  is always empty". In a comprehension body typed over an unresolved
+  iterable or filter, the failure is absorbed like any other, and the
+  comprehension is `list[nulltype]` (see ListComp): the index may never be
+  evaluated.
 - The receiver and the index/slice bounds are evaluated unconstrained (see
   [Target Type Propagation](#target-type-propagation)): the caller's
   target describes the subscript's *result*, so `[10, 20, 30][0]` with
@@ -791,7 +769,9 @@ Key differences:
    avoiding the overhead of wrapping each element in a tagged `ExprValue`.
 5. **List comprehension result type** — The Python `expr` branch of
    `openjd-model-for-python` takes a comprehension's element type from its first
-   result and makes an empty result `list[nulltype]`. The Rust evaluator follows
-   the 2026-02 Expression Language §1.3.7 rule above (an empty result of a
-   comprehension whose element type has no union is a typed empty list). The
-   Python mainline is moving to these Rust bindings rather than being changed.
+   result and makes an empty result `list[nulltype]`, as the Rust evaluator does.
+   The Rust evaluator follows the 2026-02 Expression Language §1.3.7 rule above
+   where Python does not: over an unresolved iterable the result is
+   `list[T | nulltype]` rather than `list[T]`, and a filter or body that fails to
+   type gives `list[nulltype]` rather than an error. The Python mainline is moving
+   to these Rust bindings rather than being changed.

@@ -617,52 +617,37 @@ pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
     }
 }
 
-/// The type of a comprehension whose element expression has type
-/// `body` (§1.3.7), or `None` when it would nest lists more than two
-/// levels deep ([`comprehension_too_deep`]) — an error, as for a list
-/// literal. `T` is `body` without a `nulltype` member (a list
-/// cannot hold `null`), with a union of list types read as one list of
-/// the union of their elements ([`merge_list_union`]). Then:
+/// The type of a comprehension over an unresolved iterable (or with an
+/// unresolved filter) whose element expression has type `body` (§1.3.7).
+/// `T` is `body` without a `nulltype` member (a list cannot hold `null`),
+/// with a union of list types read as one list of the union of their
+/// elements ([`merge_list_union`]). The run may keep no element, so the
+/// type covers the untyped empty list too:
 ///
-/// - `T` is a single concrete type ([`is_concrete_element_type`]: no
-///   union, `any`, or type variable at any depth): `list[T]`.
-/// - otherwise: `list[T | nulltype]` — a non-empty run takes its type from
-///   its elements, and an empty one is `list[nulltype]`.
-/// - nothing is left of `T`: `list[nulltype]`.
-pub(crate) fn comprehension_list_type(body: &ExprType) -> Option<ExprType> {
+/// - `list[T | nulltype]`: a run that keeps elements takes its type from
+///   them, and one that keeps none is `list[nulltype]`.
+/// - nothing is left of `T`, `T` is `noreturn`, or every form of `T` is a
+///   list of lists ([`comprehension_too_deep`], a run that keeps an
+///   element fails): `list[nulltype]`, the only run that can succeed.
+pub(crate) fn comprehension_list_type(body: &ExprType) -> ExprType {
     let body = match (body.code, body.params.as_slice()) {
         (TypeCode::Unresolved, [inner]) => inner,
         _ => body,
     };
+    let empty = ExprType::list(ExprType::NULLTYPE);
     let Some(t) = list_element_contribution(body) else {
-        return Some(ExprType::list(ExprType::NULLTYPE));
+        return empty;
     };
     // A body that never produces a value (`fail(...)`): only a run with
     // no elements succeeds.
     if t.code == TypeCode::NoReturn {
-        return Some(ExprType::list(ExprType::NULLTYPE));
+        return empty;
     }
     let t = merge_list_union(t);
     if comprehension_too_deep(&t) {
-        return None;
+        return empty;
     }
-    Some(if is_concrete_element_type(&t) {
-        ExprType::list(t)
-    } else {
-        ExprType::list(ExprType::union(vec![t, ExprType::NULLTYPE]))
-    })
-}
-
-/// Whether a comprehension element type `t` is a single concrete type
-/// (§1.3.7): no union, no `any`, and no type variable, at any depth. Only
-/// such a type can be the element type of an empty list value; any other
-/// says the element type is not known until the elements are.
-pub(crate) fn is_concrete_element_type(t: &ExprType) -> bool {
-    !contains_union(t) && !contains_code(t, TypeCode::Any) && !t.is_symbolic()
-}
-
-fn contains_code(t: &ExprType, code: TypeCode) -> bool {
-    t.code == code || t.params.iter().any(|p| contains_code(p, code))
+    ExprType::list(ExprType::union(vec![t, ExprType::NULLTYPE]))
 }
 
 /// Whether `t`, as a comprehension's element type `T` (§1.3.7), makes the
@@ -689,12 +674,6 @@ pub(crate) fn comprehension_too_deep(t: &ExprType) -> bool {
         .flat_map(list_forms)
         .peekable();
     forms.peek().is_some() && forms.all(|f| depth(&f) >= 2)
-}
-
-/// Whether `t` has a union at any depth (`int | string`,
-/// `list[int | nulltype]`).
-pub(crate) fn contains_union(t: &ExprType) -> bool {
-    t.code == TypeCode::Union || t.params.iter().any(contains_union)
 }
 
 /// A union of list types as the single list type it equals (§1.2.1: a

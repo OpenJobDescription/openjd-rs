@@ -674,9 +674,9 @@ fn listcomp_with_task_param_filter_over_bound_param_passes_create_job() {
 
 /// A list literal or comprehension mixing a concrete `Param.*`-derived
 /// element with an unresolved `Task.*` one joins element types exactly as
-/// the concrete list does: an empty concrete comprehension (here over
-/// `range(Param.N)`, filtering to nothing) is an empty `list[int]` (2026-02
-/// §1.3.7), which joins the unresolved `list[int]` sibling. Regression test
+/// the concrete list does: an empty concrete list (`list[nulltype]`, here
+/// a comprehension over `range(Param.N)` that filters to nothing) yields
+/// to the unresolved `list[int]` sibling. Regression test
 /// (resolved-value-limits item 24): `openjd check` passed this template
 /// while `create_job` rejected both args with "List literal contains
 /// incompatible types: list[nulltype], list[int]" (and `list[int],

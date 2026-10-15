@@ -188,10 +188,8 @@ Crate-internal helpers (`pub(crate)`, not part of the public API):
 | `types::join_list_element(&ExprType, &ExprType) -> Option<ExprType>` | The list-element join above; `None` on a conflict |
 | `types::simplify_joined_list_element(ExprType) -> ExprType` | On a joined element type, drops `list[nulltype]` from a union that also holds a typed list |
 | `types::comprehension_var(&ExprType) -> ComprehensionVar` | A list comprehension's loop variable for an iterable of this type (§1.3.7): `Typed(E)` for `list[E]` (`int` for `range_expr`, `any` for `any`, the union of the members' element types for a union, `nulltype` elements contributing nothing), `EmptyOnly` when the iterable can only be `[]`, `NotIterable` when no value can be iterated |
-| `types::comprehension_list_type(&ExprType) -> Option<ExprType>` | A comprehension's type from its body's type (§1.3.7): `T` is the body without `nulltype`, its unions of lists merged; `list[T]` if `T` is a single concrete type (`is_concrete_element_type`), `list[T \| nulltype]` otherwise, `list[nulltype]` if nothing is left or the body is `noreturn`; `None` when `T` is a list of lists (`comprehension_too_deep`) |
-| `types::is_concrete_element_type(&ExprType) -> bool` | Is a comprehension element type a single concrete type — no union, `any`, or type variable at any depth — so an empty result can be a typed empty list of it? |
+| `types::comprehension_list_type(&ExprType) -> ExprType` | The type of a comprehension over an unresolved iterable (or with an unresolved filter) from its body's type (§1.3.7): `T` is the body without `nulltype`, its unions of lists merged; `list[T \| nulltype]`, the run that keeps no element included; `list[nulltype]` if nothing is left, the body is `noreturn`, or `T` is a list of lists (`comprehension_too_deep`) |
 | `types::comprehension_too_deep(&ExprType) -> bool` | Is every form of a comprehension element type `T` (each union member's `list_forms`, `nulltype` aside) a list of lists, so the comprehension would nest three levels? |
-| `types::contains_union(&ExprType) -> bool` | Has a union at any depth |
 | `types::merge_list_union(ExprType) -> ExprType` | A union's list members as the one list type they equal (`list[A] \| list[B]` is `list[A \| B]`), at every depth |
 | `types::list_forms(&ExprType) -> Vec<ExprType>` | The list types a type with union list element types stands for (`list[int \| nulltype]` gives `list[int]` and `list[nulltype]`), at every depth; a top-level union is not expanded |
 
@@ -208,8 +206,9 @@ built from several list types (a comprehension's body, a call typed by
 forms) it is written as the second (`types::merge_list_union`). Only
 unresolved values have such types; a concrete list's type never does.
 
-They arise from comprehensions whose body type is a union
-([evaluator.md § ListComp](evaluator.md#listcomp-eval_listcomp)), and from
+They arise from comprehensions over an unresolved iterable, whose result
+`list[T | nulltype]` includes the run that keeps no element ([evaluator.md §
+ListComp](evaluator.md#listcomp-eval_listcomp)), and from
 hoisted list literals with union-typed elements. Operations treat them by
 their forms ([function-library.md § Three-Phase
 Dispatch](function-library.md#three-phase-dispatch)): indexing

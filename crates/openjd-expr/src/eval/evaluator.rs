@@ -250,19 +250,6 @@ pub struct Evaluator<'a> {
     /// leak into operand evaluation (RFC 0005 propagation rules).
     target_type: Option<crate::types::ExprType>,
     regex_cache: std::collections::HashMap<String, regex::Regex>,
-    /// Read every symbol as `unresolved(its type)` instead of its value.
-    /// Set on the child that types an empty comprehension's element
-    /// expression (2026-02 Expression Language §1.3.7): the result's type
-    /// is the element expression's static type, the type template
-    /// validation gives it, not a type that depends on the values of the
-    /// symbols it reads. Inherited by nested children.
-    symbols_as_types: bool,
-    /// Set on a child that types a comprehension's element expression
-    /// without running it (the body may never run). An operation that
-    /// fails on every run where it is evaluated (indexing an always-empty
-    /// list) is then typed `noreturn`, not reported: the comprehension is
-    /// `list[nulltype]` (2026-02 §1.3.7). Inherited by nested children.
-    typing_unrun_body: bool,
 }
 
 static EMPTY_KEYWORD_RENAMES: std::sync::LazyLock<std::collections::HashMap<String, String>> =
@@ -295,8 +282,6 @@ impl<'a> Evaluator<'a> {
             library: &crate::default_library::DEFAULT_LIBRARY,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
-            symbols_as_types: false,
-            typing_unrun_body: false,
         }
     }
 
@@ -776,22 +761,6 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// The value a symbol read yields: the symbol's value, or with
-    /// `symbols_as_types` set, `unresolved(its type)`. A `null` value is
-    /// read as `unresolved(any)`: its static type is some `T?` the value
-    /// does not record (a `let` binding `'x' if c else None`), and reading
-    /// it as `nulltype` would type the expression by a value.
-    fn read_symbol(&self, val: &ExprValue) -> ExprValue {
-        if self.symbols_as_types && !val.is_unresolved() {
-            match val {
-                ExprValue::Null => ExprValue::unresolved(ExprType::ANY),
-                _ => ExprValue::unresolved(val.expr_type()),
-            }
-        } else {
-            val.clone()
-        }
-    }
-
     fn eval_name(&mut self, n: &ast::ExprName) -> Result<ExprValue, ExpressionError> {
         let name = n.id.as_str();
         match name {
@@ -803,8 +772,7 @@ impl<'a> Evaluator<'a> {
         for symtab in self.symtabs.iter().rev() {
             if let Some(val) = symtab.get_value(name) {
                 self.check_path_format(val, name)?;
-                let val = self.read_symbol(val);
-                return self.track(val);
+                return self.track(val.clone());
             }
         }
         let available = self.collect_symbol_names();
@@ -829,8 +797,7 @@ impl<'a> Evaluator<'a> {
                 if let Some(val) = symtab.get_value(&resolved) {
                     self.count_op()?;
                     self.check_path_format(val, &resolved)?;
-                    let val = self.read_symbol(val);
-                    return self.track(val);
+                    return self.track(val.clone());
                 }
             }
         }
@@ -1739,10 +1706,7 @@ impl<'a> Evaluator<'a> {
         // (`list[nulltype]`): indexing it fails on every run. Report it
         // here, where it happens, rather than as a `noreturn` operand of
         // whatever uses the element.
-        if receiver_unresolved
-            && !self.typing_unrun_body
-            && result.expr_type() == ExprType::unresolved(ExprType::NORETURN)
-        {
+        if receiver_unresolved && result.expr_type() == ExprType::unresolved(ExprType::NORETURN) {
             let err = ExpressionError::index_out_of_bounds(
                 "Index out of bounds: the list is always empty".to_string(),
             );
@@ -1775,8 +1739,6 @@ impl<'a> Evaluator<'a> {
             library: self.library,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
-            symbols_as_types: self.symbols_as_types,
-            typing_unrun_body: self.typing_unrun_body,
         }
     }
 
@@ -1848,10 +1810,17 @@ impl<'a> Evaluator<'a> {
     /// filter evaluated to an unresolved condition on a concrete
     /// element (per-element inclusion is undecidable, so the whole
     /// comprehension is unknown). Binds the loop variable to
-    /// `Unresolved(elem_type)`, type-checks the filter (it must be
-    /// bool-compatible), evaluates the body once for its type, and
-    /// returns `unresolved(list[body_type])`. Evaluation errors in the
-    /// filter or body — including budget exceedances — propagate.
+    /// `Unresolved(elem_type)` and types the filter and body once
+    /// (2026-02 Expression Language §1.3.7).
+    ///
+    /// The run may keep no element, so the result covers both outcomes:
+    /// `unresolved(list[T | nulltype])` for a body of type `T`
+    /// ([`crate::types::comprehension_list_type`]). A filter or body that
+    /// fails to type — a type error, a value error on concrete operands, a
+    /// non-boolean filter — fails on every run that evaluates it, so the
+    /// only run that can succeed keeps no element: the result is
+    /// `unresolved(list[nulltype])`, not an error. The failure surfaces at
+    /// the stage whose values reach it. Budget exceedances propagate.
     fn eval_listcomp_unresolved(
         &mut self,
         lc: &ast::ExprListComp,
@@ -1869,64 +1838,32 @@ impl<'a> Evaluator<'a> {
         let mut combined: Vec<&SymbolTable> = self.symtabs.to_vec();
         combined.push(&tmp);
         let mut child = self.child_evaluator(&combined);
-        // The body is typed, not run: the iterable may be empty.
-        child.typing_unrun_body = true;
-        // Check filter clause type if present
-        if let Some(if_clause) = if_clause {
-            let cond = child.evaluate(if_clause);
-            let cond = match cond {
-                Ok(c) => c,
-                Err(e) => {
-                    self.absorb_spend_and_reset(&child, memory_baseline);
-                    return Err(e);
-                }
-            };
-            let cond_inner = unwrap_unresolved(&cond.expr_type());
-            let is_bool_compatible = cond_inner == ExprType::BOOL
-                || cond_inner.code() == crate::types::TypeCode::Unresolved
-                || cond_inner.code() == crate::types::TypeCode::Any
-                || (cond_inner.code() == crate::types::TypeCode::Union
-                    && cond_inner.params().contains(&ExprType::BOOL));
-            if !is_bool_compatible {
-                self.absorb_spend_and_reset(&child, memory_baseline);
-                let err = ExpressionError::new(format!(
-                    "List comprehension filter must be a boolean, got {}",
-                    cond_inner
-                ));
-                return Err(if let Some(src) = self.expr_source {
-                    err.with_node(src, if_clause)
-                } else {
-                    err
-                });
-            }
-        }
-        let body_val = child.evaluate(&lc.elt);
+        let body_type = child.speculate(|c| c.listcomp_body_type(lc, if_clause));
         self.absorb_spend_and_reset(&child, memory_baseline);
-        let body_val = body_val?;
-        // The comprehension's type follows from the body's type alone
-        // (2026-02 Expression Language §1.3.7): `list[T]` when `T` has no
-        // union, `list[T | nulltype]` when it does (an empty run is the
-        // untyped empty list), `list[nulltype]` when the body can only be
-        // `null`. `int?` gives `list[int]`.
-        let list_type = self.comprehension_type(lc, &body_val.expr_type())?;
+        let list_type = match body_type? {
+            Speculative::Value(t) => crate::types::comprehension_list_type(&t),
+            Speculative::Absorbed(_) => ExprType::list(ExprType::NULLTYPE),
+        };
         self.track(ExprValue::unresolved(list_type))
     }
 
-    /// [`crate::types::comprehension_list_type`] of the body's type, or the
-    /// nesting error (located on the comprehension) when the element type
-    /// is a list of lists.
-    fn comprehension_type(
-        &self,
+    /// Type a comprehension's filter (it must be bool-compatible) and then
+    /// its body, with the loop variable already bound; the body's type.
+    fn listcomp_body_type(
+        &mut self,
         lc: &ast::ExprListComp,
-        body_type: &ExprType,
+        if_clause: Option<&ast::Expr>,
     ) -> Result<ExprType, ExpressionError> {
-        crate::types::comprehension_list_type(body_type).ok_or_else(|| {
-            let err = ExpressionError::new("Lists may be nested at most 2 levels deep");
-            match self.expr_source {
-                Some(src) => err.with_node(src, &ast::Expr::ListComp(lc.clone())),
-                None => err,
+        if let Some(if_clause) = if_clause {
+            let cond = self.evaluate(if_clause)?;
+            if !is_bool_compatible(&cond.expr_type()) {
+                return Err(ExpressionError::new(format!(
+                    "List comprehension filter must be a boolean, got {}",
+                    unwrap_unresolved(&cond.expr_type())
+                )));
             }
-        })
+        }
+        Ok(self.evaluate(&lc.elt)?.expr_type())
     }
 
     /// The loop variable for a comprehension over `iterable`
@@ -1945,74 +1882,6 @@ impl<'a> Evaluator<'a> {
             }
             var => Ok(var),
         }
-    }
-
-    /// The result of a comprehension over a concrete iterable whose filter
-    /// kept no element (2026-02 Expression Language §1.3.7). The type
-    /// follows from the element expression's static type `T`, not from
-    /// the values: an empty `list[T]` when `T` is a single concrete type,
-    /// else (or when the iterable can only be `[]`) the untyped empty
-    /// `list[nulltype]`.
-    ///
-    /// The loop variable's type is the element type of the iterable's
-    /// static type, and `T` the element expression's static type with the
-    /// loop variable of that type: both are evaluated with every symbol read
-    /// as `unresolved(its type)` (`symbols_as_types`), so a value is never
-    /// consulted — not even the iterable's, which may be narrower than its
-    /// static type (`Param.L if Task.Param.C else Param.LS` is a
-    /// `list[int] | list[string]` whichever branch ran). If the iterable
-    /// cannot be typed so, its value's type is used. The element expression
-    /// is typed under the caller's list target, as every element of a
-    /// non-empty run is. An error typing it is an error of the
-    /// comprehension, and propagates.
-    fn empty_comprehension(
-        &mut self,
-        lc: &ast::ExprListComp,
-        iterable: &ExprValue,
-        var_name: &str,
-        elem_target: Option<&ExprType>,
-    ) -> Result<ExprValue, ExpressionError> {
-        let memory_baseline = self.current_memory;
-        let static_iterable = {
-            let mut child = self.child_evaluator(self.symtabs);
-            child.symbols_as_types = true;
-            let t = child.eval_node(&lc.generators[0].iter, None);
-            self.absorb_spend_and_reset(&child, memory_baseline);
-            match t {
-                Ok(v) => v,
-                Err(e) if contains_budget_error(&e) => return Err(e),
-                Err(_) => iterable.clone(),
-            }
-        };
-        let var = self.comprehension_var_of(&static_iterable)?;
-        let crate::types::ComprehensionVar::Typed(var_type) = var else {
-            let empty = ExprValue::make_list_checked(self, Vec::new(), ExprType::NULLTYPE)?;
-            return self.track(empty);
-        };
-        let mut tmp = crate::symbol_table::SymbolTable::new();
-        tmp.set(var_name, ExprValue::unresolved(var_type))
-            .map_err(|e| ExpressionError::new(e.to_string()))?;
-        let mut combined: Vec<&SymbolTable> = self.symtabs.to_vec();
-        combined.push(&tmp);
-        let mut child = self.child_evaluator(&combined);
-        child.symbols_as_types = true;
-        child.typing_unrun_body = true;
-        let body_val = child.eval_node(&lc.elt, elem_target);
-        self.absorb_spend_and_reset(&child, memory_baseline);
-        let list_type = self.comprehension_type(lc, &body_val?.expr_type())?;
-        let elem = list_type
-            .list_element_type()
-            .cloned()
-            .unwrap_or(ExprType::NULLTYPE);
-        // An empty value needs a single concrete element type: a union,
-        // `any`, or an unbound type variable is not one.
-        let elem = if crate::types::is_concrete_element_type(&elem) {
-            elem
-        } else {
-            ExprType::NULLTYPE
-        };
-        let empty = ExprValue::make_list_checked(self, Vec::new(), elem)?;
-        self.track(empty)
     }
 
     fn eval_listcomp(
@@ -2149,7 +2018,7 @@ impl<'a> Evaluator<'a> {
                 };
                 if let ExprValue::Bool(b) = cond {
                     include = b;
-                } else if cond.is_unresolved() {
+                } else if cond.is_unresolved() && is_bool_compatible(&cond.expr_type()) {
                     // E.g. `Param.*` bound but the filter references
                     // `Task.*`/`Session.*` at job creation. The
                     // accumulated elements are abandoned — BudgetedVec
@@ -2165,7 +2034,7 @@ impl<'a> Evaluator<'a> {
                     self.regex_cache = child.regex_cache;
                     let err = ExpressionError::new(format!(
                         "List comprehension filter must be a boolean, got {}",
-                        cond.expr_type()
+                        unwrap_unresolved(&cond.expr_type())
                     ));
                     return Err(if let Some(src) = self.expr_source {
                         err.with_node(src, if_clause)
@@ -2229,10 +2098,12 @@ impl<'a> Evaluator<'a> {
             };
         }
         let result = result.into_vec();
-        // A filter that kept nothing (or an empty iterable): the result's
-        // type comes from the element expression's type, not the values.
+        // A filter that kept nothing (or an empty iterable): the body
+        // never ran, so nothing types the elements — the untyped empty
+        // list (§1.3.7).
         if result.is_empty() {
-            return self.empty_comprehension(lc, &iterable, &var_name, elem_target.as_ref());
+            let empty = ExprValue::make_list_checked(self, result, ExprType::NULLTYPE)?;
+            return self.track(empty);
         }
 
         // Check nesting depth
@@ -2343,6 +2214,17 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
         self.regex_cache.insert(pattern.to_string(), re.clone());
         Ok(re)
     }
+}
+
+/// Whether a comprehension filter of type `t` can be a boolean: `bool`,
+/// `any`, an unconstrained `unresolved`, or a union with a `bool` member
+/// (`unresolved[T]` is read as `T`).
+fn is_bool_compatible(t: &ExprType) -> bool {
+    let t = unwrap_unresolved(t);
+    t == ExprType::BOOL
+        || t.code() == crate::types::TypeCode::Unresolved
+        || t.code() == crate::types::TypeCode::Any
+        || (t.code() == crate::types::TypeCode::Union && t.params().contains(&ExprType::BOOL))
 }
 
 /// Unwrap unresolved[T] to T, or return the type as-is if not unresolved.

@@ -8,9 +8,12 @@
 //! Each case is evaluated in the three symbol states a template sees:
 //! template validation ("pass 8": every symbol unresolved), job creation
 //! ("gate 2": `Param.*` concrete, `Task.*` unresolved), and run time
-//! (everything concrete). A comprehension's type follows from its element
-//! expression's type, not from how many elements its filter keeps, so the
-//! stages agree on an empty result.
+//! (everything concrete). A run that keeps no element never evaluates the
+//! element expression and is the untyped empty list, so a stage that cannot
+//! run the comprehension types it as `list[T | nulltype]`, and as
+//! `list[nulltype]` when the filter or body fails to type: only a run that
+//! keeps no element can succeed. No stage rejects a comprehension that a
+//! later stage's values let succeed.
 
 use openjd_expr::*;
 
@@ -98,116 +101,220 @@ fn assert_err_all(expr: &str, expected: &[&str]) {
     }
 }
 
-// ── Element expression with a single type ──
+/// Assert `expr` passes template validation as `pass8` and fails at job
+/// creation and run time, where the values reach the failure, with
+/// `expected`.
+fn assert_fails_once_run(expr: &str, pass8: &str, expected: &[&str]) {
+    let [p8, g2, rt] = states();
+    assert_eq!(eval(expr, &p8).expr_type(), tp(pass8), "pass 8: {expr}");
+    for (stage, st) in [("gate 2", &g2), ("run time", &rt)] {
+        assert_err_in(expr, st, stage, expected);
+    }
+}
+
+/// A symbol table with `name` bound to an empty list of `elem`, as job
+/// creation binds an empty `LIST[...]` parameter value.
+fn typed_empty(name: &str, elem: ExprType) -> SymbolTable {
+    let mut st = SymbolTable::new();
+    st.set(name, ExprValue::make_list(vec![], elem).unwrap())
+        .unwrap();
+    st
+}
+
+// ── A run that keeps no element ──
 
 #[test]
-fn empty_result_is_a_typed_empty_list() {
+fn empty_result_is_the_untyped_empty_list() {
     assert_stages(
         "[x for x in Param.L if x > 100]",
-        "unresolved[list[int]]",
-        "list[int]",
-        "list[int]",
+        "unresolved[list[int | nulltype]]",
+        "list[nulltype]",
+        "list[nulltype]",
         "[]",
     );
     assert_stages(
         "[[x, x] for x in Param.L if x > 100]",
-        "unresolved[list[list[int]]]",
-        "list[list[int]]",
-        "list[list[int]]",
-        "[]",
-    );
-    assert_stages(
-        "[[r] for r in [Param.R] if r == 'x']",
-        "unresolved[list[list[range_expr]]]",
-        "list[list[range_expr]]",
-        "list[list[range_expr]]",
+        "unresolved[list[list[int] | nulltype]]",
+        "list[nulltype]",
+        "list[nulltype]",
         "[]",
     );
 }
 
 #[test]
-fn empty_result_concatenates_by_its_element_type() {
-    // Promotes as `[1] + [2.5]` does.
+fn empty_result_concatenates_with_any_list() {
+    // Item 33 of the resolved-value-limits design: these succeed at job
+    // creation and run time, so template validation accepts them too.
     assert_stages(
-        "[x for x in Param.L if x > 100] + [2.5]",
+        "[x for x in Param.L if x > 100] + ['a']",
         "unresolved[list[T3]]",
-        "list[float]",
-        "list[float]",
-        "[2.5]",
+        "list[string]",
+        "list[string]",
+        r#"["a"]"#,
     );
-    // Was `['a']` at job creation and run time: the empty result was the
-    // untyped empty list.
-    let expr = "[x for x in Param.L if x > 100] + ['a']";
-    let [_, g2, rt] = states();
-    for (stage, st) in [("gate 2", &g2), ("run time", &rt)] {
-        assert_err_in(
-            expr,
-            st,
-            stage,
-            &[
-                "Cannot concatenate list[int] and list[string]\n",
-                &format!("  {expr}\n"),
-                "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~",
-            ],
-        );
-    }
+    assert_stages(
+        "[[x for x in Param.L if x > 100], ['a']]",
+        "unresolved[list[list[string]]]",
+        "list[list[string]]",
+        "list[list[string]]",
+        r#"[[], ["a"]]"#,
+    );
 }
 
 #[test]
-fn empty_result_dispatches_by_its_element_type() {
-    // `sum` has no `list[string]` signature, empty or not.
-    let expr = "sum([s for s in Param.LS if s == 'z'])";
-    assert_err_all(
-        expr,
-        &[
-            "No matching signature for sum(list[string])\n",
-            &format!("  {expr}\n"),
-            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
-        ],
-    );
+fn empty_result_dispatches_as_the_empty_list() {
+    // `sum` has no `list[string]` signature, but has one for the empty
+    // list: a run that keeps nothing sums to 0, one that keeps a string
+    // fails.
     assert_stages(
-        "sum([x for x in Param.L if x > 100])",
+        "sum([s for s in Param.LS if s == 'z'])",
         "unresolved[int]",
         "int",
         "int",
         "0",
     );
+    let expr = "sum([s for s in Param.LS])";
+    assert_fails_once_run(
+        expr,
+        "unresolved[int]",
+        &[
+            "No matching signature for sum(list[string])\n",
+            &format!("  {expr}\n"),
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+// ── A filter or body that fails to type ──
+
+#[test]
+fn body_type_error_surfaces_when_an_element_reaches_it() {
+    // Template validation cannot know whether `Param.L` will be empty, and
+    // an empty run succeeds, so it types the comprehension as the only
+    // run that can succeed: the empty list.
+    let expr = "[x.upper() for x in Param.L]";
+    assert_fails_once_run(
+        expr,
+        "unresolved[list[nulltype]]",
+        &[
+            "upper() is not available for int. Available for: string\n",
+            &format!("  {expr}\n"),
+            "   ~~^~~~~~~",
+        ],
+    );
+    // A run that keeps no element never reaches it.
+    assert_stages(
+        "[x.upper() for x in Param.L if x > 100]",
+        "unresolved[list[nulltype]]",
+        "list[nulltype]",
+        "list[nulltype]",
+        "[]",
+    );
 }
 
 #[test]
-fn empty_result_inside_a_list_literal() {
-    // Item 33 of the resolved-value-limits design: template validation
-    // rejected this while job creation and run time accepted it; now every
-    // stage rejects it, as `[[1], ['a']]` is rejected.
-    let expr = "[[x for x in Param.L if x > 100], ['a']]";
-    assert_err_all(
+fn body_type_error_with_an_unresolved_filter() {
+    // Job creation cannot decide the filter (`Task.Param.C` is unresolved),
+    // so it types the comprehension as validation does; the run decides.
+    let expr = "[x.upper() for x in Param.L if Task.Param.C]";
+    let [p8, g2, rt] = states();
+    assert_eq!(
+        eval(expr, &p8).expr_type(),
+        tp("unresolved[list[nulltype]]")
+    );
+    assert_eq!(
+        eval(expr, &g2).expr_type(),
+        tp("unresolved[list[nulltype]]")
+    );
+    assert_err_in(
         expr,
+        &rt,
+        "run time",
+        &["upper() is not available for int. Available for: string\n"],
+    );
+    let mut off = rt.clone();
+    off.set("Task.Param.C", ExprValue::Bool(false)).unwrap();
+    assert_eq!(eval(expr, &off).to_display_string(), "[]");
+}
+
+#[test]
+fn body_value_error_on_concrete_values() {
+    // `1 // Param.Z` types as `int` at validation; at job creation, where
+    // `Param.Z = 0`, the filter keeps nothing and the body never runs.
+    assert_stages(
+        "[1 // Param.Z for x in Param.L if Param.Z != 0]",
+        "unresolved[list[int | nulltype]]",
+        "list[nulltype]",
+        "list[nulltype]",
+        "[]",
+    );
+    // Validation accepts what the empty run accepts.
+    assert_stages(
+        "[1 // Param.Z for x in Param.L if Param.Z != 0].join(', ')",
+        "unresolved[string]",
+        "string",
+        "string",
+        "",
+    );
+}
+
+#[test]
+fn non_boolean_filter_surfaces_when_an_element_reaches_it() {
+    let expr = "[x for x in Param.L if x]";
+    assert_fails_once_run(
+        expr,
+        "unresolved[list[nulltype]]",
         &[
-            "List literal contains incompatible types: list[int] and list[string]\n",
+            "List comprehension filter must be a boolean, got int\n",
             &format!("  {expr}\n"),
-            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+            "                         ^",
         ],
     );
     assert_stages(
-        "[[x for x in Param.L if x > 100], [3]]",
-        "unresolved[list[list[int]]]",
-        "list[list[int]]",
-        "list[list[int]]",
-        "[[], [3]]",
+        "[x for x in Param.EL if x]",
+        "unresolved[list[nulltype]]",
+        "list[nulltype]",
+        "list[nulltype]",
+        "[]",
     );
 }
 
 #[test]
-fn empty_result_type_does_not_read_symbol_values() {
-    // The element type is the one template validation gives the element
-    // expression, with every symbol read as its type: `Param.Z = 0` is
-    // never divided by, as at run time, where the filter keeps nothing.
-    assert_stages(
-        "[1 // Param.Z for x in Param.L if Param.Z != 0]",
-        "unresolved[list[int]]",
-        "list[int]",
-        "list[int]",
-        "[]",
+fn null_guarded_body_never_runs_on_null() {
+    // H2 of audit round 2: a null-guarded body must not fail a run whose
+    // guard keeps nothing.
+    let expr = "[Opt.upper() for x in Param.L if Opt != None]";
+    let mut p8 = states()[0].clone();
+    p8.set("Opt", ExprValue::unresolved(tp("string?"))).unwrap();
+    let mut rt = states()[2].clone();
+    rt.set("Opt", ExprValue::Null).unwrap();
+    assert_eq!(
+        eval(expr, &p8).expr_type(),
+        tp("unresolved[list[string | nulltype]]")
+    );
+    let v = eval(expr, &rt);
+    assert_eq!(v.expr_type(), tp("list[nulltype]"));
+    assert_eq!(v.to_display_string(), "[]");
+}
+
+#[test]
+fn budget_exceedance_while_typing_propagates() {
+    // A failure the typing absorbs is a failure of the body on every run;
+    // the operations and memory are spent in this evaluation regardless.
+    let [p8, _, _] = states();
+    let err = ParsedExpression::new("[x + x + x + x + x + x + x + x for x in Param.L]")
+        .and_then(|p| {
+            p.with_memory_limit(usize::MAX)
+                .with_operation_limit(4)
+                .evaluate_with_metrics(&[&p8])
+        })
+        .unwrap_err();
+    assert!(
+        matches!(
+            err.kind(),
+            ExpressionErrorKind::OperationLimitExceeded { .. }
+        ),
+        "got {err}"
     );
 }
 
@@ -270,27 +377,19 @@ fn union_element_type_non_empty_result_follows_the_values() {
 #[test]
 fn nullable_element_type_drops_null() {
     // A list cannot hold `null`: a run that produces one fails, so the
-    // element type is `int`, and an empty result is a typed `list[int]`.
+    // element type is `int`.
     assert_stages(
         "[x if x > 1 else None for x in Param.L if x > 1]",
-        "unresolved[list[int]]",
+        "unresolved[list[int | nulltype]]",
         "list[int]",
         "list[int]",
         "[2, 3]",
-    );
-    assert_stages(
-        "[x if x > 1 else None for x in Param.L if x > 100]",
-        "unresolved[list[int]]",
-        "list[int]",
-        "list[int]",
-        "[]",
     );
 }
 
 #[test]
 fn element_expression_with_no_value_gives_the_untyped_empty_list() {
-    // Only a run with no elements succeeds. (The argument depends on `x`:
-    // a literal `fail('x')` fails template validation, which evaluates it.)
+    // Only a run with no elements succeeds.
     assert_stages(
         "[fail(string(x)) for x in Param.L if x > 100]",
         "unresolved[list[nulltype]]",
@@ -339,14 +438,17 @@ fn union_iterable_binds_the_union_of_element_types() {
     let mut strs = states()[2].clone();
     strs.set("Task.Param.C", ExprValue::Bool(false)).unwrap();
     let expr = "[x.upper() for x in (Param.L if Task.Param.C else Param.LS)]";
-    assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved[list[string]]"));
+    assert_eq!(
+        eval(expr, &p8).expr_type(),
+        tp("unresolved[list[string | nulltype]]")
+    );
     assert_eq!(eval(expr, &strs).to_display_string(), r#"["A"]"#);
 }
 
 #[test]
 fn unresolved_iterable_that_cannot_be_iterated() {
     // Was accepted at template validation with the loop variable bound as
-    // `int`; every run fails.
+    // `int`; every run fails. An error in the iterable is not absorbed.
     let expr = "[x for x in Task.Param.I]";
     assert_err_all(expr, &["Cannot iterate over int"]);
 }
@@ -358,6 +460,10 @@ fn indexing_a_possibly_empty_list_gives_the_element_type() {
     // The empty form has no element: indexing it is out of bounds, so it
     // adds nothing to the type.
     let [p8, _, _] = states();
+    assert_eq!(
+        eval("[x for x in Param.L][0]", &p8).expr_type(),
+        tp("unresolved[int]")
+    );
     assert_eq!(
         eval("[x if x > 1 else 'a' for x in Param.L][0]", &p8).expr_type(),
         tp("unresolved[int | string]")
@@ -402,7 +508,7 @@ fn calls_match_each_form_of_a_union_element_list() {
     );
 }
 
-// ── Nesting with range_expr elements ──
+// ── Nesting ──
 
 #[test]
 fn list_of_range_lists_is_two_levels_deep() {
@@ -417,55 +523,24 @@ fn list_of_range_lists_is_two_levels_deep() {
     );
 }
 
-// ── Audit round 1 ──
-
 #[test]
-fn empty_list_overloads_apply_only_to_the_empty_list() {
-    // F1: an argument of unknown element type (`list[T3]` from an
-    // unresolved `+`) matched `__getitem__(list[nulltype], int) -> noreturn`
-    // first, so validation rejected `[0] + 1`; only the empty list selects
-    // that overload at run time.
+fn element_type_that_is_a_list_of_lists_fails_when_an_element_reaches_it() {
+    // The comprehension would be a three-level list, which no value can be
+    // (§1.2.1); only a run that keeps no element succeeds.
     assert_stages(
-        "(Param.L + Param.L)[0] + 1",
-        "unresolved[int]",
-        "int",
-        "int",
-        "2",
+        "[[x] for x in Param.EL]",
+        "unresolved[list[nulltype]]",
+        "list[nulltype]",
+        "list[nulltype]",
+        "[]",
     );
-    let [p8, _, _] = states();
-    let mut any_list = SymbolTable::new();
-    any_list
-        .set("U", ExprValue::unresolved(tp("list[any]")))
-        .unwrap();
-    assert_eq!(eval("U[0]", &any_list).expr_type(), tp("unresolved"));
-    assert_eq!(
-        eval("min(Param.L + Param.L)", &p8).expr_type(),
-        tp("unresolved[int]")
+    assert_fails_once_run(
+        "[[[x]] for x in Param.L]",
+        "unresolved[list[nulltype]]",
+        &["Lists may be nested at most 2 levels deep"],
     );
-}
-
-#[test]
-fn element_type_that_is_a_list_of_lists_is_an_error() {
-    // F3: the comprehension would be a three-level list, which no value
-    // can be (§1.2.1); every run, empty or not, fails.
-    for (expr, caret) in [
-        ("[[x] for x in Param.EL]", "  ^~~~~~~~~~~~~~~~~~~~~~~"),
-        (
-            "[[[x]] for x in Param.L if x > 100]",
-            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
-        ),
-    ] {
-        assert_err_all(
-            expr,
-            &[
-                "Lists may be nested at most 2 levels deep\n",
-                &format!("  {expr}\n"),
-                caret,
-            ],
-        );
-    }
-    // A union element type with a form that nests correctly is not an
-    // error: a run producing only that form builds a valid list.
+    // A union element type with a form that nests correctly: a run
+    // producing only that form builds a valid list.
     let [p8, _, _] = states();
     assert_eq!(
         eval("[[[x]] if x > 100 else [x] for x in Param.L]", &p8).expr_type(),
@@ -473,11 +548,13 @@ fn element_type_that_is_a_list_of_lists_is_an_error() {
     );
 }
 
+// ── Indexing an always-empty list ──
+
 #[test]
 fn indexing_an_always_empty_list_is_reported_where_it_happens() {
-    // F7: the element of an always-empty list was `noreturn`, which leaked
-    // into the next operation's message ("No matching signature for
-    // string(noreturn)").
+    // F7 of audit round 1: the element of an always-empty list was
+    // `noreturn`, which leaked into the next operation's message ("No
+    // matching signature for string(noreturn)").
     let expr = "string([None for x in Param.L][0])";
     let [p8, _, _] = states();
     assert_err_in(
@@ -493,18 +570,25 @@ fn indexing_an_always_empty_list_is_reported_where_it_happens() {
 }
 
 #[test]
-fn concatenation_joins_inner_empty_lists() {
-    // F10: `[[]] + [[1]]` was rejected ("Cannot concatenate
-    // list[list[nulltype]] and list[list[int]]"), so an empty `list[nulltype]`
-    // body, now an empty `list[list[nulltype]]`, could no longer be
-    // concatenated. Concatenation uses the list literal's join (§2.1.3).
+fn always_empty_index_in_a_body_that_never_runs() {
+    // F2 of audit round 4: in a comprehension body the failing index may
+    // never run, so validation does not reject it.
     assert_stages(
-        "[[] for x in Param.L if x > 100] + [[1]]",
-        "unresolved[list[T3]]",
-        "list[list[int]]",
-        "list[list[int]]",
-        "[[1]]",
+        "[[None for y in Param.L][0] for x in Param.L if x > 100]",
+        "unresolved[list[nulltype]]",
+        "list[nulltype]",
+        "list[nulltype]",
+        "[]",
     );
+}
+
+// ── Concatenation and sum of typed empty lists ──
+
+#[test]
+fn concatenation_joins_inner_empty_lists() {
+    // F10 of audit round 1: `[[]] + [[1]]` was rejected ("Cannot
+    // concatenate list[list[nulltype]] and list[list[int]]").
+    // Concatenation uses the list literal's join (§2.1.3).
     let st = SymbolTable::new();
     assert_eq!(eval("[[]] + [[1]]", &st).to_display_string(), "[[], [1]]");
     assert_eq!(
@@ -523,50 +607,19 @@ fn concatenation_joins_inner_empty_lists() {
     );
 }
 
-// ── Audit round 2 ──
-
-#[test]
-fn element_type_with_a_type_variable_gives_the_untyped_empty_list() {
-    // H1: a body typed `list[T3]` (an unresolved `+`) built an empty
-    // `list[list[T3]]` value, which no concatenation could join, so runs
-    // that succeed failed: `T3` is not a concrete element type.
-    let [_, g2, rt] = states();
-    let expr = "[[s] + [s] for s in Param.LS if s == 'z'] + [['a']]";
-    for (stage, st) in [("gate 2", &g2), ("run time", &rt)] {
-        let v = eval(expr, st);
-        assert_eq!(v.expr_type(), tp("list[list[string]]"), "{stage}");
-        assert_eq!(v.to_display_string(), r#"[["a"]]"#, "{stage}");
-    }
-}
-
-#[test]
-fn null_symbol_is_typed_by_its_static_type_not_nulltype() {
-    // H2: a `null` symbol was read as `nulltype` when typing an empty
-    // result, so a null-guarded body failed at job creation and run time
-    // though validation (where it is `string?`) accepted it.
-    let expr = "[Opt.upper() for x in Param.L if Opt != None]";
-    let mut p8 = states()[0].clone();
-    p8.set("Opt", ExprValue::unresolved(tp("string?"))).unwrap();
-    let mut rt = states()[2].clone();
-    rt.set("Opt", ExprValue::Null).unwrap();
-    assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved[list[string]]"));
-    let v = eval(expr, &rt);
-    assert_eq!(v.expr_type(), tp("list[string]"));
-    assert_eq!(v.to_display_string(), "[]");
-}
-
 #[test]
 fn concatenation_with_an_empty_side_has_the_common_type() {
-    // H3: `make_list` took the type from the elements, so an empty
-    // `list[float]` plus `[1]` was `list[int]` (2026-02 §2.1.3 gives
-    // `list[float]`).
-    let st = SymbolTable::new();
-    let v = eval("[x for x in [1.5] if x > 100] + [1]", &st);
+    // H3 of audit round 2: `make_list` took the type from the elements, so
+    // an empty `list[float]` plus `[1]` was `list[int]` (2026-02 §2.1.3
+    // gives `list[float]`).
+    let st = typed_empty("EF", ExprType::FLOAT);
+    let v = eval("EF + [1]", &st);
     assert_eq!(v.expr_type(), tp("list[float]"));
     assert_eq!(v.to_display_string(), "[1.0]");
-    let v = eval("[[x] for x in [1] if x > 100] + [[]]", &st);
+    let st = typed_empty("EI", ExprType::list(ExprType::INT));
+    let v = eval("EI + [[]]", &st);
     assert_eq!(v.expr_type(), tp("list[list[int]]"));
-    let expr = "([[x] for x in [1] if x > 100] + [[]]) + [['a']]";
+    let expr = "(EI + [[]]) + [['a']]";
     assert_err_in(
         expr,
         &st,
@@ -578,23 +631,19 @@ fn concatenation_with_an_empty_side_has_the_common_type() {
     );
 }
 
-// ── Audit round 3 ──
-
 #[test]
 fn range_concatenation_with_an_empty_side_has_the_common_type() {
-    // F1: the range overloads took the type from the elements, so a range
-    // and an empty `list[float]` gave `list[int]` (2026-02 §2.1.3:
-    // `range_expr + list[T]` is `list[T]`).
-    let st = SymbolTable::new();
-    for expr in [
-        "[x for x in [1.5] if x > 100] + range_expr('1-2')",
-        "range_expr('1-2') + [x for x in [1.5] if x > 100]",
-    ] {
+    // F1 of audit round 3: the range overloads took the type from the
+    // elements, so a range and an empty `list[float]` gave `list[int]`
+    // (2026-02 §2.1.3: `range_expr + list[T]` is `list[T]`).
+    let st = typed_empty("EF", ExprType::FLOAT);
+    for expr in ["EF + range_expr('1-2')", "range_expr('1-2') + EF"] {
         let v = eval(expr, &st);
         assert_eq!(v.expr_type(), tp("list[float]"), "{expr}");
         assert_eq!(v.to_display_string(), "[1.0, 2.0]", "{expr}");
     }
-    let expr = "range_expr('1-2') + [s for s in ['a'] if s == 'z']";
+    let st = typed_empty("ES", ExprType::STRING);
+    let expr = "range_expr('1-2') + ES";
     assert_err_in(
         expr,
         &st,
@@ -608,59 +657,13 @@ fn range_concatenation_with_an_empty_side_has_the_common_type() {
 
 #[test]
 fn sum_of_an_empty_float_list_is_a_float() {
-    // F2: `sum(list[float]) -> float`, but an empty one summed to `int 0`.
-    let st = SymbolTable::new();
-    let v = eval("sum([x for x in [1.5] if x > 100])", &st);
+    // F2 of audit round 3: `sum(list[float]) -> float`, but an empty one
+    // summed to `int 0`.
+    let v = eval("sum(EF)", &typed_empty("EF", ExprType::FLOAT));
     assert_eq!(v.expr_type(), ExprType::FLOAT);
     assert_eq!(v.to_display_string(), "0.0");
     assert_eq!(
-        eval("sum([x for x in [1] if x > 100])", &st),
+        eval("sum(EI)", &typed_empty("EI", ExprType::INT)),
         ExprValue::Int(0)
-    );
-}
-
-#[test]
-fn empty_result_types_the_loop_variable_from_the_iterable_static_type() {
-    // F3: the loop variable took the run's iterable value's type
-    // (`list[string]`), not its static `list[int] | list[string]`, so an
-    // empty run failed typing `x + 1` that validation accepted.
-    let mut rt = states()[2].clone();
-    rt.set("Task.Param.C", ExprValue::Bool(false)).unwrap();
-    rt.set("Param.LS", ExprValue::ListString(vec![], 0))
-        .unwrap();
-    let expr = "[x + 1 for x in (Param.L if Task.Param.C else Param.LS)]";
-    let [p8, _, _] = states();
-    let static_type = eval(expr, &p8).expr_type();
-    let v = eval(expr, &rt);
-    assert_eq!(v.to_display_string(), "[]");
-    assert_eq!(
-        ExprValue::unresolved(v.expr_type()).expr_type(),
-        static_type,
-        "the empty run has the type validation gives it"
-    );
-}
-
-// ── Audit round 4 ──
-
-#[test]
-fn always_empty_index_in_a_body_that_never_runs_is_noreturn() {
-    // F2: indexing an always-empty list is reported where it runs, but in
-    // a comprehension body it may never run: the element is `noreturn`
-    // (§2.1.7) and the comprehension `list[nulltype]` (§1.3.7). Validation
-    // rejected this, though every run builds `[]`.
-    assert_stages(
-        "[[None for y in Param.L][0] for x in Param.L if x > 100]",
-        "unresolved[list[nulltype]]",
-        "list[nulltype]",
-        "list[nulltype]",
-        "[]",
-    );
-    // Outside a comprehension body it still fails where it happens.
-    let [p8, _, _] = states();
-    assert_err_in(
-        "[None for y in Param.L][0]",
-        &p8,
-        "pass 8",
-        &["Index out of bounds: the list is always empty\n"],
     );
 }
