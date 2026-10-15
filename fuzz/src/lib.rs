@@ -99,6 +99,14 @@ pub mod known {
              openjd-for-js, which uses `{:?}`) does not use the spec spelling.",
         ),
         (
+            "expr-static-fold-host-path-format",
+            "Template validation folds path operations on literals in the validating host's \
+             path format, so a format-dependent condition (`is_absolute(path('../a') / \
+             path('C:\\\\'))`) is folded for the submitting machine, not the worker: an \
+             expression typed `list[nulltype]` (always empty) on Linux yields a non-empty list \
+             on a Windows worker.",
+        ),
+        (
             "expr-conditional-list-element-join",
             "A list element whose type depends on a conditional is typed with the numeric \
              join of its branches, dropping the others: `[1 if c else (2.5 if d else 'a') for x \
@@ -231,17 +239,27 @@ pub mod known {
         if std::env::var_os("OPENJD_FUZZ_KNOWN").is_some_and(|v| v == "1") {
             return false;
         }
-        let (mut depth, mut max_depth) = (0i32, 0i32);
+        // A closer only closes its own kind of opener: `[ ... )` leaves the
+        // `[` open for the parser, so it stays open here too.
+        let mut stack: Vec<char> = Vec::new();
+        let mut max_depth = 0usize;
         for c in text.chars() {
-            match c {
+            let opener = match c {
                 '(' | '[' | '{' => {
-                    depth += 1;
-                    max_depth = max_depth.max(depth);
+                    stack.push(c);
+                    max_depth = max_depth.max(stack.len());
+                    continue;
                 }
-                ')' | ']' | '}' => depth = (depth - 1).max(0),
-                _ => {}
+                ')' => '(',
+                ']' => '[',
+                '}' => '{',
+                _ => continue,
+            };
+            if stack.last() == Some(&opener) {
+                stack.pop();
             }
         }
+        let depth = stack.len();
         let skip = max_depth > 12 || (depth >= 6 && text.len() > 200) || text.len() > 1024;
         if skip {
             record("expr-parser-exponential-recovery");

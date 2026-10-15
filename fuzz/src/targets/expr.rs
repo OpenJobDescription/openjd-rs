@@ -482,6 +482,16 @@ pub fn check_expression(
                     {
                         explained.push("expr-sum-empty-float");
                     }
+                    // The static pass folds path operations in the host's
+                    // format; in the other format a folded condition can go
+                    // the other way. Only when the host-format value fits.
+                    if fmt != PathFormat::host() {
+                        let host = PathFormat::host();
+                        let (hv, _) = eval_concrete(parsed, &runtime, &env.concrete_in(host), host);
+                        if hv.is_ok_and(|hv| fits(&hv, &st)) {
+                            explained.push("expr-static-fold-host-path-format");
+                        }
+                    }
                 }
                 if !explained.is_empty() {
                     for id in explained {
