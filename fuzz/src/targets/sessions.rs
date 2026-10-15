@@ -60,6 +60,20 @@ pub fn directives(data: &[u8]) {
         let (display, _pass, messages, _failed) = process_line(line, &mut filter, "s");
         let mut new_secrets = Vec::new();
         for m in &messages {
+            // A message's display (it goes to logs) never shows an env value.
+            if let ActionMessage::SetEnv { name, .. } | ActionMessage::RedactedEnv { name, .. } = m
+            {
+                let shown = m.to_string();
+                let kind = if matches!(m, ActionMessage::SetEnv { .. }) {
+                    "SetEnv"
+                } else {
+                    "RedactedEnv"
+                };
+                oracle!(
+                    shown == format!("{kind}({name})"),
+                    "message display {shown:?} is not just the name of {name:?}"
+                );
+            }
             match m {
                 ActionMessage::Progress(p) => {
                     oracle!(
@@ -248,11 +262,43 @@ pub fn embedded_files(data: &[u8]) {
     } else {
         EmbeddedFilesScope::Env
     };
+    // Caller limits reach the session through `SessionLimits::from`, field
+    // for field.
+    let mut caller = openjd_model::CallerLimits::default();
+    let mut lim = || flip(&mut u).then(|| gen::upto(&mut u, 1 << 20));
+    caller.max_resolved_arg_len = lim();
+    caller.max_resolved_data_len = lim();
+    caller.max_eval_memory_bytes = lim();
+    caller.max_eval_operations = lim();
+    let limits = openjd_sessions::SessionLimits::from(&caller);
+    oracle!(
+        limits.max_resolved_arg_len == caller.max_resolved_arg_len
+            && limits.max_resolved_data_len == caller.max_resolved_data_len
+            && limits.max_eval_memory_bytes == caller.max_eval_memory_bytes
+            && limits.max_eval_operations == caller.max_eval_operations,
+        "SessionLimits::from({caller:?}) gives {limits:?}"
+    );
     let mut ef = EmbeddedFiles::new(scope, root.clone(), "s")
         .with_user(None)
-        .with_limits(openjd_sessions::SessionLimits::default());
+        .with_limits(limits);
     #[cfg(unix)]
-    let _ = openjd_sessions::PosixSessionUser::new("user", Some("group"));
+    {
+        use openjd_sessions::SessionUser;
+        let (name, group) = (gen::ident(&mut u), flip(&mut u).then(|| gen::ident(&mut u)));
+        let user = openjd_sessions::PosixSessionUser::new(&name, group.as_deref());
+        oracle!(
+            user.user() == name
+                && group.as_deref().is_none_or(|g| user.group() == g)
+                && !user.group().is_empty(),
+            "PosixSessionUser({name:?}, {group:?}) reports {:?} / {:?}",
+            user.user(),
+            user.group()
+        );
+        let _ = (
+            user.is_process_user(),
+            user.as_any().is::<openjd_sessions::PosixSessionUser>(),
+        );
+    }
     let mut st = openjd_expr::SymbolTable::new();
     let accepted = ef.allocate_file_paths(&files, &mut st).is_ok();
     if accepted {

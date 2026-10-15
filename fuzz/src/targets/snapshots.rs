@@ -65,6 +65,7 @@ fn roundtrip<P, K>(
     if m.validate().is_err() {
         return;
     }
+    check_entry_display(m);
     let text = match encode(m) {
         Ok(t) => t,
         Err(e) => {
@@ -82,6 +83,13 @@ fn roundtrip<P, K>(
         again.as_deref() == Some(text.as_str()),
         "{what}: encoding is nondeterministic"
     );
+    if what.contains("v2023") {
+        let key = format!("\"hashAlg\":\"{}\"", m.hash_alg);
+        oracle!(
+            text.contains(&key),
+            "{what}: hash algorithm {key} not in {text}"
+        );
+    }
     match decode_manifest(&text).map(&unwrap) {
         Ok(Some(back)) => {
             {
@@ -139,6 +147,25 @@ fn roundtrip<P, K>(
     }
 }
 
+/// Entry displays (used in logs and errors) lead with the path and mark
+/// deletions.
+fn check_entry_display<P, K>(m: &Manifest<P, K>) {
+    for f in &m.files {
+        let shown = f.to_string();
+        oracle!(
+            shown.starts_with(&f.path) && shown.ends_with(" (deleted)") == f.deleted,
+            "file entry {f:?} displays as {shown:?}"
+        );
+    }
+    for d in &m.dirs {
+        let shown = d.to_string();
+        oracle!(
+            shown.starts_with(&d.path) && shown.ends_with(" (deleted)") == d.deleted,
+            "dir entry {d:?} displays as {shown:?}"
+        );
+    }
+}
+
 /// A diff the v2023 encoder accepts decodes back through
 /// `decode_v2023_as_diff` to its live entries: v2023 has no deletions, so the
 /// encoder drops deleted entries (documented) and the format has no
@@ -151,10 +178,14 @@ fn v2023_diff_roundtrip(m: &openjd_snapshots::SnapshotDiff, what: &str) {
     let back = match openjd_snapshots::decode_v2023_as_diff(&text) {
         Ok(back) => back,
         Err(e) => {
-            oracle!(
-                false,
-                "{what}: v2023-encoded diff does not decode: {e}\n{text}"
-            );
+            let msg = || format!("{what}: v2023-encoded diff does not decode: {e}\n{text}");
+            if file_is_ancestor(m) {
+                crate::known::hit("snapshots-file-as-ancestor", msg);
+            } else if symlink_target_under_file(m) {
+                crate::known::hit("snapshots-v2025-symlink-target-dirs", msg);
+            } else {
+                oracle!(false, "{}", msg());
+            }
             return;
         }
     };
@@ -281,6 +312,13 @@ type Content = (Option<String>, Option<u64>, Option<String>, bool);
 macro_rules! wrapper_matches {
     ($w:expr, $m:expr) => {{
         let (w, m) = (&$w, &$m);
+        use openjd_snapshots::manifest::ManifestRef;
+        oracle!(
+            ManifestRef::files(w) == w.files()
+                && ManifestRef::hash_alg(w) == w.hash_alg()
+                && ManifestRef::file_chunk_size_bytes(w) == w.file_chunk_size_bytes(),
+            "ManifestRef disagrees with the inherent accessors"
+        );
         oracle!(
             w.files() == m.files.as_slice()
                 && w.dirs() == m.dirs.as_slice()
@@ -635,6 +673,14 @@ pub fn ops_gen(data: &[u8]) {
     let include: Vec<&str> = (0..upto(&mut u, 2)).map(|_| *pick(&mut u, &pats)).collect();
     let exclude: Vec<&str> = (0..upto(&mut u, 2)).map(|_| *pick(&mut u, &pats)).collect();
     if let Ok(filter) = IncludeExcludePathsFilter::new(&include, &exclude) {
+        let shown = filter.to_string();
+        oracle!(
+            include
+                .iter()
+                .chain(&exclude)
+                .all(|p| shown.contains(&format!("{p:?}"))),
+            "filter display {shown:?} omits a pattern of {include:?} / {exclude:?}"
+        );
         let kept = filter_manifest(&a, &|e| filter.matches(e));
         oracle!(
             kept.files.len() <= a.files.len(),

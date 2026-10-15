@@ -27,8 +27,8 @@ use crate::targets::text_and_control;
 use crate::{known_issue, oracle};
 use arbitrary::Unstructured;
 use openjd_expr::{
-    ExprValue, ExpressionError, FormatString, FormatStringOptions, FunctionLibrary, HostContext,
-    PathFormat, SymbolTable,
+    ExprValue, ExpressionError, ExpressionErrorKind, FormatString, FormatStringOptions,
+    FunctionLibrary, HostContext, PathFormat, SymbolTable,
 };
 use openjd_model::job::{Job, Step};
 use openjd_model::template::{EnvironmentTemplate, JobTemplate};
@@ -71,6 +71,15 @@ fn is_static_error(e: &ExpressionError) -> bool {
         crate::known::hit("expr-ordering-runtime-type-check", || e.to_string());
         return false;
     }
+    // `__add__: (list[T1], list[T2]) -> list[T3]` accepts lists of different
+    // element types statically; the concatenation fails at run time.
+    if let ExpressionErrorKind::TypeError { message } = e.kind() {
+        if message.starts_with("make_list expected ") || message.starts_with("Cannot concatenate ")
+        {
+            crate::known::hit("expr-unbound-return-typevar", || e.to_string());
+            return false;
+        }
+    }
     crate::targets::expr::static_class(e.kind())
 }
 
@@ -112,11 +121,22 @@ fn inputs(u: &mut Unstructured<'_>, params: &[ParamInfo]) -> JobParameterInputVa
 }
 
 /// Run the whole instantiation pipeline and its oracles.
-/// Does a template's source contain a construct the static pass evaluates
-/// speculatively (`if`/`else`, `and`, `or`)? See known issue
-/// `expr-boolop-static-type`.
+/// Does a `{{ ... }}` interpolation in the template use a construct the
+/// static pass evaluates speculatively (`if`/`else`, `and`, `or`)? See known
+/// issue `expr-boolop-static-type`. Text outside interpolations
+/// (descriptions, commands) does not count.
 fn speculative(doc_text: &str) -> bool {
-    doc_text.contains(" if ") || doc_text.contains(" and ") || doc_text.contains(" or ")
+    let mut rest = doc_text;
+    while let Some(a) = rest.find("{{") {
+        let after = &rest[a + 2..];
+        let end = after.find("}}").unwrap_or(after.len());
+        let expr = &after[..end];
+        if crate::targets::expr::uses_boolop(expr) || expr.contains(" if ") {
+            return true;
+        }
+        rest = &after[end..];
+    }
+    false
 }
 
 pub fn pipeline(
@@ -259,6 +279,7 @@ pub fn pipeline(
         Err(e) => oracle!(false, "create_job succeeded once then failed: {e}"),
     }
 
+    surface(template, &job, &ctx);
     check_dependencies(&job);
     for step in &job.steps {
         let tasks = check_param_space(step);
@@ -327,6 +348,111 @@ fn check_dependencies(job: &Job) {
 }
 
 /// Task parameter sets are equal by name, regardless of insertion order.
+/// A spec enum's `Display` is its template spelling, which is also its
+/// serde form.
+fn display_is_serde<T: std::fmt::Display + serde::Serialize>(x: &T, what: &str) {
+    let ser = serde_json::to_value(x).ok();
+    oracle!(
+        ser == Some(serde_json::Value::String(x.to_string())),
+        "{what}: displays as {:?} but serializes as {ser:?}",
+        x.to_string()
+    );
+}
+
+/// Display / serde agreement and serde round trips for the model types a
+/// template and its job carry.
+fn surface(template: &JobTemplate, job: &Job, ctx: &openjd_model::ValidationContext) {
+    let rev = ctx.profile.revision().to_string();
+    oracle!(
+        template.specification_version.ends_with(&format!("-{rev}")),
+        "revision displays as {rev:?} for specificationVersion {:?}",
+        template.specification_version
+    );
+    for e in ctx.profile.extensions() {
+        let v = serde_json::to_value(e).ok();
+        oracle!(
+            v.as_ref().and_then(|v| v.as_str()) == Some(e.as_str()),
+            "ModelExtension {e:?} serializes as {v:?}, not {:?}",
+            e.as_str()
+        );
+    }
+    for x in template.extensions.iter().flatten() {
+        let v = serde_json::to_value(x).ok();
+        oracle!(
+            v.as_ref().and_then(|v| v.as_str()) == Some(x.0.as_str()),
+            "ExtensionName {:?} serializes as {v:?}",
+            x.0
+        );
+    }
+    if let Some(d) = &template.description {
+        let v = serde_json::to_value(d).ok();
+        oracle!(
+            v.as_ref().and_then(|v| v.as_str()) == Some(d.0.as_str()),
+            "Description serializes as {v:?}"
+        );
+    }
+    for d in template.parameter_definitions_list() {
+        let t = d.job_param_type();
+        let ser = serde_json::to_value(t).ok();
+        known_issue!(
+            "model-param-type-serde-spelling",
+            ser == Some(serde_json::Value::String(t.to_string())),
+            "JobParameterType displays as {t} but serializes as {ser:?}"
+        );
+        if let openjd_model::template::JobParameterDefinition::PATH(p) = d {
+            if let Some(o) = &p.object_type {
+                display_is_serde(o, "ObjectType");
+            }
+            if let Some(f) = &p.data_flow {
+                display_is_serde(f, "DataFlow");
+            }
+        }
+        if let openjd_model::template::JobParameterDefinition::FLOAT(f) = d {
+            for x in [&f.default, &f.min_value, &f.max_value]
+                .into_iter()
+                .flatten()
+            {
+                // FlexFloat's display parses back to the same value.
+                let shown = x.to_string();
+                oracle!(
+                    shown.parse::<f64>().ok() == Some(x.0),
+                    "FlexFloat {} displays as {shown:?}",
+                    x.0
+                );
+            }
+        }
+    }
+    let scripts = job.steps.iter().map(|s| {
+        (
+            s.script.embedded_files.as_ref(),
+            s.script.actions.on_run.cancelation.as_ref(),
+        )
+    });
+    for (files, cancel) in scripts {
+        for f in files.into_iter().flatten() {
+            display_is_serde(&f.file_type, "FileType");
+            if let Some(e) = &f.end_of_line {
+                display_is_serde(e, "EndOfLine");
+            }
+        }
+        if let Some(c) = cancel {
+            match serde_json::to_value(c)
+                .map(serde_json::from_value::<openjd_model::job::CancelationMode>)
+            {
+                Ok(Ok(back)) => oracle!(
+                    serde_json::to_value(&back).ok() == serde_json::to_value(c).ok(),
+                    "CancelationMode serde round trip changed {c:?} to {back:?}"
+                ),
+                Ok(Err(e)) => oracle!(
+                    false,
+                    "CancelationMode does not deserialize its own form: {e}"
+                ),
+                Err(e) => oracle!(false, "CancelationMode does not serialize: {e}"),
+            }
+        }
+    }
+}
+
 fn set_eq(a: &TaskParameterSet, b: &TaskParameterSet) -> bool {
     a.len() == b.len()
         && a.iter().all(|(k, va)| {
@@ -379,6 +505,25 @@ fn check_param_space(step: &Step) -> Vec<TaskParameterSet> {
         "is_empty disagrees with len {len}"
     );
     let walked: Vec<TaskParameterSet> = it.by_ref().take(2001).collect();
+    if let Some(first) = walked.first() {
+        for (name, v) in first {
+            // A task parameter's value has its declared type, and the type
+            // displays as its spec spelling.
+            let shown = v.param_type.to_string();
+            oracle!(
+                shown == v.param_type.as_spec_str(),
+                "TaskParameterType displays as {shown:?}"
+            );
+            // PATH values stay strings until the session maps them.
+            let path_as_string = v.param_type.expr_type() == openjd_expr::ExprType::PATH
+                && matches!(v.value, ExprValue::String(_));
+            oracle!(
+                path_as_string || v.value.expr_type() == v.param_type.expr_type(),
+                "task parameter {name:?} declared {shown} holds {:?}",
+                v.value
+            );
+        }
+    }
     if !adaptive && len <= 2000 {
         oracle!(
             walked.len() == len,

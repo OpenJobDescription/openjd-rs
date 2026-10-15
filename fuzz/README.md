@@ -107,12 +107,26 @@ Each check below is executable, and each was verified to fail when broken:
   (`expression_dictionary_covers_the_library`).
 - **Regressions stay fixed on every OS.** `regressions/` replays on Linux,
   macOS, and Windows in CI.
+- **Known issues stay honest.** Each `regressions/<target>/known-<id>[--note]`
+  must still reproduce `<id>`, and every known issue must have one
+  (`known_issue_reproducers_reproduce`), so a fixed bug fails until its gate
+  becomes an `oracle!`.
+- **Every target is fuzzed in CI.** Each registered target appears in exactly
+  one `fuzz.yml` matrix group (`every_target_is_in_one_ci_group`).
 - **Public API coverage** (`scripts/check_fuzz_api_coverage.py`). rustdoc JSON
-  enumerates every public free function and inherent method of openjd-expr,
-  openjd-model, openjd-sessions, and openjd-snapshots; llvm source coverage of
-  the corpus replay must show each one executed, unless `api_coverage.toml`
-  excludes it with a reason. A stale exclusion fails too. Naming a function
-  proves nothing — only executing it does.
+  enumerates, for every workspace library crate (new crates included unless
+  opted out in the script's `NOT_GATED`), every public free function, inherent
+  method, and method of a hand-written (not derived) trait impl. llvm source
+  coverage of the corpus and regression replays (not the harness self-checks)
+  must show each one's own function record executed — matched by demangled
+  definition path, so macro-generated methods count separately — unless
+  `api_coverage.toml` excludes it by exact path with a reason. Glob
+  exclusions, stale exclusions, and exclusions of executed functions all fail.
+  Executing a function is the floor, not the goal: call it with generated
+  input and check a property, never with constant arguments just to satisfy
+  the gate. Not covered: Windows-only code (rustdoc runs on Linux),
+  `#[doc(hidden)]` items, and the CLI binary (its argument parsers are fuzzed
+  by `cli_args`).
 
 ## Known issues
 

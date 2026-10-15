@@ -277,7 +277,7 @@ pub fn fits(v: &ExprValue, ty: &ExprType) -> bool {
 }
 
 /// Does `src` use `and` / `or` as an operator (word-bounded)?
-fn uses_boolop(src: &str) -> bool {
+pub(crate) fn uses_boolop(src: &str) -> bool {
     let b = src.as_bytes();
     let ident = |c: u8| c.is_ascii_alphanumeric() || c == b'_' || c == b'.';
     ["or", "and"].iter().any(|w| {
@@ -352,6 +352,20 @@ pub fn check_expression(
     for fmt in [PathFormat::Posix, PathFormat::Windows] {
         let table = env.concrete_in(fmt);
         let (result, peak) = eval_concrete(parsed, &runtime, &table, fmt);
+        if let Err(e) = &result {
+            // The error's source chain is finite and every link explains
+            // itself.
+            let mut link = std::error::Error::source(e);
+            let mut depth = 0;
+            while let Some(x) = link {
+                depth += 1;
+                oracle!(
+                    depth < 32 && !x.to_string().is_empty(),
+                    "error source chain of {e} is degenerate"
+                );
+                link = x.source();
+            }
+        }
         oracle!(
             peak <= PEAK_ALLOWANCE,
             "evaluation of {src:?} ({fmt:?}) peaked at {peak} bytes with a {MEMORY_LIMIT}-byte limit"
@@ -588,6 +602,44 @@ pub fn check_value(v: &ExprValue, fmt: PathFormat) {
         "hash not stable across clone: {v:?}"
     );
 
+    // The `From` conversions build the same value from its parts.
+    let rebuilt = match v {
+        ExprValue::Bool(b) => Some(ExprValue::from(*b)),
+        ExprValue::Int(i) => {
+            if let Ok(n) = i32::try_from(*i) {
+                oracle!(ExprValue::from(n).equals(v), "From<i32> of {n} != {v:?}");
+            }
+            Some(ExprValue::from(*i))
+        }
+        ExprValue::String(x) => {
+            oracle!(
+                ExprValue::from(x.as_str()).equals(v),
+                "From<&str> of {x:?} != {v:?}"
+            );
+            Some(ExprValue::from(x.clone()))
+        }
+        ExprValue::RangeExpr(r) => Some(ExprValue::from(r.clone())),
+        ExprValue::Unresolved(t) => Some(ExprValue::from(t.clone())),
+        _ => None,
+    };
+    if let Some(r) = rebuilt {
+        oracle!(r.equals(v), "From conversion of {v:?}'s parts gives {r:?}");
+    }
+    // `Float64`: hashing follows the bits, ordering against `f64` follows
+    // the value.
+    if let ExprValue::Float(f) = v {
+        oracle!(
+            hash_of(f) == hash_of(&f.clone()),
+            "Float64 hash unstable: {f:?}"
+        );
+        for x in [**f, 0.0, -1.5, f64::INFINITY] {
+            oracle!(
+                f.partial_cmp(&x) == (**f).partial_cmp(&x),
+                "Float64 {f:?} vs {x}: ordering disagrees with the value"
+            );
+        }
+    }
+
     // Transport round trip — the template-scope → session-scope boundary.
     let wire = v.to_json_transport();
     let has_range = matches!(v, ExprValue::RangeExpr(_))
@@ -791,6 +843,22 @@ pub fn format_string(data: &[u8]) {
     let Ok(fs) = FormatString::new(text) else {
         return;
     };
+    // Display and Serialize both give the raw text, and the serialized form
+    // deserializes back to an equal format string.
+    oracle!(
+        fs.to_string() == text,
+        "FormatString display {fs} != {text:?}"
+    );
+    match serde_json::to_value(&fs) {
+        Ok(serde_json::Value::String(s)) => {
+            oracle!(s == text, "FormatString serializes to {s:?}, not {text:?}");
+            match serde_json::from_value::<FormatString>(serde_json::Value::String(s)) {
+                Ok(back) => oracle!(back == fs, "FormatString serde round trip changed it"),
+                Err(e) => oracle!(false, "FormatString does not deserialize its own form: {e}"),
+            }
+        }
+        other => oracle!(false, "FormatString serializes to {other:?}"),
+    }
     let mut names: Vec<String> = fs.accessed_symbols().into_iter().collect();
     names.sort();
     for n in fs.expression_names() {
@@ -936,6 +1004,13 @@ pub fn range(data: &[u8]) {
             let _ = (
                 openjd_expr::RangeExprError::new(text, e.message()).to_string(),
                 openjd_expr::RangeExprError::at(text, e.message(), 0).to_string(),
+            );
+            // The conversion to ExpressionError keeps the message.
+            let msg = e.message().to_string();
+            let ee = ExpressionError::from(openjd_expr::RangeExprError::new(text, &msg));
+            oracle!(
+                ee.to_string().contains(&msg),
+                "ExpressionError from range error {msg:?} loses it: {ee}"
             );
             return;
         }
@@ -1569,6 +1644,17 @@ pub fn symbol_table(data: &[u8]) {
 
     // Serde round trip of the whole table.
     let ser = SerializedSymbolTable::from_symtab(&st);
+    match serde_json::to_string(&ser).map(|j| serde_json::from_str::<SerializedSymbolTable>(&j)) {
+        Ok(Ok(back)) => oracle!(
+            back == ser,
+            "SerializedSymbolTable serde round trip changed it"
+        ),
+        Ok(Err(e)) => oracle!(
+            false,
+            "SerializedSymbolTable does not deserialize its JSON: {e}"
+        ),
+        Err(e) => oracle!(false, "SerializedSymbolTable does not serialize: {e}"),
+    }
     match ser.to_symtab(fmt) {
         Ok(back) => {
             oracle!(back.all_paths("") == paths, "transport changed the key set");
@@ -1617,11 +1703,46 @@ pub fn symbol_table(data: &[u8]) {
         .filter_map(|p| st.get_value(p).map(|v| (p.clone(), v.clone())))
         .collect();
     match SymbolTable::from_pairs(pairs.iter().map(|(k, v)| (k.as_str(), v.clone()))) {
-        Ok(fp) => oracle!(
-            fp.all_paths("") == paths,
-            "from_pairs(all_paths) changed the key set"
-        ),
+        Ok(fp) => {
+            oracle!(
+                fp.all_paths("") == paths,
+                "from_pairs(all_paths) changed the key set"
+            );
+            // `collect()` (FromIterator) agrees with from_pairs; the entries
+            // are a table's own, so it does not panic on a conflict.
+            let collected: SymbolTable =
+                pairs.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+            oracle!(
+                collected.all_paths("") == paths,
+                "FromIterator changed the key set"
+            );
+        }
         Err(e) => oracle!(false, "from_pairs rejects a table's own entries: {e:?}"),
+    }
+    if let Some(p) = paths.first() {
+        let below = format!("{p}.{}", gen::ident(&mut u));
+        if st.get_table(p).is_none() {
+            match st.set(&below, ExprValue::Int(1)) {
+                Err(e) => {
+                    let msg = e.to_string();
+                    oracle!(
+                        msg.contains(&e.key) && msg.contains(&e.conflict),
+                        "SymbolTableError display {msg:?} omits its key or conflict"
+                    );
+                    let ee = ExpressionError::from(e.clone());
+                    oracle!(
+                        ee.to_string().contains(&msg),
+                        "ExpressionError from {msg:?} loses the message: {ee}"
+                    );
+                    let me = openjd_model::ModelError::from(e);
+                    oracle!(
+                        me.to_string().contains(&msg),
+                        "ModelError from {msg:?} loses the message: {me}"
+                    );
+                }
+                Ok(()) => oracle!(false, "set({below:?}) under the scalar {p:?} succeeded"),
+            }
+        }
     }
     let sk = format!("S.{}", gen::ident(&mut u));
     let sv = gen::string(&mut u);

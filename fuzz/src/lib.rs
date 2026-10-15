@@ -92,6 +92,13 @@ pub mod known {
              `skip_deep_unclosed_brackets`).",
         ),
         (
+            "model-param-type-serde-spelling",
+            "`JobParameterType` serializes with serde's variant names (`\"Int\"`, \
+             `\"ListListInt\"`) while its `Display` and the template spelling are `\"INT\"`, \
+             `\"LIST[LIST[INT]]\"`, so a serialized `Job`'s `parameters[*].paramType` (and \
+             openjd-for-js, which uses `{:?}`) does not use the spec spelling.",
+        ),
+        (
             "expr-ordering-runtime-type-check",
             "The ordering operators are registered `(T1, T2) -> bool` and refuse mismatched \
              operand types only at run time (`do_compare`; documented in \

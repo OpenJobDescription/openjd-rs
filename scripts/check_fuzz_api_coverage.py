@@ -17,14 +17,15 @@
 # registry proves nothing; this check cannot be satisfied by a claim.
 #
 # Rules (all enforced):
-#   1. Every public free function and inherent method of openjd-expr,
-#      openjd-model, openjd-sessions, and openjd-snapshots has a nonzero
-#      execution count under corpus replay, unless it matches an [exclude]
-#      pattern in fuzz/api_coverage.toml.
-#   2. Every [exclude] pattern matches at least one public function (no
-#      stale exclusions).
-#   3. No function excluded by an exact (non-glob) entry is in fact covered;
-#      the exclusion is stale and would hide a later loss of coverage.
+#   1. Every public free function, inherent method, and method of a
+#      hand-written (not derived) trait impl on a public type, in every
+#      workspace library crate (see NOT_GATED), has a nonzero
+#      execution count under corpus replay, unless it is listed in [exclude]
+#      in fuzz/api_coverage.toml.
+#   2. Every [exclude] entry is an exact function path (no globs, which would
+#      silently exempt functions added later) naming a public function.
+#   3. No excluded function is in fact covered; the exclusion is stale and
+#      would hide a later loss of coverage.
 #
 # Usage:
 #   scripts/check_fuzz_api_coverage.py --rustdoc-dir DIR --coverage cov.json
@@ -33,7 +34,6 @@
 # --generate needs a nightly toolchain (rustdoc JSON) and cargo-llvm-cov.
 
 import argparse
-import fnmatch
 import json
 import os
 import subprocess
@@ -42,8 +42,43 @@ import tomllib
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-CRATES = ["openjd_expr", "openjd_model", "openjd_sessions", "openjd_snapshots"]
+# Workspace library crates the gate does not cover, with the reason. Every
+# other library crate in the workspace is covered, so a new crate is gated
+# from its first public function.
+NOT_GATED = {
+    "openjd_for_js": "experimental wasm bindings over openjd-model / openjd-expr, "
+    "which are gated themselves",
+}
+
+
+def workspace_libs() -> list[str]:
+    meta = json.loads(
+        subprocess.run(
+            ["cargo", "metadata", "--no-deps", "--format-version", "1"],
+            cwd=REPO,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )
+    libs = sorted(
+        t["name"]
+        for p in meta["packages"]
+        for t in p["targets"]
+        if {"lib", "rlib"} & set(t["kind"])
+    )
+    stale = set(NOT_GATED) - set(libs)
+    assert not stale, f"NOT_GATED names crates that are not workspace libraries: {stale}"
+    return [c for c in libs if c not in NOT_GATED]
+
+
+CRATES = workspace_libs()
 POLICY = REPO / "fuzz" / "api_coverage.toml"
+
+
+# Hand-written trait impls whose methods are not public behavior worth
+# fuzzing on their own.
+UNGATED_TRAITS = {"Debug", "Drop"}
 
 
 def public_functions(doc: dict) -> dict[str, tuple[str, int, str]]:
@@ -78,7 +113,32 @@ def public_functions(doc: dict) -> dict[str, tuple[str, int, str]]:
             if not impl:
                 continue
             body = impl["inner"]["impl"]
-            if body.get("trait") is not None or body.get("is_synthetic"):
+            if body.get("is_synthetic") or body.get("blanket_impl") is not None:
+                continue
+            trait = body.get("trait")
+            if trait is not None:
+                # Methods of a hand-written trait impl, as
+                # `Type::<Trait>::method`. Derived impls are generated code.
+                name = trait["path"].split("::")[-1]
+                derived = any("automatically_derived" in str(a) for a in impl.get("attrs", []))
+                # rustdoc also lists `impl From<A> for B` under `A`; take each
+                # impl only under its own `for` type.
+                for_id = (body.get("for") or {}).get("resolved_path", {}).get("id")
+                if (
+                    derived
+                    or name in UNGATED_TRAITS
+                    or impl.get("crate_id") != 0
+                    or for_id != type_item["id"]
+                ):
+                    continue
+                for mid in body["items"]:
+                    m = index.get(str(mid))
+                    if m and "function" in m["inner"]:
+                        add(
+                            f"{type_path}::<{name}>::{m['name']}",
+                            m,
+                            f"{type_def}::<{name}>::{m['name']}" if type_def else None,
+                        )
                 continue
             for mid in body["items"]:
                 m = index.get(str(mid))
@@ -148,8 +208,8 @@ def strip_generics(s: str) -> str:
 
 def definition_path(demangled: str) -> str | None:
     """`<crate::m::Type<T>>::method::<U>` -> `crate::m::Type::method`;
-    `crate::m::f::<T>` -> `crate::m::f`. None for closures, shims, and trait
-    impls (`<T as Trait>::f`), which are not public inherent functions."""
+    `<crate::m::Type as a::b::Trait<X>>::f` -> `crate::m::Type::<Trait>::f`;
+    `crate::m::f::<T>` -> `crate::m::f`. None for closures and shims."""
     if "{" in strip_generics(demangled):
         return None
     if demangled.startswith("<"):
@@ -161,8 +221,14 @@ def definition_path(demangled: str) -> str | None:
                 break
         inner, rest = demangled[1:i], demangled[i + 1 :]
         top = strip_generics(inner)
-        if " as " in top or not top.replace("::", "").replace("_", "").isalnum():
+        trait = None
+        if " as " in top:
+            top, trait_path = top.split(" as ", 1)
+            trait = trait_path.split("::")[-1]
+        if not top.replace("::", "").replace("_", "").isalnum():
             return None
+        if trait is not None:
+            top = f"{top}::<{trait}>"
         return top + strip_generics(rest)
     return strip_generics(demangled)
 
@@ -254,14 +320,13 @@ def main() -> int:
         # A function with no llvm record was never code-generated (an
         # uninstantiated generic, or dead code), so it was not executed.
         covered = defpath in executed
-        excluded = [p for p in excludes if fnmatch.fnmatchcase(path, p)]
+        excluded = [p for p in excludes if p == path]
         for p in excluded:
             pattern_hits[p] += 1
         if excluded:
             n_exc += 1
             status = "excluded"
-            exact = [p for p in excluded if not any(c in p for c in "*?[")]
-            if covered and exact:
+            if covered:
                 failures.append(
                     f"excluded but executed by the fuzz corpus (drop the exclusion): {path}"
                 )
@@ -274,7 +339,9 @@ def main() -> int:
         rows.append((status, path, f"{file}:{begin}"))
 
     for p, hits in pattern_hits.items():
-        if hits == 0:
+        if any(c in p for c in "*?["):
+            failures.append(f"exclusions must be exact function paths, not patterns: {p!r}")
+        elif hits == 0:
             failures.append(f"stale exclusion matches no public function: {p!r}")
 
     total = len(functions)

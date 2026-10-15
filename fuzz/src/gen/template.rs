@@ -623,6 +623,21 @@ pub fn job_template(u: &mut Unstructured<'_>) -> Generated {
     if one_in(ctx.u, 10) {
         perturb(ctx.u, &mut doc);
     }
+    // A description for about a third of templates, derived from the
+    // document instead of drawn from the input, so it consumes no bytes and
+    // leaves every later draw (and the generated reproducers in
+    // regressions/) unchanged.
+    let h = {
+        use std::hash::{Hash, Hasher};
+        let mut s = std::collections::hash_map::DefaultHasher::new();
+        doc.to_string().hash(&mut s);
+        s.finish()
+    };
+    if h % 3 == 0 {
+        if let Value::Object(o) = &mut doc {
+            o.insert("description".into(), json!(format!("Job {h:x}")));
+        }
+    }
     Generated { doc, params }
 }
 

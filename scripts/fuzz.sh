@@ -63,6 +63,15 @@ dict_args() {
     esac
 }
 
+# Number of finding files (crash-/timeout-/oom-/leak-/slow-unit-) libFuzzer
+# has left for a target.
+artifact_count() {
+    local d="$FUZZ_DIR/artifacts/$1"
+    [[ -d "$d" ]] || { echo 0; return; }
+    find "$d" -maxdepth 1 -type f \( -name 'crash-*' -o -name 'timeout-*' -o -name 'oom-*' \
+        -o -name 'leak-*' -o -name 'slow-unit-*' \) | wc -l | tr -d ' '
+}
+
 LIBFUZZER_ARGS=(-timeout=20 -rss_limit_mb=3072 -malloc_limit_mb=2048 -max_len=65536 -print_final_stats=1)
 
 cmd="${1:-run}"
@@ -89,12 +98,20 @@ case "$cmd" in
             # them fatal, as they are in single-process mode.
             [[ "$FUZZ_JOBS" -gt 1 ]] &&
                 parallel=(-fork="$FUZZ_JOBS" -ignore_timeouts=0 -ignore_ooms=0)
+            # A finding is also detected by the artifact it leaves: fork
+            # mode's parent can exit 0 after a child crash (it exits with
+            # the raw wait status, which truncates to 0 on some platforms).
+            before="$(artifact_count "$t")"
             # shellcheck disable=SC2046
             cargo_fuzz run --debug-assertions "$t" \
                 "$FUZZ_WORK_DIR/$t" "${seeds[@]}" -- \
                 "${LIBFUZZER_ARGS[@]}" $(dict_args "$t") \
                 -max_total_time="$FUZZ_SECONDS" ${parallel[@]+"${parallel[@]}"} ||
                 failed+=("$t")
+            if [[ "$(artifact_count "$t")" -gt "$before" ]] &&
+                [[ " ${failed[*]-} " != *" $t "* ]]; then
+                failed+=("$t")
+            fi
             echo "::endgroup::"
         done < <(targets_or_all "$@")
         if [[ ${#failed[@]} -gt 0 ]]; then
