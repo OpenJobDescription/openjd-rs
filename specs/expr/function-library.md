@@ -260,6 +260,16 @@ the generic `(list[T1], int) -> T1`: the empty list has no element, so indexing
 it is always out of bounds, and the empty form of `list[int | nulltype]` adds
 nothing to `int`.
 
+An overload with a `list[nulltype]` parameter (this one, `sum(list[nulltype])`,
+`min`/`max(list[nulltype])`, `flatten(list[nulltype])`, `join(list[nulltype],
+string)`, …) specializes a general overload for the empty list. Signature
+matching lets an argument of unknown element type (`list[T3]`, `list[any]`,
+`any`) match it, but at run time only an empty list selects it, so for the
+type-only dispatch above (and `derive_return_type`) it applies only to an
+argument whose type is exactly `list[nulltype]`; any other argument may be
+non-empty and takes the general overload (`(Param.L + Param.L)[0]` is `int`,
+not `noreturn`).
+
 The method-vs-function distinction is made by the evaluator before dispatch:
 `eval_call` transforms `obj.method(args)` into `method(obj, args)` via UFCS and sets
 a per-call flag on the dispatch indicating that position 0 is a receiver. The library
@@ -666,3 +676,11 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   `s3://bucket/a//b`.
 - **Slicing a `range_expr`** returns `range_expr` for positive step, `list[int]` for
   negative step (§2.1.8)
+- **List concatenation** (`__add__` over two lists) gives the common element
+  type (2026-02 Expression Language §2.1.3) by the join a list literal holding
+  both lists uses (`types::join_list_element`; see [type-system.md § List
+  element join](type-system.md#list-element-join)): `[1] + [2.5]` is
+  `list[float]`, an empty inner list takes the other side's type
+  (`[[]] + [[1]]` is `list[list[int]]`), inner lists promote (`[[1]] + [[2.5]]`
+  is `list[list[float]]`), and incompatible operands fail with "Cannot
+  concatenate list[list[int]] and list[list[string]]".

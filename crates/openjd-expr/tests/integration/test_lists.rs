@@ -1758,8 +1758,8 @@ fn empty_listcomp_has_its_element_expression_type() {
 fn flatten_empty_comprehension_reaches_repr_sh() {
     // Regression: flatten over an empty comprehension result must be accepted
     // by repr_sh. The comprehension is an empty list[list[string]] (2026-02
-    // §1.3.7: typed by its element expression), so flatten gives an empty
-    // list[string].
+    // §1.3.7: typed by its element expression), and flatten of it is an
+    // empty list.
     let mut st = SymbolTable::new();
     st.set(
         "Env",

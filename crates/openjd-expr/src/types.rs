@@ -618,7 +618,9 @@ pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
 }
 
 /// The type of a comprehension whose element expression has type
-/// `body` (§1.3.7). `T` is `body` without a `nulltype` member (a list
+/// `body` (§1.3.7), or `None` when it would nest lists more than two
+/// levels deep ([`comprehension_too_deep`]) — an error, as for a list
+/// literal. `T` is `body` without a `nulltype` member (a list
 /// cannot hold `null`), with a union of list types read as one list of
 /// the union of their elements ([`merge_list_union`]). Then:
 ///
@@ -626,25 +628,54 @@ pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
 /// - `T` contains a union: `list[T | nulltype]` — a non-empty run takes
 ///   its type from its elements, and an empty one is `list[nulltype]`.
 /// - nothing is left of `T`: `list[nulltype]`.
-pub(crate) fn comprehension_list_type(body: &ExprType) -> ExprType {
+pub(crate) fn comprehension_list_type(body: &ExprType) -> Option<ExprType> {
     let body = match (body.code, body.params.as_slice()) {
         (TypeCode::Unresolved, [inner]) => inner,
         _ => body,
     };
     let Some(t) = list_element_contribution(body) else {
-        return ExprType::list(ExprType::NULLTYPE);
+        return Some(ExprType::list(ExprType::NULLTYPE));
     };
     // A body that never produces a value (`fail(...)`): only a run with
     // no elements succeeds.
     if t.code == TypeCode::NoReturn {
-        return ExprType::list(ExprType::NULLTYPE);
+        return Some(ExprType::list(ExprType::NULLTYPE));
     }
     let t = merge_list_union(t);
-    if contains_union(&t) {
+    if comprehension_too_deep(&t) {
+        return None;
+    }
+    Some(if contains_union(&t) {
         ExprType::list(ExprType::union(vec![t, ExprType::NULLTYPE]))
     } else {
         ExprType::list(t)
+    })
+}
+
+/// Whether `t`, as a comprehension's element type `T` (§1.3.7), makes the
+/// comprehension nest lists more than two levels deep (§1.2.1): every
+/// form of `T` (each member of a union `T`, each of their
+/// [`list_forms`], `nulltype` aside) is a list of lists. A form that is
+/// not leaves a run that builds a valid list, which validation must not
+/// reject; with no form left there is nothing to nest.
+pub(crate) fn comprehension_too_deep(t: &ExprType) -> bool {
+    fn depth(t: &ExprType) -> usize {
+        match (t.code, t.params.as_slice()) {
+            (TypeCode::List, [elem]) => 1 + depth(elem),
+            _ => 0,
+        }
     }
+    let members: &[ExprType] = if t.code == TypeCode::Union {
+        &t.params
+    } else {
+        std::slice::from_ref(t)
+    };
+    let mut forms = members
+        .iter()
+        .filter(|m| m.code != TypeCode::NullType)
+        .flat_map(list_forms)
+        .peekable();
+    forms.peek().is_some() && forms.all(|f| depth(&f) >= 2)
 }
 
 /// Whether `t` has a union at any depth (`int | string`,

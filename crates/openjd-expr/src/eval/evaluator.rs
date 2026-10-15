@@ -1716,11 +1716,26 @@ impl<'a> Evaluator<'a> {
         }
 
         // Single-index access: dispatch through library
-        self.dispatch_with_node(
+        let receiver_unresolved = value.is_unresolved();
+        let result = self.dispatch_with_node(
             "__getitem__",
             vec![value, slice],
             Some(&ast::Expr::Subscript(s.clone())),
-        )
+        )?;
+        // Every form of an unresolved receiver is the empty list
+        // (`list[nulltype]`): indexing it fails on every run. Report it
+        // here, where it happens, rather than as a `noreturn` operand of
+        // whatever uses the element.
+        if receiver_unresolved && result.expr_type() == ExprType::unresolved(ExprType::NORETURN) {
+            let err = ExpressionError::index_out_of_bounds(
+                "Index out of bounds: the list is always empty".to_string(),
+            );
+            return Err(match self.expr_source {
+                Some(src) => err.with_node(src, &ast::Expr::Subscript(s.clone())),
+                None => err,
+            });
+        }
+        Ok(result)
     }
 
     /// Create a child evaluator with an extra symbol table for local scope.
@@ -1874,8 +1889,25 @@ impl<'a> Evaluator<'a> {
         // union, `list[T | nulltype]` when it does (an empty run is the
         // untyped empty list), `list[nulltype]` when the body can only be
         // `null`. `int?` gives `list[int]`.
-        let list_type = crate::types::comprehension_list_type(&body_val.expr_type());
+        let list_type = self.comprehension_type(lc, &body_val.expr_type())?;
         self.track(ExprValue::unresolved(list_type))
+    }
+
+    /// [`crate::types::comprehension_list_type`] of the body's type, or the
+    /// nesting error (located on the comprehension) when the element type
+    /// is a list of lists.
+    fn comprehension_type(
+        &self,
+        lc: &ast::ExprListComp,
+        body_type: &ExprType,
+    ) -> Result<ExprType, ExpressionError> {
+        crate::types::comprehension_list_type(body_type).ok_or_else(|| {
+            let err = ExpressionError::new("Lists may be nested at most 2 levels deep");
+            match self.expr_source {
+                Some(src) => err.with_node(src, &ast::Expr::ListComp(lc.clone())),
+                None => err,
+            }
+        })
     }
 
     /// The loop variable for a comprehension over `iterable`
@@ -1906,7 +1938,9 @@ impl<'a> Evaluator<'a> {
     /// it is evaluated with the loop variable `unresolved(var_type)` and
     /// every other symbol read as `unresolved(its type)`
     /// (`symbols_as_types`), so a value it never reads at run time cannot
-    /// fail it. An error is the one validation reports, and propagates.
+    /// fail it, and under the caller's list target, as every element of a
+    /// non-empty run is. An error typing it is an error of the
+    /// comprehension, and propagates.
     fn empty_comprehension(
         &mut self,
         lc: &ast::ExprListComp,
@@ -1928,7 +1962,7 @@ impl<'a> Evaluator<'a> {
         child.symbols_as_types = true;
         let body_val = child.eval_node(&lc.elt, elem_target);
         self.absorb_spend_and_reset(&child, memory_baseline);
-        let list_type = crate::types::comprehension_list_type(&body_val?.expr_type());
+        let list_type = self.comprehension_type(lc, &body_val?.expr_type())?;
         let elem = list_type
             .list_element_type()
             .cloned()

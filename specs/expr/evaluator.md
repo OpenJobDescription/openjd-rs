@@ -626,9 +626,20 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     empty `list[int]`). The result is the empty `list[T]` when `T` has no
     union (or `any`), so `[x for x in [1, 2] if x > 5] + ['a']` fails as
     `[1] + ['a']` does, and the untyped empty `list[nulltype]` otherwise.
-    An error from the typing is the one template validation reports, and
-    propagates; the typing's spend is absorbed and its footprint reset like
-    an iteration's.
+    An error from the typing is an error of the comprehension, and
+    propagates: the body is type-checked even when it never runs. Over a
+    concrete iterable the loop variable has the iterable's own type, which
+    may be narrower than the one template validation saw (a `list[string]`
+    where validation saw `list[int] | list[string]`), so a typing error can
+    surface here that validation, typing the union, did not report — run
+    time is then stricter than validation, never laxer. The typing's spend
+    is absorbed and its footprint reset like an iteration's.
+  - An element type `T` that is a list of lists (every form of it, for a
+    union) is an error, "Lists may be nested at most 2 levels deep",
+    located on the comprehension, at every stage and whether or not the
+    result is empty: the comprehension would be a three-level list, which
+    no value can be (2026-02 §1.2.1). `[[x] for x in Param.EL]` fails with
+    `Param.EL` an empty `list[list[int]]`.
 - Operation count: +1 per iteration
 - Each iteration's child evaluator hands its *spend* — memory
   high-water mark and operation count — back to the parent on **every**
@@ -666,6 +677,9 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 - Negative indices wrap around (Python semantics)
 - Slices return the same type as the input (string→string, list→list)
 - Out-of-bounds index raises an error; out-of-bounds slice clamps silently
+- Indexing an unresolved receiver every form of which is the empty list
+  (`list[nulltype]`, e.g. `[None for x in L]`) fails on every run, and is
+  reported at the index: "Index out of bounds: the list is always empty"
 - The receiver and the index/slice bounds are evaluated unconstrained (see
   [Target Type Propagation](#target-type-propagation)): the caller's
   target describes the subscript's *result*, so `[10, 20, 30][0]` with

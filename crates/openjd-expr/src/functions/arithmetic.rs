@@ -497,21 +497,24 @@ pub fn add_list_list(ctx: Ctx, a: &[ExprValue]) -> R {
         .into_list()
         .ok_or_else(|| ExpressionError::type_error("type error"))?;
     ctx.count_ops(l.len() + r.len())?;
-    if lt != rt
-        && lt != ExprType::NULLTYPE
-        && rt != ExprType::NULLTYPE
-        && !((lt == ExprType::INT && rt == ExprType::FLOAT)
-            || (lt == ExprType::FLOAT && rt == ExprType::INT))
-        && !((lt == ExprType::PATH && rt == ExprType::STRING)
-            || (lt == ExprType::STRING && rt == ExprType::PATH))
-    {
+    // The common element type (2026-02 §2.1.3), by the join a list literal
+    // holding both lists uses (`types::join_list_element`), so an empty
+    // inner list yields at any depth (`[[]] + [[1]]` is `list[list[int]]`)
+    // and inner lists promote (`[[1]] + [[2.5]]` is `list[list[float]]`).
+    let Some(joined) =
+        crate::types::join_list_element(&ExprType::list(lt.clone()), &ExprType::list(rt.clone()))
+    else {
         return Err(ExpressionError::type_error(format!(
             "Cannot concatenate list[{lt}] and list[{rt}]"
         )));
-    }
+    };
+    let joined = crate::types::simplify_joined_list_element(joined);
+    let result_type = joined
+        .list_element_type()
+        .cloned()
+        .unwrap_or(ExprType::NULLTYPE);
     let mut combined = l;
     combined.extend(r);
-    let result_type = if lt == ExprType::NULLTYPE { rt } else { lt };
     ExprValue::make_list_checked(ctx, combined, result_type)
 }
 

@@ -368,12 +368,18 @@ impl FunctionLibrary {
             .any(|t| t.code() == crate::types::TypeCode::Union);
         if !has_unions {
             for entry in self.get_signatures(name) {
+                if empty_list_overload_mismatch(entry, arg_types) {
+                    continue;
+                }
                 if let Some(bindings) = entry.signature.match_call(arg_types) {
                     return Some(entry.signature.sig_return().substitute(&bindings));
                 }
             }
             // Try coercion
             for entry in self.get_signatures(name) {
+                if empty_list_overload_mismatch(entry, arg_types) {
+                    continue;
+                }
                 if let Some(coerced) =
                     try_coerce_types(arg_types, entry.signature.sig_params(), false)
                 {
@@ -597,6 +603,27 @@ fn unresolved_return_type(
     Some(crate::types::merge_list_union(ExprType::union(returns)))
 }
 
+/// Whether `entry` has a `list[nulltype]` parameter whose argument is not
+/// known to be the empty list.
+///
+/// Such an overload (`__getitem__(list[nulltype], int) -> noreturn`,
+/// `sum(list[nulltype]) -> int`) specializes a general one for the empty
+/// list. Signature matching lets an argument of unknown element type
+/// (`list[T3]`, `list[any]`, `any`) match it, but only an argument that is
+/// the empty list selects it at run time; any other may be non-empty and
+/// takes the general overload. So at the type level it applies only to an
+/// argument of type `list[nulltype]` — the empty form of a list with a
+/// union element type, or an empty literal.
+fn empty_list_overload_mismatch(entry: &FunctionEntry, arg_types: &[ExprType]) -> bool {
+    let empty = ExprType::list(ExprType::NULLTYPE);
+    entry
+        .signature
+        .sig_params()
+        .iter()
+        .zip(arg_types)
+        .any(|(p, a)| *p == empty && *a != empty)
+}
+
 /// The return type of the first signature the dispatch phases match for
 /// `arg_types`, applied to types.
 fn phase_return_type(
@@ -604,6 +631,11 @@ fn phase_return_type(
     arg_types: &[ExprType],
     skip_receiver_coercion: bool,
 ) -> Option<ExprType> {
+    let entries: Vec<&FunctionEntry> = entries
+        .iter()
+        .filter(|e| !empty_list_overload_mismatch(e, arg_types))
+        .collect();
+    let entries = entries.as_slice();
     // Phase 1: exact match (non-generic)
     for entry in entries {
         if !entry.signature.is_symbolic() && entry.signature.match_call(arg_types).is_some() {

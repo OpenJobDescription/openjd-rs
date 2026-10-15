@@ -19,7 +19,8 @@ fn tp(s: &str) -> ExprType {
 }
 
 /// The three symbol states: `Param.L = [1, 2, 3]`, `Param.LS = ['a']`,
-/// `Param.R = 1-3`, `Param.Z = 0`; `Task.Param.I = 2`,
+/// `Param.R = 1-3`, `Param.Z = 0`, `Param.EL` an empty `list[list[int]]`
+/// (as job creation binds an empty `LIST[LIST[INT]]`); `Task.Param.I = 2`,
 /// `Task.Param.C = true`.
 fn states() -> [SymbolTable; 3] {
     let params = [
@@ -35,6 +36,11 @@ fn states() -> [SymbolTable; 3] {
             ExprValue::RangeExpr("1-3".parse().unwrap()),
         ),
         ("Param.Z", "int", ExprValue::Int(0)),
+        (
+            "Param.EL",
+            "list[list[int]]",
+            ExprValue::make_list(vec![], ExprType::list(ExprType::INT)).unwrap(),
+        ),
     ];
     let tasks = [
         ("Task.Param.I", "int", ExprValue::Int(2)),
@@ -408,5 +414,111 @@ fn list_of_range_lists_is_two_levels_deep() {
         "list[list[range_expr]]",
         "list[list[range_expr]]",
         r#"[[1-3]]"#,
+    );
+}
+
+// ── Audit round 1 ──
+
+#[test]
+fn empty_list_overloads_apply_only_to_the_empty_list() {
+    // F1: an argument of unknown element type (`list[T3]` from an
+    // unresolved `+`) matched `__getitem__(list[nulltype], int) -> noreturn`
+    // first, so validation rejected `[0] + 1`; only the empty list selects
+    // that overload at run time.
+    assert_stages(
+        "(Param.L + Param.L)[0] + 1",
+        "unresolved[int]",
+        "int",
+        "int",
+        "2",
+    );
+    let [p8, _, _] = states();
+    let mut any_list = SymbolTable::new();
+    any_list
+        .set("U", ExprValue::unresolved(tp("list[any]")))
+        .unwrap();
+    assert_eq!(eval("U[0]", &any_list).expr_type(), tp("unresolved"));
+    assert_eq!(
+        eval("min(Param.L + Param.L)", &p8).expr_type(),
+        tp("unresolved[int]")
+    );
+}
+
+#[test]
+fn element_type_that_is_a_list_of_lists_is_an_error() {
+    // F3: the comprehension would be a three-level list, which no value
+    // can be (§1.2.1); every run, empty or not, fails.
+    for (expr, caret) in [
+        ("[[x] for x in Param.EL]", "  ^~~~~~~~~~~~~~~~~~~~~~~"),
+        (
+            "[[[x]] for x in Param.L if x > 100]",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ),
+    ] {
+        assert_err_all(
+            expr,
+            &[
+                "Lists may be nested at most 2 levels deep\n",
+                &format!("  {expr}\n"),
+                caret,
+            ],
+        );
+    }
+    // A union element type with a form that nests correctly is not an
+    // error: a run producing only that form builds a valid list.
+    let [p8, _, _] = states();
+    assert_eq!(
+        eval("[[[x]] if x > 100 else [x] for x in Param.L]", &p8).expr_type(),
+        tp("unresolved[list[list[int | list[int]] | nulltype]]")
+    );
+}
+
+#[test]
+fn indexing_an_always_empty_list_is_reported_where_it_happens() {
+    // F7: the element of an always-empty list was `noreturn`, which leaked
+    // into the next operation's message ("No matching signature for
+    // string(noreturn)").
+    let expr = "string([None for x in Param.L][0])";
+    let [p8, _, _] = states();
+    assert_err_in(
+        expr,
+        &p8,
+        "pass 8",
+        &[
+            "Index out of bounds: the list is always empty\n",
+            &format!("  {expr}\n"),
+            "         ~~~~~~~~~~~~~~~~~~~~~~~^~~",
+        ],
+    );
+}
+
+#[test]
+fn concatenation_joins_inner_empty_lists() {
+    // F10: `[[]] + [[1]]` was rejected ("Cannot concatenate
+    // list[list[nulltype]] and list[list[int]]"), so an empty `list[nulltype]`
+    // body, now an empty `list[list[nulltype]]`, could no longer be
+    // concatenated. Concatenation uses the list literal's join (§2.1.3).
+    assert_stages(
+        "[[] for x in Param.L if x > 100] + [[1]]",
+        "unresolved[list[T3]]",
+        "list[list[int]]",
+        "list[list[int]]",
+        "[[1]]",
+    );
+    let st = SymbolTable::new();
+    assert_eq!(eval("[[]] + [[1]]", &st).to_display_string(), "[[], [1]]");
+    assert_eq!(
+        eval("[[1]] + [[2.5]]", &st).expr_type(),
+        tp("list[list[float]]")
+    );
+    assert_err_in(
+        "[[1]] + [['a']]",
+        &st,
+        "concrete",
+        &[
+            "Cannot concatenate list[list[int]] and list[list[string]]\n",
+            "  [[1]] + [['a']]\n",
+            "  ~~~~~~^~~~~~~~~",
+        ],
     );
 }
