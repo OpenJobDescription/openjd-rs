@@ -267,12 +267,15 @@ fn static_type(v: &ExprValue) -> ExprType {
 
 /// Every oracle that applies to one parsed expression in one environment.
 /// `well_typed` is true for generator output, which is well-typed by
-/// construction.
+/// construction; `unbound_return` is true when that output went through a
+/// signature with an unbound return type variable (known issue
+/// `expr-unbound-return-typevar`), which voids the guarantee.
 pub fn check_expression(
     parsed: &ParsedExpression,
     env: &Env,
     u: &mut Unstructured<'_>,
     well_typed: bool,
+    unbound_return: bool,
 ) {
     let src = parsed.expression();
     let runtime = runtime_library(&env.rules);
@@ -359,6 +362,12 @@ pub fn check_expression(
                         false,
                         "{src:?}: static type {st} but run-time value {cv:?} has type {ct}"
                     );
+                } else if !fits(cv, &st) && unbound_return {
+                    known_issue!(
+                        "expr-unbound-return-typevar",
+                        false,
+                        "{src:?}: static type {st} but run-time value {cv:?} has type {ct}"
+                    );
                 } else {
                     oracle!(
                         fits(cv, &st),
@@ -401,15 +410,24 @@ pub fn check_expression(
                 }
             }
             (Err(e), Ok(cv)) if well_typed => {
-                oracle!(
-                    !matches!(
-                        e.kind(),
-                        ExpressionErrorKind::TypeError { .. }
-                            | ExpressionErrorKind::UndefinedVariable { .. }
-                            | ExpressionErrorKind::UnknownFunction { .. }
-                    ),
-                    "well-typed {src:?} evaluates to {cv:?} but static checking rejects it: {e}"
+                let static_reject = matches!(
+                    e.kind(),
+                    ExpressionErrorKind::TypeError { .. }
+                        | ExpressionErrorKind::UndefinedVariable { .. }
+                        | ExpressionErrorKind::UnknownFunction { .. }
                 );
+                if unbound_return && matches!(e.kind(), ExpressionErrorKind::TypeError { .. }) {
+                    known_issue!(
+                        "expr-unbound-return-typevar",
+                        false,
+                        "well-typed {src:?} evaluates to {cv:?} but static checking rejects it: {e}"
+                    );
+                } else {
+                    oracle!(
+                        !static_reject,
+                        "well-typed {src:?} evaluates to {cv:?} but static checking rejects it: {e}"
+                    );
+                }
             }
             _ => {}
         }
@@ -653,7 +671,7 @@ pub fn eval_text(data: &[u8]) {
         path_format(&mut u)
     };
     let env = env_for_text(&parsed, &mut u, fmt);
-    check_expression(&parsed, &env, &mut u, false);
+    check_expression(&parsed, &env, &mut u, false, false);
 }
 
 /// Generate well-typed expressions from the library's signatures, over a
@@ -674,12 +692,14 @@ pub fn eval_gen(data: &[u8]) {
     }
     let fmt = path_format(&mut u);
     let env = Env::new(&mut u, symbols, fmt);
-    let text = ExprGen::new(&mut u, &env.symbols).any();
+    let mut g = ExprGen::new(&mut u, &env.symbols);
+    let text = g.any();
+    let unbound_return = g.used_unbound_return;
     let Ok(parsed) = ParsedExpression::new(&text) else {
         return;
     };
     let _ = ExpressionError::expression_too_deep(65, 64).to_string();
-    check_expression(&parsed, &env, &mut u, true);
+    check_expression(&parsed, &env, &mut u, true, unbound_return);
 }
 
 /// `FormatString` parse, resolution, and static validation.

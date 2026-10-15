@@ -110,7 +110,7 @@ pub mod known {
         (
             "expr-unbound-return-typevar",
             "Signatures whose return type variable no parameter binds (`__add__: (list[T1], \
-             list[T2]) -> list[T3]`) lose the element type statically; a later overloaded call \
+             list[T2]) -> list[T3]`, `(list[T1], range_expr) -> list[T2]`) lose the element type statically, and admit operands (`[False] + range_expr(...)`) that static checking then rejects; a later overloaded call \
              then picks the first overload: `min([1.5] + xs)` is `int` statically, `float` at \
              run time.",
         ),

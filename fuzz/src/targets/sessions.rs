@@ -117,9 +117,13 @@ pub fn directives(data: &[u8]) {
     let redacted = redact_openjd_redacted_env_requests(&cmd);
     if let Some(pos) = cmd.find("openjd_redacted_env:") {
         let secret = &cmd[pos + "openjd_redacted_env:".len()..];
-        if secret.trim().len() >= 3 && !secret.contains('*') && !cmd[..pos].contains(secret) {
+        // Everything up to and including the token is kept verbatim (it is
+        // not secret); only what follows it must be masked.
+        let kept = pos + "openjd_redacted_env:".len();
+        if secret.trim().len() >= 3 && !secret.contains('*') {
             oracle!(
-                !redacted.contains(secret),
+                redacted.get(..kept) == Some(&cmd[..kept])
+                    && !redacted[kept..].contains(secret.trim()),
                 "redact_openjd_redacted_env_requests leaked {secret:?}"
             );
         }

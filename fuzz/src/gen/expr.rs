@@ -89,6 +89,11 @@ pub struct ExprGen<'a, 'b> {
     locals: Vec<Symbol>,
     budget: usize,
     next_local: usize,
+    /// Set when the output used a signature whose return type variable no
+    /// parameter binds (known issue `expr-unbound-return-typevar`): such a
+    /// signature does not say what it returns, so the output is not
+    /// well-typed by construction.
+    pub used_unbound_return: bool,
 }
 
 impl<'a, 'b> ExprGen<'a, 'b> {
@@ -99,6 +104,7 @@ impl<'a, 'b> ExprGen<'a, 'b> {
             locals: Vec::new(),
             budget: 48,
             next_local: 0,
+            used_unbound_return: false,
         }
     }
 
@@ -217,6 +223,9 @@ impl<'a, 'b> ExprGen<'a, 'b> {
             return None;
         }
         let (name, sig) = (*pick(self.u, &candidates)).clone();
+        if has_unbound_return(&sig) {
+            self.used_unbound_return = true;
+        }
         let mut bindings: HashMap<TypeCode, ExprType> =
             sig.sig_return().match_type(ty).unwrap_or_default();
         // Unbound type variables: share one choice so `(list[T], T)` stays
@@ -358,6 +367,25 @@ impl<'a, 'b> ExprGen<'a, 'b> {
             }
         }
     }
+}
+
+/// Does `sig`'s return type use a type variable that no parameter binds?
+fn has_unbound_return(sig: &ExprType) -> bool {
+    fn vars(t: &ExprType, out: &mut Vec<TypeCode>) {
+        if TYPE_VARS.contains(&t.code()) {
+            out.push(t.code());
+        }
+        for p in t.params() {
+            vars(p, out);
+        }
+    }
+    let mut bound = Vec::new();
+    for p in sig.sig_params() {
+        vars(p, &mut bound);
+    }
+    let mut ret = Vec::new();
+    vars(sig.sig_return(), &mut ret);
+    ret.iter().any(|v| !bound.contains(v))
 }
 
 /// Render `s` as a Python string literal.
