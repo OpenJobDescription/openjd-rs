@@ -246,9 +246,12 @@ working tree:
   guards to `true` or `false`. It does not edit string literals or constants
   inside a function body, or delete a single statement. Make those mutations
   by hand, in the worktree, one at a time. Run
-  the relevant tests there, and undo each with
-  `git -C <worktree> checkout -- <path>` before the next. The worktree holds
-  only committed content, so that undo is always correct there. To check an
+  the relevant tests there, and undo each before the next, either with
+  `git -C <worktree> checkout -- <path>` or by reverting the edit and
+  confirming with
+  `git show HEAD:<path> | diff --strip-trailing-cr - <worktree>/<path>`.
+  The worktree holds only committed content, so both undos are correct
+  there. To check an
   error-message assertion, for example, change the message text and confirm
   that a test fails. Quote the mutation's diff and the test output as
   evidence.
