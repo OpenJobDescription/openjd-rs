@@ -180,6 +180,10 @@ code?"*
 [AGENTS.md](../../AGENTS.md) covers the convention of updating the specs
 and the report in sync with the code change, but you may sometimes have
 to remind the agent to double-check that the three actually line up.
+Whatever prompt you use, the agent makes the change through the
+[`implement-change`](../../skills/implement-change/SKILL.md) skill. Its audit
+applies the same criteria as `eval-crate`, so a resolved finding should not
+reappear in the next report in a different form.
 
 ## A worked example: clearing the previous `expr` report's P1 items
 

@@ -1407,6 +1407,8 @@ pub fn uri_path::suffixes(path: &str) -> Vec<String>;
 pub fn uri_path::stem(path: &str) -> String;
 pub fn uri_path::parts(path: &str) -> Vec<String>;
 pub fn uri_path::from_parts(parts: &[String]) -> String;
+/// Append `child`. One trailing slash on `path` is dropped first, and a bare
+/// authority gives `scheme://host/child`. Interior empty segments are kept.
 pub fn uri_path::join(path: &str, child: &str) -> String;
 ```
 

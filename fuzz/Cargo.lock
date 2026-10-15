@@ -1701,7 +1701,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openjd-expr"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "regex",
  "regex-syntax",
@@ -1733,7 +1733,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-model"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "indexmap",
  "openjd-expr",
@@ -1746,7 +1746,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-sessions"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "bitflags",
  "futures-util",
@@ -1769,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-snapshots"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "aws-sdk-s3",

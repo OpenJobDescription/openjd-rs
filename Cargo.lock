@@ -2243,7 +2243,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "openjd-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "chrono",
  "clap",
@@ -2262,7 +2262,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-expr"
-version = "0.11.0"
+version = "0.12.0"
 dependencies = [
  "regex",
  "regex-syntax",
@@ -2277,7 +2277,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-for-js"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "js-sys",
  "openjd-expr",
@@ -2291,7 +2291,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-model"
-version = "0.12.0"
+version = "0.13.0"
 dependencies = [
  "indexmap",
  "openjd-expr",
@@ -2305,7 +2305,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-sessions"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "bitflags 2.13.2",
  "futures-util",
@@ -2331,7 +2331,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-snapshots"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -2851,9 +2851,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.45"
+version = "0.23.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
+checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -3785,9 +3785,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.19"
+version = "0.7.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
+checksum = "e464cf451ba96ebfc6f9b6542f17ee8b8956e33f1e40d9690624e59d7a7f8a4b"
 dependencies = [
  "bytes",
  "futures-core",
@@ -3999,9 +3999,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.27.0"
+version = "1.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97277d36b9c3ace13e58fa6e753f8b0bbbf302a18dd193240d70f9e29681059a"
+checksum = "7cc1186384beb7dd8eedea376413fd654937285ea6c9cfbb928dc3043ea4b606"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",

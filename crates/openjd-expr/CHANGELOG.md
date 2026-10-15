@@ -4,6 +4,15 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.12.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.11.0...openjd-expr-v0.12.0) - 2026-10-14
+
+### Bug fixes
+
+- [**breaking**] Type and/or correctly after an unknown operand ([#435](https://github.com/OpenJobDescription/openjd-rs/pull/435)) ([#435](https://github.com/OpenJobDescription/openjd-rs/pull/435))
+
+- [**breaking**] Use one type rule for lists at every stage ([#434](https://github.com/OpenJobDescription/openjd-rs/pull/434)) ([#434](https://github.com/OpenJobDescription/openjd-rs/pull/434))
+
+
 ## [0.11.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.10.1...openjd-expr-v0.11.0) - 2026-10-07
 
 ### Bug fixes

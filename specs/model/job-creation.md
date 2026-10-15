@@ -397,9 +397,11 @@ see ListComp in `specs/expr/evaluator.md`). Budget exceedances
 any other error; the evaluator guarantees they propagate out of every
 construct that absorbs errors under an unresolved operand — an
 unresolved-test conditional whose other branch succeeds, and `and`/`or`
-operands past an unresolved one (a value error there is absorbed —
-run time may select the other branch or short-circuit — but the budget
-was spent in this evaluation regardless; see IfExp and BoolOp in
+operands past an unresolved one that may pass evaluation on (a value error
+there is absorbed — run time may select the other branch or short-circuit —
+but the budget was spent in this evaluation regardless; operands after an
+unresolved one that always decides, such as `Task.Param.I or …`, are not
+evaluated, as at run time; see IfExp and BoolOp in
 `specs/expr/evaluator.md`). One coarseness caveat:
 for an unresolved-test conditional the evaluator charges both branches
 against the budget, while a run-time evaluation with the test resolved

@@ -375,16 +375,82 @@ of its operands, the parent's target applies to the returned value via
 the node's own result coercion — never to the operands themselves, which
 would fail on the discarded ones (issue #291, case B).
 
-When an earlier operand is unresolved, subsequent operands are still evaluated (to
-catch type errors in them), but the final result is `Unresolved(BOOL)` unless a
-subsequent concrete operand proves the result by short-circuiting (e.g.,
-`Unresolved and false` returns `false`). Operands after the unresolved one are
-evaluated speculatively (see [Speculative evaluation](#speculative-evaluation)): a
-value error is absorbed, since a runtime short-circuit could make the operand
-unreachable; a budget error propagates. Every operand value the result does not
-carry is released: the unresolved placeholder (the result is a fresh
-`Unresolved(BOOL)`), a concrete operand replaced by the next, and a speculative
-operand that did not decide the result.
+Up to the first unresolved operand, evaluation is plain short-circuiting. From it
+on, the run-time result may be the unresolved operand itself or any operand after
+it that evaluation can reach, so a later concrete operand is never returned just
+because it would decide the result: at job creation (`Param.*` concrete,
+`Task.*`/`Session.*` unresolved) that would return a value run time never
+produces, and a value error on it would reject a valid job
+(`10 // (Task.Param.I or Param.Z)` with `Param.Z = 0`; resolved-value-limits
+item 25). Instead the evaluator collects every value the operator could return.
+An unresolved operand of type `T`, when it is **not** the last, contributes per
+member of `T` (each union member, or `T` itself):
+
+| Member | `or` returns it as | `or` passes on | `and` returns it as | `and` passes on |
+|--------|--------------------|----------------|---------------------|-----------------|
+| `nulltype` | — | yes | exactly `null` | no |
+| `bool` | exactly `true` | yes (`false`) | exactly `false` | yes (`true`) |
+| `any`, a type variable | `any` | yes | exactly `false` or `null` | yes |
+| `noreturn` | — | no | — | no |
+| any other type `U` | `U` | no | — | yes |
+
+An unresolved **last** operand contributes its whole type (it is returned
+whatever its value). A reached concrete operand that decides, or the last one,
+contributes itself. Evaluation stops at that concrete operand, and also at an
+unresolved operand none of whose members passes on (`Task.Param.I or …`: an `int`
+is never falsy) — run time never evaluates anything after it, so nothing after it
+is evaluated or charged against the budget here either.
+
+A **nested** `and`/`or` operand (`cond and A or B` parses as
+`(cond and A) or B`) whose own result is unknown is not merged into one union
+first: it hands its outcome list to the parent (`eval_boolop_outcomes`), and
+each outcome is classified for the parent operator — an exact value decides it
+or passes on per the falsy rule, a type is classified like an unresolved operand
+of that type (or contributed whole when the nested operator is the last
+operand). This keeps the fact that the `bool` of `Flag and A` can only be
+`false`, which passes `or` on, so `Flag and 1 or 0` → `unresolved[int]` and
+`(Flag and Param.F or 1.0) * 2` type-checks; merging first would give
+`unresolved[bool | int]` and keep a `bool` member that no run can return.
+
+The result is:
+
+- **concrete** when no operand was absorbed (in this operator or a nested one)
+  and every outcome is the same value: a lone reached concrete operand
+  (`Task.Param.I and Param.N` → `Param.N`, since an `int` never decides `and`),
+  or one exact `bool`/`null` (`Session.HasPathMappingRules and false` → `false`;
+  `X or true` → `true` when `X` is `bool`- or `nulltype`-typed — an `any` or
+  other-typed `X` may itself be returned, giving a union);
+- **the first absorbed error**, re-raised, when no outcome remains and an
+  operand was absorbed: every operand before it passes on, so every run reaches
+  a failure (`Task.Param.I and fail('x')` reports `x`, not a coercion error on
+  `noreturn`);
+- otherwise **`unresolved(union of the outcome types)`**, normalized by
+  `ExprType::union`: `Task.Param.I or Param.Z` → `unresolved[int]`,
+  `Session.HasPathMappingRules and Param.S` → `unresolved[bool | string]` (so
+  `(… and Param.S).upper()` type-checks: dispatch accepts a union receiver a
+  member of which matches), `Task.Param.O or Param.S` with `O: int | nulltype` →
+  `unresolved[int | string]`, `Task.Param.NB and false` with
+  `NB: bool | nulltype` → `unresolved[bool | nulltype]`. A boolop with no
+  possible outcome and nothing absorbed (every candidate `noreturn`) is
+  `unresolved[noreturn]`.
+
+The parent target still applies only to the returned value, through
+`eval_node`'s coercion; for a union-typed `Unresolved`, `ExprValue::coerce`
+keeps the members that have a rule toward the target
+(`Session.HasPathMappingRules or Param.S` with a `bool` target →
+`unresolved[bool]`).
+
+Operands after the first unresolved one are evaluated speculatively (see
+[Speculative evaluation](#speculative-evaluation)): a value error is absorbed —
+run time may never reach the operand, and if it does the evaluation fails there,
+so the operand contributes no outcome — and a budget error propagates. Every
+operand value the result does not carry is released: unresolved placeholders (the
+result carries only types), a concrete operand that did not decide, and a decided
+concrete operand folded into an `unresolved` union. A nested `and`/`or` that
+hands up its outcome list has released everything it evaluated; it is still
+evaluated through the same depth bound, caret attachment (`in_node`), and
+absorption rules (`speculate`, the generic form of `eval_speculative`) as any
+other operand.
 
 ### Speculative evaluation
 

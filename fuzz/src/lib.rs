@@ -114,10 +114,8 @@ pub mod known {
         ),
         (
             "expr-boolop-static-type",
-            "`a or b` / `a and b` return an operand, but with an unresolved operand the static \
-             pass types the result `bool` (and may fold to a later operand), so validation \
-             reports the wrong type: `Param.N or 'y'` is `string` statically, `int` at run time. \
-             Errors in operands after an unresolved one are absorbed as if value-dependent, so \
+            "(The result typing of `a or b` after an unresolved operand was fixed in #435.) \
+             Errors in operands after an unresolved one are still absorbed as if value-dependent, so \
              `Param.Flag or nope_fn()` (an unknown function) passes validation. The same \
              speculative evaluation of `a if c else b` with an unresolved `c` absorbs undefined \
              symbols, so `Session.*` inside a conditional in a template-scope field passes \
