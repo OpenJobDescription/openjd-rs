@@ -16,8 +16,9 @@ project was originally ported from Python and the prompts used, see
 2. `cargo` (included with the Rust toolchain).
 3. Nightly rustfmt for formatting checks (`rustup toolchain install nightly`).
 
-Linux, macOS, and Windows all work. Some sessions tests require Docker (Linux) or a test
-user account (Windows) — see `specs/sessions/cross-user-testing.md`.
+Linux, macOS, and Windows all work. Some sessions tests require Docker (Linux), locally
+provisioned test users (macOS), or a test user account (Windows) — see
+`specs/sessions/cross-user-testing.md`.
 
 ## The three artifacts
 

@@ -169,6 +169,26 @@ impl TempDir {
             source: e,
         })?;
 
+        // Ownership/permission setup after this point can fail (e.g. chown to a
+        // group the process user is not a member of). The TempDir struct — and
+        // its Drop-based cleanup — does not exist yet, so on any such failure
+        // remove the just-created directory rather than orphaning it.
+        if let Err(e) = Self::setup_permissions(&path, _user) {
+            let _ = std::fs::remove_dir_all(&path);
+            return Err(e);
+        }
+
+        Ok(Self {
+            path,
+            cleaned_up: false,
+        })
+    }
+
+    /// Apply ownership and permissions to a freshly-created session directory.
+    ///
+    /// Split out of [`TempDir::new`] so that a failure here can trigger removal
+    /// of the directory (the caller owns that cleanup).
+    fn setup_permissions(path: &Path, _user: Option<&dyn SessionUser>) -> Result<(), SessionError> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -176,7 +196,7 @@ impl TempDir {
                 // Cross-user: chown group then set 0o770
                 // chown before chmod — security: don't grant group access if chown fails
                 if let Ok(Some(grp)) = nix::unistd::Group::from_name(u.group()) {
-                    nix::unistd::chown(&path, None, Some(grp.gid)).map_err(|e| {
+                    nix::unistd::chown(path, None, Some(grp.gid)).map_err(|e| {
                         SessionError::PathPermissions {
                             path: path.display().to_string(),
                             reason: format!(
@@ -190,12 +210,12 @@ impl TempDir {
             } else {
                 0o700
             };
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).map_err(
-                |e| SessionError::TempDir {
-                    path: path.clone(),
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).map_err(|e| {
+                SessionError::TempDir {
+                    path: path.to_path_buf(),
                     source: e,
-                },
-            )?;
+                }
+            })?;
         }
 
         // Windows: set DACL — full control for process user, modify for session user.
@@ -225,10 +245,7 @@ impl TempDir {
             }
         }
 
-        Ok(Self {
-            path,
-            cleaned_up: false,
-        })
+        Ok(())
     }
 
     pub fn path(&self) -> &Path {
@@ -315,6 +332,57 @@ mod tests {
 
         let result = find_missing_sticky_bit(&child);
         assert_eq!(result, None);
+    }
+
+    /// A cross-user TempDir under a parent that the session user cannot traverse
+    /// (e.g. a 0700 directory such as macOS's default per-user `$TMPDIR`,
+    /// `/var/folders/<hash>/T`) is created by the process user but is unusable:
+    /// `sudo -u <user> -i <helper>` cannot reach the helper binary and the
+    /// working directory cannot be entered. This test pins TODAY'S behavior —
+    /// creation currently *succeeds* (the traversability of ancestors is not
+    /// checked) — so that both a regression and a future pre-flight
+    /// traversability check become visible here. `find_missing_sticky_bit`
+    /// only checks the opposite direction (world-writable WITHOUT sticky), so
+    /// it does not catch this.
+    ///
+    /// Requires a non-root process user (root traverses any directory), so it
+    /// is ignored by default and run explicitly.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "documents un-traversable-parent behavior; run explicitly as non-root"]
+    fn tempdir_under_untraversable_parent_is_currently_created() {
+        use std::os::unix::fs::PermissionsExt;
+
+        if nix::unistd::geteuid().is_root() {
+            eprintln!("skipping: root traverses any directory regardless of mode");
+            return;
+        }
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let private = tmp.path().join("private");
+        std::fs::create_dir(&private).unwrap();
+        std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        // Same-user TempDir under the 0700 parent: creation succeeds today.
+        // No ancestor o+x/g+x (traversability) check is performed.
+        let td = TempDir::new(Some(&private), Some("untraversable-"), None)
+            .expect("TempDir::new currently succeeds even under a 0700 parent");
+        assert!(td.path().exists());
+        // The un-traversability is a property of the 0700 PARENT, which a
+        // different (session) user could not enter -- asserted directly here
+        // since this test runs single-user.
+        let parent_mode = std::fs::metadata(&private).unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            parent_mode,
+            0o700,
+            "the parent is owner-only; another user cannot traverse it to reach {}",
+            td.path().display()
+        );
+        assert!(
+            find_missing_sticky_bit(td.path()).is_none(),
+            "sticky-bit policy does not (and is not meant to) flag an \
+             un-traversable ancestor"
+        );
     }
 
     /// Mirrors Python TestTempDirWindows::test_windows_temp_dir — verifies the
