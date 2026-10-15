@@ -625,7 +625,12 @@ pub fn make_apply_path_mapping_fn(
 
 fn format_padded(num: i64, width: usize) -> String {
     if num < 0 {
-        format!("-{:0>width$}", -num, width = width.saturating_sub(1))
+        // `unsigned_abs`, not `-num`: negating `i64::MIN` overflows.
+        format!(
+            "-{:0>width$}",
+            num.unsigned_abs(),
+            width = width.saturating_sub(1)
+        )
     } else {
         format!("{:0>width$}", num, width = width)
     }
@@ -652,9 +657,13 @@ fn with_number_replace(stem: &str, num: i64) -> Result<String, ExpressionError> 
     }
     // 2. Hash pattern ####
     if let Some(start) = stem.rfind('#') {
+        // End of the last non-`#` char, not `index + 1`: that char may be
+        // multibyte.
         let hash_start = stem[..=start]
-            .rfind(|c: char| c != '#')
-            .map(|i| i + 1)
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| c != '#')
+            .map(|(i, c)| i + c.len_utf8())
             .unwrap_or(0);
         let width = start - hash_start + 1;
         if width > MAX_PADDING_WIDTH {
