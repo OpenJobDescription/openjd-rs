@@ -470,7 +470,7 @@ jobs:
           echo "default TMPDIR mode:  $(stat -f '%Mp%Lp %N' "$(getconf DARWIN_USER_TEMP_DIR)" 2>/dev/null || true)"
           echo "override TMPDIR mode: $(stat -f '%Mp%Lp %N' "${TMPDIR}" 2>/dev/null || true)"
           echo "runner default temp: ${RUNNER_TEMP:-unset}"
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       - name: Install rust stable
         run: |
           rustup toolchain install stable --profile minimal

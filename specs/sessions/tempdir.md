@@ -74,8 +74,8 @@ impl TempDir {
 Step 5 matters because the failure happens after the directory exists but before
 the `TempDir` value does, so the `Drop` safety net below cannot clean it up. A
 `chown` to a group the process user does not belong to is the ordinary way to
-reach it. The constructor therefore leaves no directory behind when it returns
-an error.
+reach it. The removal is best-effort on the same terms as the `Drop` path below:
+its result is ignored, so a directory can survive if the removal itself fails.
 
 ### Drop implementation — best-effort cleanup
 

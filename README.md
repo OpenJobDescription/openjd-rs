@@ -56,9 +56,13 @@ cargo test -p openjd-sessions
 
 The workspace has 5,300+ unit and integration tests across all crates.
 
-### Cross-user tests (Docker)
+### Cross-user tests
 
-Cross-user subprocess execution (via `sudo`) requires a multi-user Linux environment. Docker containers provide this:
+Cross-user subprocess execution (via `sudo`) needs more than one user account on
+the host, so the tests are `#[ignore]`d and a plain `cargo test` skips them. CI
+provisions the accounts three ways: Docker containers on Linux, local users on
+the macOS runner, and a temporary test user on Windows. Locally, the Docker
+containers are the easiest route:
 
 ```bash
 # Local users (primary)

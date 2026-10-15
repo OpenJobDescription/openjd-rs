@@ -1035,7 +1035,9 @@ embedded at build time by `build.rs`. The public surface is just the
 ## Platform Support
 
 Primary target: POSIX / Linux (the main Deadline Cloud worker
-platform). Windows support covers same-user execution, cross-user
+platform). macOS runs the same POSIX code path with no
+`target_os = "macos"` gating, including cross-user execution via
+`sudo`. Windows support covers same-user execution, cross-user
 execution with both password and logon-token `WindowsSessionUser`
 modes, temp dir and embedded file permissions via ACLs, and process
 tree kill via `CreateToolhelp32Snapshot`. A Windows-specific
@@ -1043,9 +1045,10 @@ tree kill via `CreateToolhelp32Snapshot`. A Windows-specific
 to identify the current process's user name; most of the
 `win32` / `win32_permissions` module is crate-internal.
 
-Cross-user integration tests run under Docker on Linux CI and with a
-temporary test user on Windows CI. Both platforms are exercised by
-the workspace's clippy, build, and test jobs.
+Cross-user integration tests run under Docker on Linux CI, with locally
+provisioned users on macOS CI, and with a temporary test user on Windows CI.
+All three platforms are exercised by the workspace's clippy, build, and test
+jobs.
 
 ## Versioning and Stability Conventions
 

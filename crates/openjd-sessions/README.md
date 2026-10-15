@@ -34,8 +34,8 @@ the [`openjd-rs`] workspace.
 - **Linux** — primary target. Cross-user execution requires `sudo`.
 - **macOS** — supported, including cross-user execution via `sudo`. The
   session root must be traversable by the session user, which the default
-  per-user `TMPDIR` (`/var/folders/<hash>/T`, mode `0700`) is not; see
-  [cross-user-testing.md](../../specs/sessions/cross-user-testing.md).
+  per-user `TMPDIR` (`/var/folders/<hash>/T`, mode `0700`) is not, so set
+  `TMPDIR` to a world-traversable directory.
 - **Windows** — supported, including cross-user execution via the
   embedded helper (logon-token based, mirroring the Python
   reference implementation).
