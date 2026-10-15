@@ -522,3 +522,58 @@ fn concatenation_joins_inner_empty_lists() {
         ],
     );
 }
+
+// ── Audit round 2 ──
+
+#[test]
+fn element_type_with_a_type_variable_gives_the_untyped_empty_list() {
+    // H1: a body typed `list[T3]` (an unresolved `+`) built an empty
+    // `list[list[T3]]` value, which no concatenation could join, so runs
+    // that succeed failed: `T3` is not a concrete element type.
+    let [_, g2, rt] = states();
+    let expr = "[[s] + [s] for s in Param.LS if s == 'z'] + [['a']]";
+    for (stage, st) in [("gate 2", &g2), ("run time", &rt)] {
+        let v = eval(expr, st);
+        assert_eq!(v.expr_type(), tp("list[list[string]]"), "{stage}");
+        assert_eq!(v.to_display_string(), r#"[["a"]]"#, "{stage}");
+    }
+}
+
+#[test]
+fn null_symbol_is_typed_by_its_static_type_not_nulltype() {
+    // H2: a `null` symbol was read as `nulltype` when typing an empty
+    // result, so a null-guarded body failed at job creation and run time
+    // though validation (where it is `string?`) accepted it.
+    let expr = "[Opt.upper() for x in Param.L if Opt != None]";
+    let mut p8 = states()[0].clone();
+    p8.set("Opt", ExprValue::unresolved(tp("string?"))).unwrap();
+    let mut rt = states()[2].clone();
+    rt.set("Opt", ExprValue::Null).unwrap();
+    assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved[list[string]]"));
+    let v = eval(expr, &rt);
+    assert_eq!(v.expr_type(), tp("list[string]"));
+    assert_eq!(v.to_display_string(), "[]");
+}
+
+#[test]
+fn concatenation_with_an_empty_side_has_the_common_type() {
+    // H3: `make_list` took the type from the elements, so an empty
+    // `list[float]` plus `[1]` was `list[int]` (2026-02 §2.1.3 gives
+    // `list[float]`).
+    let st = SymbolTable::new();
+    let v = eval("[x for x in [1.5] if x > 100] + [1]", &st);
+    assert_eq!(v.expr_type(), tp("list[float]"));
+    assert_eq!(v.to_display_string(), "[1.0]");
+    let v = eval("[[x] for x in [1] if x > 100] + [[]]", &st);
+    assert_eq!(v.expr_type(), tp("list[list[int]]"));
+    let expr = "([[x] for x in [1] if x > 100] + [[]]) + [['a']]";
+    assert_err_in(
+        expr,
+        &st,
+        "concrete",
+        &[
+            "Cannot concatenate list[list[int]] and list[list[string]]\n",
+            &format!("  {expr}\n"),
+        ],
+    );
+}

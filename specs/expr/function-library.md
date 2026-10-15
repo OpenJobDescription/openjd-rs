@@ -267,8 +267,8 @@ matching lets an argument of unknown element type (`list[T3]`, `list[any]`,
 `any`) match it, but at run time only an empty list selects it, so for the
 type-only dispatch above (and `derive_return_type`) it applies only to an
 argument whose type is exactly `list[nulltype]`; any other argument may be
-non-empty and takes the general overload (`(Param.L + Param.L)[0]` is `int`,
-not `noreturn`).
+non-empty and takes the general overload (`(Param.L + Param.L)[0]` takes
+`(list[T1], int) -> T1`, not the `noreturn` overload).
 
 The method-vs-function distinction is made by the evaluator before dispatch:
 `eval_call` transforms `obj.method(args)` into `method(obj, args)` via UFCS and sets
@@ -683,4 +683,8 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   `list[float]`, an empty inner list takes the other side's type
   (`[[]] + [[1]]` is `list[list[int]]`), inner lists promote (`[[1]] + [[2.5]]`
   is `list[list[float]]`), and incompatible operands fail with "Cannot
-  concatenate list[list[int]] and list[list[string]]".
+  concatenate list[list[int]] and list[list[string]]". The built list has
+  the common element type even when one side is empty: each element of
+  another type is coerced to it (an empty `list[float]` plus `[1]` is
+  `[1.0]`), since `make_list` would otherwise take the type from the
+  elements alone.

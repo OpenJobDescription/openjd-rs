@@ -770,10 +770,16 @@ impl<'a> Evaluator<'a> {
     }
 
     /// The value a symbol read yields: the symbol's value, or with
-    /// `symbols_as_types` set, `unresolved(its type)`.
+    /// `symbols_as_types` set, `unresolved(its type)`. A `null` value is
+    /// read as `unresolved(any)`: its static type is some `T?` the value
+    /// does not record (a `let` binding `'x' if c else None`), and reading
+    /// it as `nulltype` would type the expression by a value.
     fn read_symbol(&self, val: &ExprValue) -> ExprValue {
         if self.symbols_as_types && !val.is_unresolved() {
-            ExprValue::unresolved(val.expr_type())
+            match val {
+                ExprValue::Null => ExprValue::unresolved(ExprType::ANY),
+                _ => ExprValue::unresolved(val.expr_type()),
+            }
         } else {
             val.clone()
         }
@@ -1967,12 +1973,12 @@ impl<'a> Evaluator<'a> {
             .list_element_type()
             .cloned()
             .unwrap_or(ExprType::NULLTYPE);
-        // An empty value needs a concrete element type: a union (or the
-        // `any` of a failed binding's placeholder) has none.
-        let elem = if crate::types::contains_union(&elem) || contains_any(&elem) {
-            ExprType::NULLTYPE
-        } else {
+        // An empty value needs a single concrete element type: a union,
+        // `any`, or an unbound type variable is not one.
+        let elem = if crate::types::is_concrete_element_type(&elem) {
             elem
+        } else {
+            ExprType::NULLTYPE
         };
         let empty = ExprValue::make_list_checked(self, Vec::new(), elem)?;
         self.track(empty)
@@ -2307,11 +2313,6 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
         self.regex_cache.insert(pattern.to_string(), re.clone());
         Ok(re)
     }
-}
-
-/// Whether `t` has `any` at any depth.
-fn contains_any(t: &ExprType) -> bool {
-    t.code() == crate::types::TypeCode::Any || t.params().iter().any(contains_any)
 }
 
 /// Unwrap unresolved[T] to T, or return the type as-is if not unresolved.

@@ -515,6 +515,24 @@ pub fn add_list_list(ctx: Ctx, a: &[ExprValue]) -> R {
         .unwrap_or(ExprType::NULLTYPE);
     let mut combined = l;
     combined.extend(r);
+    // `make_list` takes its element type from the elements when there are
+    // any, so an empty side's type would be lost (`list[float]` (empty) +
+    // `[1]` must be `list[float]`, §2.1.3): coerce each element of another
+    // type to the common one first.
+    if result_type != ExprType::NULLTYPE {
+        let path_format = ctx.path_format();
+        combined = combined
+            .into_iter()
+            .map(|e| {
+                if e.expr_type() == result_type {
+                    Ok(e)
+                } else {
+                    e.coerce(&result_type, path_format)
+                        .map_err(ExpressionError::type_error)
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+    }
     ExprValue::make_list_checked(ctx, combined, result_type)
 }
 

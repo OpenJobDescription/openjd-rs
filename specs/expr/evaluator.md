@@ -615,17 +615,28 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     `list[T | nulltype]`; with nothing left of `T` (the body can only be
     `null`, or always fails) it is `list[nulltype]`.
   - A non-empty result over a concrete iterable builds from its values
-    through `make_list`, as above — the elements' type is the one the rule
-    gives when `T` has no union, and the values decide it when `T` has one
+    through `make_list`, as above. Its elements' type is the one the rule
+    gives when `T` is a single concrete type, as far as the body's static
+    type covers its values (the known `flatten` of a typed empty list, which
+    is `list[nulltype]`, does not), and the values decide it otherwise
     (`[x if x > 1 else 2.5 for x in L]` is `list[int]` or `list[float]`).
   - An empty result (`empty_comprehension`) types the body once, with the
     loop variable unresolved and `symbols_as_types` set so that every
     symbol it reads is `unresolved(its type)` — the type template
     validation gives it, never a value it would not read at run time
     (`[1 // Param.Z for x in L if Param.Z != 0]` with `Param.Z = 0` is an
-    empty `list[int]`). The result is the empty `list[T]` when `T` has no
-    union (or `any`), so `[x for x in [1, 2] if x > 5] + ['a']` fails as
+    empty `list[int]`). The result is the empty `list[T]` when `T` is a
+    single concrete type (`types::is_concrete_element_type`: no union,
+    `any`, or type variable — so a body typed `list[T3]` by `+` gives
+    `list[nulltype]`), so `[x for x in [1, 2] if x > 5] + ['a']` fails as
     `[1] + ['a']` does, and the untyped empty `list[nulltype]` otherwise.
+    A symbol's static type is approximated by its value's type, which is
+    the same or narrower; a `null` value, whose `T?` type the value does not
+    record, is read as `any` (`[Opt.upper() for x in L if Opt != None]` with
+    `Opt` null is an empty `list[string]`). Where a value's type is narrower
+    than the type template validation gave the symbol (a `let` binding of a
+    union type), the typing can fail where validation's did not, making run
+    time stricter than validation, never laxer.
     An error from the typing is an error of the comprehension, and
     propagates: the body is type-checked even when it never runs. Over a
     concrete iterable the loop variable has the iterable's own type, which

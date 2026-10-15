@@ -624,9 +624,10 @@ pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
 /// cannot hold `null`), with a union of list types read as one list of
 /// the union of their elements ([`merge_list_union`]). Then:
 ///
-/// - `T` contains no union: `list[T]`.
-/// - `T` contains a union: `list[T | nulltype]` — a non-empty run takes
-///   its type from its elements, and an empty one is `list[nulltype]`.
+/// - `T` is a single concrete type ([`is_concrete_element_type`]: no
+///   union, `any`, or type variable at any depth): `list[T]`.
+/// - otherwise: `list[T | nulltype]` — a non-empty run takes its type from
+///   its elements, and an empty one is `list[nulltype]`.
 /// - nothing is left of `T`: `list[nulltype]`.
 pub(crate) fn comprehension_list_type(body: &ExprType) -> Option<ExprType> {
     let body = match (body.code, body.params.as_slice()) {
@@ -645,11 +646,23 @@ pub(crate) fn comprehension_list_type(body: &ExprType) -> Option<ExprType> {
     if comprehension_too_deep(&t) {
         return None;
     }
-    Some(if contains_union(&t) {
-        ExprType::list(ExprType::union(vec![t, ExprType::NULLTYPE]))
-    } else {
+    Some(if is_concrete_element_type(&t) {
         ExprType::list(t)
+    } else {
+        ExprType::list(ExprType::union(vec![t, ExprType::NULLTYPE]))
     })
+}
+
+/// Whether a comprehension element type `t` is a single concrete type
+/// (§1.3.7): no union, no `any`, and no type variable, at any depth. Only
+/// such a type can be the element type of an empty list value; any other
+/// says the element type is not known until the elements are.
+pub(crate) fn is_concrete_element_type(t: &ExprType) -> bool {
+    !contains_union(t) && !contains_code(t, TypeCode::Any) && !t.is_symbolic()
+}
+
+fn contains_code(t: &ExprType, code: TypeCode) -> bool {
+    t.code == code || t.params.iter().any(|p| contains_code(p, code))
 }
 
 /// Whether `t`, as a comprehension's element type `T` (§1.3.7), makes the
