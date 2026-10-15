@@ -194,7 +194,16 @@ pub(crate) fn check_static_miss(e: &ExpressionError, facts: Facts, msg: impl FnO
     let is_type_error = matches!(e.kind(), ExpressionErrorKind::TypeError { .. });
     if is_ordering_type_error(e) {
         crate::known::hit("expr-ordering-runtime-type-check", msg);
-    } else if facts.boolop {
+    } else if facts.boolop
+        || (facts.conditional
+            && matches!(
+                e.kind(),
+                ExpressionErrorKind::UndefinedVariable { .. }
+                    | ExpressionErrorKind::UnknownFunction { .. }
+            ))
+    {
+        // Speculative evaluation of `and`/`or` and of `a if c else b` with an
+        // unresolved operand absorbs name errors in the other operands.
         crate::known::hit("expr-boolop-static-type", msg);
     } else if (facts.unbound_return && is_type_error)
         || (is_list_element_mix_error(e) && facts.list_add)
