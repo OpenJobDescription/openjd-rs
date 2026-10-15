@@ -63,13 +63,13 @@ dict_args() {
     esac
 }
 
-# Number of finding files (crash-/timeout-/oom-/leak-/slow-unit-) libFuzzer
-# has left for a target.
+# Number of finding files (crash-/timeout-/oom-/leak-) libFuzzer has left
+# for a target. Not slow-unit-*: those are reports (at 10 s), not failures.
 artifact_count() {
     local d="$FUZZ_DIR/artifacts/$1"
     [[ -d "$d" ]] || { echo 0; return; }
     find "$d" -maxdepth 1 -type f \( -name 'crash-*' -o -name 'timeout-*' -o -name 'oom-*' \
-        -o -name 'leak-*' -o -name 'slow-unit-*' \) | wc -l | tr -d ' '
+        -o -name 'leak-*' \) | wc -l | tr -d ' '
 }
 
 LIBFUZZER_ARGS=(-timeout=20 -rss_limit_mb=3072 -malloc_limit_mb=2048 -max_len=65536 -print_final_stats=1)

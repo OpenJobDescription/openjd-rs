@@ -210,34 +210,32 @@ pub mod known {
     ];
 
     /// Known issue `expr-parser-exponential-recovery`: should a text target
-    /// skip this expression text? True when brackets nest more than 12 deep
-    /// without closing, or the text is longer than 320 bytes: on malformed
-    /// input ruff's error recovery grows exponentially with nesting and
-    /// superlinearly with length, so the fuzzer would otherwise spend its
-    /// time rediscovering the slowdown. A timeout cannot be gated like an
-    /// oracle, so the input is skipped instead; `OPENJD_FUZZ_KNOWN=1`
-    /// disables the skip.
+    /// skip this expression text? On malformed input ruff's error recovery
+    /// grows exponentially with the number of brackets left open, so the
+    /// fuzzer would otherwise spend its time rediscovering the slowdown. A
+    /// timeout cannot be gated like an oracle, so the input is skipped
+    /// instead; `OPENJD_FUZZ_KNOWN=1` disables the skip.
+    ///
+    /// Measured (release build) over the corpus: every parse over 50 ms had
+    /// at least 6 brackets still open and over 200 bytes, or nesting deeper
+    /// than 12; length alone is not the cause (a 450-byte balanced input
+    /// parses in microseconds). Inputs over 4 KiB are skipped too, as a cap.
     pub fn skip_deep_unclosed_brackets(text: &str) -> bool {
         if std::env::var_os("OPENJD_FUZZ_KNOWN").is_some_and(|v| v == "1") {
             return false;
         }
-        let deep = || {
-            let mut depth = 0i32;
-            for c in text.chars() {
-                match c {
-                    '(' | '[' | '{' => {
-                        depth += 1;
-                        if depth > 12 {
-                            return true;
-                        }
-                    }
-                    ')' | ']' | '}' => depth = (depth - 1).max(0),
-                    _ => {}
+        let (mut depth, mut max_depth) = (0i32, 0i32);
+        for c in text.chars() {
+            match c {
+                '(' | '[' | '{' => {
+                    depth += 1;
+                    max_depth = max_depth.max(depth);
                 }
+                ')' | ']' | '}' => depth = (depth - 1).max(0),
+                _ => {}
             }
-            false
-        };
-        let skip = text.len() > 320 || deep();
+        }
+        let skip = max_depth > 12 || (depth >= 6 && text.len() > 200) || text.len() > 4096;
         if skip {
             record("expr-parser-exponential-recovery");
         }

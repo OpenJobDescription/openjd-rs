@@ -147,6 +147,7 @@ pub fn pipeline(
     source: &str,
 ) {
     let spec = speculative(source);
+    param_def_surface(template);
     let _ = template.profile();
     let _ = template.description();
     let _ = template.name().raw();
@@ -178,8 +179,24 @@ pub fn pipeline(
             let _ = s.actions.iter_named().count();
         }
     }
-    let _ = openjd_model::ValidationContext::new(openjd_model::SpecificationRevision::V2023_09);
-    let _ = PathParameterOptions::new("/tmpl", "/cwd");
+    // A fresh context for the template's revision has no extensions, and
+    // path options keep the directories they are given.
+    let rev = template.default_validation_context().profile.revision();
+    let fresh = openjd_model::ValidationContext::new(rev);
+    oracle!(
+        fresh.profile.revision() == rev && fresh.profile.extensions().is_empty(),
+        "ValidationContext::new({rev}) is not a bare {rev} context"
+    );
+    // (Derived from the template rather than drawn, so later draws stay put.)
+    let (tdir, cwd) = (
+        format!("/t/{}", template.steps.len()),
+        format!("/c/{}", source.len()),
+    );
+    let opts = PathParameterOptions::new(&tdir, &cwd);
+    oracle!(
+        opts.job_template_dir == tdir && opts.current_working_dir == cwd,
+        "PathParameterOptions::new({tdir:?}, {cwd:?}) does not keep them"
+    );
     if let Ok(merged) = merge_job_parameter_definitions(template, env_templates) {
         for m in &merged {
             let _ = m.validate_satisfiable();
@@ -359,6 +376,42 @@ fn display_is_serde<T: std::fmt::Display + serde::Serialize>(x: &T, what: &str) 
     );
 }
 
+/// Spec spelling and serde agreement of a decoded template's parameter
+/// definitions (any decodable template, not only those that instantiate).
+fn param_def_surface(template: &JobTemplate) {
+    for d in template.parameter_definitions_list() {
+        let t = d.job_param_type();
+        let ser = serde_json::to_value(t).ok();
+        known_issue!(
+            "model-param-type-serde-spelling",
+            ser == Some(serde_json::Value::String(t.to_string())),
+            "JobParameterType displays as {t} but serializes as {ser:?}"
+        );
+        if let openjd_model::template::JobParameterDefinition::PATH(p) = d {
+            if let Some(o) = &p.object_type {
+                display_is_serde(o, "ObjectType");
+            }
+            if let Some(f) = &p.data_flow {
+                display_is_serde(f, "DataFlow");
+            }
+        }
+        if let openjd_model::template::JobParameterDefinition::FLOAT(f) = d {
+            for x in [&f.default, &f.min_value, &f.max_value]
+                .into_iter()
+                .flatten()
+            {
+                // FlexFloat's display parses back to the same value.
+                let shown = x.to_string();
+                oracle!(
+                    shown.parse::<f64>().ok() == Some(x.0),
+                    "FlexFloat {} displays as {shown:?}",
+                    x.0
+                );
+            }
+        }
+    }
+}
+
 /// Display / serde agreement and serde round trips for the model types a
 /// template and its job carry.
 fn surface(template: &JobTemplate, job: &Job, ctx: &openjd_model::ValidationContext) {
@@ -390,37 +443,6 @@ fn surface(template: &JobTemplate, job: &Job, ctx: &openjd_model::ValidationCont
             v.as_ref().and_then(|v| v.as_str()) == Some(d.0.as_str()),
             "Description serializes as {v:?}"
         );
-    }
-    for d in template.parameter_definitions_list() {
-        let t = d.job_param_type();
-        let ser = serde_json::to_value(t).ok();
-        known_issue!(
-            "model-param-type-serde-spelling",
-            ser == Some(serde_json::Value::String(t.to_string())),
-            "JobParameterType displays as {t} but serializes as {ser:?}"
-        );
-        if let openjd_model::template::JobParameterDefinition::PATH(p) = d {
-            if let Some(o) = &p.object_type {
-                display_is_serde(o, "ObjectType");
-            }
-            if let Some(f) = &p.data_flow {
-                display_is_serde(f, "DataFlow");
-            }
-        }
-        if let openjd_model::template::JobParameterDefinition::FLOAT(f) = d {
-            for x in [&f.default, &f.min_value, &f.max_value]
-                .into_iter()
-                .flatten()
-            {
-                // FlexFloat's display parses back to the same value.
-                let shown = x.to_string();
-                oracle!(
-                    shown.parse::<f64>().ok() == Some(x.0),
-                    "FlexFloat {} displays as {shown:?}",
-                    x.0
-                );
-            }
-        }
     }
     let scripts = job.steps.iter().map(|s| {
         (

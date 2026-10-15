@@ -133,7 +133,10 @@ impl Ctx<'_, '_> {
             let expr = if !self.has("EXPR") || one_in(self.u, 3) {
                 // Base-spec interpolation: a bare symbol reference.
                 if self.symbols.is_empty() {
-                    "Param.Missing".to_string()
+                    // Nothing in scope: a literal (an undefined reference
+                    // would only test that rejection, which the text
+                    // targets already cover).
+                    "'x'".to_string()
                 } else {
                     pick(self.u, &self.symbols).name.clone()
                 }
@@ -240,7 +243,10 @@ impl Ctx<'_, '_> {
                     json!(self.fmt(&t))
                 })
                 .collect();
-            m.insert("args".into(), Value::Array(args));
+            // `args: []` is invalid ("if provided, must not be empty").
+            if !args.is_empty() {
+                m.insert("args".into(), Value::Array(args));
+            }
         }
         if one_in(self.u, 4) {
             let t = if one_in(self.u, 2) {
@@ -478,11 +484,8 @@ impl Ctx<'_, '_> {
             self.u,
             &["linux", "windows", "macos", "x86_64", "arm64", "Other", ""],
         );
-        let min = if one_in(self.u, 3) {
-            json!(self.fmt(&ExprType::INT))
-        } else {
-            json!(small_int(self.u))
-        };
+        // A non-negative number (a format string is not accepted here).
+        let min = json!(small_int(self.u).unsigned_abs());
         Some(json!({
             "amounts": [{"name": amount, "min": min}],
             "attributes": [{"name": attr, "anyOf": [val]}],
@@ -586,10 +589,24 @@ pub fn job_template(u: &mut Unstructured<'_>) -> Generated {
     if !defs.is_empty() {
         doc.insert("parameterDefinitions".into(), Value::Array(defs));
     }
-    let name = ctx.fmt(&ExprType::STRING);
+    // The job name is template scope: no Session.* symbols. Control
+    // characters and names over 128 characters are invalid, so they would
+    // only test that rejection.
+    let session_syms = std::mem::take(&mut ctx.symbols);
+    ctx.symbols = session_syms
+        .iter()
+        .filter(|s| !s.name.starts_with("Session."))
+        .cloned()
+        .collect();
+    let name: String = ctx
+        .fmt(&ExprType::STRING)
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect();
+    ctx.symbols = session_syms;
     doc.insert(
         "name".into(),
-        json!(if name.is_empty() {
+        json!(if name.is_empty() || name.chars().count() > 128 {
             "Job".to_string()
         } else {
             name

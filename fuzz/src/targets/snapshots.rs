@@ -147,6 +147,48 @@ fn roundtrip<P, K>(
     }
 }
 
+/// The first path component of a manifest's first file (a real directory
+/// or file name of the manifest), or `"a"` for an empty one.
+fn first_component(files: &[FileEntry]) -> String {
+    files
+        .first()
+        .and_then(|f| f.path.split('/').next())
+        .filter(|c| !c.is_empty())
+        .unwrap_or("a")
+        .to_string()
+}
+
+/// `join_*_rel(m, prefix)` puts every file under `prefix/`, one for one.
+fn check_joined_under(joined: &[FileEntry], orig: &[FileEntry], prefix: &str, what: &str) {
+    oracle!(
+        joined.len() == orig.len()
+            && joined.iter().all(|f| orig
+                .iter()
+                .any(|o| f.path == format!("{prefix}/{}", o.path))),
+        "{what}({prefix:?}) did not move every file under the prefix: {:?}",
+        joined.iter().map(|f| &f.path).collect::<Vec<_>>()
+    );
+}
+
+/// `subtree_*_rel(m, root)` (Preserve) keeps exactly the regular files under
+/// `root/`, with the prefix removed.
+fn check_subtree_of(sub: &[FileEntry], orig: &[FileEntry], root: &str, what: &str) {
+    let expected: Vec<&str> = orig
+        .iter()
+        .filter(|f| f.symlink_target.is_none())
+        .filter_map(|f| f.path.strip_prefix(&format!("{root}/")))
+        .collect();
+    let got: Vec<&str> = sub
+        .iter()
+        .filter(|f| f.symlink_target.is_none())
+        .map(|f| f.path.as_str())
+        .collect();
+    oracle!(
+        expected.iter().all(|e| got.contains(e)),
+        "{what}({root:?}) lost files: expected {expected:?}, got {got:?}"
+    );
+}
+
 /// Entry displays (used in logs and errors) lead with the path and mark
 /// deletions.
 fn check_entry_display<P, K>(m: &Manifest<P, K>) {
@@ -172,8 +214,16 @@ fn check_entry_display<P, K>(m: &Manifest<P, K>) {
 /// `runnable` flag. Symlinks are collapsed by the encoder, so with symlinks
 /// only the regular files' survival is checked.
 fn v2023_diff_roundtrip(m: &openjd_snapshots::SnapshotDiff, what: &str) {
-    let Ok(text) = encode_snapshot_diff_v2023(m) else {
-        return;
+    let text = match encode_snapshot_diff_v2023(m) {
+        Ok(t) => t,
+        Err(e) => {
+            // v2023 has no chunking; symlink targets must be relative.
+            oracle!(
+                m.file_chunk_size_bytes != -1 || e.to_string().contains("symlink"),
+                "{what}: a valid diff fails to encode as v2023: {e}"
+            );
+            return;
+        }
     };
     let back = match openjd_snapshots::decode_v2023_as_diff(&text) {
         Ok(back) => back,
@@ -545,13 +595,26 @@ pub fn ops_gen(data: &[u8]) {
             );
             v2023_diff_roundtrip(&rel, "generated diff");
             let _ = openjd_snapshots::join_snapshot_diff(&rel, ABS_ROOT);
-            let _ = openjd_snapshots::join_snapshot_diff_rel(&rel, "pre");
-            let _ = openjd_snapshots::subtree_rel_snapshot_diff(&rel, "a", SymlinkPolicy::Preserve);
+            let top = first_component(&rel.files);
+            if let Ok(j) = openjd_snapshots::join_snapshot_diff_rel(&rel, &top) {
+                check_joined_under(&j.files, &rel.files, &top, "join_snapshot_diff_rel");
+            }
+            if let Ok(sub) =
+                openjd_snapshots::subtree_rel_snapshot_diff(&rel, &top, SymlinkPolicy::Preserve)
+            {
+                check_subtree_of(&sub.files, &rel.files, &top, "subtree_rel_snapshot_diff");
+            }
             let rm = openjd_snapshots::RelManifest::Diff(rel.clone());
             wrapper_matches!(rm, rel);
             let _ = openjd_snapshots::join_manifest(&rm, ABS_ROOT);
-            let _ = openjd_snapshots::join_manifest_rel(&rm, "pre");
-            let _ = openjd_snapshots::subtree_rel_manifest(&rm, "a", SymlinkPolicy::Preserve);
+            if let Ok(j) = openjd_snapshots::join_manifest_rel(&rm, &top) {
+                check_joined_under(j.files(), &rel.files, &top, "join_manifest_rel");
+            }
+            if let Ok(sub) =
+                openjd_snapshots::subtree_rel_manifest(&rm, &top, SymlinkPolicy::Preserve)
+            {
+                check_subtree_of(sub.files(), &rel.files, &top, "subtree_rel_manifest");
+            }
         }
         let _ = openjd_snapshots::subtree_manifest(&am, ABS_ROOT, SymlinkPolicy::Preserve);
     }
@@ -563,7 +626,10 @@ pub fn ops_gen(data: &[u8]) {
     .into_iter()
     .find_map(|p| subtree_snapshot(&a, ABS_ROOT, p).ok());
     if let Some(rel) = rel {
-        let _ = openjd_snapshots::join_snapshot_rel(&rel, "pre");
+        let top = first_component(&rel.files);
+        if let Ok(j) = openjd_snapshots::join_snapshot_rel(&rel, &top) {
+            check_joined_under(&j.files, &rel.files, &top, "join_snapshot_rel");
+        }
         let _ = openjd_snapshots::partition_rel_manifest(&rel, &PartitionOptions::default());
     }
 
@@ -626,8 +692,12 @@ pub fn ops_gen(data: &[u8]) {
         if let Ok(joined) = join_snapshot(&sub, &sub_root) {
             let orig = by_path(&a.files);
             for f in &joined.files {
+                // By path component: `/r/ab` is not inside `/r/a`.
+                let root = sub_root.trim_end_matches('/');
+                let inside =
+                    f.path == root || root.is_empty() || f.path.starts_with(&format!("{root}/"));
                 oracle!(
-                    f.path.starts_with(&sub_root),
+                    inside,
                     "subtree/join produced {:?} outside {sub_root:?}",
                     f.path
                 );

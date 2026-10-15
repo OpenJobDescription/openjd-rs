@@ -88,16 +88,21 @@ fn registry_matches_bins_files_and_corpus() {
     }
 }
 
-/// Every target is fuzzed in CI: it appears in exactly one `targets:` line
-/// of the fuzz.yml matrix, and that line names no unknown target.
+/// Every target is fuzzed in CI: it appears in exactly one group of the
+/// `fuzz` job's matrix in fuzz.yml, and no group names an unknown target.
 #[test]
 fn every_target_is_in_one_ci_group() {
     let wf = std::fs::read_to_string(root().join("../.github/workflows/fuzz.yml")).unwrap();
+    let doc: serde_json::Value = serde_saphyr::from_str(&wf).unwrap();
+    let include = doc["jobs"]["fuzz"]["strategy"]["matrix"]["include"]
+        .as_array()
+        .expect("fuzz.yml: jobs.fuzz.strategy.matrix.include");
     let mut seen: Vec<String> = Vec::new();
-    for line in wf.lines() {
-        if let Some(list) = line.trim().strip_prefix("targets: ") {
-            seen.extend(list.split_whitespace().map(str::to_string));
-        }
+    for group in include {
+        let list = group["targets"]
+            .as_str()
+            .expect("matrix entry without targets");
+        seen.extend(list.split_whitespace().map(str::to_string));
     }
     let registry = names(TARGETS.iter().map(|(n, _)| n.to_string()));
     let in_ci = names(seen.iter().cloned());

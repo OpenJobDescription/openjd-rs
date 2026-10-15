@@ -117,25 +117,64 @@ fn is_null_element_error(e: &ExpressionError) -> bool {
         if message == "Cannot create list from null elements")
 }
 
+/// What, per known issue, may void static/run-time agreement for one
+/// expression. Generated expressions report it from the generator (what it
+/// actually emitted); text inputs have no generator to ask, so it is
+/// inferred from the source.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Facts {
+    /// `and` / `or` (`expr-boolop-static-type`).
+    pub boolop: bool,
+    /// A union-typed argument or result (`expr-union-arg-overload`,
+    /// `expr-flatten-union-static-type`).
+    pub union: bool,
+    /// A signature with an unbound return type variable
+    /// (`expr-unbound-return-typevar`).
+    pub unbound_return: bool,
+}
+
+impl Facts {
+    pub fn from_gen(g: &ExprGen<'_, '_>) -> Self {
+        Self {
+            boolop: g.used_boolop,
+            union: g.used_union,
+            unbound_return: g.used_unbound_return,
+        }
+    }
+
+    fn from_text(src: &str) -> Self {
+        let has = |fs: &[&str]| fs.iter().any(|f| src.contains(f));
+        Self {
+            boolop: uses_boolop(src),
+            union: (src.contains(" if ") && src.contains("[]"))
+                || has(&[
+                    "::",
+                    "re_findall",
+                    "re_match",
+                    "re_search",
+                    "round",
+                    "**",
+                    "flatten",
+                ]),
+            unbound_return: src.contains(" + ") && has(&["min(", "max(", "sum("]),
+        }
+    }
+}
+
 /// A statically accepted `src` failed at run time with `e`. Fails the
 /// oracle when the static pass should have rejected it, unless the
 /// disagreement is a known issue (`unbound_return`: the generator went
 /// through a signature with an unbound return type variable).
-pub(crate) fn check_static_miss(
-    e: &ExpressionError,
-    src: &str,
-    unbound_return: bool,
-    msg: impl FnOnce() -> String,
-) {
+pub(crate) fn check_static_miss(e: &ExpressionError, facts: Facts, msg: impl FnOnce() -> String) {
     if !static_class(e.kind()) || is_null_element_error(e) {
         return;
     }
     let is_type_error = matches!(e.kind(), ExpressionErrorKind::TypeError { .. });
     if is_ordering_type_error(e) {
         crate::known::hit("expr-ordering-runtime-type-check", msg);
-    } else if uses_boolop(src) {
+    } else if facts.boolop {
         crate::known::hit("expr-boolop-static-type", msg);
-    } else if unbound_return && is_type_error {
+    } else if facts.unbound_return && is_type_error {
         crate::known::hit("expr-unbound-return-typevar", msg);
     } else {
         oracle!(false, "{}", msg());
@@ -324,18 +363,17 @@ fn static_type(v: &ExprValue) -> ExprType {
 }
 
 /// Every oracle that applies to one parsed expression in one environment.
-/// `well_typed` is true for generator output, which is well-typed by
-/// construction; `unbound_return` is true when that output went through a
-/// signature with an unbound return type variable (known issue
-/// `expr-unbound-return-typevar`), which voids the guarantee.
+/// `generated` carries the generator's [`Facts`] for generator output, which
+/// is well-typed by construction (modulo those facts); `None` for text.
 pub fn check_expression(
     parsed: &ParsedExpression,
     env: &Env,
     u: &mut Unstructured<'_>,
-    well_typed: bool,
-    unbound_return: bool,
+    generated: Option<Facts>,
 ) {
     let src = parsed.expression();
+    let well_typed = generated.is_some();
+    let facts = generated.unwrap_or_else(|| Facts::from_text(src));
     let runtime = runtime_library(&env.rules);
     let validation = validation_library();
 
@@ -392,57 +430,41 @@ pub fn check_expression(
             (Ok(sv), Ok(cv)) => {
                 let st = static_type(sv);
                 let ct = cv.expr_type();
-                let boolop = uses_boolop(src);
-                if !fits(cv, &st) && boolop {
-                    known_issue!(
-                        "expr-boolop-static-type",
-                        false,
-                        "{src:?}: static type {st} but run-time value {cv:?} has type {ct}"
-                    );
-                } else if !fits(cv, &st)
-                    && src.contains(" + ")
-                    && (src.contains("min(")
-                        || src.contains("max(")
-                        || src.contains("sum(")
-                        || src.contains(".min(")
-                        || src.contains(".max("))
-                {
-                    known_issue!(
-                        "expr-unbound-return-typevar",
-                        false,
-                        "{src:?}: static type {st} but run-time value {cv:?} has type {ct}"
-                    );
-                } else if !fits(cv, &st)
-                    // A conditional makes a union only when its branches
-                    // differ in type; in generated (same-typed-branch)
-                    // output that takes an untyped `[]`.
-                    && ((src.contains(" if ") && src.contains("[]"))
-                        || src.contains("::")
-                        || ["re_findall", "re_match", "re_search", "round", "**"]
-                            .iter()
-                            .any(|f| src.contains(f)))
-                    && !(src.contains("flatten") && st.to_string().contains("nulltype"))
-                {
-                    known_issue!(
-                        "expr-union-arg-overload",
-                        false,
-                        "{src:?}: static type {st} but run-time value {cv:?} has type {ct}"
-                    );
-                } else if !fits(cv, &st)
-                    && src.contains("flatten")
-                    && st.to_string().contains("nulltype")
-                {
-                    known_issue!(
-                        "expr-flatten-union-static-type",
-                        false,
-                        "{src:?}: static type {st} but run-time value {cv:?} has type {ct}"
-                    );
-                } else if !fits(cv, &st) && unbound_return {
-                    known_issue!(
-                        "expr-unbound-return-typevar",
-                        false,
-                        "{src:?}: static type {st} but run-time value {cv:?} has type {ct}"
-                    );
+                let boolop = facts.boolop;
+                let mismatch = !fits(cv, &st);
+                let flatten_null = st.to_string().contains("nulltype") && src.contains("flatten");
+                // Every known issue that can explain the mismatch is recorded
+                // (the cause is ambiguous when several apply); a mismatch none
+                // explains is a new bug.
+                let mut explained: Vec<&'static str> = Vec::new();
+                if mismatch {
+                    if boolop {
+                        explained.push("expr-boolop-static-type");
+                    }
+                    if facts.unbound_return || has_type_var(&st) {
+                        explained.push("expr-unbound-return-typevar");
+                    }
+                    if facts.union && flatten_null {
+                        explained.push("expr-flatten-union-static-type");
+                    }
+                    if facts.union && !flatten_null {
+                        explained.push("expr-union-arg-overload");
+                    }
+                    if st == ExprType::FLOAT
+                        && matches!(cv, ExprValue::Int(0))
+                        && src.contains("sum(")
+                    {
+                        explained.push("expr-sum-empty-float");
+                    }
+                }
+                if !explained.is_empty() {
+                    for id in explained {
+                        crate::known::hit(id, || {
+                            format!(
+                                "{src:?}: static type {st} but run-time value {cv:?} has type {ct}"
+                            )
+                        });
+                    }
                 } else {
                     oracle!(
                         fits(cv, &st),
@@ -465,8 +487,11 @@ pub fn check_expression(
                 }
             }
             (Ok(sv), Err(e)) => {
-                let lost = unbound_return || has_type_var(&static_type(sv));
-                check_static_miss(e, src, lost, || {
+                let lost = Facts {
+                    unbound_return: facts.unbound_return || has_type_var(&static_type(sv)),
+                    ..facts
+                };
+                check_static_miss(e, lost, || {
                     format!("{src:?}: accepted statically ({sv:?}) but run-time evaluation fails with {e}")
                 });
                 if well_typed && !static_class(e.kind()) && !is_null_element_error(e) {
@@ -483,7 +508,8 @@ pub fn check_expression(
                         | ExpressionErrorKind::UndefinedVariable { .. }
                         | ExpressionErrorKind::UnknownFunction { .. }
                 );
-                if unbound_return && matches!(e.kind(), ExpressionErrorKind::TypeError { .. }) {
+                if facts.unbound_return && matches!(e.kind(), ExpressionErrorKind::TypeError { .. })
+                {
                     known_issue!(
                         "expr-unbound-return-typevar",
                         false,
@@ -628,10 +654,16 @@ pub fn check_value(v: &ExprValue, fmt: PathFormat) {
     // `Float64`: hashing follows the bits, ordering against `f64` follows
     // the value.
     if let ExprValue::Float(f) = v {
-        oracle!(
-            hash_of(f) == hash_of(&f.clone()),
-            "Float64 hash unstable: {f:?}"
-        );
+        // Hash agrees with Eq: the same value without its original spelling
+        // is equal, so it must hash equal.
+        if let Ok(g) = openjd_expr::value::Float64::new(**f) {
+            if *f == g {
+                oracle!(
+                    hash_of(f) == hash_of(&g),
+                    "equal Float64s {f:?} and {g:?} hash differently"
+                );
+            }
+        }
         for x in [**f, 0.0, -1.5, f64::INFINITY] {
             oracle!(
                 f.partial_cmp(&x) == (**f).partial_cmp(&x),
@@ -776,7 +808,7 @@ pub fn eval_text(data: &[u8]) {
         path_format(&mut u)
     };
     let env = env_for_text(&parsed, &mut u, fmt);
-    check_expression(&parsed, &env, &mut u, false, false);
+    check_expression(&parsed, &env, &mut u, None);
 }
 
 /// Generate well-typed expressions from the library's signatures, over a
@@ -799,12 +831,17 @@ pub fn eval_gen(data: &[u8]) {
     let env = Env::new(&mut u, symbols, fmt);
     let mut g = ExprGen::new(&mut u, &env.symbols);
     let text = g.any();
-    let unbound_return = g.used_unbound_return;
+    let facts = Facts::from_gen(&g);
     let Ok(parsed) = ParsedExpression::new(&text) else {
         return;
     };
-    let _ = ExpressionError::expression_too_deep(65, 64).to_string();
-    check_expression(&parsed, &env, &mut u, true, unbound_return);
+    let (depth, max) = (text.len(), text.len() / 2);
+    let deep = ExpressionError::expression_too_deep(depth, max).to_string();
+    oracle!(
+        deep.contains(&depth.to_string()) && deep.contains(&max.to_string()),
+        "expression_too_deep({depth}, {max}) message {deep:?} omits a number"
+    );
+    check_expression(&parsed, &env, &mut u, Some(facts));
 }
 
 /// `FormatString` parse, resolution, and static validation.
@@ -981,7 +1018,7 @@ pub fn format_string(data: &[u8]) {
                     "{text:?}: static resolved_type {} but resolution gives {rv:?}",
                     sr.resolved_type
                 ),
-                Err(e) => check_static_miss(e, text, false, || {
+                Err(e) => check_static_miss(e, Facts::from_text(text), || {
                     format!("{text:?}: validates but resolution fails with {e}")
                 }),
             }
