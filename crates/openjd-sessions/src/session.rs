@@ -17,6 +17,8 @@
 //!   runtime does not consume session IDs as bearer tokens or secrets.
 //! - It has no meaning outside the process that created the session; the
 //!   runtime does not persist it to any shared store.
+//! - It is not part of the session working directory's name, which is random
+//!   (see [`Session::working_directory`]).
 //! - Auto-generated values (when the runtime needs to fabricate one) are
 //!   `<caller-id>:<uuid>` — random, but not secret.
 //!
@@ -108,6 +110,8 @@ pub struct SessionConfig {
     pub os_env_vars: Option<HashMap<String, String>>,
     /// Root directory under which the session's working and embedded-files
     /// directories are created. If `None`, a temporary directory is used.
+    /// The working directory is created directly under this root with an
+    /// 8-character random name (see [`Session::working_directory`]).
     ///
     /// A relative path is resolved to an absolute path (against the process
     /// current working directory) when the session is created, so all derived
@@ -664,11 +668,11 @@ impl Session {
             }
         }
 
-        let working_dir = crate::tempdir::TempDir::new(
-            Some(&root_dir),
-            Some(&config.session_id),
-            config.user.as_deref(),
-        )?;
+        // The working directory's name is random and carries no part of the
+        // session ID, to save Windows MAX_PATH budget; the ID is logged beside
+        // the directory's path below. See `SESSION_DIR_NAME_LENGTH`.
+        let working_dir =
+            crate::tempdir::TempDir::new_session_working_dir(&root_dir, config.user.as_deref())?;
         let files_dir = crate::tempdir::TempDir::new(
             Some(working_dir.path()),
             Some("embedded_files"),
@@ -891,6 +895,12 @@ impl Session {
     pub fn state(&self) -> SessionState {
         self.state
     }
+    /// The session working directory.
+    ///
+    /// [`Session::with_config`] creates it directly under the session root,
+    /// named with 8 random characters from `[a-z0-9_]`. The name carries no
+    /// part of the session ID, to save Windows `MAX_PATH` budget; the session
+    /// log records this path beside the session ID.
     pub fn working_directory(&self) -> &Path {
         &self.working_directory
     }
