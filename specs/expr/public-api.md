@@ -450,7 +450,7 @@ impl FunctionLibrary {
     /// concatenation of known element types (a `range_expr` counting as a
     /// `list[int]`) has their common element type, of unknown ones (or an
     /// operand of unknown type) `list[any]`, and of no common type the
-    /// signature's `list[T3]`.
+    /// signature's type (`list[T3]`, or `list[T2]` for the range overloads).
     pub fn derive_return_type(
         &self, name: &str, arg_types: &[ExprType],
     ) -> Option<ExprType>;

@@ -567,17 +567,17 @@ pub(crate) enum ComprehensionVar {
     Typed(ExprType),
     /// The iterable can only be the empty list: the body never runs.
     EmptyOnly,
-    /// No value of the type can be iterated.
-    NotIterable,
 }
 
-/// The loop variable's type for a comprehension over an iterable of type
-/// `t` (§1.3.7): `E` for `list[E]`, `int` for `range_expr`, the union of
-/// the members' element types for a union, and `any` for `any`, a type
-/// variable, or a list whose element is one (or a bare `unresolved`). A
+/// The loop variable's type for a comprehension over an unresolved
+/// iterable of type `t` (§1.3.7): `E` for `list[E]`, `int` for
+/// `range_expr`, the union of the members' element types for a union, and
+/// `any` for `any`, a type variable, a list whose element is one (or a bare
+/// `unresolved`), or a type that cannot be iterated (it may come from
+/// typing an operation on values of unknown type; a run reports it). A
 /// `nulltype` element member contributes nothing (§1.2.1: it marks the
-/// list as possibly empty), nor does a union member that cannot be
-/// iterated (a run with it fails). `unresolved[T]` is read as `T`.
+/// list as possibly empty), nor does a `nulltype` member (a `null`
+/// iterable fails every run). `unresolved[T]` is read as `T`.
 pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
     let t = match (t.code, t.params.as_slice()) {
         (TypeCode::Unresolved, [inner]) => inner,
@@ -588,12 +588,10 @@ pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
     } else {
         std::slice::from_ref(t)
     };
-    let mut iterable = false;
     let mut elems = Vec::new();
     for m in members {
         match (m.code, m.params.as_slice()) {
             (TypeCode::List, [elem]) => {
-                iterable = true;
                 if let Some(e) = list_element_contribution(elem) {
                     // A bare `unresolved` element (any type), or a type
                     // variable left unbound (`list[T3]`), binds `any`.
@@ -612,31 +610,18 @@ pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
                     elems.push(e);
                 }
             }
-            (TypeCode::RangeExpr, _) => {
-                iterable = true;
-                elems.push(ExprType::INT);
-            }
-            // `any`, an unconstrained `unresolved`, or a type variable (the
-            // `T3` of an operation on values of unknown type) may be any
-            // list.
-            (
-                TypeCode::Any
-                | TypeCode::Unresolved
-                | TypeCode::TypeVarT
-                | TypeCode::TypeVarT1
-                | TypeCode::TypeVarT2
-                | TypeCode::TypeVarT3,
-                _,
-            ) => {
-                iterable = true;
-                elems.push(ExprType::ANY);
-            }
-            _ => {}
+            (TypeCode::RangeExpr, _) => elems.push(ExprType::INT),
+            // A `null` iterable fails every run: it contributes nothing.
+            (TypeCode::NullType, _) => {}
+            // `any`, an unconstrained `unresolved`, a type variable, or a
+            // type that cannot be iterated: the type of an unresolved value
+            // may come from typing an operation on values of unknown type
+            // (`T3 * 2` is typed `int`), which says less than it seems, so
+            // only a run, which has the value, can tell.
+            _ => elems.push(ExprType::ANY),
         }
     }
-    if !iterable {
-        ComprehensionVar::NotIterable
-    } else if elems.is_empty() {
+    if elems.is_empty() {
         ComprehensionVar::EmptyOnly
     } else {
         ComprehensionVar::Typed(ExprType::union(elems))

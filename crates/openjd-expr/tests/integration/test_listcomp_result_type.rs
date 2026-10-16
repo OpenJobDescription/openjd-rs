@@ -599,14 +599,15 @@ fn union_iterable_binds_the_union_of_element_types() {
 }
 
 #[test]
-fn union_iterable_member_that_cannot_be_iterated_contributes_nothing() {
-    // F3 of audit round 6: a run that takes the `string` member fails
-    // ("Cannot iterate over string"), so only the list's elements bind the
-    // loop variable.
+fn union_iterable_member_that_cannot_be_iterated_binds_any() {
+    // F3 of audit round 6, revised in loop audit 2 round 3: a member whose
+    // type cannot be iterated (here `string`) may come from typing an
+    // operation on values of unknown type, so it binds `any` rather than
+    // nothing; a run that takes it reports it.
     assert_stages(
         "[x for x in (Param.L if Task.Param.C else Param.LS[0])]",
-        "unresolved[list[int | nulltype]]",
-        "unresolved[list[int | nulltype]]",
+        "unresolved[list[any]]",
+        "unresolved[list[any]]",
         "list[int]",
         "[1, 2, 3]",
     );
@@ -1467,5 +1468,69 @@ fn filter_that_fails_to_type_over_unknown_elements() {
             &format!("  {expr}\n"),
             "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~",
         ],
+    );
+}
+
+// ── Audit loop 2, round 3 ──
+
+#[test]
+fn union_iterable_member_of_a_non_iterable_type_binds_any() {
+    // A-F1, B-F1: a member typed `int` by an operation on values of
+    // unknown type (`([] + LL)[0] * 2`) contributed nothing, so with an
+    // empty other branch the comprehension was the empty list and indexing
+    // it was rejected, though the run gives 5.
+    let [p8, g2, rt] = states_with_nested_task_list();
+    let e1 = "((([] if Task.Param.C else Param.R) + Task.Param.LL)[0] * 2)";
+    for (expr, ty, value) in [
+        (
+            format!("[x for x in ({e1} if Task.Param.C else [])][0]"),
+            "unresolved",
+            "5",
+        ),
+        (
+            format!("[x + 1 for x in ({e1} if Task.Param.C else Param.LS)][0]"),
+            "unresolved[int]",
+            "6",
+        ),
+    ] {
+        for st in [&p8, &g2] {
+            assert_eq!(eval(&expr, st).expr_type(), tp(ty), "{expr}");
+        }
+        assert_eq!(eval(&expr, &rt).to_display_string(), value, "{expr}");
+    }
+    // A `null` member fails every run that takes it: it binds nothing.
+    assert_stages(
+        "[x for x in (Param.L if Task.Param.C else None)]",
+        "unresolved[list[int | nulltype]]",
+        "unresolved[list[int | nulltype]]",
+        "list[int]",
+        "[1, 2, 3]",
+    );
+}
+
+#[test]
+fn concatenation_with_an_operand_of_unknown_type_is_a_list_of_any() {
+    // B-F2: a bare type-variable operand (`(A + B)[0]` with no common type
+    // is a `T3`) reads as a list of unknown elements.
+    let lib = FunctionLibrary::for_profile(&ExprProfile::current());
+    for args in [
+        ["T", "list[int]"],
+        ["T1", "list[int]"],
+        ["T3", "list[int]"],
+        ["list[int]", "T3"],
+    ] {
+        let args = args.map(tp);
+        assert_eq!(
+            lib.derive_return_type("__add__", &args),
+            Some(tp("list[any]")),
+            "{args:?}"
+        );
+    }
+    let [mut p8, _, _] = states_with_nested_task_list();
+    p8.set("A", ExprValue::unresolved(tp("list[list[string]]")))
+        .unwrap();
+    assert_eq!(
+        eval("[y + 1 for y in (A + Task.Param.LL)[0] + [1]][0]", &p8).expr_type(),
+        tp("unresolved[int]")
     );
 }

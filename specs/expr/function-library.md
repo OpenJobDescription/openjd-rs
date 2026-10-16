@@ -264,7 +264,10 @@ concatenating the values uses, a `range_expr` operand counting as a `list[int]`
 is `list[int]`; see List concatenation below). An operand whose element type is not
 known (it holds `any` or a type variable at any depth, or is itself of unknown type)
 gives `list[any]`; operands with no common
-type keep the signature's type.
+type keep the signature's type (`list[T3]`, or `list[T2]` for the range overloads). A
+type variable operand on the right can still be captured by the signature's own
+variables (`list[int] + T1` finds no signature); that is part of the first-match
+dispatch limitation.
 
 Indexing has a `(list[nulltype], int) -> noreturn` overload, registered before
 the generic `(list[T1], int) -> T1`: the empty list has no element, so indexing

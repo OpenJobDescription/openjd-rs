@@ -348,7 +348,8 @@ impl FunctionLibrary {
     /// A list concatenation of known element types (a `range_expr` counting
     /// as a `list[int]`) has their common element type, as concatenating
     /// values gives, of unknown ones (or an operand of unknown type)
-    /// `list[any]`, and of no common type the signature's `list[T3]`.
+    /// `list[any]`, and of no common type the signature's type (`list[T3]`,
+    /// or `list[T2]` for the range overloads).
     pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
         self.derive_return_type_by_signature(name, arg_types)
             .map(|ret| concat_return_type(name, arg_types, ret))

@@ -1891,29 +1891,12 @@ impl<'a> Evaluator<'a> {
         Ok(self.evaluate(&lc.elt)?.expr_type())
     }
 
-    /// The loop variable for a comprehension over `iterable`
-    /// ([`crate::types::comprehension_var`]). A concrete iterable that
-    /// cannot be iterated is an error. An unresolved one whose type cannot
-    /// be iterated binds `any` (2026-02 §1.3.7): its type may come from
-    /// typing an operation on values of unknown type (`T3 * 2` is typed
-    /// `int`), which says less than it seems, so only a run, which has the
-    /// value, can tell.
-    fn comprehension_var_of(
-        &self,
-        iterable: &ExprValue,
-    ) -> Result<crate::types::ComprehensionVar, ExpressionError> {
-        match crate::types::comprehension_var(&iterable.expr_type()) {
-            crate::types::ComprehensionVar::NotIterable if iterable.is_unresolved() => {
-                Ok(crate::types::ComprehensionVar::Typed(ExprType::ANY))
-            }
-            crate::types::ComprehensionVar::NotIterable => {
-                Err(ExpressionError::type_error(format!(
-                    "Cannot iterate over {}",
-                    unwrap_unresolved(&iterable.expr_type())
-                )))
-            }
-            var => Ok(var),
-        }
+    /// The loop variable for a comprehension over the unresolved (or
+    /// filter-unresolved) `iterable` ([`crate::types::comprehension_var`]).
+    /// A type that cannot be iterated binds `any` there (2026-02 §1.3.7); a
+    /// concrete iterable that cannot be iterated fails in `eval_listcomp`.
+    fn comprehension_var_of(&self, iterable: &ExprValue) -> crate::types::ComprehensionVar {
+        crate::types::comprehension_var(&iterable.expr_type())
     }
 
     fn eval_listcomp(
@@ -1978,7 +1961,7 @@ impl<'a> Evaluator<'a> {
         // consumed here like everywhere else below.
         if iterable.is_unresolved() {
             self.current_memory = comprehension_baseline;
-            return match self.comprehension_var_of(&iterable)? {
+            return match self.comprehension_var_of(&iterable) {
                 crate::types::ComprehensionVar::Typed(elem_type) => {
                     self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type)
                 }
@@ -2127,7 +2110,7 @@ impl<'a> Evaluator<'a> {
             // runtime filter may exclude could raise a spurious value
             // error (e.g. `[1 // f for f in [0, 1] if f > Task.Param.N]`
             // must not divide by zero here).
-            return match self.comprehension_var_of(&iterable)? {
+            return match self.comprehension_var_of(&iterable) {
                 crate::types::ComprehensionVar::Typed(elem_type) => {
                     self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type)
                 }
