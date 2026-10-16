@@ -319,7 +319,7 @@ After all steps complete (or on failure), the command prints a summary:
 --- Results of local session ---
 
 Session ended successfully
-Working directory preserved at: /tmp/openjd-cli-12345
+Working directory preserved at: /tmp/OpenJD/k3x9_q2m
 
 Job: MyJob
 Step: Render

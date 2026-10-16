@@ -152,7 +152,7 @@ impl TempDir {
     pub fn new(
         dir: Option<&Path>,
         prefix: Option<&str>,
-        _user: Option<&dyn SessionUser>,
+        user: Option<&dyn SessionUser>,
     ) -> Result<Self, SessionError> {
         let parent = match dir {
             Some(d) => d.to_path_buf(),
@@ -169,6 +169,26 @@ impl TempDir {
             source: e,
         })?;
 
+        Self::secure(path, user)
+    }
+
+    /// Create a session working directory directly under `dir`, named with
+    /// [`SESSION_DIR_NAME_LENGTH`] random characters and nothing else.
+    ///
+    /// Matches Python's `mkdtemp(prefix="")`: the name is drawn from
+    /// [`SESSION_DIR_NAME_ALPHABET`], each candidate is created with an
+    /// exclusive `create_dir`, and a name that already exists is retried
+    /// with a fresh one, up to [`SESSION_DIR_NAME_ATTEMPTS`] times.
+    pub(crate) fn new_session_working_dir(
+        dir: &Path,
+        user: Option<&dyn SessionUser>,
+    ) -> Result<Self, SessionError> {
+        let path = create_unique_dir(dir, SESSION_DIR_NAME_ATTEMPTS, random_session_dir_name)?;
+        Self::secure(path, user)
+    }
+
+    /// Apply ownership and permissions to the just-created directory `path`.
+    fn secure(path: PathBuf, _user: Option<&dyn SessionUser>) -> Result<Self, SessionError> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -264,6 +284,86 @@ fn random_hex() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
 
+/// Length of a session working directory's name.
+///
+/// Every character of the working directory's path is charged against
+/// `MAX_PATH` (260) for the Windows applications a job runs, many of which
+/// are not long-path aware, so the name is this many random characters and
+/// nothing else. It carries no part of the session ID; the session log
+/// records the working directory's path beside the full session ID, which is
+/// how a retained or orphaned directory is traced back to its session.
+/// Matches Python's `SESSION_DIR_NAME_LENGTH` (openjd-sessions-for-python
+/// PR #348), where the name comes from `mkdtemp(prefix="")`.
+pub(crate) const SESSION_DIR_NAME_LENGTH: usize = 8;
+
+/// Characters a session working directory's name is drawn from: CPython's
+/// `tempfile._RandomNameSequence.characters`. Lower case only, so two names
+/// cannot differ only in case (NTFS folds case), and free of every
+/// Windows-reserved character.
+pub(crate) const SESSION_DIR_NAME_ALPHABET: &[u8; 37] = b"abcdefghijklmnopqrstuvwxyz0123456789_";
+
+/// How many names [`TempDir::new_session_working_dir`] tries before giving
+/// up. CPython's `tempfile.TMP_MAX` fallback value.
+pub(crate) const SESSION_DIR_NAME_ATTEMPTS: usize = 10_000;
+
+/// Generate one candidate session working directory name:
+/// [`SESSION_DIR_NAME_LENGTH`] characters drawn uniformly from
+/// [`SESSION_DIR_NAME_ALPHABET`] with the OS CSPRNG.
+fn random_session_dir_name() -> std::io::Result<String> {
+    // Rejection sampling keeps the draw uniform: 222 is the largest multiple
+    // of 37 that fits in a byte, so bytes >= 222 are discarded.
+    const LIMIT: u8 =
+        (256 / SESSION_DIR_NAME_ALPHABET.len() * SESSION_DIR_NAME_ALPHABET.len()) as u8;
+    let mut name = String::with_capacity(SESSION_DIR_NAME_LENGTH);
+    let mut buf = [0u8; 16];
+    while name.len() < SESSION_DIR_NAME_LENGTH {
+        getrandom::fill(&mut buf).map_err(|e| {
+            std::io::Error::other(format!("Failed to generate a random directory name: {e}"))
+        })?;
+        for b in buf {
+            if b < LIMIT && name.len() < SESSION_DIR_NAME_LENGTH {
+                let i = usize::from(b) % SESSION_DIR_NAME_ALPHABET.len();
+                name.push(char::from(SESSION_DIR_NAME_ALPHABET[i]));
+            }
+        }
+    }
+    Ok(name)
+}
+
+/// Create a new directory under `parent` named by `next_name`, retrying with
+/// a fresh name each time the candidate already exists.
+///
+/// Each attempt is an exclusive `create_dir`, so an existing directory is
+/// never reused and concurrent callers cannot be handed the same path. Any
+/// error other than `AlreadyExists` is returned at once, as is a failure of
+/// `next_name` (reported against `parent`). After `attempts` names that all
+/// exist, fails with an `AlreadyExists` error naming `parent`.
+fn create_unique_dir(
+    parent: &Path,
+    attempts: usize,
+    mut next_name: impl FnMut() -> std::io::Result<String>,
+) -> Result<PathBuf, SessionError> {
+    for _ in 0..attempts {
+        let name = next_name().map_err(|source| SessionError::TempDir {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+        let path = parent.join(name);
+        match std::fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(SessionError::TempDir { path, source: e }),
+        }
+    }
+    Err(SessionError::TempDir {
+        path: parent.to_path_buf(),
+        source: std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            format!("No usable temporary directory name found after {attempts} attempts"),
+        ),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +381,128 @@ mod tests {
         let td = TempDir::new(None, None, None).unwrap();
         let p: &std::path::Path = td.as_ref();
         assert_eq!(p, td.path());
+    }
+
+    /// A candidate name is exactly `SESSION_DIR_NAME_LENGTH` characters from
+    /// `SESSION_DIR_NAME_ALPHABET`.
+    #[test]
+    fn random_session_dir_name_length_and_alphabet() {
+        for _ in 0..1000 {
+            let name = random_session_dir_name().unwrap();
+            assert_eq!(name.len(), SESSION_DIR_NAME_LENGTH, "{name:?}");
+            assert!(
+                name.bytes().all(|b| SESSION_DIR_NAME_ALPHABET.contains(&b)),
+                "{name:?}"
+            );
+        }
+    }
+
+    /// Every alphabet character is reachable, including the last one (`_`),
+    /// which an off-by-one in the rejection limit or the modulus would drop.
+    #[test]
+    fn random_session_dir_name_uses_whole_alphabet() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..2000 {
+            seen.extend(random_session_dir_name().unwrap().bytes());
+        }
+        assert_eq!(seen.len(), SESSION_DIR_NAME_ALPHABET.len(), "{seen:?}");
+    }
+
+    /// A name that already exists is skipped, not reused and not an error:
+    /// the next candidate is created instead and the existing directory is
+    /// left untouched.
+    #[test]
+    fn create_unique_dir_retries_on_collision() {
+        let parent = tempfile::tempdir().unwrap();
+        let taken = parent.path().join("taken000");
+        std::fs::create_dir(&taken).unwrap();
+        std::fs::write(taken.join("marker"), "x").unwrap();
+        let mut names = vec!["taken000", "fresh000"].into_iter();
+        let path =
+            create_unique_dir(parent.path(), 10, || Ok(names.next().unwrap().to_string())).unwrap();
+        assert_eq!(path, parent.path().join("fresh000"));
+        assert!(path.is_dir());
+        assert!(taken.join("marker").exists());
+        assert_eq!(names.next(), None, "exactly two candidates are drawn");
+    }
+
+    /// When every candidate exists, creation stops after `attempts` tries
+    /// with an error naming the parent directory.
+    #[test]
+    fn create_unique_dir_gives_up_after_attempts() {
+        let parent = tempfile::tempdir().unwrap();
+        std::fs::create_dir(parent.path().join("taken000")).unwrap();
+        let mut calls = 0;
+        let err = create_unique_dir(parent.path(), 3, || {
+            calls += 1;
+            Ok("taken000".to_string())
+        })
+        .unwrap_err();
+        assert_eq!(calls, 3);
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Failed to create temp directory in {}: \
+                 No usable temporary directory name found after 3 attempts",
+                parent.path().display()
+            )
+        );
+    }
+
+    /// An error other than `AlreadyExists` is returned at once, naming the
+    /// candidate path, without drawing another name.
+    #[test]
+    fn create_unique_dir_returns_other_errors_immediately() {
+        let parent = tempfile::tempdir().unwrap();
+        let missing = parent.path().join("missing");
+        let mut calls = 0;
+        let err = create_unique_dir(&missing, 10, || {
+            calls += 1;
+            Ok("abcdefgh".to_string())
+        })
+        .unwrap_err();
+        assert_eq!(calls, 1);
+        let SessionError::TempDir { path, source } = &err else {
+            panic!("expected SessionError::TempDir, got {err:?}");
+        };
+        assert_eq!(path, &missing.join("abcdefgh"));
+        assert_eq!(source.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    /// A failure to generate a name is reported against the parent directory.
+    #[test]
+    fn create_unique_dir_reports_name_generation_failure() {
+        let parent = tempfile::tempdir().unwrap();
+        let err = create_unique_dir(parent.path(), 10, || {
+            Err(std::io::Error::other("no entropy"))
+        })
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Failed to create temp directory in {}: no entropy",
+                parent.path().display()
+            )
+        );
+    }
+
+    /// The session working directory is created directly under the given
+    /// root with an 8-character name, and secured like any other `TempDir`.
+    #[test]
+    fn new_session_working_dir_creates_short_name_under_root() {
+        let parent = tempfile::tempdir().unwrap();
+        let mut td = TempDir::new_session_working_dir(parent.path(), None).unwrap();
+        assert_eq!(td.path().parent(), Some(parent.path()));
+        let name = td.path().file_name().unwrap().to_str().unwrap();
+        assert_eq!(name.len(), SESSION_DIR_NAME_LENGTH);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(td.path()).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
+        td.cleanup().unwrap();
+        assert!(!td.path().exists());
     }
 
     /// Mirrors Python TestSession::test_posix_permissions_warning.

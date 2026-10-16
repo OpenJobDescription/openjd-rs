@@ -101,6 +101,10 @@ impl Session {
 
     pub fn session_id(&self) -> &str;
     pub fn state(&self) -> SessionState;
+    /// The session working directory: a new directory directly under the
+    /// session root, named with 8 random characters from `[a-z0-9_]`.
+    /// The name carries no part of the session ID; the session log records
+    /// this path beside the session ID.
     pub fn working_directory(&self) -> &Path;
     pub fn files_directory(&self) -> &Path;
     pub fn environments_entered(&self) -> &[EnvironmentIdentifier];
@@ -321,8 +325,8 @@ pub struct SessionConfig {
     pub os_env_vars: Option<HashMap<String, String>>,
 
     /// Parent directory under which the session working directory
-    /// will be created. Defaults to the platform-specific OpenJD
-    /// temp directory (see `openjd_temp_dir`).
+    /// will be created, with an 8-character random name. Defaults to the
+    /// platform-specific OpenJD temp directory (see `openjd_temp_dir`).
     pub session_root_directory: Option<PathBuf>,
 
     /// Cross-user execution: when set, actions run as this user via
