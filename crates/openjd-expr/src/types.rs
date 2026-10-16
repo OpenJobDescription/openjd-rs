@@ -638,11 +638,8 @@ pub(crate) fn comprehension_list_type(body: &ExprType) -> ExprType {
     let Some(t) = list_element_contribution(body) else {
         return empty;
     };
-    // A body that never produces a value (`fail(...)`): only a run with
-    // no elements succeeds.
-    if t.code == TypeCode::NoReturn {
-        return empty;
-    }
+    // `noreturn` (a body that never produces a value) needs no case: the
+    // union below drops it, leaving `list[nulltype]`.
     let t = merge_list_union(t);
     if comprehension_too_deep(&t) {
         return empty;

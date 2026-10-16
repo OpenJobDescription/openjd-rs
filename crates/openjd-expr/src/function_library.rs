@@ -347,20 +347,17 @@ impl FunctionLibrary {
     pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
         // A list argument whose element type is a union is typed by its
         // forms, as `call` types an unresolved one (2026-02 Expression
-        // Language §1.2.1).
-        match form_combinations(arg_types) {
-            None => return Some(ExprType::ANY),
-            Some(combinations) if combinations.len() > 1 => {
-                let returns: Vec<ExprType> = combinations
-                    .iter()
-                    .filter_map(|c| self.derive_return_type(name, c))
-                    .collect();
-                if returns.is_empty() {
-                    return None;
-                }
-                return Some(crate::types::merge_list_union(ExprType::union(returns)));
+        // Language §1.2.1). Past `MAX_FORM_COMBINATIONS` they are typed as
+        // they are, below.
+        if let Some(combinations) = form_combinations(arg_types).filter(|c| c.len() > 1) {
+            let returns: Vec<ExprType> = combinations
+                .iter()
+                .filter_map(|c| self.derive_return_type(name, c))
+                .collect();
+            if returns.is_empty() {
+                return None;
             }
-            Some(_) => {}
+            return Some(crate::types::merge_list_union(ExprType::union(returns)));
         }
         // Fast path: if no union args, try exact match first (matches Python's singleton optimization)
         let has_unions = arg_types
@@ -541,7 +538,8 @@ fn can_coerce(from: &ExprType, to: &ExprType) -> bool {
 }
 
 /// Most combinations of list forms a call is typed by; past this the
-/// call is typed `any`, which every run's result satisfies.
+/// call is typed from the argument types as they are, without expanding
+/// their forms.
 const MAX_FORM_COMBINATIONS: usize = 64;
 
 /// The combinations of the arguments' list forms
@@ -582,13 +580,14 @@ fn form_combinations(arg_types: &[ExprType]) -> Option<Vec<Vec<ExprType>>> {
 /// union of the return types of the combinations that match, a union of
 /// list types read as one list type (`list[int] | list[nulltype]` is
 /// `list[int | nulltype]`). It is `None` when no combination matches.
+/// Past [`MAX_FORM_COMBINATIONS`] the arguments are typed as they are.
 fn unresolved_return_type(
     entries: &[FunctionEntry],
     arg_types: &[ExprType],
     skip_receiver_coercion: bool,
 ) -> Option<ExprType> {
     let Some(combinations) = form_combinations(arg_types) else {
-        return Some(ExprType::ANY);
+        return phase_return_type(entries, arg_types, skip_receiver_coercion);
     };
     if let [only] = combinations.as_slice() {
         return phase_return_type(entries, only, skip_receiver_coercion);

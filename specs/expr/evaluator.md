@@ -574,11 +574,13 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   comprehension concludes as over an unresolved iterable (below), with
   the body's type derived under an unresolved loop variable (evaluating
   the body on a concrete element the runtime filter may exclude could
-  raise a spurious value error). The loop still runs to the end: an
-  element whose filter is concretely true, before or after the unresolved
-  one, is kept by every run, so its body is evaluated and its failure is
-  an error (`[x.upper() for x in [2, 1] if x == 1 or Task.Param.C]`
-  fails at every stage, whatever the order). This state — iterable concrete, filter
+  raise a spurious value error). The elements before it were evaluated in
+  order, and one whose filter is concretely true is kept by every run, so
+  a failure of its body is an error (`[x.upper() for x in [1, 2] if x == 1`
+  `or Task.Param.C]` fails at every stage). The elements after it are not
+  evaluated (`[x.upper() for x in [2, 1] if ...]` fails only at run time):
+  evaluating them would cost, at a stage that cannot short-circuit the
+  filter, what the run does not. This state — iterable concrete, filter
   unresolved — is exactly what job creation evaluates under when the
   iterable depends on `Param.*` and the filter on `Task.*`/`Session.*`;
   a hard error here would reject templates that both validate and run.
@@ -681,9 +683,10 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 - Negative indices wrap around (Python semantics)
 - Slices return the same type as the input (string→string, list→list)
 - Out-of-bounds index raises an error; out-of-bounds slice clamps silently
-- Indexing an unresolved receiver every form of which is the empty list
-  (`list[nulltype]`, e.g. `[None for x in L]`) fails on every run that
-  evaluates it, and is reported at the index: "Index out of bounds: the list
+- Indexing a receiver every form of which is the empty list
+  (`list[nulltype]`, e.g. `[None for x in L]`, or `[]` with an unresolved
+  index), typed `noreturn` by `__getitem__(list[nulltype], int)`, fails on
+  every run that evaluates it, and is reported at the index: "Index out of bounds: the list
   is always empty". In a comprehension body typed over an unresolved
   iterable or filter, the failure is absorbed like any other, and the
   comprehension is `list[nulltype]` (see ListComp): the index may never be

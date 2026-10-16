@@ -1696,17 +1696,18 @@ impl<'a> Evaluator<'a> {
         }
 
         // Single-index access: dispatch through library
-        let receiver_unresolved = value.is_unresolved();
         let result = self.dispatch_with_node(
             "__getitem__",
             vec![value, slice],
             Some(&ast::Expr::Subscript(s.clone())),
         )?;
-        // Every form of an unresolved receiver is the empty list
-        // (`list[nulltype]`): indexing it fails on every run. Report it
-        // here, where it happens, rather than as a `noreturn` operand of
-        // whatever uses the element.
-        if receiver_unresolved && result.expr_type() == ExprType::unresolved(ExprType::NORETURN) {
+        // Typed `noreturn`, the index selected `__getitem__(list[nulltype],
+        // int)`: every form of the receiver is the empty list, so indexing
+        // it fails on every run. Report it here, where it happens, rather
+        // than as a `noreturn` operand of whatever uses the element. (A
+        // concrete index into a concrete empty list fails in dispatch with
+        // the list's length.)
+        if result.expr_type() == ExprType::unresolved(ExprType::NORETURN) {
             let err = ExpressionError::index_out_of_bounds(
                 "Index out of bounds: the list is always empty".to_string(),
             );
@@ -1988,12 +1989,10 @@ impl<'a> Evaluator<'a> {
         let mut result = crate::budgeted_vec::BudgetedVec::new();
         let base_symtabs: Vec<&SymbolTable> = self.symtabs.to_vec();
         // Set when a filter condition evaluates to an unresolved value:
-        // per-element inclusion is undecidable, so the comprehension
-        // concludes unresolved (below, after the borrowing iterator is
-        // dropped). The remaining elements are still filtered, and those
-        // whose filter is concretely true still have their body
-        // evaluated: every run evaluates it, so its failure is reported
-        // whatever the order of the elements.
+        // per-element inclusion is undecidable, so the loop stops and the
+        // comprehension concludes unresolved (below, after the borrowing
+        // iterator is dropped). The elements before it were evaluated in
+        // order, and a failure among them was already an error.
         let mut filter_unresolved = false;
         for item in iter {
             self.count_op()?;
@@ -2028,11 +2027,15 @@ impl<'a> Evaluator<'a> {
                     // accumulated elements are abandoned — BudgetedVec
                     // only pre-checks the budget; the finished list
                     // would be tracked by make_list_checked, which is
-                    // never reached. The loop goes on, so that every
-                    // element whose filter is concretely true has its
-                    // body evaluated wherever it is in the iterable.
+                    // never reached. The remaining elements are not
+                    // evaluated (§1.3.7): typing the comprehension as a
+                    // whole decides its result, and evaluating them would
+                    // cost what a run that short-circuits the filter does
+                    // not.
+                    self.absorb_spend_and_reset(&child, memory_baseline);
+                    self.regex_cache = child.regex_cache;
                     filter_unresolved = true;
-                    include = false;
+                    break;
                 } else {
                     self.absorb_spend_and_reset(&child, comprehension_baseline);
                     self.regex_cache = child.regex_cache;
@@ -2071,10 +2074,7 @@ impl<'a> Evaluator<'a> {
             // child's footprint.
             self.absorb_spend_and_reset(&child, memory_baseline);
             self.regex_cache = child.regex_cache;
-            // Once a filter was unresolved the result is concluded from
-            // types (below): an element's body is evaluated only so that
-            // its failure, which every run reaches, is reported.
-            if let Some(elt) = elt.filter(|_| !filter_unresolved) {
+            if let Some(elt) = elt {
                 if let Err(e) = result.push(self, elt) {
                     // Only a budget exceedance can land here, which no
                     // enclosing construct absorbs — but the exit drops
@@ -2224,14 +2224,25 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
 }
 
 /// Whether a comprehension filter of type `t` can be a boolean: `bool`,
-/// `any`, an unconstrained `unresolved`, or a union with a `bool` member
+/// `any`, an unconstrained `unresolved`, a type variable (`T3` from an
+/// operation on values of unknown type), or a union with such a member
 /// (`unresolved[T]` is read as `T`).
 fn is_bool_compatible(t: &ExprType) -> bool {
     let t = unwrap_unresolved(t);
-    t == ExprType::BOOL
-        || t.code() == crate::types::TypeCode::Unresolved
-        || t.code() == crate::types::TypeCode::Any
-        || (t.code() == crate::types::TypeCode::Union && t.params().contains(&ExprType::BOOL))
+    let can_be_bool = |m: &ExprType| {
+        *m == ExprType::BOOL
+            || matches!(
+                m.code(),
+                crate::types::TypeCode::Unresolved
+                    | crate::types::TypeCode::Any
+                    | crate::types::TypeCode::TypeVarT
+                    | crate::types::TypeCode::TypeVarT1
+                    | crate::types::TypeCode::TypeVarT2
+                    | crate::types::TypeCode::TypeVarT3
+            )
+    };
+    can_be_bool(&t)
+        || (t.code() == crate::types::TypeCode::Union && t.params().iter().any(can_be_bool))
 }
 
 /// Unwrap unresolved[T] to T, or return the type as-is if not unresolved.

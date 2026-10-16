@@ -252,7 +252,8 @@ list members merged into one list type (`types::merge_list_union`), and the
 call fails as usual when none matches. `sum` of a `list[float | int | nulltype]`
 is `float | int` (from `sum(list[float])`, `sum(list[int])`, and
 `sum(list[nulltype])`); `sorted` of it is `list[float | int | nulltype]`. Past
-64 combinations the call is `any`. A top-level union argument is not expanded
+64 combinations the call is typed by the argument types as they are, without
+expanding their forms. A top-level union argument is not expanded
 (it dispatches as before). `derive_return_type` expands list forms the same way.
 
 Indexing has a `(list[nulltype], int) -> noreturn` overload, registered before

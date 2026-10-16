@@ -112,6 +112,21 @@ fn assert_fails_once_run(expr: &str, pass8: &str, expected: &[&str]) {
     }
 }
 
+/// Assert `expr` has type `stage_type` at template validation and job
+/// creation, and fails at run time, where the task values reach the
+/// failure, with `expected`.
+fn assert_fails_once_run_only(expr: &str, stage_type: &str, expected: &[&str]) {
+    let [p8, g2, rt] = states();
+    for (stage, st) in [("pass 8", &p8), ("gate 2", &g2)] {
+        assert_eq!(
+            eval(expr, st).expr_type(),
+            tp(stage_type),
+            "{stage}: {expr}"
+        );
+    }
+    assert_err_in(expr, &rt, "run time", expected);
+}
+
 /// A symbol table with `name` bound to an empty list of `elem`, as job
 /// creation binds an empty `LIST[...]` parameter value.
 fn typed_empty(name: &str, elem: ExprType) -> SymbolTable {
@@ -242,32 +257,63 @@ fn body_type_error_with_an_unresolved_filter() {
 }
 
 #[test]
-fn body_failure_on_an_element_every_run_keeps_is_reported_in_any_order() {
-    // F2 of audit round 5: an element whose filter is concretely true is
-    // kept by every run, so its body's failure is an error at every stage —
-    // also when an element with an unresolved filter comes before it.
-    for expr in [
-        "[x.upper() for x in [1, 2] if x == 1 or Task.Param.C]",
-        "[x.upper() for x in [2, 1] if x == 1 or Task.Param.C]",
-    ] {
-        assert_err_all(
-            expr,
-            &[
-                "upper() is not available for int. Available for: string\n",
-                &format!("  {expr}\n"),
-                "   ~~^~~~~~~",
-            ],
-        );
-    }
-    // Its value does not decide the result: that is concluded from types.
+fn body_failure_on_an_element_before_an_unresolved_filter() {
+    // F2 of audit rounds 5 and 6: the elements are evaluated in order until
+    // a filter is unresolved (§1.3.7). An element before that whose filter
+    // is concretely true is kept by every run, so its body's failure is an
+    // error at every stage.
+    let expr = "[x.upper() for x in [1, 2] if x == 1 or Task.Param.C]";
+    assert_err_all(
+        expr,
+        &[
+            "upper() is not available for int. Available for: string\n",
+            &format!("  {expr}\n"),
+            "   ~~^~~~~~~",
+        ],
+    );
+    // The elements after it are not evaluated: the comprehension is typed
+    // as a whole, so the failure is absorbed, and the run reports it.
+    let expr = "[x.upper() for x in [2, 1] if x == 1 or Task.Param.C]";
+    assert_fails_once_run_only(
+        expr,
+        "unresolved[list[nulltype]]",
+        &[
+            "upper() is not available for int. Available for: string\n",
+            &format!("  {expr}\n"),
+            "   ~~^~~~~~~",
+        ],
+    );
+    // A kept element's value does not decide the result.
     let [p8, g2, _] = states();
-    let expr = "[x for x in [2, 1] if x == 1 or Task.Param.C]";
+    let expr = "[x for x in [1, 2] if x == 1 or Task.Param.C]";
     for st in [&p8, &g2] {
         assert_eq!(
             eval(expr, st).expr_type(),
             tp("unresolved[list[int | nulltype]]")
         );
     }
+}
+
+#[test]
+fn type_variable_filter_can_be_a_boolean() {
+    // F1 of audit round 6: a filter typed `T3` (an element of a `[] + [b]`
+    // concatenation) was taken as never a boolean. Over an unresolved
+    // iterable the comprehension was `list[nulltype]` and its index an
+    // error; over a concrete one the filter was an error.
+    assert_stages(
+        "[x for x in ([] + [Task.Param.C]) if x][0]",
+        "unresolved[T3]",
+        "unresolved[T3]",
+        "bool",
+        "true",
+    );
+    assert_stages(
+        "[x for x in [1, 2] if ([] + [Task.Param.C])[0]]",
+        "unresolved[list[int | nulltype]]",
+        "unresolved[list[int | nulltype]]",
+        "list[int]",
+        "[1, 2]",
+    );
 }
 
 #[test]
@@ -511,6 +557,20 @@ fn union_iterable_binds_the_union_of_element_types() {
 }
 
 #[test]
+fn union_iterable_member_that_cannot_be_iterated_contributes_nothing() {
+    // F3 of audit round 6: a run that takes the `string` member fails
+    // ("Cannot iterate over string"), so only the list's elements bind the
+    // loop variable.
+    assert_stages(
+        "[x for x in (Param.L if Task.Param.C else Param.LS[0])]",
+        "unresolved[list[int | nulltype]]",
+        "unresolved[list[int | nulltype]]",
+        "list[int]",
+        "[1, 2, 3]",
+    );
+}
+
+#[test]
 fn unresolved_iterable_that_cannot_be_iterated() {
     // Was accepted at template validation with the loop variable bound as
     // `int`; every run fails. An error in the iterable is not absorbed.
@@ -527,17 +587,24 @@ fn unresolved_iterable_that_cannot_be_iterated() {
 
 #[test]
 fn unresolved_iterable_that_can_only_be_empty() {
-    // F2 of audit round 5: the body of a comprehension whose iterable can
-    // only be `[]` is neither run nor type-checked, whatever the stage.
-    assert_stages(
+    // F2 of audit rounds 5 and 6: the body of a comprehension whose
+    // iterable can only be `[]` is neither run nor type-checked, whatever
+    // the stage: `1` does not make it a `list[int | nulltype]`, nor
+    // `x.upper()` an error.
+    for expr in [
+        "[1 for x in ([] if Task.Param.C else [])]",
         "[x.upper() for x in ([] if Task.Param.C else [])]",
-        "unresolved[list[nulltype]]",
-        "unresolved[list[nulltype]]",
-        "list[nulltype]",
-        "[]",
-    );
+    ] {
+        assert_stages(
+            expr,
+            "unresolved[list[nulltype]]",
+            "unresolved[list[nulltype]]",
+            "list[nulltype]",
+            "[]",
+        );
+    }
     // So indexing it fails on every run.
-    let expr = "[x for x in ([] if Task.Param.C else [])][0]";
+    let expr = "[1 for x in ([] if Task.Param.C else [])][0]";
     let [p8, g2, rt] = states();
     let caret = "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~";
     for (stage, st) in [("pass 8", &p8), ("gate 2", &g2)] {
@@ -620,6 +687,50 @@ fn calls_match_each_form_of_a_union_element_list() {
             &format!("  {expr}\n"),
             &format!("  {}^~~~~~~", "~".repeat(39)),
         ],
+    );
+}
+
+#[test]
+fn empty_list_overloads_apply_only_to_the_empty_list() {
+    // F1 of audit round 1: an argument of unknown element type (`list[T3]`
+    // from an unresolved `+`, or `list[any]`) matched
+    // `__getitem__(list[nulltype], int) -> noreturn` first, so validation
+    // rejected `[0] + 1`; only the empty list selects that overload at run
+    // time. So with `flatten(list[nulltype])`.
+    assert_stages(
+        "(Param.L + Param.L)[0] + 1",
+        "unresolved[int]",
+        "int",
+        "int",
+        "2",
+    );
+    let mut st = states()[0].clone();
+    st.set("U", ExprValue::unresolved(tp("list[any]"))).unwrap();
+    for (expr, ty) in [
+        ("U[0]", "unresolved"),
+        ("flatten(U)", "unresolved[list[T1]]"),
+        ("min(Param.L + Param.L)", "unresolved[int]"),
+    ] {
+        assert_eq!(eval(expr, &st).expr_type(), tp(ty), "{expr}");
+    }
+}
+
+#[test]
+fn calls_past_the_form_combination_cap_are_typed_by_the_argument_types() {
+    // F1 and F5 of audit round 6: past 64 combinations of forms a call was
+    // typed `any`, and `any[0]` takes the `string` overload, so validation
+    // rejected `+ 1` though every run gives an int. The body has nine
+    // types, so each comprehension's element type has ten forms, and `+`
+    // of two has a hundred.
+    let b = "(1 if Param.Z == 0 else 2.5 if Param.Z == 1 else 'a' if Param.Z == 2 \
+             else True if Param.Z == 3 else [1] if Param.Z == 4 else ['a'] if Param.Z == 5 \
+             else [2.5] if Param.Z == 6 else Param.R if Param.Z == 7 else [True])";
+    assert_stages(
+        &format!("([{b} for x in Param.L] + [{b} for x in Param.L])[0] + 1"),
+        "unresolved[int]",
+        "int",
+        "int",
+        "2",
     );
 }
 
@@ -706,6 +817,37 @@ fn indexing_an_always_empty_list_is_reported_where_it_happens() {
 }
 
 #[test]
+fn unresolved_index_into_a_concrete_empty_list() {
+    // F3 of audit round 6: `[]` indexed by an unresolved int is typed by
+    // `__getitem__(list[nulltype], int) -> noreturn`, which leaked into the
+    // next call's message ("No matching signature for string(noreturn)").
+    let expr = "string([][Task.Param.I])";
+    let [p8, g2, rt] = states();
+    for (stage, st) in [("pass 8", &p8), ("gate 2", &g2)] {
+        assert_err_in(
+            expr,
+            st,
+            stage,
+            &[
+                "Index out of bounds: the list is always empty\n",
+                &format!("  {expr}\n"),
+                "         ~~^~~~~~~~~~~~~~",
+            ],
+        );
+    }
+    assert_err_in(
+        expr,
+        &rt,
+        "run time",
+        &[
+            "Index 2 out of bounds for list of length 0\n",
+            &format!("  {expr}\n"),
+            "         ~~^~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
 fn always_empty_index_in_a_body_that_never_runs() {
     // F2 of audit round 4: in a comprehension body the failing index may
     // never run, so validation does not reject it.
@@ -763,6 +905,7 @@ fn concatenation_with_an_empty_side_has_the_common_type() {
         &[
             "Cannot concatenate list[list[int]] and list[list[string]]\n",
             &format!("  {expr}\n"),
+            "  ~~~~~~~~~~~~^~~~~~~~~",
         ],
     );
 }
@@ -787,6 +930,7 @@ fn range_concatenation_with_an_empty_side_has_the_common_type() {
         &[
             "Cannot concatenate range_expr and list[string]\n",
             &format!("  {expr}\n"),
+            "  ~~~~~~~~~~~~~~~~~~^~~~",
         ],
     );
 }
