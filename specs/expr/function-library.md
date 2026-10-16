@@ -256,6 +256,13 @@ is `float | int` (from `sum(list[float])`, `sum(list[int])`, and
 expanding their forms. A top-level union argument is not expanded
 (it dispatches as before). `derive_return_type` expands list forms the same way.
 
+List concatenation's `(list[T1], list[T2]) -> list[T3]` leaves `T3` unbound;
+with unresolved list operands whose element types hold no `any` or type variable,
+the call (and `derive_return_type`) gives the common element type instead, by
+the join concatenating the values uses (`list[list[int]] + list[list[float]]` is
+`list[list[float]]`; see List concatenation below). Operands with no common type,
+or of unknown element type, keep `list[T3]`.
+
 Indexing has a `(list[nulltype], int) -> noreturn` overload, registered before
 the generic `(list[T1], int) -> T1`: the empty list has no element, so indexing
 it is always out of bounds, and the empty form of `list[int | nulltype]` adds

@@ -250,6 +250,11 @@ pub struct Evaluator<'a> {
     /// leak into operand evaluation (RFC 0005 propagation rules).
     target_type: Option<crate::types::ExprType>,
     regex_cache: std::collections::HashMap<String, regex::Regex>,
+    /// The failure typing the last comprehension over unknown elements
+    /// absorbed (2026-02 §1.3.7), keyed by the comprehension node's
+    /// address. Indexing that comprehension directly names it as the
+    /// reason the list is always empty.
+    absorbed_listcomp_failure: Option<(usize, ExpressionError)>,
 }
 
 static EMPTY_KEYWORD_RENAMES: std::sync::LazyLock<std::collections::HashMap<String, String>> =
@@ -282,6 +287,7 @@ impl<'a> Evaluator<'a> {
             library: &crate::default_library::DEFAULT_LIBRARY,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
+            absorbed_listcomp_failure: None,
         }
     }
 
@@ -1696,21 +1702,34 @@ impl<'a> Evaluator<'a> {
         }
 
         // Single-index access: dispatch through library
+        let receiver_always_empty =
+            crate::types::list_forms(&unwrap_unresolved(&value.expr_type()))
+                .iter()
+                .all(|f| *f == ExprType::list(ExprType::NULLTYPE));
         let result = self.dispatch_with_node(
             "__getitem__",
             vec![value, slice],
             Some(&ast::Expr::Subscript(s.clone())),
         )?;
-        // Typed `noreturn`, the index selected `__getitem__(list[nulltype],
-        // int)`: every form of the receiver is the empty list, so indexing
-        // it fails on every run. Report it here, where it happens, rather
-        // than as a `noreturn` operand of whatever uses the element. (A
-        // concrete index into a concrete empty list fails in dispatch with
-        // the list's length.)
-        if result.expr_type() == ExprType::unresolved(ExprType::NORETURN) {
-            let err = ExpressionError::index_out_of_bounds(
-                "Index out of bounds: the list is always empty".to_string(),
-            );
+        // Typed `noreturn` with a receiver every form of which is the empty
+        // list (`__getitem__(list[nulltype], int)`): indexing it fails on
+        // every run. Report it here, where it happens, rather than as a
+        // `noreturn` operand of whatever uses the element. (A concrete index
+        // into a concrete empty list fails in dispatch with the list's
+        // length.) A comprehension that is always empty because a run that
+        // keeps an element fails says how.
+        if receiver_always_empty && result.expr_type() == ExprType::unresolved(ExprType::NORETURN) {
+            let cause = match (s.value.as_ref(), &self.absorbed_listcomp_failure) {
+                (ast::Expr::ListComp(lc), Some((id, e)))
+                    if *id == std::ptr::from_ref(lc) as usize =>
+                {
+                    format!(", since a run that keeps an element fails: {}", e.message())
+                }
+                _ => String::new(),
+            };
+            let err = ExpressionError::index_out_of_bounds(format!(
+                "Index out of bounds: the list is always empty{cause}"
+            ));
             return Err(match self.expr_source {
                 Some(src) => err.with_node(src, &ast::Expr::Subscript(s.clone())),
                 None => err,
@@ -1740,6 +1759,7 @@ impl<'a> Evaluator<'a> {
             library: self.library,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
+            absorbed_listcomp_failure: None,
         }
     }
 
@@ -1844,7 +1864,10 @@ impl<'a> Evaluator<'a> {
         self.absorb_spend_and_reset(&child, memory_baseline);
         let list_type = match body_type? {
             Speculative::Value(t) => crate::types::comprehension_list_type(&t),
-            Speculative::Absorbed(_) => ExprType::list(ExprType::NULLTYPE),
+            Speculative::Absorbed(e) => {
+                self.absorbed_listcomp_failure = Some((std::ptr::from_ref(lc) as usize, e));
+                ExprType::list(ExprType::NULLTYPE)
+            }
         };
         self.track(ExprValue::unresolved(list_type))
     }
@@ -2225,7 +2248,8 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
 
 /// Whether a comprehension filter of type `t` can be a boolean: `bool`,
 /// `any`, an unconstrained `unresolved`, a type variable (`T3` from an
-/// operation on values of unknown type), or a union with such a member
+/// operation on values of unknown type), `noreturn` (a filter that never
+/// gives a value fails the run itself), or a union with such a member
 /// (`unresolved[T]` is read as `T`).
 fn is_bool_compatible(t: &ExprType) -> bool {
     let t = unwrap_unresolved(t);
@@ -2235,6 +2259,7 @@ fn is_bool_compatible(t: &ExprType) -> bool {
                 m.code(),
                 crate::types::TypeCode::Unresolved
                     | crate::types::TypeCode::Any
+                    | crate::types::TypeCode::NoReturn
                     | crate::types::TypeCode::TypeVarT
                     | crate::types::TypeCode::TypeVarT1
                     | crate::types::TypeCode::TypeVarT2
@@ -2368,3 +2393,41 @@ fn resolve_keyword_renames(
 }
 
 use crate::types::ExprType;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tp(s: &str) -> ExprType {
+        ExprType::parse(s).unwrap()
+    }
+
+    #[test]
+    fn comprehension_filter_types_that_can_be_a_boolean() {
+        for t in [
+            "bool",
+            "any",
+            "unresolved",
+            "unresolved[bool]",
+            "noreturn",
+            "T",
+            "T1",
+            "T2",
+            "T3",
+            "bool | int",
+            "int | T1",
+        ] {
+            assert!(is_bool_compatible(&tp(t)), "{t}");
+        }
+        for t in [
+            "int",
+            "string",
+            "list[bool]",
+            "list[T1]",
+            "unresolved[int]",
+            "int | string",
+        ] {
+            assert!(!is_bool_compatible(&tp(t)), "{t}");
+        }
+    }
+}

@@ -586,7 +586,10 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   a hard error here would reject templates that both validate and run.
   A filter that evaluates to a concrete non-boolean, or to an unresolved
   value whose type can never be a boolean, on a concrete element is an
-  error: that element reaches it on every run.
+  error: that element reaches it on every run. A type that can be a
+  boolean is `bool`, `any`, an unconstrained `unresolved`, a bare type
+  variable (`T3` of an operation on values of unknown type), `noreturn`
+  (the filter itself fails the run), or a union with such a member.
 - Over a concrete iterable, the results build through `make_list`, which
   applies the shared list-element join; an incompatible pair fails with
   "make_list expected `T` element, got `U`" (`T` the join of the elements
@@ -643,7 +646,8 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     member that cannot be iterated contributes nothing, nor does a
     `nulltype` element). An iterable that can only be `[]` gives
     `list[nulltype]` with the body neither run nor type-checked
-    (`[x * 2 for x in []]`). An unresolved iterable no value of which can be
+    (`[x * 2 for x in []]`). An iterable typed as a type variable (`T3`)
+    binds `any`, as `any` does. An unresolved iterable no value of which can be
     iterated fails with "Cannot iterate over `T`", as a concrete one does:
     an error in the iterable is not absorbed.
 - Operation count: +1 per iteration
@@ -687,7 +691,11 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
   (`list[nulltype]`, e.g. `[None for x in L]`, or `[]` with an unresolved
   index), typed `noreturn` by `__getitem__(list[nulltype], int)`, fails on
   every run that evaluates it, and is reported at the index: "Index out of bounds: the list
-  is always empty". In a comprehension body typed over an unresolved
+  is always empty". Indexing a comprehension whose typing absorbed a failure
+  (see ListComp) adds it: `[x.upper() for x in Param.L][0]` at template
+  validation fails with "..., since a run that keeps an element fails: upper()
+  is not available for int ...". A `noreturn` element of a list that is not
+  always empty (`[fail(m)][0]`) is not reported so. In a comprehension body typed over an unresolved
   iterable or filter, the failure is absorbed like any other, and the
   comprehension is `list[nulltype]` (see ListComp): the index may never be
   evaluated.

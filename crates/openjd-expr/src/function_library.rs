@@ -208,6 +208,7 @@ impl FunctionLibrary {
         // matched by their forms (`unresolved_return_type`).
         if any_unresolved {
             if let Some(ret) = unresolved_return_type(entries, &arg_types, skip_receiver_coercion) {
+                let ret = concat_return_type(name, &arg_types, ret);
                 return Ok(ExprValue::unresolved(ret));
             }
         }
@@ -344,7 +345,18 @@ impl FunctionLibrary {
     /// Accepts union types in arg_types and returns a union of all possible return types.
     /// A list argument whose element type is a union is typed by its
     /// forms (`list[int | nulltype]` as `list[int]` and `list[nulltype]`).
+    /// A list concatenation of known element types has their common
+    /// element type, as concatenating values gives.
     pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
+        self.derive_return_type_by_signature(name, arg_types)
+            .map(|ret| concat_return_type(name, arg_types, ret))
+    }
+
+    fn derive_return_type_by_signature(
+        &self,
+        name: &str,
+        arg_types: &[ExprType],
+    ) -> Option<ExprType> {
         // A list argument whose element type is a union is typed by its
         // forms, as `call` types an unresolved one (2026-02 Expression
         // Language §1.2.1). Past `MAX_FORM_COMBINATIONS` they are typed as
@@ -352,7 +364,7 @@ impl FunctionLibrary {
         if let Some(combinations) = form_combinations(arg_types).filter(|c| c.len() > 1) {
             let returns: Vec<ExprType> = combinations
                 .iter()
-                .filter_map(|c| self.derive_return_type(name, c))
+                .filter_map(|c| self.derive_return_type_by_signature(name, c))
                 .collect();
             if returns.is_empty() {
                 return None;
@@ -541,6 +553,44 @@ fn can_coerce(from: &ExprType, to: &ExprType) -> bool {
 /// call is typed from the argument types as they are, without expanding
 /// their forms.
 const MAX_FORM_COMBINATIONS: usize = 64;
+
+/// The type of a list concatenation (`__add__` of two lists) whose
+/// signature `(list[T1], list[T2]) -> list[T3]` leaves `T3` unbound: the
+/// common element type (2026-02 §2.1.3), by the join a list literal
+/// holding both lists uses, as concatenating the values does
+/// (`list[list[int]] + list[list[float]]` is `list[list[float]]`). Any
+/// other call, or operands with no common type, keep `ret`.
+fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> ExprType {
+    let unwrap = |t: &ExprType| match (t.code(), t.params()) {
+        (crate::types::TypeCode::Unresolved, [inner]) => inner.clone(),
+        _ => t.clone(),
+    };
+    let [left, right] = arg_types else {
+        return ret;
+    };
+    let (left, right) = (unwrap(left), unwrap(right));
+    // `any` joins as the other type, which a value of it need not be
+    // (`list[any] + list[int]` may be a `list[float]`).
+    fn has_any(t: &ExprType) -> bool {
+        matches!(
+            t.code(),
+            crate::types::TypeCode::Any | crate::types::TypeCode::Unresolved
+        ) || t.params().iter().any(has_any)
+    }
+    if name != "__add__"
+        || !ret.is_symbolic()
+        || !left.is_list()
+        || !right.is_list()
+        || has_any(&left)
+        || has_any(&right)
+    {
+        return ret;
+    }
+    match crate::types::join_list_element(&left, &right) {
+        Some(joined) if !joined.is_symbolic() => crate::types::simplify_joined_list_element(joined),
+        _ => ret,
+    }
+}
 
 /// The combinations of the arguments' list forms
 /// ([`crate::types::list_forms`]): one argument list per way of picking a

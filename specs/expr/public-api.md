@@ -446,7 +446,8 @@ impl FunctionLibrary {
     /// argument types, without evaluating. Accepts union types in
     /// `arg_types` and returns a union of possible return types. A list
     /// argument whose element type is a union is typed by its forms
-    /// (`list[int | nulltype]` as `list[int]` and `list[nulltype]`).
+    /// (`list[int | nulltype]` as `list[int]` and `list[nulltype]`). A list
+    /// concatenation of known element types has their common element type.
     pub fn derive_return_type(
         &self, name: &str, arg_types: &[ExprType],
     ) -> Option<ExprType>;

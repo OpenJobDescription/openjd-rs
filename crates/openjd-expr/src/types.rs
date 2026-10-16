@@ -573,7 +573,8 @@ pub(crate) enum ComprehensionVar {
 
 /// The loop variable's type for a comprehension over an iterable of type
 /// `t` (§1.3.7): `E` for `list[E]`, `int` for `range_expr`, the union of
-/// the members' element types for a union, and `any` for `any`. A
+/// the members' element types for a union, and `any` for `any` or a type
+/// variable. A
 /// `nulltype` element member contributes nothing (§1.2.1: it marks the
 /// list as possibly empty), nor does a union member that cannot be
 /// iterated (a run with it fails). `unresolved[T]` is read as `T`.
@@ -601,7 +602,18 @@ pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
                 iterable = true;
                 elems.push(ExprType::INT);
             }
-            (TypeCode::Any, _) | (TypeCode::Unresolved, _) => {
+            // `any`, an unconstrained `unresolved`, or a type variable (the
+            // `T3` of an operation on values of unknown type) may be any
+            // list.
+            (
+                TypeCode::Any
+                | TypeCode::Unresolved
+                | TypeCode::TypeVarT
+                | TypeCode::TypeVarT1
+                | TypeCode::TypeVarT2
+                | TypeCode::TypeVarT3,
+                _,
+            ) => {
                 iterable = true;
                 elems.push(ExprType::ANY);
             }
