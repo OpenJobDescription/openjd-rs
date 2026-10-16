@@ -130,8 +130,8 @@ is 8 random characters and nothing else:
 ### Why 8 random characters
 
 Windows applications that a job runs, such as After Effects and Cinema 4D,
-are limited to `MAX_PATH` (260 characters) regardless of the
-`LongPathsEnabled` registry value or a `\\?\` prefix, and the working
+use the legacy Win32 file APIs and so are limited to `MAX_PATH` (260
+characters) regardless of the `LongPathsEnabled` registry value or a `\\?\` prefix, and the working
 directory's path counts against that limit for everything beneath it. A
 short random name keeps that cost low while staying unique.
 
@@ -149,7 +149,9 @@ This matches openjd-sessions-for-python PR #348, with two differences:
   depends on the platform.
 - On Windows, Python also retries when creating the directory fails with
   `PermissionError` in a writable parent. This crate retries only on
-  `AlreadyExists`, so that case fails the session.
+  `AlreadyExists`, so that case fails the session. Retrying on access denied
+  without first checking that the parent is writable would make a real
+  permission error spin through all 10,000 attempts.
 
 ## Integration with Session
 

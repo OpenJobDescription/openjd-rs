@@ -577,7 +577,7 @@ mod tests {
     }
 
     /// The directory is created directly under the root with an
-    /// 8-character name and owner-only permissions.
+    /// 8-character name and, on POSIX, mode 0700.
     #[test]
     fn new_session_working_dir_creates_short_name_under_root() {
         let parent = tempfile::tempdir().unwrap();

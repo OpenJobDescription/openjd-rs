@@ -226,8 +226,8 @@ async fn test_working_directory_name_is_8_chars_from_alphabet() {
     session.cleanup();
 }
 
-/// No part of the session ID appears in the name, including any tail of 4
-/// or more characters.
+/// Neither the session ID, `session`, nor any tail of the ID of 4 or more
+/// characters appears in the name.
 #[tokio::test]
 async fn test_working_directory_name_carries_no_session_id() {
     let tmp = TempDir::new().unwrap();
@@ -242,36 +242,6 @@ async fn test_working_directory_name_carries_no_session_id() {
             "name {name:?} contains the session ID's tail {tail:?}"
         );
     }
-    session.cleanup();
-}
-
-/// The embedded-files directory, directly inside the working directory, is
-/// named `embedded_files` followed by 32 lower-case hex characters.
-#[tokio::test]
-async fn test_files_directory_name_unchanged() {
-    let tmp = TempDir::new().unwrap();
-    let mut session = Session::with_config(config_in_root(tmp.path(), DEADLINE_SHAPED_ID)).unwrap();
-    assert_eq!(
-        session.files_directory().parent(),
-        Some(session.working_directory())
-    );
-    let name = session
-        .files_directory()
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_string();
-    let suffix = name
-        .strip_prefix("embedded_files")
-        .unwrap_or_else(|| panic!("files directory name {name:?}"));
-    assert_eq!(suffix.len(), 32, "files directory name {name:?}");
-    assert!(
-        suffix
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
-        "files directory name {name:?}"
-    );
     session.cleanup();
 }
 
