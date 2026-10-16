@@ -648,9 +648,11 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     `list[nulltype]` with the body neither run nor type-checked
     (`[x * 2 for x in []]`). An iterable typed as a type variable (`T3`),
     or a list of one (`list[T1]`, as `sorted` of an `any` is typed), binds
-    `any`, as `any` does. An unresolved iterable no value of which can be
-    iterated fails with "Cannot iterate over `T`", as a concrete one does:
-    an error in the iterable is not absorbed.
+    `any`, as `any` does. An unresolved iterable whose type cannot be
+    iterated also binds `any`: its type may come from typing an operation on
+    values of unknown type (`T3 * 2` is typed `int`), so only a run can tell,
+    and a concrete one fails with "Cannot iterate over `T`". Other errors in
+    the iterable are not absorbed.
 - Operation count: +1 per iteration
 - Each iteration's child evaluator hands its *spend* — memory
   high-water mark and operation count — back to the parent on **every**

@@ -614,17 +614,32 @@ fn union_iterable_member_that_cannot_be_iterated_contributes_nothing() {
 
 #[test]
 fn unresolved_iterable_that_cannot_be_iterated() {
-    // Was accepted at template validation with the loop variable bound as
-    // `int`; every run fails. An error in the iterable is not absorbed.
+    // An iterable whose value is not known, and whose type cannot be
+    // iterated, is not rejected at validation (loop audit 2, round 2): its
+    // type may come from typing an operation on values of unknown type
+    // (`T3 * 2` is typed `int`), so the loop variable is `any`. A run, which
+    // has the value, reports it.
     let expr = "[x for x in Task.Param.I]";
-    assert_err_all(
+    let [p8, g2, rt] = states();
+    for st in [&p8, &g2] {
+        assert_eq!(eval(expr, st).expr_type(), tp("unresolved[list[any]]"));
+    }
+    assert_err_in(
         expr,
+        &rt,
+        "run time",
         &[
             "Cannot iterate over int\n",
             &format!("  {expr}\n"),
             "  ^~~~~~~~~~~~~~~~~~~~~~~~",
         ],
     );
+    // A type that comes from such an operation, though the run iterates a
+    // list (`[[5, 6]][0] * 2`).
+    let [p8, _, rt] = states_with_nested_task_list();
+    let expr = "[x for x in (([] if Task.Param.C else Param.R) + Task.Param.LL)[0] * 2]";
+    assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved[list[any]]"));
+    assert_eq!(eval(expr, &rt).to_display_string(), "[5, 6, 5, 6]");
 }
 
 #[test]
@@ -834,7 +849,7 @@ fn type_variable_element_type_is_not_a_list_of_lists() {
     for st in [&p8, &g2] {
         assert_eq!(
             eval(expr, st).expr_type(),
-            tp("unresolved[list[T3]]"),
+            tp("unresolved[list[any]]"),
             "{expr}"
         );
     }
@@ -1038,8 +1053,10 @@ fn unresolved_concatenation_has_the_common_element_type() {
         }
         assert_eq!(eval(expr, &rt).to_display_string(), value, "{expr}");
     }
-    // Operands of no common type keep the signature's type: a run with an
-    // empty form may still succeed.
+    // Operands of no common type keep the signature's type; an operand of
+    // unknown elements (`any` or a type variable, at any depth, or an
+    // operand of unknown type) gives `list[any]`; an unresolved operand is
+    // read as its type.
     let lib = FunctionLibrary::for_profile(&ExprProfile::current());
     for (args, ty) in [
         (
@@ -1047,6 +1064,13 @@ fn unresolved_concatenation_has_the_common_element_type() {
             "list[list[float]]",
         ),
         (["list[any]", "list[int]"], "list[any]"),
+        // B-F1..F6 of loop audit 2, round 2.
+        (["list[T1]", "list[int]"], "list[any]"),
+        (["list[list[any]]", "list[list[int]]"], "list[any]"),
+        (["list[string]", "list[int]"], "list[T3]"),
+        (["range_expr", "list[string]"], "list[T2]"),
+        (["list[int]", "any"], "list[any]"),
+        (["unresolved[list[int]]", "list[float]"], "list[float]"),
     ] {
         let args = args.map(tp);
         assert_eq!(

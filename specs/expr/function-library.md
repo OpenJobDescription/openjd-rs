@@ -262,7 +262,8 @@ List concatenation's `(list[T1], list[T2]) -> list[T3]` (and the range overloads
 concatenating the values uses, a `range_expr` operand counting as a `list[int]`
 (`list[list[int]] + list[list[float]]` is `list[list[float]]`, `range_expr + list[int]`
 is `list[int]`; see List concatenation below). An operand whose element type is not
-known (it holds `any` or a type variable) gives `list[any]`; operands with no common
+known (it holds `any` or a type variable at any depth, or is itself of unknown type)
+gives `list[any]`; operands with no common
 type keep the signature's type.
 
 Indexing has a `(list[nulltype], int) -> noreturn` overload, registered before

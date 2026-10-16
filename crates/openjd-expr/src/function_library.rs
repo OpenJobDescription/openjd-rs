@@ -347,7 +347,8 @@ impl FunctionLibrary {
     /// forms (`list[int | nulltype]` as `list[int]` and `list[nulltype]`).
     /// A list concatenation of known element types (a `range_expr` counting
     /// as a `list[int]`) has their common element type, as concatenating
-    /// values gives, and of unknown ones `list[any]`.
+    /// values gives, of unknown ones (or an operand of unknown type)
+    /// `list[any]`, and of no common type the signature's `list[T3]`.
     pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
         self.derive_return_type_by_signature(name, arg_types)
             .map(|ret| concat_return_type(name, arg_types, ret))
@@ -570,10 +571,16 @@ fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Expr
             (crate::types::TypeCode::Unresolved, [inner]) => inner.clone(),
             _ => t.clone(),
         };
-        if t.code() == crate::types::TypeCode::RangeExpr {
-            ExprType::list(ExprType::INT)
-        } else {
-            t
+        match t.code() {
+            crate::types::TypeCode::RangeExpr => ExprType::list(ExprType::INT),
+            // An operand of unknown type, which a run that succeeds has as
+            // a list of unknown elements.
+            crate::types::TypeCode::Any
+            | crate::types::TypeCode::TypeVarT
+            | crate::types::TypeCode::TypeVarT1
+            | crate::types::TypeCode::TypeVarT2
+            | crate::types::TypeCode::TypeVarT3 => ExprType::list(ExprType::ANY),
+            _ => t,
         }
     };
     let [left, right] = arg_types else {

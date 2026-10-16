@@ -722,7 +722,8 @@ rejected during validation.
 A source constraint may contain unbound type variables. Generic return
 types can leave one unbound when an argument is unresolved — list
 concatenation's signature is `(list[T1], list[T2]) -> list[T3]`, and no
-parameter binds `T3` — and callers of the public API can construct such
+parameter binds `T3`; its type is `list[T3]` when the operands have no common
+element type — and callers of the public API can construct such
 constraints directly. A concrete value can never have a type variable in
 its type, so on the source side an unbound variable reads as a
 **wildcard**: it is erased to `any` before the rules apply. The shape

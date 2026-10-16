@@ -1892,13 +1892,20 @@ impl<'a> Evaluator<'a> {
     }
 
     /// The loop variable for a comprehension over `iterable`
-    /// ([`crate::types::comprehension_var`]), or the error for an
-    /// iterable no value of which can be iterated.
+    /// ([`crate::types::comprehension_var`]). A concrete iterable that
+    /// cannot be iterated is an error. An unresolved one whose type cannot
+    /// be iterated binds `any` (2026-02 §1.3.7): its type may come from
+    /// typing an operation on values of unknown type (`T3 * 2` is typed
+    /// `int`), which says less than it seems, so only a run, which has the
+    /// value, can tell.
     fn comprehension_var_of(
         &self,
         iterable: &ExprValue,
     ) -> Result<crate::types::ComprehensionVar, ExpressionError> {
         match crate::types::comprehension_var(&iterable.expr_type()) {
+            crate::types::ComprehensionVar::NotIterable if iterable.is_unresolved() => {
+                Ok(crate::types::ComprehensionVar::Typed(ExprType::ANY))
+            }
             crate::types::ComprehensionVar::NotIterable => {
                 Err(ExpressionError::type_error(format!(
                     "Cannot iterate over {}",

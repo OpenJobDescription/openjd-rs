@@ -448,8 +448,9 @@ impl FunctionLibrary {
     /// argument whose element type is a union is typed by its forms
     /// (`list[int | nulltype]` as `list[int]` and `list[nulltype]`). A list
     /// concatenation of known element types (a `range_expr` counting as a
-    /// `list[int]`) has their common element type, and of unknown ones
-    /// `list[any]`.
+    /// `list[int]`) has their common element type, of unknown ones (or an
+    /// operand of unknown type) `list[any]`, and of no common type the
+    /// signature's `list[T3]`.
     pub fn derive_return_type(
         &self, name: &str, arg_types: &[ExprType],
     ) -> Option<ExprType>;

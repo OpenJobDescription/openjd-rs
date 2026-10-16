@@ -1220,7 +1220,8 @@ impl ExprValue {
         // still a list, so only list rules apply — and the rules below need
         // no case for variables at all. Such constraints arise from generic
         // return types whose variable no parameter binds, e.g. list
-        // concatenation's `(list[T1], list[T2]) -> list[T3]`.
+        // concatenation's `(list[T1], list[T2]) -> list[T3]` with operands
+        // of no common element type.
         let erased;
         let source = if source.is_symbolic() {
             erased = source.erase_type_vars();
