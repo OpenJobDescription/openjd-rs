@@ -306,16 +306,28 @@ pub(crate) const SESSION_DIR_NAME_ATTEMPTS: usize = 10_000;
 /// [`SESSION_DIR_NAME_LENGTH`] characters drawn uniformly from
 /// [`SESSION_DIR_NAME_ALPHABET`] with the OS CSPRNG.
 fn random_session_dir_name() -> std::io::Result<String> {
-    // Rejection sampling keeps the draw uniform: 222 is the largest multiple
-    // of 37 that fits in a byte, so bytes >= 222 are discarded.
+    session_dir_name_from(|buf| {
+        getrandom::fill(buf).map_err(|e| {
+            std::io::Error::other(format!("Failed to generate a random directory name: {e}"))
+        })
+    })
+}
+
+/// Build a session working directory name from the random bytes that `fill`
+/// writes, calling it again for more bytes as needed.
+///
+/// Rejection sampling keeps the draw uniform: 222 is the largest multiple of
+/// 37 that fits in a byte, so bytes >= 222 are discarded and each kept byte
+/// maps to `SESSION_DIR_NAME_ALPHABET[byte % 37]`.
+fn session_dir_name_from(
+    mut fill: impl FnMut(&mut [u8]) -> std::io::Result<()>,
+) -> std::io::Result<String> {
     const LIMIT: u8 =
         (256 / SESSION_DIR_NAME_ALPHABET.len() * SESSION_DIR_NAME_ALPHABET.len()) as u8;
     let mut name = String::with_capacity(SESSION_DIR_NAME_LENGTH);
     let mut buf = [0u8; 16];
     while name.len() < SESSION_DIR_NAME_LENGTH {
-        getrandom::fill(&mut buf).map_err(|e| {
-            std::io::Error::other(format!("Failed to generate a random directory name: {e}"))
-        })?;
+        fill(&mut buf)?;
         for b in buf {
             if b < LIMIT && name.len() < SESSION_DIR_NAME_LENGTH {
                 let i = usize::from(b) % SESSION_DIR_NAME_ALPHABET.len();
@@ -404,6 +416,40 @@ mod tests {
                 "{name:?}"
             );
         }
+    }
+
+    /// Bytes at or above 222 are rejected and each kept byte maps to
+    /// `ALPHABET[byte % 37]`, so the draw is uniform. 221 is the largest
+    /// accepted byte and maps to the last character, `_`.
+    #[test]
+    fn session_dir_name_from_rejects_biased_bytes() {
+        let bytes: [u8; 12] = [222, 255, 0, 36, 37, 221, 1, 2, 3, 4, 25, 26];
+        let mut calls = 0;
+        let name = session_dir_name_from(|buf| {
+            calls += 1;
+            buf.fill(222);
+            buf[..bytes.len()].copy_from_slice(&bytes);
+            Ok(())
+        })
+        .unwrap();
+        // 222 and 255 rejected; 0->a, 36->_, 37->a, 221->_, 1->b, 2->c, 3->d, 4->e.
+        assert_eq!(name, "a_a_bcde");
+        assert_eq!(calls, 1);
+    }
+
+    /// When a buffer yields too few accepted bytes, more are requested.
+    #[test]
+    fn session_dir_name_from_refills_until_full() {
+        let mut calls = 0;
+        let name = session_dir_name_from(|buf| {
+            calls += 1;
+            buf.fill(255);
+            buf[0] = 24 + calls; // one accepted byte per call: z, 0, 1, ...
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(name, "z0123456");
+        assert_eq!(calls, 8);
     }
 
     /// Every alphabet character is reachable, including the last one (`_`),

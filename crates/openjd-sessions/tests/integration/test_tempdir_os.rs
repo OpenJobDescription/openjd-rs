@@ -44,6 +44,27 @@ fn test_tempdir_with_prefix() {
     tmp.cleanup().unwrap();
 }
 
+/// `TempDir::new` names the directory `{prefix}` followed by 32 lower-case
+/// hex characters (tempdir.md, Construction). The session working directory
+/// uses a different, shorter scheme; this one is unchanged.
+#[test]
+fn test_tempdir_name_is_prefix_plus_32_hex() {
+    let parent = tempfile::TempDir::new().unwrap();
+    let mut tmp = TempDir::new(Some(parent.path()), Some("myprefix"), None).unwrap();
+    let name = tmp.path().file_name().unwrap().to_str().unwrap();
+    let suffix = name
+        .strip_prefix("myprefix")
+        .expect("name keeps the prefix");
+    assert_eq!(suffix.len(), 32, "name {name:?}");
+    assert!(
+        suffix
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "name {name:?}"
+    );
+    tmp.cleanup().unwrap();
+}
+
 #[test]
 fn test_tempdir_cleanup() {
     let parent = tempfile::TempDir::new().unwrap();
