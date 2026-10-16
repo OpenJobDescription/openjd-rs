@@ -173,12 +173,11 @@ impl TempDir {
     }
 
     /// Create a session working directory directly under `dir`, named with
-    /// [`SESSION_DIR_NAME_LENGTH`] random characters and nothing else.
+    /// [`SESSION_DIR_NAME_LENGTH`] random characters from
+    /// [`SESSION_DIR_NAME_ALPHABET`].
     ///
-    /// Matches Python's `mkdtemp(prefix="")`: the name is drawn from
-    /// [`SESSION_DIR_NAME_ALPHABET`], each candidate is created with an
-    /// exclusive `create_dir`, and a name that already exists is retried
-    /// with a fresh one, up to [`SESSION_DIR_NAME_ATTEMPTS`] times.
+    /// A name that already exists is replaced by a fresh one, up to
+    /// [`SESSION_DIR_NAME_ATTEMPTS`] times.
     pub(crate) fn new_session_working_dir(
         dir: &Path,
         user: Option<&dyn SessionUser>,
@@ -296,24 +295,19 @@ fn random_hex() -> String {
 
 /// Length of a session working directory's name.
 ///
-/// Every character of the working directory's path is charged against
-/// `MAX_PATH` (260) for the Windows applications a job runs, many of which
-/// are not long-path aware, so the name is this many random characters and
-/// nothing else. It carries no part of the session ID; the session log
-/// records the working directory's path beside the full session ID, which is
-/// how a retained or orphaned directory is traced back to its session.
-/// Matches Python's `SESSION_DIR_NAME_LENGTH` (openjd-sessions-for-python
-/// PR #348), where the name comes from `mkdtemp(prefix="")`.
+/// Kept short because the path counts against Windows `MAX_PATH` (260) for
+/// job applications that are not long-path aware. The name carries no part
+/// of the session ID; the session log records the path beside the ID.
+/// Matches openjd-sessions-for-python PR #348.
 pub(crate) const SESSION_DIR_NAME_LENGTH: usize = 8;
 
-/// Characters a session working directory's name is drawn from: CPython's
-/// `tempfile._RandomNameSequence.characters`. Lower case only, so two names
-/// cannot differ only in case (NTFS folds case), and free of every
-/// Windows-reserved character.
+/// Characters a session working directory's name is drawn from. Lower case
+/// only, so names cannot collide on case-insensitive filesystems, and no
+/// character is reserved on Windows.
 pub(crate) const SESSION_DIR_NAME_ALPHABET: &[u8; 37] = b"abcdefghijklmnopqrstuvwxyz0123456789_";
 
 /// How many names [`TempDir::new_session_working_dir`] tries before giving
-/// up. CPython's `tempfile.TMP_MAX` fallback value.
+/// up.
 pub(crate) const SESSION_DIR_NAME_ATTEMPTS: usize = 10_000;
 
 /// Generate one candidate session working directory name:
@@ -352,14 +346,14 @@ fn session_dir_name_from(
     Ok(name)
 }
 
-/// Create a new directory under `parent` named by `next_name`, retrying with
-/// a fresh name each time the candidate already exists.
+/// Create a new directory under `parent` named by `next_name`, drawing a
+/// fresh name each time the candidate already exists.
 ///
 /// Each attempt is an exclusive `create_dir`, so an existing directory is
-/// never reused and concurrent callers cannot be handed the same path. Any
-/// error other than `AlreadyExists` is returned at once, as is a failure of
-/// `next_name` (reported against `parent`). After `attempts` names that all
-/// exist, fails with an `AlreadyExists` error naming `parent`.
+/// never reused and concurrent callers never share a path. Any other error,
+/// or a failure of `next_name` (reported against `parent`), is returned at
+/// once. After `attempts` names that all exist, fails with an
+/// `AlreadyExists` error naming `parent`.
 fn create_unique_dir(
     parent: &Path,
     attempts: usize,
@@ -405,9 +399,8 @@ mod tests {
         assert_eq!(p, td.path());
     }
 
-    /// The naming parameters are the documented ones (tempdir.md, "Session
-    /// working directory name"), spelled out literally so that a change to a
-    /// constant cannot pass by also changing what the tests compare against.
+    /// The naming parameters match tempdir.md, written as literals so a
+    /// changed constant fails here.
     #[test]
     fn session_dir_name_parameters_match_spec() {
         assert_eq!(SESSION_DIR_NAME_LENGTH, 8);
@@ -432,9 +425,8 @@ mod tests {
         }
     }
 
-    /// Bytes at or above 222 are rejected and each kept byte maps to
-    /// `ALPHABET[byte % 37]`, so the draw is uniform. 221 is the largest
-    /// accepted byte and maps to the last character, `_`.
+    /// Bytes >= 222 are rejected and each kept byte maps to
+    /// `ALPHABET[byte % 37]`. 221, the largest kept byte, maps to `_`.
     #[test]
     fn session_dir_name_from_rejects_biased_bytes() {
         let bytes: [u8; 12] = [222, 255, 0, 36, 37, 221, 1, 2, 3, 4, 25, 26];
@@ -466,8 +458,7 @@ mod tests {
         assert_eq!(calls, 8);
     }
 
-    /// Every alphabet character is reachable, including the last one (`_`),
-    /// which an off-by-one in the rejection limit or the modulus would drop.
+    /// Every alphabet character is reachable, including the last one (`_`).
     #[test]
     fn random_session_dir_name_uses_whole_alphabet() {
         let mut seen = std::collections::HashSet::new();
@@ -477,9 +468,8 @@ mod tests {
         assert_eq!(seen.len(), SESSION_DIR_NAME_ALPHABET.len(), "{seen:?}");
     }
 
-    /// A name that already exists is skipped, not reused and not an error:
-    /// the next candidate is created instead and the existing directory is
-    /// left untouched.
+    /// An existing name is skipped and left untouched, and the next
+    /// candidate is created.
     #[test]
     fn create_unique_dir_retries_on_collision() {
         let parent = tempfile::tempdir().unwrap();
@@ -555,9 +545,7 @@ mod tests {
         );
     }
 
-    /// The session working directory path retries a taken name for the full
-    /// `SESSION_DIR_NAME_ATTEMPTS` (10,000): the 10,000th candidate is still
-    /// tried, and only after 10,000 taken names does creation fail.
+    /// The 10,000th candidate is still tried, and 10,000 taken names fail.
     #[test]
     fn new_session_working_dir_retries_up_to_attempt_bound() {
         let parent = tempfile::tempdir().unwrap();
@@ -592,8 +580,8 @@ mod tests {
         );
     }
 
-    /// The session working directory is created directly under the given
-    /// root with an 8-character name, and secured like any other `TempDir`.
+    /// The directory is created directly under the root with an
+    /// 8-character name and owner-only permissions.
     #[test]
     fn new_session_working_dir_creates_short_name_under_root() {
         let parent = tempfile::tempdir().unwrap();

@@ -45,8 +45,7 @@ fn test_tempdir_with_prefix() {
 }
 
 /// `TempDir::new` names the directory `{prefix}` followed by 32 lower-case
-/// hex characters (tempdir.md, Construction). The session working directory
-/// uses a different, shorter scheme; this one is unchanged.
+/// hex characters.
 #[test]
 fn test_tempdir_name_is_prefix_plus_32_hex() {
     let parent = tempfile::TempDir::new().unwrap();

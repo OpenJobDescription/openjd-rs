@@ -118,8 +118,8 @@ pub struct SessionConfig {
     pub os_env_vars: Option<HashMap<String, String>>,
     /// Root directory under which the session's working and embedded-files
     /// directories are created. If `None`, a temporary directory is used.
-    /// The working directory is created directly under this root with an
-    /// 8-character random name (see [`Session::working_directory`]).
+    /// The working directory is created directly under this root (see
+    /// [`Session::working_directory`]).
     ///
     /// A relative path is resolved to an absolute path (against the process
     /// current working directory) when the session is created, so all derived
@@ -680,9 +680,8 @@ impl Session {
             }
         }
 
-        // The working directory's name is random and carries no part of the
-        // session ID, to save Windows MAX_PATH budget; the ID is logged beside
-        // the directory's path below. See `SESSION_DIR_NAME_LENGTH`.
+        // The name carries no part of the session ID; the ID is logged
+        // beside the path below.
         let working_dir =
             crate::tempdir::TempDir::new_session_working_dir(&root_dir, config.user.as_deref())?;
         let files_dir = crate::tempdir::TempDir::new(
@@ -921,10 +920,9 @@ impl Session {
     }
     /// The session working directory.
     ///
-    /// [`Session::with_config`] creates it directly under the session root,
-    /// named with 8 random characters from `[a-z0-9_]`. The name carries no
-    /// part of the session ID, to save Windows `MAX_PATH` budget; the session
-    /// log records this path beside the session ID.
+    /// It is created directly under the session root, named with 8 random
+    /// characters from `[a-z0-9_]`. The name carries no part of the session
+    /// ID; the session log records this path beside the ID.
     pub fn working_directory(&self) -> &Path {
         &self.working_directory
     }

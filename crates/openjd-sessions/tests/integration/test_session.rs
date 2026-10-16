@@ -176,10 +176,7 @@ async fn test_root_dir_permissions_posix() {
 // === TestSessionWorkingDirectoryName ===
 //
 // Mirrors Python TestSessionWorkingDirectoryName (openjd-sessions-for-python
-// PR #348). The working directory's name is a Windows MAX_PATH budget
-// decision: every character is charged against the 260-character limit of
-// the applications a job runs, so the name is 8 random characters and carries
-// nothing of the session ID.
+// PR #348).
 
 /// Session ID shaped like a Deadline Cloud session ID: `session-<32 hex>`.
 const DEADLINE_SHAPED_ID: &str = "session-0123456789abcdef0123456789abcdef";
@@ -213,9 +210,7 @@ fn working_dir_name(session: &Session) -> String {
         .to_string()
 }
 
-/// The name is exactly 8 characters, all from mkdtemp()'s alphabet
-/// `[a-z0-9_]`: lower case so names cannot differ only in case (NTFS folds
-/// case), and free of any Windows-reserved character.
+/// The name is exactly 8 characters from `[a-z0-9_]`.
 #[tokio::test]
 async fn test_working_directory_name_is_8_chars_from_alphabet() {
     let tmp = TempDir::new().unwrap();
@@ -231,10 +226,8 @@ async fn test_working_directory_name_is_8_chars_from_alphabet() {
     session.cleanup();
 }
 
-/// No part of the session ID survives into the name. The ID's `-` is outside
-/// the name alphabet, so `session-` and the full ID can never appear. Check
-/// every tail of the ID of 4 or more characters too, as Python's test does:
-/// Python's first draft of the change used the ID's last 6 characters.
+/// No part of the session ID appears in the name, including any tail of 4
+/// or more characters.
 #[tokio::test]
 async fn test_working_directory_name_carries_no_session_id() {
     let tmp = TempDir::new().unwrap();
@@ -252,10 +245,8 @@ async fn test_working_directory_name_carries_no_session_id() {
     session.cleanup();
 }
 
-/// The embedded-files directory keeps its name, `embedded_files` followed by
-/// 32 lower-case hex characters, directly inside the working directory
-/// (tempdir.md, "Integration with Session"). Only the working directory's
-/// name changed for #314.
+/// The embedded-files directory, directly inside the working directory, is
+/// named `embedded_files` followed by 32 lower-case hex characters.
 #[tokio::test]
 async fn test_files_directory_name_unchanged() {
     let tmp = TempDir::new().unwrap();
@@ -284,8 +275,7 @@ async fn test_files_directory_name_unchanged() {
     session.cleanup();
 }
 
-/// The full session ID is what maps a directory back to its session now, so
-/// it must stay in the log beside the working directory's path.
+/// The log records the full session ID and the working directory's path.
 #[tokio::test]
 async fn test_working_directory_logged_with_full_session_id() {
     testing_logger::setup();
@@ -302,8 +292,7 @@ async fn test_working_directory_logged_with_full_session_id() {
     });
 }
 
-/// Many sessions held open at once in one root get distinct directories, so
-/// none is free by virtue of an earlier one having been cleaned up.
+/// Many sessions open at once in one root get distinct directories.
 #[tokio::test]
 async fn test_many_sessions_in_one_root_get_distinct_directories() {
     let tmp = TempDir::new().unwrap();
@@ -319,8 +308,7 @@ async fn test_many_sessions_in_one_root_get_distinct_directories() {
     }
 }
 
-/// The same under real concurrency: creation is create-or-fail, not
-/// check-then-create, so there is no window between picking and creating.
+/// Sessions created concurrently in one root get distinct directories.
 #[tokio::test]
 async fn test_concurrent_sessions_in_one_root_get_distinct_directories() {
     let tmp = TempDir::new().unwrap();

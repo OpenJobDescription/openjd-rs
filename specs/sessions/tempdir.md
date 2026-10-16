@@ -113,56 +113,43 @@ The session working directory is created by the crate-internal
 `TempDir::new_session_working_dir(root, user)`, not by `TempDir::new`. Its name
 is 8 random characters and nothing else:
 
-- **Alphabet.** `abcdefghijklmnopqrstuvwxyz0123456789_`, CPython's
-  `tempfile` alphabet, drawn uniformly from the OS CSPRNG (`getrandom`, with
-  rejection sampling). Lower case only, so two names cannot differ only in
-  case (NTFS folds case), and free of every Windows-reserved character. An
-  8-character name cannot be a Windows device name (`CON`, `COM1`, ...).
+- **Alphabet.** `abcdefghijklmnopqrstuvwxyz0123456789_`, drawn uniformly from
+  the OS CSPRNG (`getrandom`, with rejection sampling). Lower case only, so
+  names cannot collide on case-insensitive filesystems, and no character is
+  reserved on Windows. An 8-character name cannot be a Windows device name
+  (`CON`, `COM1`, ...).
 - **Collisions.** Each candidate is created with an exclusive
-  `std::fs::create_dir()`. If the name already exists, a fresh name is drawn
-  and tried, up to 10,000 times (CPython's `tempfile.TMP_MAX` fallback). An
-  existing directory is never reused, and concurrent sessions in one root
-  cannot be handed the same path. Any other error is returned at once. If
-  every attempt collides, creation fails with `SessionError::TempDir` naming
-  the root and `No usable temporary directory name found after 10000 attempts`.
-- **Permissions** are applied exactly as for `TempDir::new` (see
-  Construction above).
+  `std::fs::create_dir()`. If the name already exists, a fresh name is tried,
+  up to 10,000 attempts. An existing directory is never reused, and concurrent
+  sessions in one root never share a path. Any other error is returned at
+  once. If every attempt collides, creation fails with `SessionError::TempDir`
+  naming the root and `No usable temporary directory name found after 10000
+  attempts`.
+- **Permissions** are applied as for `TempDir::new` (see Construction above).
 
 ### Why 8 random characters
 
 Windows applications that a job runs, such as After Effects and Cinema 4D,
-use the legacy Win32 file APIs, which cap a path at `MAX_PATH` (260
-characters) regardless of the `LongPathsEnabled` registry value or a `\\?\`
-prefix. Only a shorter path helps them. Every character of the
-working directory's path is charged against that budget for everything the
-job puts beneath it. The name used to be the session ID followed by
-`random_hex`: 72 characters for a Deadline Cloud session ID
-(`session-` + 32 hex characters). Uniqueness needs only the random part.
+are limited to `MAX_PATH` (260 characters) regardless of the
+`LongPathsEnabled` registry value or a `\\?\` prefix, and the working
+directory's path counts against that limit for everything beneath it. A
+short random name keeps that cost low while staying unique.
 
-The name carries no part of the session ID, so a retained or orphaned
-directory cannot be traced to its session by its name. The session log does
-that: `Session::with_config()` logs `Initializing Open Job Description
-Session: <session_id>` and `Session Working Directory: <path>`, and every
-`session_log!` record carries the session ID.
+The name carries no part of the session ID. To trace a retained or orphaned
+directory to its session, use the session log: `Session::with_config()` logs
+`Initializing Open Job Description Session: <session_id>` and
+`Session Working Directory: <path>`, and every `session_log!` record carries
+the session ID.
 
-### Python parity
+### Differences from Python
 
-This matches openjd-sessions-for-python PR #348, which creates the working
-directory with `TempDir(prefix="")` and so with `mkdtemp()`'s 8 random
-characters. Two documented differences remain:
+This matches openjd-sessions-for-python PR #348, with two differences:
 
-- CPython retries `os.TMP_MAX` times (238,328 on Linux); this crate retries a
-  fixed 10,000 on every platform.
-- On Windows, CPython's `mkdtemp()` also retries on `PermissionError` when the
-  parent directory is a writable directory (a name pending deletion reports
-  access denied). This crate retries only on `AlreadyExists` and returns
-  every other error, so such a collision fails the session instead of being
-  retried. CPython guards that retry with an `os.access(parent, W_OK)` check
-  so that a genuinely unwritable parent fails at once; without an equivalent
-  check, retrying on access denied would spin through all 10,000 attempts
-  before reporting a real permission error. The case it covers needs a
-  random 8-character name to match one pending deletion (37^8, about
-  3.5 × 10^12, names), so the simpler rule was kept.
+- This crate makes at most 10,000 attempts on every platform. Python's limit
+  depends on the platform.
+- On Windows, Python also retries when creating the directory fails with
+  `PermissionError` in a writable parent. This crate retries only on
+  `AlreadyExists`, so that case fails the session.
 
 ## Integration with Session
 
@@ -173,8 +160,7 @@ characters. Two documented differences remain:
    `Session.WorkingDirectory` in the symbol table
 2. **Files directory**: `TempDir::new(working_dir, "embedded_files", user)` —
    subdirectory for embedded files, referenced by `EmbeddedFiles`, named
-   `embedded_files` followed by 32 hex characters. Python names it
-   `embedded_files` followed by `mkdtemp()`'s 8 characters; that difference
-   is not yet resolved.
+   `embedded_files` followed by 32 hex characters. Python uses 8 random
+   characters after `embedded_files`; that difference is not yet resolved.
 
 Both are stored in the `Session` struct and cleaned up by `Session::cleanup()`.
