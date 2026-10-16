@@ -447,7 +447,9 @@ impl FunctionLibrary {
     /// `arg_types` and returns a union of possible return types. A list
     /// argument whose element type is a union is typed by its forms
     /// (`list[int | nulltype]` as `list[int]` and `list[nulltype]`). A list
-    /// concatenation of known element types has their common element type.
+    /// concatenation of known element types (a `range_expr` counting as a
+    /// `list[int]`) has their common element type, and of unknown ones
+    /// `list[any]`.
     pub fn derive_return_type(
         &self, name: &str, arg_types: &[ExprType],
     ) -> Option<ExprType>;

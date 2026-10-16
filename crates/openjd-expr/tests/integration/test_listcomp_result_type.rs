@@ -823,18 +823,18 @@ fn element_type_that_is_a_list_of_lists_fails_when_an_element_reaches_it() {
 
 #[test]
 fn type_variable_element_type_is_not_a_list_of_lists() {
-    // F1 of audit round 5: with `Task.Param.A` a `list[any]`, `(A + [[x]])[0]` is a
-    // `T3`, and the body `(A + [[x]])[0] + [2]` types as
-    // `list[list[T1]]`, which does not say what its values are. Counting it
-    // as a list of lists made the comprehension `list[nulltype]` and its
-    // index an error, though every run builds `[[1, 2]]`.
+    // F1 of audit round 5: a body typed with a type variable does not say
+    // what its values are; counting `list[list[T1]]` as a list of lists made
+    // the comprehension `list[nulltype]` and its index an error, though
+    // every run builds `[[1, 2]]`. (The body here is now a `list[T3]`;
+    // `comprehension_too_deep`'s unit test covers `list[list[T1]]`.)
     let [p8, g2, rt] =
         states_with_any_list(ExprValue::make_list(vec![], ExprType::list(ExprType::INT)).unwrap());
     let expr = "[(Task.Param.A + [[x]])[0] + [2] for x in Param.L][0]";
     for st in [&p8, &g2] {
         assert_eq!(
             eval(expr, st).expr_type(),
-            tp("unresolved[list[list[T1]]]"),
+            tp("unresolved[list[T3]]"),
             "{expr}"
         );
     }
@@ -1046,7 +1046,7 @@ fn unresolved_concatenation_has_the_common_element_type() {
             ["list[list[int]]", "list[list[float]]"],
             "list[list[float]]",
         ),
-        (["list[any]", "list[int]"], "list[T3]"),
+        (["list[any]", "list[int]"], "list[any]"),
     ] {
         let args = args.map(tp);
         assert_eq!(
@@ -1233,7 +1233,7 @@ fn bare_unresolved_element_type_binds_any() {
 }
 
 #[test]
-fn concatenation_with_an_any_operand_on_either_side_keeps_its_signature_type() {
+fn concatenation_with_an_any_operand_on_either_side_is_a_list_of_any() {
     // F2 of audit round 8: an `any` element type on the right was untested.
     // A `list[any]` value may be a `list[string]`, so `+ 'a'` on an element
     // must not be rejected.
@@ -1242,7 +1242,7 @@ fn concatenation_with_an_any_operand_on_either_side_keeps_its_signature_type() {
         let args = args.map(tp);
         assert_eq!(
             lib.derive_return_type("__add__", &args),
-            Some(tp("list[T3]")),
+            Some(tp("list[any]")),
             "{args:?}"
         );
     }
@@ -1302,14 +1302,15 @@ fn bare_unresolved_types_do_not_panic() {
 
 #[test]
 fn every_type_variable_iterable_binds_any() {
-    // F2 of audit round 9: a `T1`-typed iterable (an element of a
-    // `list[list[T1]]`), not only `T3`, binds `any`.
-    let mut st = states()[0].clone();
-    st.set("U", ExprValue::unresolved(ExprType::ANY)).unwrap();
-    assert_eq!(
-        eval("[y for y in (([] + [U])[0] + [['y']])[0][0]]", &st).expr_type(),
-        tp("unresolved[list[any]]")
-    );
+    // F2 of audit round 9: a `T1`-typed iterable element (`sorted` of an
+    // `any` is a `list[T1]`), not only `T3`, binds `any`; every type
+    // variable code is covered by the unit tests of `comprehension_var`.
+    let [mut p8, _, mut rt] = states();
+    p8.set("U", ExprValue::unresolved(ExprType::ANY)).unwrap();
+    rt.set("U", ExprValue::ListInt(vec![2, 1])).unwrap();
+    let expr = "[z for z in sorted(U) if z in [1, 2]][0]";
+    assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved"));
+    assert_eq!(eval(expr, &rt).to_display_string(), "1");
 }
 
 #[test]
@@ -1341,7 +1342,8 @@ fn type_variable_element_type_binds_any() {
     // gives `1` (§1.3.7: a type variable binds `any`).
     let [p8, g2, rt] = states();
     let expr = "[x for x in Param.R + Param.L if x in [1, 2]][0]";
-    assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved"));
+    // (`Param.R + Param.L` is now a `list[int]`, round 11.)
+    assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved[int]"));
     for st in [&g2, &rt] {
         assert_eq!(eval(expr, st).to_display_string(), "1");
     }
@@ -1363,4 +1365,83 @@ fn bare_unresolved_argument_matches_any_signature() {
     ] {
         assert_eq!(eval(expr, &st).expr_type(), tp(ty), "{expr}");
     }
+}
+
+// ── Audit loop 2, round 1 ──
+
+#[test]
+fn concatenation_with_a_range_or_unknown_elements_types_its_uses() {
+    // A-F1, B-F1: `Param.R + Param.L` was a `list[T2]`, and a concatenation
+    // with an `any` operand a `list[T3]`, so their elements failed `in` and
+    // arithmetic at validation though every run succeeds. A range
+    // concatenates as a `list[int]`, and unknown elements give `list[any]`.
+    for (expr, ty, value) in [
+        (
+            "2 in ([x for x in Param.R + Param.L] + [1])",
+            "unresolved[bool]",
+            "true",
+        ),
+        (
+            "([[x] for x in Param.R + Param.L] + [[1]])[0][0] - 1",
+            "unresolved[int]",
+            "0",
+        ),
+        (
+            "([x for x in Param.R + Param.L] + [2.5])[0] - 1",
+            "unresolved[float]",
+            "0.0",
+        ),
+        (
+            "[x[0] for x in [Param.R + Param.L] if x[0] in [1, 2]][0]",
+            "unresolved[int]",
+            "1",
+        ),
+        (
+            "(Param.R + Param.L)[0] in [1, 2]",
+            "unresolved[bool]",
+            "true",
+        ),
+    ] {
+        let [p8, g2, rt] = states();
+        assert_eq!(eval(expr, &p8).expr_type(), tp(ty), "{expr}");
+        for st in [&g2, &rt] {
+            assert_eq!(eval(expr, st).to_display_string(), value, "{expr}");
+        }
+    }
+    // A-F2: job creation joined a `T3` element with an `int` and failed.
+    let [p8, g2, rt] =
+        states_with_any_list(ExprValue::make_list(vec![], ExprType::NULLTYPE).unwrap());
+    let expr = "[x if x > 1 else (Task.Param.A + [1])[0] for x in Param.L]";
+    assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved[list[any]]"));
+    assert_eq!(eval(expr, &g2).expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(eval(expr, &rt).to_display_string(), "[1, 2, 3]");
+}
+
+#[test]
+fn filter_that_fails_to_type_over_unknown_elements() {
+    // B-F2: over an unresolved iterable, a filter that fails (here on
+    // known operands) is not an error at validation: the comprehension is
+    // the empty list, and the run reports the failure.
+    let expr = "[x for x in Param.L if fail('m')]";
+    assert_fails_once_run(
+        expr,
+        "unresolved[list[nulltype]]",
+        &[
+            "m\n",
+            &format!("  {expr}\n"),
+            "                         ^~~~~~~~~",
+        ],
+    );
+    let expr = "[x for x in Param.L if fail('m')][0]";
+    assert_err_in(
+        expr,
+        &states()[0],
+        "pass 8",
+        &[
+            "Index out of bounds: the list is always empty, since a run that keeps an element \
+             fails: m\n",
+            &format!("  {expr}\n"),
+            "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~",
+        ],
+    );
 }

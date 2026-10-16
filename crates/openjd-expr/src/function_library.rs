@@ -345,8 +345,9 @@ impl FunctionLibrary {
     /// Accepts union types in arg_types and returns a union of all possible return types.
     /// A list argument whose element type is a union is typed by its
     /// forms (`list[int | nulltype]` as `list[int]` and `list[nulltype]`).
-    /// A list concatenation of known element types has their common
-    /// element type, as concatenating values gives.
+    /// A list concatenation of known element types (a `range_expr` counting
+    /// as a `list[int]`) has their common element type, as concatenating
+    /// values gives, and of unknown ones `list[any]`.
     pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
         self.derive_return_type_by_signature(name, arg_types)
             .map(|ret| concat_return_type(name, arg_types, ret))
@@ -554,41 +555,50 @@ fn can_coerce(from: &ExprType, to: &ExprType) -> bool {
 /// their forms.
 const MAX_FORM_COMBINATIONS: usize = 64;
 
-/// The type of a list concatenation (`__add__` of two lists) whose
-/// signature `(list[T1], list[T2]) -> list[T3]` leaves `T3` unbound: the
+/// The type of a list concatenation (`__add__` of two lists, or of a list
+/// and a `range_expr`, which concatenates as a `list[int]`) whose signature
+/// leaves its result's element type unbound (`list[T3]`, `list[T2]`): the
 /// common element type (2026-02 §2.1.3), by the join a list literal
 /// holding both lists uses, as concatenating the values does
-/// (`list[list[int]] + list[list[float]]` is `list[list[float]]`). Any
-/// other call, or operands with no common type, keep `ret`.
+/// (`list[list[int]] + list[list[float]]` is `list[list[float]]`). An
+/// operand whose element type is not known (it holds `any`, `unresolved`,
+/// or a type variable) makes it `list[any]`: the values decide. Any other
+/// call, or operands with no common type, keep `ret`.
 fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> ExprType {
-    let unwrap = |t: &ExprType| match (t.code(), t.params()) {
-        (crate::types::TypeCode::Unresolved, [inner]) => inner.clone(),
-        _ => t.clone(),
+    let as_list = |t: &ExprType| {
+        let t = match (t.code(), t.params()) {
+            (crate::types::TypeCode::Unresolved, [inner]) => inner.clone(),
+            _ => t.clone(),
+        };
+        if t.code() == crate::types::TypeCode::RangeExpr {
+            ExprType::list(ExprType::INT)
+        } else {
+            t
+        }
     };
     let [left, right] = arg_types else {
         return ret;
     };
-    let (left, right) = (unwrap(left), unwrap(right));
+    let (left, right) = (as_list(left), as_list(right));
+    if name != "__add__" || !ret.is_symbolic() || !left.is_list() || !right.is_list() {
+        return ret;
+    }
     // `any` joins as the other type, which a value of it need not be
-    // (`list[any] + list[int]` may be a `list[float]`).
-    fn has_any(t: &ExprType) -> bool {
+    // (`list[any] + list[int]` may be a `list[string]`), and a type
+    // variable joins with nothing.
+    fn unknown(t: &ExprType) -> bool {
         matches!(
             t.code(),
             crate::types::TypeCode::Any | crate::types::TypeCode::Unresolved
-        ) || t.params().iter().any(has_any)
+        ) || t.is_symbolic()
+            || t.params().iter().any(unknown)
     }
-    if name != "__add__"
-        || !ret.is_symbolic()
-        || !left.is_list()
-        || !right.is_list()
-        || has_any(&left)
-        || has_any(&right)
-    {
-        return ret;
+    if unknown(&left) || unknown(&right) {
+        return ExprType::list(ExprType::ANY);
     }
     match crate::types::join_list_element(&left, &right) {
-        Some(joined) if !joined.is_symbolic() => crate::types::simplify_joined_list_element(joined),
-        _ => ret,
+        Some(joined) => crate::types::simplify_joined_list_element(joined),
+        None => ret,
     }
 }
 

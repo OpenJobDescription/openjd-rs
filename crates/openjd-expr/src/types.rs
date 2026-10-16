@@ -573,8 +573,8 @@ pub(crate) enum ComprehensionVar {
 
 /// The loop variable's type for a comprehension over an iterable of type
 /// `t` (§1.3.7): `E` for `list[E]`, `int` for `range_expr`, the union of
-/// the members' element types for a union, and `any` for `any` or a type
-/// variable. A
+/// the members' element types for a union, and `any` for `any`, a type
+/// variable, or a list whose element is one (or a bare `unresolved`). A
 /// `nulltype` element member contributes nothing (§1.2.1: it marks the
 /// list as possibly empty), nor does a union member that cannot be
 /// iterated (a run with it fails). `unresolved[T]` is read as `T`.
@@ -1891,6 +1891,24 @@ mod tests {
         let ba = join_list_element(&b, &a).map(|t| t.to_string());
         assert_eq!(ab, ba, "join must be commutative for {a} and {b}");
         ab
+    }
+
+    #[test]
+    fn comprehension_var_binds_any_for_every_type_variable() {
+        let any = ComprehensionVar::Typed(ExprType::ANY);
+        for v in ["T", "T1", "T2", "T3"] {
+            let t = ExprType::parse(v).unwrap();
+            assert_eq!(comprehension_var(&t), any, "{v}");
+            assert_eq!(comprehension_var(&ExprType::list(t)), any, "list[{v}]");
+        }
+    }
+
+    #[test]
+    fn comprehension_too_deep_ignores_type_variable_forms() {
+        let tp = |s: &str| ExprType::parse(s).unwrap();
+        assert!(comprehension_too_deep(&tp("list[list[int]]")));
+        assert!(!comprehension_too_deep(&tp("list[list[T1]]")));
+        assert!(!comprehension_too_deep(&tp("list[int]")));
     }
 
     #[test]
