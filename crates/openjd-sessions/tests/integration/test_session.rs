@@ -252,6 +252,38 @@ async fn test_working_directory_name_carries_no_session_id() {
     session.cleanup();
 }
 
+/// The embedded-files directory keeps its name, `embedded_files` followed by
+/// 32 lower-case hex characters, directly inside the working directory
+/// (tempdir.md, "Integration with Session"). Only the working directory's
+/// name changed for #314.
+#[tokio::test]
+async fn test_files_directory_name_unchanged() {
+    let tmp = TempDir::new().unwrap();
+    let mut session = Session::with_config(config_in_root(tmp.path(), DEADLINE_SHAPED_ID)).unwrap();
+    assert_eq!(
+        session.files_directory().parent(),
+        Some(session.working_directory())
+    );
+    let name = session
+        .files_directory()
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    let suffix = name
+        .strip_prefix("embedded_files")
+        .unwrap_or_else(|| panic!("files directory name {name:?}"));
+    assert_eq!(suffix.len(), 32, "files directory name {name:?}");
+    assert!(
+        suffix
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+        "files directory name {name:?}"
+    );
+    session.cleanup();
+}
+
 /// The full session ID is what maps a directory back to its session now, so
 /// it must stay in the log beside the working directory's path.
 #[tokio::test]
