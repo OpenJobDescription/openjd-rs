@@ -157,7 +157,12 @@ characters. Two documented differences remain:
   parent directory is a writable directory (a name pending deletion reports
   access denied). This crate retries only on `AlreadyExists` and returns
   every other error, so such a collision fails the session instead of being
-  retried.
+  retried. CPython guards that retry with an `os.access(parent, W_OK)` check
+  so that a genuinely unwritable parent fails at once; without an equivalent
+  check, retrying on access denied would spin through all 10,000 attempts
+  before reporting a real permission error. The case it covers needs a
+  random 8-character name to match one pending deletion (37^8, about
+  3.5 × 10^12, names), so the simpler rule was kept.
 
 ## Integration with Session
 

@@ -183,7 +183,17 @@ impl TempDir {
         dir: &Path,
         user: Option<&dyn SessionUser>,
     ) -> Result<Self, SessionError> {
-        let path = create_unique_dir(dir, SESSION_DIR_NAME_ATTEMPTS, random_session_dir_name)?;
+        Self::new_session_working_dir_with(dir, user, random_session_dir_name)
+    }
+
+    /// [`TempDir::new_session_working_dir`] with the candidate names supplied
+    /// by `next_name`, so tests can force collisions.
+    fn new_session_working_dir_with(
+        dir: &Path,
+        user: Option<&dyn SessionUser>,
+        next_name: impl FnMut() -> std::io::Result<String>,
+    ) -> Result<Self, SessionError> {
+        let path = create_unique_dir(dir, SESSION_DIR_NAME_ATTEMPTS, next_name)?;
         Self::secure(path, user)
     }
 
@@ -540,6 +550,43 @@ mod tests {
             err.to_string(),
             format!(
                 "Failed to create temp directory in {}: no entropy",
+                parent.path().display()
+            )
+        );
+    }
+
+    /// The session working directory path retries a taken name for the full
+    /// `SESSION_DIR_NAME_ATTEMPTS` (10,000): the 10,000th candidate is still
+    /// tried, and only after 10,000 taken names does creation fail.
+    #[test]
+    fn new_session_working_dir_retries_up_to_attempt_bound() {
+        let parent = tempfile::tempdir().unwrap();
+        std::fs::create_dir(parent.path().join("taken000")).unwrap();
+
+        let mut calls = 0;
+        let mut td = TempDir::new_session_working_dir_with(parent.path(), None, || {
+            calls += 1;
+            Ok(if calls < 10_000 {
+                "taken000"
+            } else {
+                "fresh000"
+            }
+            .to_string())
+        })
+        .unwrap();
+        assert_eq!(calls, 10_000);
+        assert_eq!(td.path(), parent.path().join("fresh000"));
+        td.cleanup().unwrap();
+
+        let err = TempDir::new_session_working_dir_with(parent.path(), None, || {
+            Ok("taken000".to_string())
+        })
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Failed to create temp directory in {}: \
+                 No usable temporary directory name found after 10000 attempts",
                 parent.path().display()
             )
         );
