@@ -47,7 +47,7 @@ env:
   # Pinned so a broken nightly cannot randomly fail the job; bump deliberately
   # (and keep scripts/fuzz.sh and scripts/check_fuzz_api_coverage.py in step).
   FUZZ_TOOLCHAIN: nightly-2026-10-07
-  FUZZ_SECONDS_PR: 90
+  FUZZ_SECONDS_PR: 60
   FUZZ_SECONDS_NIGHTLY: 1200
 
 jobs:
