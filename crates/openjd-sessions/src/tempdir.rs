@@ -188,11 +188,11 @@ impl TempDir {
     }
 
     /// Apply ownership and permissions to the just-created directory `path`.
-    fn secure(path: PathBuf, _user: Option<&dyn SessionUser>) -> Result<Self, SessionError> {
+    fn secure(path: PathBuf, user: Option<&dyn SessionUser>) -> Result<Self, SessionError> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = if let Some(u) = _user.filter(|u| !u.is_process_user()) {
+            let mode = if let Some(u) = user.filter(|u| !u.is_process_user()) {
                 // Cross-user: chown group then set 0o770
                 // chown before chmod — security: don't grant group access if chown fails
                 if let Ok(Some(grp)) = nix::unistd::Group::from_name(u.group()) {
@@ -221,7 +221,7 @@ impl TempDir {
         // Windows: set DACL — full control for process user, modify for session user.
         #[cfg(windows)]
         {
-            if let Some(u) = _user.filter(|u| !u.is_process_user()) {
+            if let Some(u) = user.filter(|u| !u.is_process_user()) {
                 // Fail closed: a cross-user directory without the DACL grant is
                 // unusable by the session user (and silently skipping the grant
                 // previously masked the failure until a subprocess hit it).
@@ -383,15 +383,28 @@ mod tests {
         assert_eq!(p, td.path());
     }
 
-    /// A candidate name is exactly `SESSION_DIR_NAME_LENGTH` characters from
-    /// `SESSION_DIR_NAME_ALPHABET`.
+    /// The naming parameters are the documented ones (tempdir.md, "Session
+    /// working directory name"), spelled out literally so that a change to a
+    /// constant cannot pass by also changing what the tests compare against.
+    #[test]
+    fn session_dir_name_parameters_match_spec() {
+        assert_eq!(SESSION_DIR_NAME_LENGTH, 8);
+        assert_eq!(
+            SESSION_DIR_NAME_ALPHABET,
+            b"abcdefghijklmnopqrstuvwxyz0123456789_"
+        );
+        assert_eq!(SESSION_DIR_NAME_ATTEMPTS, 10_000);
+    }
+
+    /// A candidate name is exactly 8 characters from `[a-z0-9_]`.
     #[test]
     fn random_session_dir_name_length_and_alphabet() {
         for _ in 0..1000 {
             let name = random_session_dir_name().unwrap();
-            assert_eq!(name.len(), SESSION_DIR_NAME_LENGTH, "{name:?}");
+            assert_eq!(name.len(), 8, "{name:?}");
             assert!(
-                name.bytes().all(|b| SESSION_DIR_NAME_ALPHABET.contains(&b)),
+                name.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'),
                 "{name:?}"
             );
         }

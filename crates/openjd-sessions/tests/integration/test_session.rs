@@ -232,8 +232,9 @@ async fn test_working_directory_name_is_8_chars_from_alphabet() {
 }
 
 /// No part of the session ID survives into the name. The ID's `-` is outside
-/// the name alphabet, so `session-` and the full ID can never appear; check
-/// the ID's tail too, which Python's first draft of the change used.
+/// the name alphabet, so `session-` and the full ID can never appear. Check
+/// every tail of the ID of 4 or more characters too, as Python's test does:
+/// Python's first draft of the change used the ID's last 6 characters.
 #[tokio::test]
 async fn test_working_directory_name_carries_no_session_id() {
     let tmp = TempDir::new().unwrap();
@@ -241,10 +242,13 @@ async fn test_working_directory_name_carries_no_session_id() {
     let name = working_dir_name(&session);
     assert!(!name.contains(DEADLINE_SHAPED_ID), "name {name:?}");
     assert!(!name.contains("session"), "name {name:?}");
-    assert!(
-        !name.contains(&DEADLINE_SHAPED_ID[DEADLINE_SHAPED_ID.len() - 6..]),
-        "name {name:?} contains the session ID's tail"
-    );
+    for n in 4..DEADLINE_SHAPED_ID.len() {
+        let tail = &DEADLINE_SHAPED_ID[DEADLINE_SHAPED_ID.len() - n..];
+        assert!(
+            !name.contains(tail),
+            "name {name:?} contains the session ID's tail {tail:?}"
+        );
+    }
     session.cleanup();
 }
 
