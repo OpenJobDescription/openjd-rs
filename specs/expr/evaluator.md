@@ -646,8 +646,9 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     member that cannot be iterated contributes nothing, nor does a
     `nulltype` element). An iterable that can only be `[]` gives
     `list[nulltype]` with the body neither run nor type-checked
-    (`[x * 2 for x in []]`). An iterable typed as a type variable (`T3`)
-    binds `any`, as `any` does. An unresolved iterable no value of which can be
+    (`[x * 2 for x in []]`). An iterable typed as a type variable (`T3`),
+    or a list of one (`list[T2]`, as `range_expr + list[int]` is typed), binds
+    `any`, as `any` does. An unresolved iterable no value of which can be
     iterated fails with "Cannot iterate over `T`", as a concrete one does:
     an error in the iterable is not absorbed.
 - Operation count: +1 per iteration

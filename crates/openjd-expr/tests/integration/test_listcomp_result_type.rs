@@ -302,9 +302,10 @@ fn type_variable_filter_can_be_a_boolean() {
     // index an error; over a concrete one the filter was an error.
     let [p8, g2, rt] =
         states_with_any_list(ExprValue::make_list(vec![], ExprType::NULLTYPE).unwrap());
+    // (Its loop variable is `any`, round 10.)
     let expr = "[x for x in (Task.Param.A + [Task.Param.C]) if x][0]";
     for st in [&p8, &g2] {
-        assert_eq!(eval(expr, st).expr_type(), tp("unresolved[T3]"), "{expr}");
+        assert_eq!(eval(expr, st).expr_type(), tp("unresolved"), "{expr}");
     }
     assert_eq!(eval(expr, &rt).to_display_string(), "true");
     let expr = "[x for x in [1, 2] if (Task.Param.A + [Task.Param.C])[0]]";
@@ -822,14 +823,14 @@ fn element_type_that_is_a_list_of_lists_fails_when_an_element_reaches_it() {
 
 #[test]
 fn type_variable_element_type_is_not_a_list_of_lists() {
-    // F1 of audit round 5: over `Task.Param.A + [[1]]` (`A` a `list[any]`,
-    // the sum an unresolved `list[T3]`) the body `x + [2]` types as
+    // F1 of audit round 5: with `Task.Param.A` a `list[any]`, `(A + [[x]])[0]` is a
+    // `T3`, and the body `(A + [[x]])[0] + [2]` types as
     // `list[list[T1]]`, which does not say what its values are. Counting it
     // as a list of lists made the comprehension `list[nulltype]` and its
     // index an error, though every run builds `[[1, 2]]`.
     let [p8, g2, rt] =
         states_with_any_list(ExprValue::make_list(vec![], ExprType::list(ExprType::INT)).unwrap());
-    let expr = "[x + [2] for x in (Task.Param.A + [[1]])][0]";
+    let expr = "[(Task.Param.A + [[x]])[0] + [2] for x in Param.L][0]";
     for st in [&p8, &g2] {
         assert_eq!(
             eval(expr, st).expr_type(),
@@ -1327,5 +1328,39 @@ fn concatenation_of_a_list_and_a_range_names_the_range() {
                 "  ~~~~~~^~~~~~~~~",
             ],
         );
+    }
+}
+
+// ── Audit round 10 ──
+
+#[test]
+fn type_variable_element_type_binds_any() {
+    // F1 of audit round 10: over `Param.R + Param.L` (a `list[T2]`) the loop
+    // variable was `T2`, so `x in [1, 2]` failed to type, the comprehension
+    // was `list[nulltype]`, and indexing it was rejected though every run
+    // gives `1` (§1.3.7: a type variable binds `any`).
+    let [p8, g2, rt] = states();
+    let expr = "[x for x in Param.R + Param.L if x in [1, 2]][0]";
+    assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved"));
+    for st in [&g2, &rt] {
+        assert_eq!(eval(expr, st).to_display_string(), "1");
+    }
+}
+
+#[test]
+fn bare_unresolved_argument_matches_any_signature() {
+    // F1 of audit round 10: a bare `unresolved` argument reads as
+    // `unresolved[any]`, so calls on it are typed.
+    let mut st = states()[0].clone();
+    st.set(
+        "Task.Param.X",
+        ExprValue::unresolved(ExprType::new(TypeCode::Unresolved, vec![])),
+    )
+    .unwrap();
+    for (expr, ty) in [
+        ("Task.Param.X + 1", "unresolved[int]"),
+        ("len(Task.Param.X)", "unresolved[int]"),
+    ] {
+        assert_eq!(eval(expr, &st).expr_type(), tp(ty), "{expr}");
     }
 }

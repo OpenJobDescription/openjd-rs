@@ -595,8 +595,16 @@ pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
             (TypeCode::List, [elem]) => {
                 iterable = true;
                 if let Some(e) = list_element_contribution(elem) {
-                    // A bare `unresolved` element (any type) binds `any`.
-                    let e = if e.code == TypeCode::Unresolved && e.params.is_empty() {
+                    // A bare `unresolved` element (any type), or a type
+                    // variable left unbound (`list[T3]`), binds `any`.
+                    let e = if (e.code == TypeCode::Unresolved && e.params.is_empty())
+                        || matches!(
+                            e.code,
+                            TypeCode::TypeVarT
+                                | TypeCode::TypeVarT1
+                                | TypeCode::TypeVarT2
+                                | TypeCode::TypeVarT3
+                        ) {
                         ExprType::ANY
                     } else {
                         e
