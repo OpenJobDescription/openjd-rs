@@ -6601,11 +6601,11 @@ fn test_single_valued_attr_deferred_count_still_capped_at_50_at_decode() {
 // This function both consumes and produces `JobParameterValues`, and both are public,
 // so a caller can hand its output straight back to it. `create_job` does something
 // adjacent already: it re-runs `check_constraints` over every value it is given
-// (create_job/mod.rs:54-60). "Every value it emits, it accepts" is therefore a
-// requirement, and LIST[PATH] is where it first failed.
-//
-// A goal rather than an invariant: scalar PATH violates it, see issue #388 and
-// "Round trip" in specs/model/job-creation.md.
+// (the "Validate parameter values against template constraints" loop in
+// create_job/mod.rs). "Every value it emits, it accepts" is therefore a requirement,
+// and LIST[PATH] is where it first failed. Scalar PATH under a constraint holds it
+// too, because every pass checks the joined value; see "Scalar PATH constraints
+// across passes" below and "Round trip" in specs/model/job-creation.md.
 
 /// A minimal job template declaring EXPR, which the LIST[*] parameter types require.
 fn minimal_expr_job_template(params: &str) -> serde_json::Value {
