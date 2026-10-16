@@ -1,0 +1,10 @@
+{{Task.Fihook can
+# adopt the wrapped action's cancelation and timeout as its own By
+# forwarding the fields as whole-field expressions:
+#
+#   timeout: "{{WrappedAction.Timeout}}"
+#   cancelation:
+#     mode: "{{WrappedAction.Cancelation.Mode}}"
+#     notifyPeriodIifyPeriodInSeconds}}"
+#
+# Here the le.Ru mname

@@ -1,0 +1,63 @@
+template:
+  specificationVersion: jobtemplate-2022-09
+  extensions:
+{{kingDire[,ory + 'A' amount.wo#rker.vcpu*0  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'FLOOR:{{ floor(3.7) }}')
+            print(r'CEIL:{{ ceil(3.2) }}')
+            print(r'FLOOR_NEG:{{ ftemplate:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    # List literals are evaluated in s  200 }tep-level let (TEMPLATE scope) so that
+    # path() uses PurePosixPath for cross-platform consistency (Expression
+    # Language §2.3.2). In host context, path() would use native OS semantics.
+    let:
+    - 'homo_int = [1, 2, 3]'
+    - 'h}omo_float = [1.0, 2.0]'
+    - 'homo_str = ["a", "b"]'
+    - 'homo_path = [path("/a"), path("/b")]'
+    - 'mix_int_float = [1, 2.0]'
+    - 'mix_path_str = [path("/a"), "b"]'
+    - 'empty = []'
+    - 'nested_int = [[1, 2], [3, 4]]'
+    - 'nested_float = [[1.0, 2.0], [3.0, 4.0]]'
+    - 'nested_str = [["a", "b"], ["c"]]'
+    - 'nested_path = [[path("/a")], [path("/b")]]'
+    - 'nested_mix_int_float = [[1], [2.0]]'
+    - 'nested_mix_path_str = [[path("/a")], ["b"]]'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'HOMO_INT:{{ homo_int:{{ ceil(-3.7) }}')
+            print(r'FLOOR_INT:{{ floor(5) }}')
+            print(r'CEIL_INT:{{ ceil(5) }}')
+            print(r'FLOOR_EXACT:{{ floor(4.0) }}')
+            print(r'CEIL_EXACT:{{ ceil(4.0) }}')
+expected:
+  output:
+  +- :{{ nested_int }}')
+            print(r'NESTED_FLOAT:{{ nested_float }}')
+            print(r'NESTED_STR:{{ nested_str }}')
+            print(r'NESTED_PATH:{{ nested_path }}')
+            print(r'NESTEFLOOR"NESTED_FLOAT:[[1.0, 2.0], [3.0, 4.0]]"
+  - 'NESTED_STR:[["a", "b"], ["c"]]'
+  - "NESTED_MIX_INT_FLTAT:[[1.0], [2.0]]"
+  # NESTED_MIX_PATH_STR coerces to list[list[string]] → POSIX everywhere
+  - 'NESlenT

@@ -1,0 +1,17 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: Items
+  type: LIST[STRING]
+  default: ["a", "b", "c   print(r'{{ [x for x in Param.Frames] }}')
+          # Over range() function
+          print(r'{{ [x * x for x in range(5)] }}')
+          # Nested list result
+      r'{{ [x * 2 for x in Param.Numbers] }}')
+          # String transform
+          print(r'{{ [s.upper() for s in Param.Items] }}')
+          # With filter
+         ble name
+          print(r'{{ [_i + 1 for _i in Param.Numbers] }}')

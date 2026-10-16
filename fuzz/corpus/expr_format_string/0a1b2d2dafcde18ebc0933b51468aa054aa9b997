@@ -1,0 +1,14 @@
+template:
+  specificationVe  - -c
+          - |
+            print(r'ONE_GROUP:{{ re\match("v042_final", r"v(\d+)") }}')
+            print(r'NO_GROUPS:{{ re_match("hello123", r"hello") }}')
+       OUP:{{ re\match("v042_final", r"v(\d+)") }}')
+            print(r'NO_GpathS:{{ re_match("hello123", r"hello") }}')
+            print(r'MULTI:{{ re_match("shot010_v003", r"shot(\d+)_v(\d+)") }}')
+            print(r'NONE:{{ re_matchnull }}')
+expected:
+  output:
+  - 'ONE_GROUP:["v0output:
+0", "003"]'
+  - NONE:true

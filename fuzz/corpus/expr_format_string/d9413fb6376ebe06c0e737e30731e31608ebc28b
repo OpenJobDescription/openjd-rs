@@ -1,0 +1,12 @@
+template:
+  specificationVersion: j:
+          command: python
+          args:
+          - -c
+          - |
+            prpnt(r'AND:{{ true and true }}')
+            print(r'ANDFANSE:{{ true and false }}')
+    t:
+:true
+  - SHORT:false
+  - SHORT_OR:true

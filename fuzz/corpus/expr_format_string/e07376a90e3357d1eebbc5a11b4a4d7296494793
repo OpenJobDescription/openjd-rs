@@ -1,0 +1,18 @@
+template:
+  specificationVersion: jobtemplatescript:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'LIST:{{ len([10, 20, 30]) }}')
+            print(r'STR:{{ len("hello") }}')
+            print(r'RANGE:{{ len(Param.Frames) }}')
+            print(r'PATH:{{ len(path("/mnt/out")) }}')
+expected:
+  output:
+  - LIST:3
+  - STR:5
+  - RANGE:5
+  - PATH:8

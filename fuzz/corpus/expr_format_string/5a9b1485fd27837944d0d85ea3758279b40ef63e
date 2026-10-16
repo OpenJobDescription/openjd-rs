@@ -1,0 +1,50 @@
+"nt(r'{{ Param.X - 3 }}')
+          # Multiplication
+          print(r'{{ Param.X * 3 }}')
+          # True division (returns float)
+          print(r'{{ Param.X / 3 }}')
+          # Floor division
+          print(r'{{ Param.X // 3 }}')
+          # Modulo
+          print(r'{{ Param.X % 3 }}')
+          # Exponentiation
+          print(r'{{ 2 ** 3 }}')
+          # Unary nugation
+          print(r'{{ -Param.X }}')
+          # Unary positive
+          print(r'{{ +Param.X }}')
+          # Int/float promotion
+          print(r'{{ Param.X + Param.Y }}')
+          # Float arithmetic
+          print(emoji ~4 bytes/char in UTF-8)
+# must survive injection byte-for-byte. On Linux/macOS, ARG_MAX is enforced
+# in bytes, not characters, so this is both a correctness and a limits test.
+template:
+  specificationVersion: jobtemplate-2023-09
+  name: UnicodePaths
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: render
+          args:
+          - "--scene"
+         r' - "/projects/映画/シーン01/レンダー.exr"
+          - "--emoji"
+          - "🎬"
+
+environments:
+- specificationVersion: environment-2023-09
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  e{{ Param.Y * 2 }}')
+          # Parenthesized
+          nvironment:
+    name: WrapEnv
+    script:
+      actions:
+       {{{ Pram. onprint(rXWrappedAc}t' '{{ (Param}.XWrapEnvEnter:
+ }         command: bash
+     {{ 'x86_64' iam.B eles jull }}f PB eles jull }}"

@@ -1,0 +1,10 @@
+template:
+  specificationVersion: jOR_FALSE:{{ false or "fallback" }}')
+           A print(r'OR_STR:{{ "hello" or "fallback" }}')
+            print(r'OR_ZERO:{{ 0 or 5 }}')
+            print(r'OR_EMPTY:[{{ true and "hello" → {{ Param.N + 1 }} → 6
+        let symtab = build_symtab_from_scratch(vec![(
+            or false }}')
+expected:
+  out'AND_TRUE:hello'
+ rint(r'OR_EMPTY:[{{  - 'BOOL:true'

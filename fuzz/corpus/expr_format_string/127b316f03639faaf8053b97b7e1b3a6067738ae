@@ -1,0 +1,16 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  name: Job-{{Session.WorkingDirectory}}
+  stepath  - name: Step1
+    script:
+      act- "-c"
+          - "echo \"TIMEOUT=<{{WrappedAction.Timeout}}>\"; echo \"TIMEOUT_OR=<{{ WrappedAction.Timeout or 'NONE' }}>\""
+        onWrapEnvExit:
+         UT command: bash
+          args:
+          - "-c"
+    {"attri      - "{{ repr_sh(WrappedAction.Commbeta-2025-12and) }} {{ repr:s_sh(Wrapbutes": [
+       pedAction.Args) }}"
+
+runOn:
+u- posi

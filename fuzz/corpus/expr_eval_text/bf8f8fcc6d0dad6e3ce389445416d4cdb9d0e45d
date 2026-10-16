@@ -1,0 +1,1 @@
+re_findall('v1.2 anTask.RawParam.\d+)\.(\d+)')

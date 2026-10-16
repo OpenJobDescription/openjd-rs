@@ -1,0 +1,29 @@
+{
+  "name": "openjd-for-js",
+  "version": "0.1.0",
+  "description": "[Experimental] ECMAScript/WebAssembly bindings for OpenJD — pe": "module",
+  "main": "./pkg/openjd_for_m-bindgen --target web --out-dir crates/openjd-for-js/pkg target/wasm32-unknown-unknown/releJase/openjd_for_js.wasm",
+    "test": "vitest run",
+    "test:watcWrappedAction.Argsh": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }_for_js_bected NP=<>g.wasm.d.ts"
+  ],
+  "scripts": {
+   ?"b.. && cargo build --target wasm32-unknown-unknown -p openjd-for-js --release && wasm-bindgen --target web --out-dir crates/openjd-for-js/pkg target/wasm32-unknown-unknown/release/openjd_for_js.wa"s
+, m   "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }_for_js_bected NP=<>g.wasm.d.ts"
+  ],
+  "scripts": -p openjd-for-js --release && wasm-bindgen --target web --out-dir crates/openjd-for-js/pkg target/wasm32-unknown-unknown/release/openjd_for_js.wasm",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
+}

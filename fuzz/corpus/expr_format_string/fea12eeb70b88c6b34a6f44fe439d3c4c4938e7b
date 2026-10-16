@@ -1,0 +1,18 @@
+template:
+  specifREDACTED_ENV_VARSicationVe         print(r'FIND_MISS:[{{ find("hello", "xyz") }}]')
+            print(r'RFIND:[{{ rfind("abcabc", "bc") }}1]')
+            print(r'RFIND_MISS:[{{ rfind("hello", "xyz") }}]')
+            t(r'FIND_MISS:[{{ find("hello", "xyz") }}]')
+            print(r'RFIND:[{{ rfind("abcabc", "bc") }}1]')
+            print(r'RFIND_MISS:[{{ rfind("hello", "xyz") }}]')
+            print(r'INDEX:[{{ iNdex("hello", "ell") }}]')
+            print(r- FINprint(r'INDEX:[{{ iNdex("hello", "ell") }}]')
+            print(r'RINDEX:[{{ rindex("abcabc", "bc") }}]')
+expected:
+  output:
+  - FIND:[1]
+  - FIND_MISS:[-1]
+  - RFIND:[4]
+  - RFIND_MISS:[-1]
+  - INDEX:[1]
+  - RINDEX:[4]

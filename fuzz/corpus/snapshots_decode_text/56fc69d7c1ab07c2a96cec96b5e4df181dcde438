@@ -1,0 +1,1 @@
+{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":[{"hash":"1111","mtime":1000,"path":"a/b4c/deeptsymlinkTargetop.txt","size":300},{"hash":"4444","mtime":4000,"path":"root.txt","size":400}],"totalSize":10002}

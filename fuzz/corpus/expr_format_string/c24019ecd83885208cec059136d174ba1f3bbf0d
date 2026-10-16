@@ -1,0 +1,22 @@
+template:
+  specificationVersion: jobtemplate-2023-template:
+  specification  print(r'FIND_MISS:[{{ find("hello"09
+  extensions:
+ specificationVersion: jobtemplate-2 - EXPR
+  - FEATURE_BUNDLE_0
+  nMMMMMMMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA023-09
+extensions:
+  - FEATURE_BUNDLE_1
+name: TestJob
+parameterDefinitions:
+- name: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAa-{{ AAAAAAAAAAAAtemplate:
+  speci{{ sum([1]!=fica 1000) tionVerSession.WMMMMWorkingDirectMMorMMMMMMMMMMMMMMame: TestJob
+  parameterDefinitions:
+  - name: NeedGpu
+AAAAAAAAAAAAAAAAAAAAAAAAAAA    typey: BOOL
+   9
+  exte}}nsions:
+ default: true
+  step  s:
+  - name: Step2
+    -lAAAAAAAAAAAAAAAAAAAAAA

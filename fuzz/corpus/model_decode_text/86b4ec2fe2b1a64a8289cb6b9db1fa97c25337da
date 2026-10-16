@@ -1,0 +1,4 @@
+specificationVersion:extensions:isp t:
+    actions:
+      onRungs:
+        - "print(r'{{ re_split(\"hello\", \"\", 2) }}')"

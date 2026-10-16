@@ -1,0 +1,1 @@
+[Task.File.x * 2 for x in s]

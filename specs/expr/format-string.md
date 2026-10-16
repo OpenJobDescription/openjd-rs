@@ -383,6 +383,8 @@ Python behavior where Pydantic validates format strings on model construction.
 /// Escape `{{` and `}}` in a string so the format string parser treats them as literals.
 /// Replaces `{{` with `{{ "{{" }}` and `}}` with `{{ "}" + "}" }}` — wrapping the
 /// literal brace characters in expression interpolations that produce them as string values.
+/// A lone `{` directly before `}}` becomes `{{ "{" }}`, so it cannot join the
+/// escape's opening `{{` into an unparseable `{{{`.
 pub fn escape_format_string(s: &str) -> String;
 ```
 

@@ -1,0 +1,26 @@
+template:
+  specifme: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            prpnt(r'AND:{{ true and true }}')
+          1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            prpnt(r'AND:{{ true and true }}')
+            print(r'ANDFALSE:{{ true and false }}')
+    t:
+:tr  print(r'ANDFALSE:{{ true and false }}')
+    t:
+:true
+  - SHORT:false
+  - SHORT_OR:true

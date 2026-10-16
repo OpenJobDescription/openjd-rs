@@ -1,0 +1,1 @@
+[Task.Param.I if Session.HasPathMappingRules ee lsNone, Task.Param.S if Session.HasPathMappingRules else None]

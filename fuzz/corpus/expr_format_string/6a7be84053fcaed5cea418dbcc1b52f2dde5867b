@@ -1,0 +1,9 @@
+specificationVersion: jobtemplat{{ [#tag_a',e-2023-09
+nam 'tag_e: TestJob
+steps:
+- nobtemplat{{ [#tag_a',e-2023-09
+namions:
+      onR }}un:
+        command: echo
+        args:
+        - "{{Unknown.Variable}}"

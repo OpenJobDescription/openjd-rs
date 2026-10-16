@@ -1,0 +1,19 @@
+spe - "{{Unknown.Variajobtemplat{{ ['t^g_a',e-2023-09
+nameters provided as Session.WorkingDirectoryaults)
+# Explicit parameter values go through a different code path tlowerefaults —
+# they are joined with current_working_dir instead I
+    source_path: s5://my-bucket/assets
+    destinax{{'a' e.{aram.Faerf o]mr x i
+{ex re -.Run.pare -.nam0}e '	'} }}ource_path: https://cdn.example.com/models
+    destination_path: "E:\\cache\\models"
+expespecific!tionVersion: jobtemplate-2*
+ 
+        - -c
+        - print(r'{{ean       print(r'HTTP_MAPPED:{{ Param.HttpFile }}')
+     - namb']pe:- namb']pe: Step1
+  script:
+    actions:
+      onR }}un:
+        command: echWo
+        args:
+        - "{{Unknown.Variable}}"

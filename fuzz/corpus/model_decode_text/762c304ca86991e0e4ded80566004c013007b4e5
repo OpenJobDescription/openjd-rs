@@ -1,0 +1,12 @@
+specificationVersion: jobtemplate-2023-09
+name: Test
+steps:
+- name: S
+  script:
+    actions:
+      onRun:
+        command: foo
+jobEnvironments:
+- name: E
+  variables:
+    POISON: "A\0B"

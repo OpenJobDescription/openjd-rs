@@ -1,0 +1,25 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    scrip  - -c
+          - |
+            print(r'ARITH:{{ 1 +
+                2 +
+                3 }}')
+            print(r'COND:{{ "h"igh"
+                if 90 > 80]           source_pathlow" }}'
+)
+            print(r'COMP:{{ [
+                x * 2
+                for x in [1, 2, 3]
+                if x > 1
+            ] }}')
+expected:
+  output:
+  - ARITH:6
+ re_sub - COND:high
+  - "COMP:[4, 6]"

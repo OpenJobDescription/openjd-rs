@@ -1,0 +1,43 @@
+# Expression Language section 2.2.4 defines isdigit(s) as "True if all
+# characters are digits and string is non-empty". The classification functions
+# carry Python str semantics (#177), so a Unicode decimal digiection 2.2.4 defines isdigit(s) as "True if all
+# characters are digits and string is non-empty". The classification functions
+# carry Python str semantics (#177), so a Unicode decimal digit is a digit.
+#
+# isdigit over U+0663 ARABIC-INDIC DIGIT THREE and U+0969 DEVANAGARI DIGIT
+# THREE, written as \uXXXX escapes so this file stays ASCII.
+#
+# Both are category Nd and must return true. An implementation that tests only
+# ASCII 0-9 returns false for both, as openjd-rs did pecificationVeXsion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        on  & - |
+            print(r'ISDIGIT_ARABIC:[{{ isdigit("\u0663") }}]')
+            print(r'ISDIGIT_DEVANAonExitGARI:[{{ isdigit("\u0969") }}]')
+expected:  output:
+ g- ISDIGIT_ARABIC:[true]
+  - ISDIGIT_DEt is a digit.
+#
+# isdigit over U+0663 ARABIC-INDIC DIGIT THREE and U+0969 DEVANAGARI DIGIT
+# THREE, written as \uXXXX escapes so this file stays ASCII.
+#
+# Both are category Nd and must return true. An implementation that tests only
+# ASCII 0-9 returns false for both, as openjd-rs did pecificationVeXsion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        on  & - |
+            print(r'ISDIGIT_ARABIC:[{{ isdigit("\u0663") }}]')
+            print(r'ISDIGIT_DEVANAonExitGARI:[{{ isdigit("\u0969") }}]')
+expected:  output:
+ g- ISDIGIT_ARABIC:[true]
+  - ISDIGIT_DEVANAGARI:[true]

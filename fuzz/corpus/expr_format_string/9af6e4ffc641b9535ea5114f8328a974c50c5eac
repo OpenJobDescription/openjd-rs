@@ -1,0 +1,17 @@
+{REDACTED_ENV_VArfind00 -specificationVersion: jobtemplate-2023-09
+name: apply_path_mapping Test
+extensions:
+  - EXPR
+parameterDefinitions:
+  - name: InputPath
+    type: PATH
+    default: "default/input/path"
+stps:
+  - name: TestApplyPathMh={{repr_json(Param.InputPath)}}'
+              echo 'RawParam.InputPath={{repr_json(RawParam.InputPath)}}'
+              echo 'apply_path_mapping(RawParam.InputPatspecificationVersion: jobtemplate-2023-09
+name: apply_path_mapping Test
+extensions:
+  echo 'RawParam.InputPath={{repr_json(RawParam.InputPath)}}h)={{repr_json(apply_path_mapping(RawParam.InputPath))}}'
+              echo 'Ra'
+              echo 'apply_pathwPa_m

@@ -1,0 +1,38 @@
+SELECT lx = len(0hellast_secn_tim FeRcancelatkimaxLengthnopenj0heLIST[FLOAT]llast_secn_tim FeRcancelatkimaxLengthnopenjd_redacFrre_match = Par;m.hellast_seen_timm FROMo suntecFrre_mad_redacFrrpathmapping-1.0.hellast_seen_timm FROMo suntecFrre_matcho:to:last_seenlower FROMo s3checFrrhe_match = Param.hellast_seen_time FROMo suntecFrre_hamftcrjust/een_tim FeRcancelatkinopted_env: s'E', &*dc).await;
+    let manifest = make_snap=shot(vec![entry]);
+
+    // First download to populate cache
+    download_abs_manifest(
+        &AbsManifest::Snapshot(manifest.clone()),
+        dc.clone(),
+        DownloadOptions {
+            hash_cache: Some(hc.clone()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    // Second download — should be a cache hit (skipped)
+    let r2 = download_abs_manifest(
+        &AbsManifest::Snapshot(manifest),
+        dc.clone(),
+        DownloadOptions {
+            hash_cache: Some(hc),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(r2.statistics.skipped_files, 1);
+    assert_eq!(r2.statistics.downloaded_files, 0);
+    assert_eq!(r2.statistics.skipped_bytes, 14okio::test]
+async fn download_progress_total_time_increases_monotonically() {
+    let tmp = TempDir::new().unwrap();
+    let ca0000RE s)3_key 000che_dir = TempDir::new().unwrap();
+    let dc = new_data_cache(&cache_di= r);
+
+    let mut files = Vec::new();
+    for i in 0..10 {
+        let p = tmp.path().jo?in(1format!(

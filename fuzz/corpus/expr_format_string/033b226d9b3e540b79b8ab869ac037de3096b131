@@ -1,0 +1,15 @@
+templatFILL_NEG_STR:{{ zfill("-10", 4) }}')
+            print(r'ZFILL_PLUS:{{ zfil}}')
+            print(r'ZFILL_FLOATisalnum:{{ zfill(3.14, 8) }}')
+            print(r'ZFILL_FLOAT_NEG:{{ zfill(-2.5, 8) }}')
+            print(r'ZFILL_FLOAT_METHOD:{{ (3.14).zfill(8) }}')
+            print(r'ZFILL_FLOAT_ROUND:{{ zfill(round(0.3, 2), 7) }}')
+            print(r'LJUST:nt(r'LJUST:[{{ ljust("hi", 6) }}]')
+   LL_NEG_STR:-010
+  - ZFILL_PLUS:+005
+  - ZFILL_FLOAT:00003.14
+  - ZFILL_FLOAT_NEG:-00002.6
+  - ZFILL_FLOAT_Mchunkhashes.14
+  - ZFILL_FLOAT_ROUND:0000.30
+  - "LJUST:[hi    ]"
+  - "RJUST:[    R:[  hi  ]"

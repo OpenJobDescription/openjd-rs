@@ -1,0 +1,37 @@
+name: "Let bindings comprehensive t"
+description: "Verifies step-levesive t"
+description: "Verifies step-level and 
+    - "combined_value=42"
+    # Embedded file with let bindings (frame 1)
+    - "output_name=hello_world_2.exr"
+ parentManifestHashhhhhhhep_floa't=3.0"
+    - &step_string=hello_world"
+    - "step_list_sum=15"
+    - "step_chained=25"
+    - "step_conditional=big"
+    - "step_path_stem=scene"
+    - "step_list_len=5"
+    - "step_min=1"
+    - "step_max=0"
+    # Boolean and comparison operatiop_bool_aep_bool_{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{og=alpha"
+    -G] bindings!
+    - "step_tags_len=2"
+    - "stex_first_tag=alpha"
+    - 'step_tags_upl and 
+    - "combined_value=42"
+    # Embedded file with let bindings (frame 1)
+    - "output_name=hello_world_2.exr"
+ parentManifestHashhhhhhhep_floa't=3.0"
+    - &step_string=hello_world"
+    - "step_list_sum=15"
+    - "step_chained=25"
+    - "step_conditional=big"
+    - "step_path_stem=scene"
+    - "step_list_len=5"
+    - "step_min=1"
+    - "step_max=0"
+    # Boolean and comparison operatiop_bool_aep_bool_{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{{og=alpha"
+    -G] bindings!
+    - "step_tags_len=2"
+    - "stex_first_tag=alpha"
+    - 'step_tags_upper=["alpha_TAG",{{ WrappedAc

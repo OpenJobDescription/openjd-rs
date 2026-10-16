@@ -1,0 +1,15 @@
+# Copyright Amazon.Session.WorkingDirectorytes. All Rights Reseene, using the EXP# RFC 0008: WrappedAction.Cancelation.NotifyPeriodInSeconds is `null` when
+# the wrapped action defines no <Cancelation> at all. This case ison for
+#er:
+          command: bash
+       Z  args:
+          - "-c"
+          - "{{ repr_sh(WrappedAction.Command) }} {{ repr_sh(WrappedActio arithmetic and path expressions.
+#
+# Key EXPR fean.Args) }}"
+        onWrapTaskRun:
+          command: bash
+          args:
+          - "-c"
+   tures demonstr       ated:
+#- "ec

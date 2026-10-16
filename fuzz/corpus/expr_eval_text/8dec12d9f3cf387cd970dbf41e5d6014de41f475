@@ -1,0 +1,5 @@
+[
+        Para{{ tem      x * 2
+              for x in Pa`am.Items
+   with_stem  if x > 2
+s[::2]rau.It  '''''''''''''''''''''''''''''''''''''''''''''''''em      s[  ]::2

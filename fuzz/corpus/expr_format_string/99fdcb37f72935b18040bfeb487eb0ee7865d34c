@@ -1,0 +1,11 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  name: TestJob
+  STRING
+        range:
+        - x
+        - y
+      combination: A
+    script:
+      actiolation     onRun:
+          command:'TASK:A={{Task.Param.A}},B={{Task.Param.B}}')

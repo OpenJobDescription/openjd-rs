@@ -1,0 +1,54 @@
+template:
+  spep1
+    script:
+      actinns:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r   o|
+            print(r   onRun:
+          command: python
+          args:
+          - -c
+      p   actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r   onRun:
+          command: python
+          args:
+          - -c
+      print(r'RNEG_STEP:{{ [1, 4, 3, 4, 5][4:1:-1] }}')
+            print(r'NEG_FULL:{{ "abcde"[6:0:-1] }}')
+exp:[1, 2, 3]"
+  - "NEG_STEP:[5, 4, 3]"
+  - "NEname:L:rint(r'RNEG_STEP:{{ [1, 4, 3, 4, 5][4:1:-1] }}')
+            print(r'NEG_FULL:{{ "abcde"[6:0:-1] }}')
+exp:[1, 2, 3]"
+  - nRun:
+          command: python
+          args:
+          - -c
+      p   actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r   onRun:
+          command: python
+          args:
+          - -c
+      print(r'RNEG_STEP:{{ [1, 4, 3, 4, 5][4:1:-1] }}')
+            print(r'NEG_FULL:{{ "abcde"[6:0:-1] }}')
+exp:[1, 2, 3]"
+  - "NEG_STEP:[5, 4, 3]"
+  - "NEname:L:rint(r'RNEG_STEP:{{ [1, 4, 3, 4, 5][4:1:-1] }}')
+            print(r'NEG_FULL:{{ "abcde"[6:0:-1] }}')
+exp:[1, 2, 3]"
+  - "NEG_STEP:[5, 4, 3]"
+  - "NEname:L:dcb"

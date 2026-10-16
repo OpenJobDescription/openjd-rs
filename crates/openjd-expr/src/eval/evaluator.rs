@@ -59,6 +59,15 @@ fn contains_budget_error(err: &ExpressionError) -> bool {
     ) || err.sub_errors().iter().any(contains_budget_error)
 }
 
+/// Did evaluating an attribute's base fail because the base name is not
+/// defined (as opposed to existing but being unusable)?
+fn base_is_undefined(err: &ExpressionError) -> bool {
+    matches!(
+        err.kind(),
+        crate::error::ExpressionErrorKind::UndefinedVariable { .. }
+    )
+}
+
 /// Outcome of evaluating a sub-expression whose failure an enclosing
 /// construct may absorb (see [`Evaluator::eval_speculative`]).
 enum Speculative<T = ExprValue> {
@@ -798,8 +807,9 @@ impl<'a> Evaluator<'a> {
             }
         }
         // Fall back: evaluate the value, then access the attribute via library.
-        // If the base evaluation fails (e.g., "Param" is a subtable not a value),
-        // and we had a dotted path, report the dotted path as undefined with suggestions.
+        // If the base is undefined (e.g., "Param" is a subtable, not a value)
+        // and we had a dotted path, report the dotted path as undefined with
+        // suggestions; any other base error is kept.
         //
         // Both fallback arms below replace the original error with a
         // friendlier one. A budget error is never replaced: the rewritten
@@ -809,6 +819,10 @@ impl<'a> Evaluator<'a> {
         let value = match self.eval_node(&a.value, None) {
             Ok(v) => v,
             Err(e) if contains_budget_error(&e) => return Err(e),
+            // A base that exists but cannot be used (e.g. a PATH value in the
+            // other path format) keeps its own error; rewriting it as an
+            // undefined `Base.attr` would hide the real problem.
+            Err(e) if dotted_path.is_some() && !base_is_undefined(&e) => return Err(e),
             Err(_) if dotted_path.is_some() => {
                 let path = dotted_path.as_ref().unwrap();
                 let available = self.collect_symbol_names();
@@ -1163,10 +1177,12 @@ impl<'a> Evaluator<'a> {
         let mut left = self.eval_node(first, None)?;
         // An unresolved operand still goes through dispatch: the library
         // matches the operand types against the operator's signatures and
-        // returns `unresolved[bool]` on success, so a comparison whose types
-        // can never match (`Param.Name in [1, 2]` with a STRING parameter,
-        // or `Param.Path < 1`) is refused at validation time rather than on
-        // the worker. Only the value is deferred, not the type check.
+        // returns `unresolved[bool]` on success, so a membership test whose
+        // types can never match (`Param.Name in [1, 2]` with a STRING
+        // parameter) is refused at validation time rather than on the
+        // worker. The ordering operators are `(T1, T2)`, so their cross-type
+        // refusal (`Param.Path < 1`) is still a run-time one (see
+        // specs/expr/function-library.md).
         let mut seen_unresolved = false;
         let last_index = c.ops.len().saturating_sub(1);
         for (index, (op, right_node)) in c.ops.iter().zip(comparators.iter()).enumerate() {
@@ -1919,8 +1935,15 @@ impl<'a> Evaluator<'a> {
         // consumed here like everywhere else below.
         if iterable.is_unresolved() {
             let inner = unwrap_unresolved(&iterable.expr_type());
-            let elem_type = inner.list_element_type().cloned().unwrap_or(ExprType::INT);
             self.current_memory = comprehension_baseline;
+            // A type that can never be iterated (`[x for x in Param.Name]`
+            // with a STRING parameter) fails every run, so it is refused
+            // here with the run-time error rather than on the worker.
+            let Some(elem_type) = unresolved_iteration_element(&inner) else {
+                return Err(ExpressionError::type_error(format!(
+                    "Cannot iterate over {inner}"
+                )));
+            };
             return self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type);
         }
 
@@ -2187,6 +2210,38 @@ fn unwrap_unresolved(t: &ExprType) -> ExprType {
         t.params()[0].clone()
     } else {
         t.clone()
+    }
+}
+
+/// The element type a comprehension binds when iterating a value of the
+/// (unresolved) type `t`, or `None` if no value of that type is iterable.
+/// Unknown types (`any`, type variables, an unresolved placeholder) bind
+/// `any`, so a nested comprehension over the loop variable is not refused;
+/// a union iterates as its iterable members.
+fn unresolved_iteration_element(t: &ExprType) -> Option<ExprType> {
+    use crate::types::TypeCode;
+    match t.code() {
+        TypeCode::List => Some(t.list_element_type().cloned().unwrap_or(ExprType::INT)),
+        TypeCode::RangeExpr => Some(ExprType::INT),
+        TypeCode::Union => {
+            let elems: Vec<ExprType> = t
+                .params()
+                .iter()
+                .filter_map(unresolved_iteration_element)
+                .collect();
+            match elems.len() {
+                0 => None,
+                1 => elems.into_iter().next(),
+                _ => Some(ExprType::union(elems)),
+            }
+        }
+        TypeCode::NullType
+        | TypeCode::Bool
+        | TypeCode::Int
+        | TypeCode::Float
+        | TypeCode::String
+        | TypeCode::Path => None,
+        _ => Some(ExprType::ANY),
     }
 }
 

@@ -1,0 +1,15 @@
+template:
+  specificationVersion: jonRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'TWO:{{ min(3, 1) }}         print(r'RANGE:{{ min(range_expr("3-7")) }}')
+            pri2023-03-03:{{ min(1, 2.5) }}')
+expected:
+  output:
+  - TWO:1
+  - THREE:1
+  - LIST:2
+  - RANGE:3
+  - MIXED:1.0

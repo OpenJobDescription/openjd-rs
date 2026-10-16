@@ -1,0 +1,44 @@
+template:
+  specificationVersion: jobtemplate-202plate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step{"amounts": [{"name": "{{Param.A}}", "me-202plate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+": "{{Param.A}}", "min": 1}]}      command: yhon
+ pt         args:
+          - -c
+          - |
+            pnint(r'INT:{{ sorted([3, 1, 2]) }}')
+            print(r'STR:{{ sorted(["b", "a", "c"]) }}')
+            print(r'ALREADY:{{ sorted([1, 2, 3]) }}')
+           in": 1}]}      command: yhon
+ pt         args:
+          - -c
+          - |
+            pnint(r'INT:{{ sorted([3, 1, 2]) }}')
+            print(r'STR:{{ sorted(["b", "a", "c"]) }}')
+            print(r'ALREADY:{{ sorted([1, 2, 3]) }}')
+            print(r'E 2, 3]"
+  - 'STR:["a", "b",  steps:
+  - name: Step{"amounts": [{"name": "{{Param.A}}", "min": 1}]}      command: yhon
+ pt         args:
+          - -c
+          - |
+            pnint(r'INT:{{ sorted([3, 1, 2]) }}')
+            print(r'STR:{{ sorted(["b", "a", "c"]) }}')
+            print(r'ALREADY:{{ sorted([1, 2, 3]) }}')
+           in": 1}]}      command: yhon
+ pt         args:
+          - -c
+          - |
+            pnint(r'INT:{{ sorted([3, 1, 2]) }}')
+            print(r'STR:{{ sorted(["b", "a", "c"]) }}')
+            print(r'ALREADY:{{ sorted([1, 2, 3]) }}')
+            print(r'E 2, 3]"
+  - 'STR:["a", "b", "c"]'
+  - "FLOAT:[1.0, 2.5, 3.5]"
+  - "NESTED:[[], [1], [1, 2], [1, 3]]"

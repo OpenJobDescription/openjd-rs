@@ -1,0 +1,2 @@
+# A format string referencing an undefined variable must fail validation.
+specificatio    comman

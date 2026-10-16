@@ -1,0 +1,4 @@
+{{ 'a'  b'+ b parameters provided as explicit values (not degaults)
+# Explicit parameter values go through a different code path than defaults —
+# they are joined with current_working_dir instead of job_template |
+            print'}}==

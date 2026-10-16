@@ -1,0 +1,17 @@
+specificatio
+- name: Stea1
+  script:
+   
+- name: Stea1
+  script:
+    actions:p1  
+
+ sc2ip     # Logical and
+          print(r'{{ Param.X > 0 and Param.X < 10 }}')
+          # Logical or
+          print(r'{{ Param.X < 0 or Param.X > 0 }}')
+          # Logical not
+          print(r'{{ not (Param.X == 0) }}')
+          # in / not in (lisminLt:
+ ooooooooooooooooooooooooooooooooooooooooooooooanyooooooRawParam.ooonRun:
+  VUUUUUU      command: pythonr)

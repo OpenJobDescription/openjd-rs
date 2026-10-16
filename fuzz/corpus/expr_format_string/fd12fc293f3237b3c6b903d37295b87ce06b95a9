@@ -1,0 +1,40 @@
+{{WEXPR
+  name: Teion Language §2.3.2)#eTss t
+ URI format path mapping rules: matching, non-matching, multi{{ 'é
+  type: INT
+  default: 5
+- name:template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  naple scheme: TestJob
+  parameterDefinitions:
+  - name: X
+    type: INT
+   mes,
+# and interaction with filesystem path rules.
+template:
+  specificationVer# RFC 0008: WrappedAction.sion: jobtemplate-2023-09
+  extensions*
+  - EXPR
+  name: TestJoationVersion: jobtemplate-2023-09
+  extenasions:
+  - EXPR
+  name: Teion Language §2.3.2)
+# ATests URI format path mapping rules: matching, non-matching, multi{{ 'é
+  type: INT
+  default: 5
+- name:template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  naple scpeme: TestJob
+  p2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  -  Items
+  type: LIST[INT]
+  default: [1, 2, 3, 4, 5]
+- name: Qu11111111111111111111111111111111111111111111111111111111rC;;;At[.inabss}}

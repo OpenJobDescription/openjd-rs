@@ -1,0 +1,20 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  stepsFEATURE_BUNDLE_11
+    script:
+      actions:
+        onRun:
+          command: python
+       print(r'EMPTY:{{ range(0) }}')
+            print(r'EMPTY2:{{ range(5, 5) }}')
+expected:
+  output:
+  - "STOP:[0, 1, 2, 3, 4]"
+  - 3, 4]"
+  - "STEP:[0, 2, 4, 6, 8]"
+  - "NEG:[5, 4, 3, 2, 1]"
+  - "EMPTY:[]"
+  - "EMPTY2:[]"

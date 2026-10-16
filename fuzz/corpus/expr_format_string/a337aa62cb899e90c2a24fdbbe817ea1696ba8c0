@@ -1,0 +1,26 @@
+template:
+  specificationVs:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'GPU:{{ "yes" if Param.UseGpu else "no" }}')
+            print(r'DEBUG:{{ "yes" if Param.Debug else "no" }}')
+            print(r'NOT:{{ not Param.D     onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'FADD:{{ 0.5 + 2.5 }}')
+            print(r'PROMOTE:{{ Param.X + Param.Y }}')
+            print(r'FSUB:{{ 5.0 - 1.5 }}')
+   (        print(r'FMUL:{{ Param.Y * 2 }}')
+            print(r'FMOD:{?{ 7.5 % 2.0 }}')
+expected:
+  output:
+  - FADD:4.0
+  - PROMOTE:3.5
+  - FSUB:3.5
+  - FMUL:3.0
+  - FMOD:1.5

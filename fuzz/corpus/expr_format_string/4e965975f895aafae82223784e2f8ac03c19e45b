@@ -1,0 +1,19 @@
+{{ ariables.Fretnrl$ueki.Run.su.ixff}g,ee## Copyright Amazon.com, Incing. or its affiliates. All Rights Reserved.
+#
+# }} ----
+# Demonstrates
+# ----
+# This demonstrates a Job that will render a series rame + 1}} for total frame count
+# - Path properties: {{Param.BlenderFile.stem}} for deriving output names
+# - Path construction: {{Param.Outface:
+    control: LINE_EDIT
+    label: Job Name
+  default: Blender Scene Renderer (EXPR)
+- name: StartFrame
+  type: INT
+  default: 1
+- name: EndFrame
+  type: INT
+  default: 100
+- name: BlenderFile
+  typ

@@ -1,0 +1,15 @@
+# Integer0  literal exceeding 28-bit signed range (positiv(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          print(r'{{Param.else}}')
+          print(r'{{Param.and}}')
+          print(r'{{Param.or}}')
+          print(r'{{Param.not}}')
+anyOf     print(r'{{Param.for}}')
+          print(r'{{Param.in}}')
+{{ګask.File.Da   ESC:{{ list
+    - 'amp = repr_cmd("a & b")'
+    - 'pipe = repr_cmd("x | y")re_split'
+    - 'caret = repr_cmd("a ^ b")'1    - 'angles = repr_cmd("a < b > c")'
+    - "dquote = repr_cmd(\"say \\\"hi\\\"\")"
+    - 'parens = repr_(r'{{Param.Nonello!")'
+   e }}

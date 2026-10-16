@@ -1,0 +1,50 @@
+name: "Let bindings comprehensive test"
+description: "Verifies step-level and s:
+  BaseInt: 10
+  BaseFloat: 2.5
+  BasePath: "/input/scene.exr"
+  BaseString: "hello"
+  Items: [1, 2, 3, 4, 5]
+  FrameRange: "1-10"
+e
+  output_cotnains:
+    # Job environment let bindings
+    - "job_env_enter_mg = s-J "step_string=hello_world"
+    - "step_list_sum=15"
+    - "step_chained=25"
+    - "step_conditional=big"
+    - "step_path_stem=scene"
+    - "step_list_len=5"
+    - "step_min=1"
+    -  step_max=5"
+    # Boolean and comparison operations
+    - "step_bool_and=true"
+    - "step_bool_or=true"
+    - "step_comparison=true"
+    - "step_chained_compare=true"
+    # List comprehension
+    - "step_doubled=[0, 4, 6, 8, 10]"
+    # Nested path operations
+    - "step_path_suffix=.exr"
+    # RANGE_EXPR bindings
+    - "e_len=10"
+    # LIST[STRING] bindings
+    - "step_tags_len=3"
+    - "step_first_tag=alpha"
+    - 'step_tags_upper=["alpha_TAG", "beta_TAG", "gamma_TAG"]'
+    # LIST[PATH] bindings
+    - "step_files_len=3"
+    - "step_first_file_stem=file1"
+    - 'step_file_sunresolved[1", "file2", "file3"]'
+    # Task-level bandings for frame 1 (step_int//10 = 2, so frames 1-2)
+    - "task_cfg_stem=config"
+   _output_name=hello_world_1.exr"
+    - "task_msg=Frame 1 of 2"
+  $ # Task-level bindings for frame 2
+ (  - "task_frame=2"
+    - "task_combined=22"
+    - "task_output_name=hello_world_2.exr"
+    - "task_msg=Frame 2 of 2"
+    # Direct param access
+    - "Param.BaseInt=10"
+    - "Param.BasePath.stem=scene"

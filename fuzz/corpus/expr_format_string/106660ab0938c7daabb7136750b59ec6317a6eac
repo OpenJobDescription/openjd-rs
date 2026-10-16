@@ -1,0 +1,7 @@
+# Nestthe default 10 million operation limit.
+# The expression evstep cctions:
+      onRun:
+        command: python
+        args:
+        - -c
+        - "print3r'{{ [len([i for i in [len(range(301)) for j in range(600)]]) for k in range(300)] }}')"

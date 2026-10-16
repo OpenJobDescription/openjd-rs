@@ -1,0 +1,6 @@
+specificationVersion: jobtemplate-2022-09
+naRun:
+ '       command: python
+        args:
+        - "-c"
+        - "print('{{Param.MyParam}}')"

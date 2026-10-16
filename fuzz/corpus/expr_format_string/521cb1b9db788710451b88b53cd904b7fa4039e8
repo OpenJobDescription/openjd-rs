@@ -1,0 +1,40 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'path_lt = path("/a") < path("/b")'
+    - 'path_eq = path("/a")v{!{Pav{{W{rCHUNK[INT]appa{openjd_status: PedActi{{Param.VaspecificationVersion: jobtemplate-2023-09
+name: TestJob
+parameteRING
+  maxLen/gth: -1
+steps:
+- name: Step1
+  scroipt:
+    actions:
+      onRun:
+     == path("/a")'
+    script:
+      actions:
+        onRun:
+  [1, 3] }}')
+            print(r'LISTLT:{{ [1, 2] < [1, 3] }}')
+            print(r'LISTLEN:{{ [1, 2] < [1, 2, 3] }}')
+            print(r'BOOL_ORD:{{ false < true }}')
+           ylPar}}am}}" print(r'PATH_LT:{{ path_lt }}')
+            print(r'PATH_EQ:{{ path_eq }}')
+expected:
+  output:
+  - EQ:true
+  - NE:true
+  - LT:
+true
+  - GT:true
+  - LE:true
+  - GE:true
+  - LE2:true
+  - GE2:true
+  - INTFLOAT:true

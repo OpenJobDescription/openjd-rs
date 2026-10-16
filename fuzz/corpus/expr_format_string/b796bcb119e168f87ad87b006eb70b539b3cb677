@@ -1,0 +1,17 @@
+{{template:
+  specificationVfinitions:
+  - name: Verbose
+    typ  args:
+          - -c
+          - |
+            import sys
+    VUUUUUUsys.stdout.write('ARGS:')
+            sys.stdout.write(' '.join(sys.argv[1:]))
+            sys.stdout.write('\n')
+          - "--input"
+          - "file.exr"
+          - "{{  in erbose' if Param.Verbose lse nu{ 1.5 + 2.5 }}')
+     TE:3.5
+  - FSUB:3.5
+  rame >- FMUL:3.0
+  - FMOD 3}}:1.5

@@ -1,0 +1,54 @@
+specificationVersion: jobte.mplate-2011-09
+extensions:
+- EXPR
+name: TestJob
+paramespecicifationVersion: lstripjobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        Version: jobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J]]]]]]]]]]]]]]]]]]]]stJob
+paramespecicifationVersion: lstripjobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        Version: jobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+  typWINDOWSNG
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+   ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]fationVersion: lstripjobtemplate-2023-09
+naJ}} Fuz={{Task.Param.Fuz}}.')}')
+          # Transform
+]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]
+  typWINDOWSNG
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+   ]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]fationVersion: lstripjobtemplate-2023-09
+naJ}} Fuz={{Task.Param.Fuz}}.')}')
+          # Transform
+   1       print(r'{{ [x * 2 for forwarx 

@@ -1,0 +1,49 @@
+specificationVersion: jobtemplate-2023-09
+name: Job
+parameterDefinitions:
+- na   type: INT
+      range: '2'
+    - name: Bar
+      type: STRING
+      range:
+      - Bar1
+      - Bar2
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - -c
+        - print('J={{Param.J}} Foo={{Task.Param.Foo}}. Bar={{Task.Param.Bar}}')
+- name: Second
+  dependencies:
+  - dependsOn: First
+  parameterSpace:
+    taskParameterDefinitions:
+    - n INT
+      range: '0'
+    - name: Bar
+      type: STRING
+      range:
+      - Bar1
+      - Bar2
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - -c
+        - print('J={{Param.J}} Foo={{Task.Param.Foo}}. Bar={{Task.Param.Bar}}')
+- name: Second
+  dependencies:
+  - dependsOn: First
+  parameterSpace:
+    taskParameterDefinitions:
+    - name: Fuz
+      type: INT
+      range: 1-2
+  script:
+    and: python
+        args:
+        - -c
+        - print('J={{Param.J}} Fuz={{Task.Param.Fuz}}.')

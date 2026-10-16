@@ -1,0 +1,1 @@
+"high" if Param.X > 10 else "mid" if Pa|am.X > 3 else "low"

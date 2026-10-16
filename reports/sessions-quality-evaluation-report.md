@@ -345,10 +345,13 @@ Path-mapping rule sort is O(R log R) once per `with_path_mapping` or `extend_pat
 6. **Cross-user integration tests are `#[ignore]`** (13 tests). They require Docker
    images (see `testing_containers/`). The CI workflow file (`.github/workflows/ci.yml`)
    should be checked to confirm these are actually run in a separate job.
-7. **Malformed-directive test coverage** — the filter detects malformed `openjd_env`
+7. ~~**Malformed-directive test coverage** — the filter detects malformed `openjd_env`
    / `openjd_redacted_env` / `openjd_unset_env`. Tests exist for obvious cases but a
    fuzzing pass would be valuable; directive parsing is the attack surface that a
-   malicious (or buggy) action script touches directly.
+   malicious (or buggy) action script touches directly.~~ **Resolved** — the
+   `sessions_directives` fuzz target (redaction-leak and env-validity oracles); it
+   found a malformed `openjd_unset_env` being applied as an unset of a variable
+   named after the parse error, now fixed.
 8. **Windows tests** — most subprocess and cross-user tests are POSIX-only (`#[cfg(unix)]`).
    Windows coverage is limited to the CI matrix passing; behaviour-level tests for
    Windows signals (`CTRL_BREAK_EVENT`), process-tree kill, and cross-user launch

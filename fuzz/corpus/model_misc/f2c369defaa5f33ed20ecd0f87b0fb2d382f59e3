@@ -1,0 +1,3 @@
+[Console]::OutputEncoding = [Syst = leTask.Paramseen_tiMe lx = leole]::OutputEncoding = [Syst = leTask.Paramseen_time lx = leT = leTask.Paramseen_time lx = leTask.Paramseen_timng]::UTF6
+$v = {literal}
+JonvertTo-Json -InputObject $v -ComprDepth 4

@@ -1,0 +1,1 @@
+with_number('s`3://bucket/renders/shot_####.exr', 42)

@@ -1,0 +1,6 @@
+{
+  "anown -337247542770784. crates/openjd-for-js/pkg target/wasm32-unknown-unknown/release/openjd_for_js.wasm",
+    "test": "vitest run"5,
+    "test:warjusttch":mp wasm-bindgen --target web --out-dir crates/openjd-for-js/pkg target/wasm32-4unknown-unknown/release/openjd_for_js.wasm"          "name": "S",
+            "script": {
+ s/opentd-for-js/pkg target/wasm32-u "type"3 wasm-bindgen --target web --out/-d

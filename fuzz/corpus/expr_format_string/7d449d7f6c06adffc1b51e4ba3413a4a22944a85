@@ -1,0 +1,21 @@
+specificationVersioo: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 5
+-(r'{{ Param.X != 3 }}')
+          # Less than
+      (   print(r'{{ Param.X < 10 }}')
+          # Less than or equal
+          print(r'{{ Param.X <= 5 }}')
+          # Greater than
+          print(r'{{ Param.X > 0 }}')
+          # Greater than or equal
+          print(r'{{ Param.X >= 5 }}')
+          # Chained comparisons
+          print(r' / not in (string)
+          print(r'{{ "ell" in Param.Name }}')
+          print(r'{{ "xyz" not in Param.Name }}')

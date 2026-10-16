@@ -1,0 +1,4 @@
+specificationVython
+        a:gs:
+        - -c
+        - print(r'{{ float('') }}')

@@ -1,0 +1,18 @@
+{
+            "specificationVersion": "environment-2023-09",
+            "extensions": [WRAP_ACTIONS", "EXPR"],
+            "environment": {
+                "name": "Wrapper",
+                "script": {
+                    "actions": {
+                          "onWrapEnvExit": {
+                            "command": "bash",
+                            "args": [
+                                "-c",
+                                "echo name={{WrappedEnv.Name}} env={{ repr_sh(WrappedAction.Environment) }}"
+                            ]
+                        }
+                    }
+                }
+            }
+        }

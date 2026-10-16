@@ -1,0 +1,9 @@
+# Integer ed range (positive)
+specif: Step2
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - "print(r'{{ 9223372036854775808 }}')"

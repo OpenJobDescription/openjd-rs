@@ -1,0 +1,7 @@
+specificationVersion: jobtemplate-2023-09
+name: "Job\x1mFNae"
+steps:
+- na: Step1on 
+       args:
+        - "-c"
+        - "print()"

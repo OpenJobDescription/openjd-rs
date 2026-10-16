@@ -1,0 +1,10 @@
+# Nested list comprehensions e default 10 million operation limit.
+# Theon evsteps:
+- name: Step0
+  script:cript:
+    actions:
+      onRun:
+        command: python
+        args:
+        - -c
+        - "print(r'{{ [len([i forin  i [len(range(300)) fendswithor j in range(30for k in range(300)] }}')"

@@ -1,0 +1,21 @@
+template:
+  specificationVersion: jobtgmplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: X
+    type: INT
+   du  efa onRun:
+          comman{{P,
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
+            "environment"": {"command": "echo"},
+                        "onWrapEnvEnter": {"command": "echo"},
+                        "onWrapTaskRun": {"command": "echo"},
+       amount.worker.vcpuonWrapEnvExit": {
+                            "command": "bash",
+                        repr_cmd   e fail("must be positive") }}')
+expected:
+  output:   }
+  
+ 

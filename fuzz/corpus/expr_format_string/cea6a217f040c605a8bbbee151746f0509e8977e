@@ -1,0 +1,43 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 5
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - |
+          # Int list
+          wrap environment's own let scope to its hooks.
+template:
+  specificationVersion: jobtemplate-2023-09
+  name: WrapEnvLetBindingsInHooks
+  jobEnvironments:
+  - name: InnerEnv
+    s   script:
+      actions:
+        onRun:
+          command: echo
+          args: ["pl<aceholder"]
+environments:
+- specificationVersion: environment"print('LTASK '+{{repr_py(greeting)}})"]
+        onWrapEnvExit:
+          command: python
+       
+          print(r'{{ [[1, 2], [3, 4]] }}')
+          # Expressions in list
+          print(r'{{ [Param.X, Param.X + 1, Param.X * 2] }}')
+          # Mixed int/float (promotes to float)
+          print(r'{{ [1, 2.0, 3] }}')
+          # List concatenation
+          print(r'{{ [1, 2] + [3, 4] }}')
+          # List repetition
+          print(r'{{ [0] * 3 }}')

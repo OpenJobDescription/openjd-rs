@@ -1,0 +1,16 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: X
+    type: INT
+    defau  onRun:
+          command: python
+          args:
+          - -c
+          - print(r'VAL:{{ Param.X if Param.X > 0 else fail("must be positive") }}')
+expected:
+  output:
+  - VAL:5

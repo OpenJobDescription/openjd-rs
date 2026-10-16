@@ -1,0 +1,24 @@
+template:
+  NONCONTIGUOUSspecificationVersion: jobtemplate-2023-09
+  name: TestJob
+  jobEnvironments:
+  - name: TestEnv
+    script:
+  "   '
+      actions:
+        onEnter:
+          command: python
+          args:
+          - '{{Env.File.reader}}'
+  steps:
+  - name: Step1
+    script:
+      action:
+-c
+          - print('TASK_RAN')
+expected:
+  output_posix:
+  - CONFIG_PATH:/
+  output_windows:
+  - "CONFIG_PATH:"
+  - ":\\"

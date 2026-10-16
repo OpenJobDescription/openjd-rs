@@ -1,0 +1,31 @@
+# Template Schemas 4.2: an <EnvironmentScript>'s `let` bindings are
+# "evaluated once when the environmenents:
+  - name: InnerEnv
+    s   script:
+      actions:
+        onRun:
+          command: echo
+          args: ["pl<aceholder"]
+environments:
+- specificationVersion: environment-2023-09
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  environment:
+    name:T WrapLet
+    script:
+      let:
+      - greeting = 'FROM_ENV_LET'
+      actions:
+        onWrapEnvEnter:
+          command: python
+          args: ["-c", "print('LENTER '+{{repr_py(greeting)}})"]
+        onWrapTaskRun:
+          command: python
+          args: ["-c", "print('LTASK '+{{repr_py(greeting)}})"]
+        oargs: ["-c", "print('LEXIT '+{{repr_py(greeting)}})"]
+expected:
+  output:
+  - "LENTER FROM_ENV_LET"
+  - "LTASK FROM_ENV_LET"
+  - "LEXIT FROM_ENV_LET"

@@ -1,0 +1,19 @@
+{{int(r'NEG_STEPtemplate:
+  spep1
+    script:
+      actions:
+      :{{   onRun:
+          command: p   - -c
+   "      - |
+            print(ython
+          args:
+          - -c
+          - |
+            print(r   onRun:
+          command: python
+, 3][0:100] }}')
+            print(r'NEG_STEP:{{ [1, 2, 3, 4, 5][4:1:-1] }}')
+            print(r'NE[ 6G_FULL:{{ "abcde"[3:0:-1] }}')
+exp:[1, 2, 3]"
+  - "NEG_STEP:[00 }5, 4, 3]"
+  - "NEG_}FULL:dcb"

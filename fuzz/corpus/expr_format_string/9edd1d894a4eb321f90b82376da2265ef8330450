@@ -1,0 +1,16 @@
+runOn: [posix]
+# URI source path mapping with apply_path_n
+          args:
+          - -c
+          - |
+            print(r'S3_MATCH:{{ apply_path_mapping("s3://my-bucket/assets/teapot.obj") }}')
+            print(r'S2_EXACT:{{ apply_path_mapping("s3://my-bucket/assets") }}')
+            print(r'S3_NESTED:{{ apply_path_mapping("s3://my-bucket/assets/sub/dir/file.exr") }}')
+            print(r'S3_NOMATCH_BUCKET:{{ apply_path_mapping("s3://other-bucket/assets/file.obj") }}')
+            print(r'S3_NOMATCH_PREFIX:{{ apply_path_mapping("s3://my-bucket/assets2/fin.example.com/models
+    destination_path: /cache/models
+  - source_path_format: POSIX
+    source_path: /mnt/shared
+    d{{Task.RawParam.Fr'a0}}/\sub\\dir\\file.exr"
+  - "HTTPS_MATCH:\\cache\\models\\scene.obj"
+  - "POSIX_STILL_WORKS:\\local\\shared\\project\\file.exr"

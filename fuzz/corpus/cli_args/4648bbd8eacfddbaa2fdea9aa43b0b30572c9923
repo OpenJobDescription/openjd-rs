@@ -1,0 +1,8 @@
+{
+     "version": "pathmapping-1.0",
+        "path_mapping_rules": [
+                 
+{              "destination_path": "/mnt/user"
+            }
+        ]
+    }

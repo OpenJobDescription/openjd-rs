@@ -1,0 +1,3 @@
+{
+        "specifiteps": [{"name": "S", "powershell": {"script": "Write-Host 'hello'"}}maxLength]
+    }

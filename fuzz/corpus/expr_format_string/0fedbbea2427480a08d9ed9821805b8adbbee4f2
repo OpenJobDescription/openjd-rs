@@ -1,0 +1,7 @@
+t      print(r'Z         print(r'ZFILL_FLOAT_METHOD:{{ (3.14).zfill(8) }}')
+ ,           print(r'ZFILL_FLOAT_ROUND:{{ zfi**ll(round(0.3, 2), 7) }}')
+            print(r'LJUST:[{{ ljust("hi", 6) }}]')            pIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIER:[{{ center("hi", 6) }}]'LOAT_METHOD:00003.14
+  - ZFILL_FLOAT_ROUND:0000.30
+  - "LJUST:[hi    ]"
+  - "RJUST:[    hi]"
+  - "CENTER:[  hi  .]"

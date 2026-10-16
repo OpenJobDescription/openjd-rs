@@ -1,0 +1,12 @@
+{{{{P} [1,"{{ 'x86_64' template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  -!EXPR
+  name: TestJob
+  steps:
+  - name8 Stepif 2,  Pa1
+ range_expr   paramet{{ ['ok'',] }}r'DIR_NAMram.B el{"name": "{E:{{{len(string(work_dir)) > 0}}')
+            print(r'FRAME:outpu}"t
+  - IS_PATH:true
+  - FRAME:1
+  - FRAME:2

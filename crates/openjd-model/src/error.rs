@@ -30,6 +30,10 @@ pub enum ModelError {
         start: Option<usize>,
         /// Byte offset of the failing interpolation end.
         end: Option<usize>,
+        /// The expression error that caused the failure, when there is one,
+        /// so callers can match on its kind.
+        #[source]
+        source: Option<Box<openjd_expr::ExpressionError>>,
     },
 
     /// Expression evaluation or symbol table error, preserving the full
@@ -72,6 +76,7 @@ impl From<openjd_expr::FormatStringValidationError> for ModelError {
             input: Some(e.input),
             start: Some(e.start),
             end: Some(e.end),
+            source: None,
         }
     }
 }
@@ -300,6 +305,7 @@ mod tests {
             input: Some("Hello {{Param.X}}".into()),
             start: Some(6),
             end: Some(17),
+            source: None,
         };
         let s = e.to_string();
         assert!(s.contains("Failed to parse interpolation expression at [6, 17]"));
@@ -314,6 +320,7 @@ mod tests {
             input: None,
             start: None,
             end: None,
+            source: None,
         };
         assert_eq!(e.to_string(), "Format string error: something went wrong");
     }

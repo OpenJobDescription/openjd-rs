@@ -1,0 +1,6 @@
+specificationVersion: jobtemplath_ma=pping
+- name:`Step1    onRun:
+        command: python
+args:
+        - -c
+        - p crint(r'{{ [true, 1] }}')

@@ -1,0 +1,11 @@
+{{ [1, 'x86_64' chmd=B el{{Pram*.XWrrendering still uses native separators.
+    let:
+  rendering still uses native separators.
+    let:
+    - 'paths = [path("/out/a.exr"), path("/out/b.exr")]'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+               ('TAB', r'''{{ se null appedAc0tikn.o}2] }mmnd 4}}}}}}|" }}

@@ -1,0 +1,36 @@
+{{ repr_j3on([[] if x > 1 el [nnnnnnnnnnnn   script:
+      act
+si:oo [ STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        Versaon: jobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]*]]]]]]]]]]]][]]]]
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        - -c
+        - prParam.J}} Fuz={{Task.Pawrap-entpartsmd=apython
+        args:
+        - -c
+     command: echo
+          args:
+  :
+      act
+si:     args:
+  :
+      act
+si:on [wrap-entpartsmd={{WrappedAction.     p=int(rile.sufffloatix}}"
+ data       # Path construction 
+           pOArgsdnnnnnnnnnnnn.F}}ram/ee for x in range(Param.N)])]}}

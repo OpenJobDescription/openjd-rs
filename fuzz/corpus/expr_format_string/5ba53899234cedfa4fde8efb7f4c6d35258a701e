@@ -1,0 +1,37 @@
+{{ repr_json([[x for x in rA]ge||||||||||e: TestJob
+  parameterDefinitions:
+  - name: S3File
+    type: PATH
+  - name: HttpFile
+    type: PrDefinitions:
+  - name: S3File
+    type: PATH
+  - name: HttpFile
+    type: PATH
+  - namextensionsdm.Nseps:
+- TEXTname: Step0
+  script:
+    act)taskParameterDefinitionsm.Framions:
+      onRun:
+        command: python
+        args:
+        - -\
+         p-rint(r'{{ re_sea -> rch("a  onRun:
+        command: python
+        args:
+        e]])- -\
+       ATH
+  - namextensionsdm.Nseps:
+- TEXTname: Step0
+  script:
+    act)taskParameterDefinitionsm.Framions:
+      onRun:
+        command: python
+        args:
+        - -\
+         p-rint(r'{{ re_sea -> rch("a  onRun:
+        command: python
+        args:
+        e]])- -\
+         p-rint(r'{{ re_sea -> rch("abc", rbc", r"(a)\ ;") }}')
+}}

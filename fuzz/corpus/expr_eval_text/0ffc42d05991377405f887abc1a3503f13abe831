@@ -1,0 +1,1 @@
+['--quality', string(Param.Quality)] if Parma.Quality > 0 else null

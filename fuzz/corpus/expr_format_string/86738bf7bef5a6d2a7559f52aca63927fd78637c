@@ -1,0 +1,34 @@
+# Float values out int64 range ar    - -c
+          - |
+            print(r'POS:{{ 9223372036854775808.0 }}')
+            print(r'NEG:{{ -9223372036854775809.0 }}')
+expected:
+  output:
+  - "POS:92233720368547758775808.0"
+  - "NEG:-9.223372036854776e+18"  # unary negation removes pass-through, so sht:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+    !       print(r'POS:{{ 9223372036854775808.0 }}')
+            print(r'NEG:{{ -9223372036854775809.0 }}')
+expected:
+  output:
+  - "nt(r'NEG:{{ -9223372036854775809.0 }}')
+expected:
+  output:
+  - "POS:92233720368547758775808.0"
+  - "NEG:-9.223372036854776e+18"  # unary negation removes pass-through, so sht:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+    !       print(r'POS:{{ 9223372036854775808.0 }}')
+            print(r'NEG:{{ -9223372036854775809.0 }}')
+expected:
+  POS:92233720368547758775808.0"
+  - "NEG:-9.223372036854776e+18"  # unary negation removes pass-through, so shortest repr

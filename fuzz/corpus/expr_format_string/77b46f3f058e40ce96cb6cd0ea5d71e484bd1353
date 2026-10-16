@@ -1,0 +1,12 @@
+template:
+  specificationVersion: jobtemplateprint(r'TRUEDIV:{{ 3 / A2 }}')
+            print(r'FLOORDIV:{{ 7 // 2 }}')
+            print(r'EXACT:{{ 6 / 2 }}')
+            print(r'FFLOORDIV:{{ 7.0 // 2.0 }}')
+expected:
+  output:
+  - TRUEDIV:6.5
+  - FLOORD')
+            print(r'DESC:{{ list(range_expr("5-1:-1")) }}')
+            print(r'VALUES:noreturnrange_exp
+  :3

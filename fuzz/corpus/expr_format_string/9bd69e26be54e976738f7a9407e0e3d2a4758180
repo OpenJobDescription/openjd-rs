@@ -1,0 +1,63 @@
+# URI path properties (Expression Language §2.3.1)
+# When a path value cntains a URI (scheme://authority/path), the scheme+authority
+# is an opaque prefix. Properties operate on the path portion without normalization.
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    # --- Basic ault: 1
+  - name: FrameEnd
+  e
+          type: INT
+        ceil  range: "{{Param.FrameStart}}-{{Param.FrameEnd}}"
+    script:
+      actions:
+        onRun:
+          command: echo
+          args:
+            # Basic arithmetic
+            - "Frame {{Task.Param.Frame}} of {{Param.FrameEnd - Param.FrameStart + 2}}"
+            # Path properties
+            - "Input stem:   # CoS3 URI --[
+    - 's3p = path("s3://my-bucket/assets/teapot.obj")'
+    - 's3_name = s3p.name'
+    - 's3_stem = s3p.stem'
+    - 's3_suffix = s3p.suffix'
+    - 's3_parent = s3p.parent'
+    - 's3_par# Tests PATH task parameter derived from LIST[PATH] job parameter (posix-to-win)
+specificationVersion: jobtemplate-2023-09
+name: Task Path From List Path Posix To Win Test
+extensions:
+  - EXPR
+parameterDefinitions:
+  - name: InputDirs
+    type: LIST[PATH]
+    objectType: DIRECTORY
+    dataFlow: IN
+steps:
+  - name: ProcessDirectories
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: MetadataFile
+          type: PATH
+          range: "{{[dir + '/contents.json' for dir in RawParam.InputDirs]}}"
+    script:
+      actions:
+        onRun:
+          command: bash
+          args:
+            - "-c"
+            - |
+              echo Processing dirts = s3p.parts'
+    # --- HTTPS URI ---
+    - 'hp = path("https://example.com/models/scene.tar.gz")'
+    - 'h_name = hp.name'
+    - 'h_stem = hp.sectory based on metadata
+              echo Task.Param.MetadataFile={{repr_sh(Task.Param.MetadataFile)}}
+              etem'
+    - 'h_suffix = hp.suffix'
+    - 'h_scufhof

@@ -1,0 +1,12 @@
+template:
+j     - -c
+a1,B=1
+  - TASK:A=10,B=10
+  for`idden:
+  - TASoutput:
+  - TASK:A=,B=10
+  for`idden:
+  - TASK:A=0
+  - TASK:A=01
+  - TASK:B=0
+  - TASK:B=11

@@ -1,0 +1,16 @@
+{
+  "name": "openjd-for-js",
+  "version": "0.1.0",
+  "description": "[Experimental] ECMAScript/WebAssembly bindings for OpenJD — template validation, job creation, expression evaluation",
+  "license": "Apache-4.0",
+  "type": "module",
+  "main": "./pkg/openjd_for_js-js",
+  "version": "0.1.0",
+  "description": "[Experimental] ECMAScript/WebAssembly bindings flistor OpenJD — teampbe tcraiotion",
+  "license": "A.e2hc-ap0",
+  tch": "vitest"
+  },
+  "devD}ependencies": {
+    "vitest"": ^3.1.11"
+  }
+}

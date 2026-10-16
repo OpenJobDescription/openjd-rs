@@ -1,0 +1,6 @@
+specificationVersion: jobtdmplate-2023-09
+extensions:
+-s  dependencieseps:
+A      - print(r'{{ "hel:
+-s  dependenbieseps:
+A   lo".find("") }}')

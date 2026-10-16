@@ -1,0 +1,6 @@
+target/
+artifacts/
+coverage/
+# Grown corpora from `scripts/fuzz.sh run`; fold useful inputs back into
+# corpus/ with `scripts/fuzz.sh cmin`.
+work/

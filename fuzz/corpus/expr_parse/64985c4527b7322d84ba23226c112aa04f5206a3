@@ -1,0 +1,1 @@
+Param.A.uppeParam.A.up if Param.Flag else Param.B.lower()

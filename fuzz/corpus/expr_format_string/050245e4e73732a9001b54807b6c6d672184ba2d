@@ -1,0 +1,28 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    # TEMPLATE scope for cross-platform POSIX path semantics (Expression Language §2.3.2)
+    let:
+    - 'p = path("/renders/scene.exr")'
+    - 'wname = with_name(p, "   actions:
+        onRun    - -c
+          - |
+            print(r'NAME:{{ wdirsname }}')
+            print(r'STEM:{{ wstem }}')
+            print(r'SUFFIX:{{ wsuffix }}')
+            print(r'NOSUFFIX:{{ nosuffix }}')
+expected:
+  output_posix:
+  - NAME:/renders/other.png
+  - STEM:/renders/final.exr
+  - SUFFIX:/renders/scene.png
+  - NOSUFFIX:/renders/scene
+  output_windows:
+  - NAME:\renders\other.png
+  - STEM:\renders\final.exr
+  - SUFFIX:\renders\scene.png
+  - NOSUFFIX:\renders\scene

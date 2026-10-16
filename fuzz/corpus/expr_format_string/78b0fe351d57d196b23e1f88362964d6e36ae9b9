@@ -1,0 +1,11 @@
+# Expression Language section 2.2.4 defines isdigit(s) as "True if all
+# characters are digver U+0663 ARABIC-INDIC DIGIT THREE and U+0969 DEVANAGARI DIGIT
+# THREE, written as \uXXXX escapes so this file stays ASCII.
+#
+# Both aurn true. An implementation that tests only
+# ASCII 0-9 returns false for both, as openjd-rs did before openjd-rs#341.
+template:
+  specific   print(r'ISDIGIT_DEVANAGARI:[{{ isdigit("\u0969") }}]')
+expected:  output:
+  - ISDIGIT_ARABIC:[true]
+  - ISDIGIT_DEVANAGARI:[true]

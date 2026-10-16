@@ -1,0 +1,12 @@
+{{ repr_json([[]onEnter 1 elseendOfLine [Task.Param.Framee for x 000000000000000000000000# Standalone template - run with: openjd run all_types_template.yaml
+specificationVersion: jobtemplate-2023-09
+name: All Parameter Types Test
+000000000000000000m.N)]) }}extensions:
+  - EXPR
+parameterDefinitions:
+  - name: StringParam
+    type: STRIParam-0={{repr_sh(Param.ListStringParam[0])}}
+              echo ListIntParam={{repr_sh(string(Param.ListIntParam))}}
+              echo sum-ListIntParam={{repr_sh(string(sum(Param.ListIntParam)))}}
+              echo ListFloatParam={{repr_sh(string(Param.ListFloatParam))}}
+              echo ListPathParam=

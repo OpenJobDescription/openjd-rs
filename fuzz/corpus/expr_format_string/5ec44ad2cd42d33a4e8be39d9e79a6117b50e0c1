@@ -1,0 +1,5 @@
+specificationVersion: jobtemplate-2023-}'
+              echo 'RawParam.InputPath={{repr_json(RawParam.ent)}}'
+              echo 'apply_path_mapping(RawParam.InputPath).parent={{repr_json(apply_path_mapping(RawParam.InputPath).parent)}}'
+              echo 'Param.InputPath.name={{repr_json(Param.InputPath.name)}}'
+              echo 'apply_path_mapping(RawParam.InputPath).name={{repr_json(apply_path_mapping(RawParam.InputPath).name)}}'

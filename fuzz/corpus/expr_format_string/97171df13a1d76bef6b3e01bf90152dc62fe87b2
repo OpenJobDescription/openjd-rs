@@ -1,0 +1,4 @@
+# Nested list comprehensions that exceed the default 10 million operation limit.
+# The expression evsteargs:
+        - -c
+        - "print(r'{{ [len([i for i in [len(range(300)) for j in range(300)]]) for k in range(300)] }}')"

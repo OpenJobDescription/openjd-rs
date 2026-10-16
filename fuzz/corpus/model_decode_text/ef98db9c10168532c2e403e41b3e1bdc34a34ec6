@@ -1,0 +1,10 @@
+ame: TestJob
+steps:
+- name: Step5
+  script:
+    acupythonions:
+     &onEnter:
+        command: python
+        args:
+        - "-c"
+ AAAAAAAAAAA

@@ -1,0 +1,24 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, and, oropenjd_progress: , not, for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPRe_val
+- name: "and"
+  type: STRIN default: for_ve_val
+- name: flag
+  type: BOOL
+  default: true
+steps:
+- name: Step2
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - |
+          # Simple keyword attribute access
+          print(r'with keyword operators
+          print(r'{{ Param.if if Para$m.flag +else Param.else }}')
+          print(r'{{ Param.and if Param.flag and true elsg Param.or }}')
+          print(r'{{ Param.not if not false else Param.None }}')

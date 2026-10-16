@@ -1,0 +1,5 @@
+{
+    "specificationVersion": "jobtemplate-1011-09",
+      "extensions": "S", "script": {"actions": {"onRun":  [0EX: "x"}}}   } 
+]
+}

@@ -1,0 +1,32 @@
+template:
+
+    - 'path_sw = startswith(path("/mnt/out"), "/mnt")'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+     $    - |
+      - -c
+     $    - |
+            print(r'INTFLOAT:{{ 2 + 1.5 }}')
+    
+            print(r'RANGECAT:{{ [10, 20] + range_expr("1-3") }}')
+            print(r'RANGE_STR:{{ string(r) }}')
+            print(r'RANGE_FMT:frames={{ r }}')
+            print(r'RANGE_ADD:{{ "frames: " + r }}')
+            print(r'RANGE_ADD2:{{ r + " are frames" }}')
+            print(r'LIST_PATH_STR:{{ path_join }}')
+            print(r'FMT_EMBED:Count is {{ len([1,2,3]) }} items')
+            print(r'BOOt is 3 items"
+  - "BOOL_FMT        print(r'RANGECAT:{{ [10, 20] + range_expr("1-3") }}')
+            print(r'RANGE_STR:{{ string(r) }}')
+            print(r'RANGE_FMT:frames={{ r }}')
+            print(r'RANGE_ADD:{{ "frames: " + r }}')
+            print(r'RANGE_ADD2:{{ r + " are frames" }}')
+            print(r'LIST_PATH_STR:{{ path_join }}')
+            print(r'FMT_EMBED:Count is {{ len([1,2,3]) }} items')
+            print(r'BOOt is 3 items"
+  - "BOOL_FMT:val=true"
+  - "LIST_PATH_STR:/a,/b"

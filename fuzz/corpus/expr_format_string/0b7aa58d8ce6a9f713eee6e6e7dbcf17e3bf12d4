@@ -1,0 +1,4 @@
+{{)specificatio2nVersion: jobtemplate-2023a{)amand: python
+        args:
+        - -c
+        -/ /\"{{ re_search('hello', '') }}\")"}}

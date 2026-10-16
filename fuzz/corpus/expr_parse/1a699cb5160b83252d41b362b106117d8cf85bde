@@ -1,0 +1,9 @@
+,
+          rfind,
+            &[],
+                  rfind,
+            &[],
+            None,
+            None,
+              assert_eq!(
+            symtab.get_value(

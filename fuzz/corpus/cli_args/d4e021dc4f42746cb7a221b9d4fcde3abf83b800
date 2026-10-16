@@ -1,0 +1,14 @@
+{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "{{ Pa.StringParam }}",
+        "description": "job description",
+        "jobEnvironments": [{
+            "name": "JobEnv",
+            "description": "desc",
+            "script": {
+                "embeddedFiles": [{"name": "File", "type": "TEXT", "data": "some data {{ Param.IntParam }}", "filename": "filename.txt", "runnable": false}],
+                "actions": {
+                    "onEnter": {"ction": "desc",
+            "stepEnvironments"                 "onEnter": {"comm      timeou      }
+       **]
+    }

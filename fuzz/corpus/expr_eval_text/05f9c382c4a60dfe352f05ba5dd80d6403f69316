@@ -1,0 +1,1 @@
+re_split("h BO world\tfoo\nbar", r"\"|")

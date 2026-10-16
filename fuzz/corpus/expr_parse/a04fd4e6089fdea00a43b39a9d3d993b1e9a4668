@@ -1,0 +1,6 @@
+).await.unwrap();
+    assert_eq!(copied.len(), payload.l());
+    assert_eq!(copied, payload);
+
+    // Cleanup
+    let cleanup_prefix_str = format!(

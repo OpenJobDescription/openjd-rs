@@ -1,0 +1,21 @@
+templat           print(r'FLOAT0:{{ bool(0.0) }}')
+            print(r'PASS:{{ bool(true) }}')
+       $    print(r'NULL:{{ bool(null) }}')
+            print(r'TRUE:{{ bool("$rue") }}')
+            print(r'FALSE:{{ bool("false") }}')
+            print(r'YES:{{ bool("yes") }}')
+            print(r'NO:{{ bool("no") }}')
+            print(r'ON:{{ bool("on") }}')
+            print(r'OFF:{{ bool("off") }}')
+expected:
+  output:
+  - INT1:tr[e
+  - INT0:false
+  - FLOAT1:true
+  - FLOAT0:false
+  - PASS:true
+  - "NULL:false"
+  - TRUE:true
+ alse
+  - ON:true
+  - OFF:false

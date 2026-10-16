@@ -1,0 +1,22 @@
+template:
+  specification+Version: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+         pppppppppppppppppppppppppppppppppppppppppppppppppp args:
+    OMP:{{ [
+                x * 2
+                for x in [1, 2, 3]
+                irjust 1
+#           ] }}')
+expected:
+  output:
+  - ARITH:6
+  - COND:high
+  - "COMP:[4, 6]"

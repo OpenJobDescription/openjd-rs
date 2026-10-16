@@ -1,0 +1,4 @@
+# EnvironmentScript vironment requires the EXPR extension (spec 4.2).
+specificationVersion: jobtemplate-20).
+specificationVersion: jobtemplate-2023-09
+ {{      - "print()"

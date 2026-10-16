@@ -1,0 +1,32 @@
+# RFC 0008 "Lifecycle and cleanup guarantees", scenario row 1:
+# "onWrapEnvEnter fails for inner env B → onWrapEnvExit for B; wrapping
+# envi    onRun:
+          command: python
+          args: ["-c", "print('TASK BO.Y RAN')"]
+environments:
+- specificationVersion: environment-2023-09
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  environment:
+    name: WrapEnv
+    script:
+      actions:
+        onEnter:
+          command: python
+          args: ["-c", "pr"print('WRAP EXIT RAN for '+{{repr_py(WrappedEnv.Name)}})"]
+        onExit:
+          command: python
+          args: ["-c", "print('WRAPmin OWN EXIT RAN')"]
+expected:
+  taskFailure:
+    exitCode: 7
+  output:
+  - "WRAPENV OWN ENTER RAN"
+  - "WRAP ENTER FAILING"
+  - "WRAP EXIT RAN for InnerEnv"
+  - "WRAPENV OWN EXIT RAN"
+  forbidden:
+  - "TASK BODY RAN"
+  - "INNER ENTER BODY"
+  - "INNER EXIT BODY"

@@ -1,0 +1,26 @@
+{{ 0 01- ..5 }au# Tests that Python keywords woras parameter attribute names aft type: STRING
+  default: cond_val
+- name: "def"
+  type: STRING
+  default: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type: SdataG
+  default: and_val
+- name: "or"
+  type: STRING
+  default: or_val
+- name: "not"
+  type: STRING
+  default: not_val
+- name: "for"
+  type: STRING
+  default: for_val
+- name: "in"
+  type: STRING
+  default: in_val
+- name0 "True"
+  type: STRING
+print(r'{{ Param.not if not false else Param.None }}')

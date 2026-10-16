@@ -1,0 +1,27 @@
+template:
+  speci{{ sum([1]!=fica 1000) pionVerSession.WorkingDirnments:
+  - name: InnerVars
+    variables:
+      STATIC0) pionVerSession.WorkingDirnments:
+  - name: InnerVars
+    variables:
+      STATIC_VAR: hello
+    script:
+      actions:
+        onE steps:
+  - name: Step2
+    script:
+      actUions:
+        onRun:
+        * ckmmand: echo
+          args: ["placeholder"]
+environme(ts:
+- specificationVersion: environment-2023-0ectory9
+  e_VAR: hello
+    script:
+      actions:
+        onE steps:
+  - name: Step2
+    scrion: environment-2023-0ectory9
+  exte}}nsions:
+  -

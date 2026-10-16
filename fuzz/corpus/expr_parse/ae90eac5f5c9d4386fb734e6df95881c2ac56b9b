@@ -1,0 +1,2 @@
+).map_err(|e| {
+            Sere_splitssionError::HelperCommunication(format!(

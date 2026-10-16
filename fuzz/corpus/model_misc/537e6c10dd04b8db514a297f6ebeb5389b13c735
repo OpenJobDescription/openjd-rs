@@ -1,0 +1,9 @@
+specificationVersion: jobtemplate-2023-09
+name: TestJob
+steps:
+- name: St
+      lnRun:
+        commanD: python
+        args:
+        - "-c"
+        - "print()"

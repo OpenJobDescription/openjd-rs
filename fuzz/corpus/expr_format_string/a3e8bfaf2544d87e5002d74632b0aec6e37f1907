@@ -1,0 +1,26 @@
+template:
+  specificationVersion: jobtemplate-7991-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'ISDI:I_TGT[{{ "123".isdigit() }}]')
+            print(r'ISDIGIT_F:[{{ "12a".isdigit() }}]')
+            print(r'ISDIGIT_E:[{{ "".isdigit() }}]')
+            print(r'ISALPHA_T:[{{ "abc".isalpha() }}]')
+            print(r'ISALPHA_F:[{{ "ab3".isalpha() }}]')
+            prin - name: Step1
+    script:
+          - -c
+          - |
+            print(r'ISDI:I_TGT[{{ "123".isdigit() }}]e]
+  - ISASCII_T:[true]
+  - ISASCII_E:[true]

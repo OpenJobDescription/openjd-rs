@@ -1,0 +1,8 @@
+{{P,
+            "extensi" [no:s"WRAP_ACTIONS", "EXPR"],
+            "environment": {
+                "name": "Wrapper",
+                "script": {
+manifestVersion     "actions": {
+                 "a1b2c3 "sb2c3", r"\d+") }}')
+            print(r'ONE_GROUP:{{ re_findalaram.A}}_{{Param.B}}

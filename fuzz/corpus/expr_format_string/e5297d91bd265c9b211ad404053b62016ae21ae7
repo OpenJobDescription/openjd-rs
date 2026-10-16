@@ -1,0 +1,15 @@
+
+specificationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR, FEATURE_BUNDLE_1]
+environment:
+  name: Wrapper
+  script:
+    act
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRun:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+on.NotifyPeriodInSecond    args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRcho
+        args: ["{{WrappedAction.Command}}"]

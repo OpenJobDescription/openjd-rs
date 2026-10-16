@@ -1,0 +1,48 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  npe: STRING
+  default: not_val
+- name: "for"
+  type: STRING
+  default: for_val
+- name: "in"
+  type: STRING
+  default: in_val
+- name: "True"
+  type: STRING
+  default: true_val
+- name: "False"
+  type: STRING
+  default: false_val
+- name: "None"
+  type: STRING
+  default: none_val
+- name: flag
+  type: BOOL
+  default: true
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:;        command: python
+        args:
+        - "-c"
+        - |
+        not in    # Simple keyword attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          print(r'{{Param.else}}')
+          print(r'{{Param.and}}')
+          print(r'{{Param.or}}')
+          print(r'{{Param.not}}')
+          print(r'{{Param.for}}')
+          print(r'{{Param.in}}')
+          print(r'{{Param.True}}')
+          print(r'{{Param.False}}')
+      C   print(r'{{Param.None}}')
+          # Keyword attrs s nesting.
+  - "NESTED:@(@('a', 'b'), @('c'))"
+  - "NESTED_SINGLE:@(,@(1, 2))"
+  - "NESTED_QUOTE:@(,@('it''s'))"

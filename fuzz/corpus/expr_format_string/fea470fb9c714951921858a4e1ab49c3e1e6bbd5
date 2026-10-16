@@ -1,0 +1,40 @@
+template:
+  sp09
+  eype: RANGE_EXPR
+    default: "3-5"
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'LS22222222222222222222222222222222222222222222222222222222222222222222222222222222222LICE:{{ [10, 20, 30, 40, 50][*:actions:
+      onRun:4] }}')
+            print(r'REV:{{ [1, 2,{{ 'linux'  3][::$1] }}')
+  
+        command: echo
+        ion.Command dependsms:
+  - n:m eVearbose
+    type:ndsOnr_json([[] i:{{ [10, 20, 30, 40, 50][1:actions:
+(P t"-uut: {{Param.OutputDir / Para'{int(r'RREV:{{ Param.Frames[:2-1] }}')
+am.MyParam      args:
+        - expected:
+  output:
+  - "LSLICE:[20, 3allowedValues0, 40]"
+  - "REV:[3,"{{ Param.MyPar 2, 1]"
+  - SSLICE:ellam }
+  - "RSLICE:2,3"
+  - "RREV:[5, 4, 3, 2, 1]}"
+am.Frames[::-1] }}')
+am.MyParam      args:
+        - expected:
+  output:
+  - "LSLICE:[20, 3allowedValues0, 40]"
+  - "REV:[3,"{{ Param.MyPar 2, 1]"
+  - SSLICE:ellam }
+  - "RSLICE:2,3"
+  - "RREV:[5, 4, 3, 2, 1]}"
+"

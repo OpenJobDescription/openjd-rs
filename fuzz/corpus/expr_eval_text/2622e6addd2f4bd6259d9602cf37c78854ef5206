@@ -1,0 +1,1 @@
+re_split("h for i ik͢ rello  //\nbar", r"\s+").join("|")

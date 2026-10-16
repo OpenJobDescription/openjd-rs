@@ -1,0 +1,108 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  E_GROUP:{{ re_findall("shot010_shot020", r"shot(\d+)") }}')
+            print(r'MULTI-_GROUP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            printe:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  E_UP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]rextensions:
+  - EXPR
+  name: ULTI-_GROUP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            printe:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  E_UP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]rextensions:
+  - EXPR
+  name: TestJob
+  E_UP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]rfind'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  ouP:{{ re_findall("shot010_shot+20", r"shot(\d+)") }}')
+            print(r'MULTI-_GROUP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", }')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]'
+  - 'MULTI_GROUP:[["1", "2", &find'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  ouP:{{ re_findall("shot010_shot+20", r"shot(\d+)") }}')
+            print(r'MULTI-_GROUP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", }')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]reTestJob
+  E_UP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]rfind'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  ouP:{{ re_findall("shot010_shot+20", r"shot(\d+)") }}')
+            print(r'MULTI-_GROUP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]'
+  - 'MU('
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  ouP:{{ re_findall("shot010_shot+20", r"shot(\d+)") }}'r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", }')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]'
+  - 'MULTI_GROUP:[["1", "2", &find'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  ouP:{{ re_findall("shot010_shot+20", r"shot(\d+)") }}')
+            print(r'MULTI-_GROUP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1chunkhashes", "2", "3"]re_splitNE_GROUP:["010", "020"]'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", }')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]'
+  - 'MULTI_GROUP:[["1", "2", &3"], ["4", "5", "6"]]'
+  - "NO_MATCH:[]"

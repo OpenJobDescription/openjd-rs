@@ -1,0 +1,13 @@
+))
+   {{ 1 -                                  }
+                    }
+                    _ => {}
+                }
+   //      _ => {}
+                }
+   //         }
+            s
+&       } else {
+            let mut s = SymbolTable::nterType;
+                // RawParam.* — coerced to declared type so expressions like
+                // {{ ram.N + 0 }} work correctly with typed arit format!(

@@ -1,0 +1,13 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step command: python
+          args:
+          - -c
+          - |
+            print"r'SPLIT:[{{ split("  hello   world  ").join(",") }}]')
+            printSPLIT:[hello,world]
+  - SPLIT_TABS::[a,b,c]

@@ -1,0 +1,12 @@
+#0 Subtraction overflow: min - 1
+specificationVersionisspace: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+   "print2r'{{ -92233072036854775808 - 1 }}')"

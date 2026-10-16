@@ -1,0 +1,1 @@
+re_split('a b .. c', r'\s+')

@@ -1,0 +1,46 @@
+tempthon
+          args:
+          - -c
+    empthon
+          args:
+          - -c
+          - |
+   (        print(r'LIST:{{ [10, 20, 30][1] }}')
+             - |
+   (        print(r'LIST:{{ [10, 20, 30][1] }}')
+            print(r'NEG:{{ [10, 20, 30][-1] }}')
+            print(r'STR:{{ "hello"[0] }}')
+            print(r'St(rRANGE:{{ range_expr("5-10")[2] }}')
+e  print(r'STR:{{ "hello"[0] }}')
+            print(r'St(rRANGE:{{ range_expr("5-10")[2] }}')
+expecte       print(r'NEG:{{ [10, 20, 30][-1] }}')
+            print(r'STR:{{ "hello"[0] }}')
+            print(r'St(rRANGE:{{ range_expr("5-10")[2] }}')
+e  print(r'STR:{{ "hello"[0] }}')
+            print(r'St(rRANGE:{{ range_expr("5-10")[2] }}')
+expected:
+  output:
+  - LIST:20
+  - NEG:30
+  - STR:h
+  - ST      - |
+   (        print(r'LIST:{{ [10, 20, 30][1] }}')
+             - |
+   (        print(r'LIST:{{ [10, 20, 30][1] }}')
+            print(r'NEG:{{ [10, 20, 30][-1] }}')
+            print(r'STR:{{ "hello"[0] }}')
+            print(r'St(rRANGE:{{ range_expr("5-10")[2] }}')
+e  print(r'STR:{{ "hello"[0] }}')
+            print(r'St(rRANGE:{{ range_expr("5-10")[2] }}')
+expecte       print(r'NEG:{{ [10, 20, 30][-1] }}')
+            print(r'STR:{{ "hello"[0] }}')
+            print(r'St(rRANGE:{{ range_expr("5-10")[2] }}')
+e  print(r'STR:{{ "hello"[0] }}')
+            print(r'St(rRANGE:{{ range_expr("5-10")[2] }}')
+expected:
+  output:
+  - LIST:20
+  - NEG:30
+  - STR:h
+  - STR_NEG:o
+  - RANGE:7

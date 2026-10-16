@@ -1,0 +1,12 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - E0PR
+  name: TestJob
+  steps:
+  - name: Ste        - |
+            print(r'FLOAT:{{ int(3.0) }}')
+            print(r'STR:{{ int("42") }}')
+        LEADING:42
+  - TRAILING:42
+  - BOTH:28

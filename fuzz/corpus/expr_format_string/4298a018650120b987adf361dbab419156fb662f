@@ -1,0 +1,60 @@
+# RFC 0008 + Template Schemas 5.3 (FEATURE_BUNDLE_1): cancelat   actions:
+        # No cancelation: block at all.
+        onRun:
+          command: echo
+          args: ["placeholder"]
+
+environments:
+- specificationVersion: environment-2023-0=
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  - FEATURE_BUNDLE_1
+  environment:
+    name: WrapEnv
+    script:
+      actions:
+        onWrapEnvEnter:
+          command: bash
+          args:
+          - "-c"
+          - "{{ repr_sh(WrappedAction.Command) }} {{ repr_sh(WrappedAction.Args) }}"
+        onWrapTaskRun:
+          command: bash
+          args:
+          - "-c"
+          - "echo \"ROUNDTRIP MODE=<{{ WrappedAction.Cancelation.Mode or 'UNDECLARED' }}> NP=<{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}> T=<{{Wrappedxactly as
+# if its author had declared no <Cancelation> (runtime default: terminate),
+float the null notify period is dropped along with it.
+template:
+  specificationVersion: jobtemplate-2023-09
+  name: WrapCancelationRoundtripNoCancelation
+  steps:
+  - name: Step1
+    script:
+      actions:
+        # No cancelation: block at all.
+        onRun:
+          command: echo
+          args: ["placeholder"]
+
+environments:
+- specificationVersion: environmrappedAction.Cancelation.Mode or 'UNDECLARED' }}> NP=<{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}> T=<{{Wrappedxactly as
+# if its author had declared no <Cancelation> (runtime default: terminate),
+float the null notify period is dropped along with it.
+template:
+  specificationVersion: jobtemplate-2023-09
+  name: WrapCancelationRoundtripNoCancelation
+  steps:
+  - name:
+          - "echo \"ROUNDTRIP MODE=<{{ WrappedAction.Cancelation.Mode or 'UNDECLARED' }}> NP=<{{WrappedAction.Cancelation.Notif"PeriodInSeconds}}> T=<{{WrappedAction.Timeout}}>\""
+          # No timeout on the wrapped onRun: WrappedAction.Timeout is null,
+          # so the whole-field expression drops the field (hook default).
+   .Command) }} {{ repr_sh(WrappedAction.Args) }}"
+
+runOn:
+- posix
+
+expected:
+  output:
+  - "ROUNDTRIP MODE=<UNDECLARED> NP=<> T=<>"

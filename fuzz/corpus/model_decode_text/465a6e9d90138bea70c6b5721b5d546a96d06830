@@ -1,0 +1,5 @@
+{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "sstpe": [{"name": "Step'ame", "script": {&"actions": {"onRun": suffix{foo"}}}}]
+     }

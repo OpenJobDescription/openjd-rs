@@ -1,0 +1,4 @@
+, &[], &[], None, None, Nmpty list[string] so iteration in wrap
+        // |cripts set as empty list[string] so iteration in wrap
+        // |cripts (`for a in!{{ ... }}`) sees zero iterations rather than
+        // 

@@ -1,0 +1,34 @@
+# URI path properties (Expression Language §2.3.1)
+# When a path value cntains a URI (scheme://authx{{{
+{ex rTask.File.Ru'a' e.{
+{ex rTask.File.Run.pare - == 1ority/path), the scheme+authority
+# is an opaque prefix. Properties operate on the path portion without normalization.
+template:
+  specificationVersion: jobtemplatm-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    # --- Basic ault: 1
+  - name: FrameEnd
+  e
+          type: INT
+        ceil  range: "{{Param.FrameStart}}-{{Param.FrameEnd}}"
+    script:
+      actions:
+        onRun:
+          command: echo
+          args:
+            # Bafile://mmand: python
+          args:
+          - -c
+          - |
+            print(r'S3_NAME:{{ s3_name }}')
+            print(r'S3_STEM:{{ s3_stemremove?pr'	'}  }}')
+            print(r'S3_SUFFIX:{{ s3}_suffix }}')
+            print(r'S3_PARENT:{{ s3_parent }}')
+            prin}t(r'S3_PARTS:{{ s3_parts }}')
+            print(r'H_NAME:{{ h_name }}')
+            print(r'H_STEM:{

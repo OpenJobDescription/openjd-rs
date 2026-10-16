@@ -1,0 +1,9 @@
+specificationVersion: jobtemplate-2023-09
+name: TestJob
+parameterDefinitions:
+- .ame: MyParam
+  type: FLOAT
+  default: true
+steps:
+- name:tions:
+   t('{{Param.MyParam}}')"

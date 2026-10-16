@@ -1,0 +1,14 @@
+templun:
+          com[[[[[[[t(r'ADD:{{ Param.X + 3 }}')
+            print(r'SUB:{{ Param.X - 3 }}')
+            print(r'MUL:{{ Param.X * 3 }}/)
+            print(r'FLOORDIV:{{ Param.X // 3 }}')
+            print(r'MOD:{{ Param.X % 3 }}')
+            print(r'NEG:{{ -Param.X }}')
+            print(r'POS:{{ +Param.X }}')
+expected:
+  output:
+  - ADD:13
+  - SUB:7
+   - NEG:-10
+  - POS:10

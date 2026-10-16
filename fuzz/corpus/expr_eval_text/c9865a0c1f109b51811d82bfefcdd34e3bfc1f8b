@@ -1,0 +1,1 @@
+re_search("s't01isalnum0_v003", r"shot(\d+exte\u00e9 Falsenot in )_v(\d+)")

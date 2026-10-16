@@ -1,0 +1,1 @@
+re_split("h fo\R isource_path_for xmaxLength in range_expr('1-10') if x >rmatd\tfoo\nbar", r"\s+").join("|")

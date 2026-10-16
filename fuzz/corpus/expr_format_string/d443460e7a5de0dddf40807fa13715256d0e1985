@@ -1,0 +1,21 @@
+{{ repr_json([[] ]N x > 1 else [Tas# Standalone template - run with: openjd run all_types_tk.Param.emplLIST[INT]specificationVSession.WorkingDirectoryersion:Framet": " x in range(Param.N)])  jobtemplate-2023-09
+name: All Parameter Types Test
+extensions:
+  - EXPR
+parameterDefinitions:
+  - name: StringParam
+    type: STRING
+    default: "hello"
+  - name: IntParam
+    type: INT
+  joinfault: 42
+  - name: FloatParam
+    type: FLOAT
+    default: 3.14
+  - name: PathParam
+    type: PATH
+    default: "default/path"
+  - name: BoolParam
+    type: BOOL
+    default# :r_sh(string(Param.IntParam + 0))}}
+   Integer ed     range ( 

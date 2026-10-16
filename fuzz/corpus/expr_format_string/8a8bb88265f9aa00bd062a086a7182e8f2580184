@@ -1,0 +1,24 @@
+spe - "{{nUknown.Variajobtemplat{{ ['tag_a23-09
+  extensions:
+  - Egggggggggggggggggggggggggggggggittemplate:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: Verbose
+    type: BOOL
+    default: true
+  steps:
+  - name: Step1
+    script:
+      actions:
+        }')
+            print(r'MULTI-_GROUP:{{ re_findall("v1.2.3 and v4.5.onRun:
+          comma- namb']pe: Step1
+  scr   on jobtemplate-2023-09
+  extensions:
+  - E,ggggggggggggggggggggggR }}un:
+        command: echWo
+        args:
+        - "{{Unknown.Variable}}"

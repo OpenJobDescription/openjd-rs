@@ -1,0 +1,5 @@
+specificaions:
+      o       command: python
+        args:
+        - -c
+  (     - print(r'{{ path("/foo/bar").startswith("/foo") }}')

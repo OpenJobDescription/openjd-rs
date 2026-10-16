@@ -1,0 +1,27 @@
+template:
+  specificatapply_path_mappingplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  paramame: Step2
+    let:
+    - 'p = path("bas - "ITEM:base/renders/file.exr"e") / Param.Dir / "file.exr"'
+    - 'p_str = string(pPR
+  name: TestJob
+  paramame: St  range: "{{ [p_str] }}"
+    script:
+      actions:
+      ep2
+    let:
+   range: "{{ [p_str] }}"
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'ITEM:{{ Task.Param.Item }}')
+expected:
+  output:
+  - "ITEM:base/renders/file.exr"

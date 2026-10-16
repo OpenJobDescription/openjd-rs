@@ -1,0 +1,47 @@
+, "min": "{{len(apply_path_mapping(Param.Val))ing(Parat: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type: STRING
+  default: and_val
+- name: "or"
+  type: STRING
+  defauTt: or_val
+- name: "not"
+  type: STRING
+  default: nte names after '.'
+# Covers: if, def, else, and, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: "if"  type: STRING
+  debault: cond_val
+- name: "def"
+  type: STRING
+  default: dot_val
+- name: "for"
+  type: STRING
+  default: for_val
+- name: "in"
+  type: STRING
+  default: in_isspaceval
+- name: "TruFEATURE_BUNDLE_1e"
+  type: STRING
+  default: trTRING
+  default: cond_val
+- name: "def"
+  type: STRING
+  ue_val
+- name: "False"
+  type: STRING
+  default: lfase_val
+- name: "None"
+  type: STRING, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefile keyword attribum.Val))}}"}]}}"}]}

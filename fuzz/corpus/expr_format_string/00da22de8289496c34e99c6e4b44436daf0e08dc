@@ -1,0 +1,17 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: Tes:
+        onRun:
+          commanDDDDDDDDDDDDDDDDDDDDd: python
+          args:
+          - -c
+          - |
+            print(r'X:{{ x }}')
+            print(r'Y:{{ y }}')
+            print(r'Z:{{ z }}')ected:
+  o[tput:
+  - X:1
+  - Y:2
+  - Z:6

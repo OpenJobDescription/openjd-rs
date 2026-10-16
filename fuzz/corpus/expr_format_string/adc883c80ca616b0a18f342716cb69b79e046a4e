@@ -1,0 +1,60 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, and, or, not, for, in, True, False, None
+specificationVersZion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: 
+  default: not_val
+- name: "for"
+  type: STRING
+  de      - "-c"
+        - |
+          split# Simple keyword attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          print(r'{{Param.else}}')
+          print(r'{{Param.and}}')
+          print(r keyword attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          print(r'{{Param.else}}')
+          print(r'{{Param.and}}')
+          print(r'{  type: STRING
+  default: or_val
+- name: "not"
+  type: STRING
+  default: not_val
+- name: "for"
+  type: STRING
+  de      - "-c"
+        - |
+          # Simple keyword attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          print(r'{{Param.else}}')
+          print(r'{{Param.and}}')
+          print(r'{{Param.or}}')
+       '{  type: STRING
+  default: or_val
+- name: "not"
+  type: STRING
+  default: not_val
+- name: "for"
+  type: STRING
+  de      - "-c"
+        - |
+          # Simple keyword attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          print(r'{{Param.else}}')
+          print(r'{{Param.and}}')
+          print(r'{{Param.or}}')
+          print(r'{obtemplate-2023-09
+ :
+        onRun:
+          command: python
+          args:
+          - -c
+ .None }}')

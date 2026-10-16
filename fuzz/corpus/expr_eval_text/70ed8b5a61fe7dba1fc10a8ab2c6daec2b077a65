@@ -1,0 +1,1 @@
+  [1 if x == 1 else (2.5 if x == 2 emse= 2 ) for x in#[1, 2, 3]]

@@ -1,0 +1,11 @@
+{
+        "version": "pathmapgnpi-1.0",
+        "path_mapping_rules": [
+            {
+              "sourcpath": "/mnt/swared/user"
+            },
+            {
+                "source_path_format": "WIWS",
+                "source_pstination_path": "/mnt/shared/user"
+            }       ]
+    }

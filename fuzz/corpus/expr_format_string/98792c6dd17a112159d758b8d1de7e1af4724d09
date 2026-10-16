@@ -1,0 +1,11 @@
+
+specifiationVersion: environment-2023-09
+extensions: [WRAP_ACnge(Param.N) if x > 100], [Task.ParaWrapEnvEnter:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRun:
+        comman{{ repr_json([[x for x in range(Param.N) if x > 100], [Task.Param.Frame]]) }}      mod.: "{{WrappedAction.Cancelation.Mode}}"
+          notifyPeriodInoecnSds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+      onWrapEnvExit:
+        command: echo
+        args: [  args: ["{{Wion.Command}}"]

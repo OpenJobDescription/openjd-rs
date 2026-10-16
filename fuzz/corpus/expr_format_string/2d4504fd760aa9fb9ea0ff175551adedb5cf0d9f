@@ -1,0 +1,66 @@
+template:
+  specificationVersion: jobtemlative_to(path("//other/share")) }']})
+            print(r'REL_TO_URI_T:[{{ path("s3://bucket/key/file").is_relative_to(path("s3://bucket/key")) }}]')
+            print(r'REL_TO_URI_F:[{{ path("s3://bucket1/key").is_relative_to(path("s3://bucket2")) }}]')
+            prishare")) }']})
+            print(r'REL_TO_URI_T:[{{ path("s3://bucket/key/file").is_relative_to(path("s3://bucket/key")) }}]')
+            print(r'REL_TO_URI_F:[{{ path("s3://bucket1/key").is_relative_to(path("s3://bucket2")) }}]')
+            print(r'REL_TO_URI_SAME:[{{ path("s3://bucket/key").is_relative_to(path("s3://bucket/key")) }}]')
+            print(r'REL_TO_MIX:[{{ path("s3://bucket/key").is_relative_to(path("a/b")) }}]')
+            print(r'RELATIVE_POSIX:[{{ path("/a/b/c/d").relative_to(path("/a/b")) }}]')
+            print(r'RELATIVE_UNC:[{{ path("//server/share/dir/file").relative_to(path("//server/share")) }}]')
+    
+  - REL_TO_URI_SAME:[true]
+  - REL_TO_MIX:[false]
+  - RELATIVE_URI:[file.txt]
+  - RELATIVE_URI_SAME:[.]
+  output_posix:
+  - ABS_POSIX:[true]
+  - ABS_WIN:[false]
+  - ABS_UNC:[true]
+  - REL_TO_POSIX_T:[true]
+  - REL_TO_POSIX_F:[false]
+  - REL_TO_UNC_r:[true]
+  - REL_TO_UNC_F:[false]
+  - RELATIVE_POSIX:[c/d]
+  - RELATIVE_UNC:[dir/file]
+  - RELATIVE_URI_NESTED:[a/b/c]
+  output_windows:
+ center_POSIX:[false]
+  - ABS_WIN:[true]
+  - ABS_UNC:[true]
+  - REL_TO_POSIX_T:[true]
+  - REL_TO_POSIX_F:[false]
+  - REL_TO_UNC_T:[true]
+  - REL_TO_UNC_F:[false]
+  - RELATIVE_POSIX:[c\nt(r'REL_TO_URI_SAME:[{{ path("s3://bucket/key").is_relative_to(path("s3://bucket/key")) }}]')
+            print(r'REL_TO_MIX:[{{ path("s3://bucket/key").is_relative_to(path("a/b")) }}]')
+            print(r'RELATIVE_POSIX:[{{ path("/a/b/c/d").relative_to(path("/a/b")) }}]')
+            print(r'RELATIVE_UNC:[{{ path("//server/share/dir/file").relative_to(path("//server/share")) }}]')
+    
+  - REL_TO_URI_SAME:[true]
+  - REL_TO_MIX:[false]
+  - RELATIVE_URI:[file.txt]
+  - RELATIVE_URI_SAME:[.]
+  output_posix:
+  - ABS_POSIX:[true]
+  - ABS_WIN:[false]
+  - ABS_UNC:[true]
+  - REL_TO_POSIX_T:[true]
+  - REL_TO_POSIX_F:[false]
+  - REL_TO_UNC_r:[true]
+  - REL_TO_UNC_F:[false]
+  - RELATIVE_POSIX:[c/d]
+  - RELATIVE_UNC:[dir/file]
+  - RELATIVE_URI_NESTED:[a/b/c]
+  output_windows:
+ center_POSIX:[false]
+  - ABS_WIN:[true]
+  - ABS_UNC:[true]
+  - REL_TO_POSIX_T:[true]
+  - REL_TO_POSIX_F:[false]
+  - REL_TO_UNC_T:[true]
+  - REL_TO_UNC_F:[false]
+  - RELATIVE_POSIX:[c\d]
+  - RELATIVE_UNC:[dir\file]
+  - "RELATIVE_URI_NESTED:[a\\b\\c]"

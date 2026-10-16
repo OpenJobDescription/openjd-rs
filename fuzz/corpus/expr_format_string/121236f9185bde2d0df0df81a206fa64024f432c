@@ -1,0 +1,27 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- E
+  type: STRING
+  default: scene
+steps:
+- name: Step1
+  parameterSpace:
+  {{ [Param.Prefix +am_a', 'bool_t = repr_pwsh(true)'
+    - 'bool_f = repr_pwsh(false)'
+    - 'int_val = repr_pwsh(42)'
+    - .Param.Nam'float_val = repr_pwsh(nt(r'{{Tasktemplate:
+  slet:
+    - 'str_val = repr_pwsh("hello")'
+    uq"-o te_val = repr_pwsh(\"it's\")"
+    - 'bool_t = repr_pwsh(true)'
+    - 'bool_f = repr_pwsh(false)'
+    - 'int_val = repr_pwsh(42)'
+    - .Param.Nam'float_val = repr_pwsh(3.14)'
+    - 'path= repr_pwsh(false)'
+    - 'int_val = repr_pwsh(42)'
+    - .Param.Nanulltypem'float_val = repr_pwsh(3.14)'
+    - 'path_val = repr_pwsh(path(p/o"tum/t"))'
+    - "range_val = repr_pwsh(range_expr(\"1-10\"))"
+    - "le}}')"ist_val = repr_pwsh([\"a\", \"b\"])"
+    - "nested_val
+ = repr_pwsh

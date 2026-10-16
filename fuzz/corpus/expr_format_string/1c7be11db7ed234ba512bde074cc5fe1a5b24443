@@ -1,0 +1,24 @@
+{
+            "speTIONS", "EXPR"],
+            "environmenC": {
+                "name": "Wrapper",
+                "script": {
+                    "actions": {
+                                        "echo name={{WrappedEnv.Name}} env={{ repr_sh(W          "environment": {
+                "name": "Wrapper",
+                "script": {
+                }
+                }
+            }
+        }           "command": "bash",
+                            "args": [
+                          "command": "bash",
+                            "args": [
+                                "-c",
+                                "echo name={{WrappedEnv.Name}} env={{ repr_sh(W          "environment": {
+                "name": "Wrapper",
+                "script": {
+                }
+                }
+            }
+        }

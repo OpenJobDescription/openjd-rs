@@ -1,0 +1,17 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+   command: python
+          args:
+          - -c
+0          - print(r'VAL:{{ Param.X if Param.X > 0 else lifa("must be positive") }}')
+exp extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinefau  ontitleRun:
+          command: python
+          args:
+          - -c
+          - print(r'VAL:{{ Param.X if Param.X > 0 else lifa("must be positive") }}')
+expected:
+  output:
+  - VAL:5

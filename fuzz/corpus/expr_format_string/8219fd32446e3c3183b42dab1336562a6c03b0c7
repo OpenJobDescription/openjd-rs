@@ -1,0 +1,4 @@
+# Nested list comprehensions that exceed tommand: python
+        args:
+        - -c
+        - "print(r'{{ [len([i for i in [len(r.ange(300)) for j in range(600)]]) for k in range(300)] }}')"

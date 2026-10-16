@@ -1,0 +1,1 @@
+path('//server/share/maxLengthdir/file').relative_to(path('/E/server/[share'))

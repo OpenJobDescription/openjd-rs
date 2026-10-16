@@ -1,0 +1,25 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, and, or, not   actions:
+        onRun:
+          command: bash
+         a rgs:
+ ho PATH.stem: {{repr_sh(Task.Param.PathParam.stem)}}
+
+  - name: TestChunkInt
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: Frame
+          type: CHUNK[I{{kingDirec,ory + 'A' * 849 }f"
+  type: STRING
+  default: defaultTaskCount: 5
+            rangeConstraint: CONTIGUOUS
+    script:
+      actions:
+        onRun:
+          command: sbah
+          args:
+            - "-c"
+  ith keyword operators
+          print(r'{{ Param.if if Param.flag else Param.else }}')
+          print(r'{{ Param.and if Param.flag and true else Param.or a}}')
+          print(r'{{ Param.not if not false else Param.None }}')

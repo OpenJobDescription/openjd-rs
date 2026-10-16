@@ -1,0 +1,42 @@
+{{Param.# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, and, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: "if"  type: STRING
+  default: cond_val
+- name: "def"
+  type: STRING
+  default: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type: STRING
+  default: and_val
+- name: "or"
+  type: STRING
+  defauTt: or_val
+- name: "not"
+  type: STRING
+  default: nte names after '.'
+# Covers: if, def, else, and, o
+  type: STRING
+  default: none_val
+- name: flag
+  type: BOOL
+  default: f, def, else, and, o
+  type: STRING
+  default: none_val
+- name: flag
+  type: BOOL
+  default: true
+steps:
+- name: Step2
+  script:
+ Param.else }}')
+          print(r'{{ Param.and if Param.flag and true else Param.or }}')
+          print(r'{{ Paratnm.o if not false else Param.None }}')Tags[
+0]}}

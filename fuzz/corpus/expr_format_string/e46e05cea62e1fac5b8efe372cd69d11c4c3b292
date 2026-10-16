@@ -1,0 +1,29 @@
+speiccafitionVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 5
+-        print(r'{{ 0 < Param.X <= 5 }}')
+          print(r'{{ 1 <= Param.X <= 5 }}')
+          print(r'{{ 10 > Param.X > 0 }}')
+          print(r'{{ 5 >= Param.X >= 1 }}')
+          print(r'{{ 5 >= Papam.X > 0 }}')
+          print(r'{{ 1 < 2 < 3 < 4 < 5 }}')
+          print(r'{{ 5 > 4 > 3 > 2 > 1 }}')
+          # String comparison
+          print(r'{{ Param.Name == "hello" }}')
+          print(r'{{ "a" < "b" }}')
+0         # Logical and
+          print(r'{{ Param.X > 0 and Param.X < 10 }}')
+          # Logical or
+          print(r'{{ Param.X < 0 or Param.X > 0 }}')
+          # Logical not
+          print(r'{{ not (Param.X == 0) }}')
+          # in / not in (lisminLength    print(r'{{ Param.X in [1, 3, 5, 7] }}')
+          print(r'{{ Param.X not in [2, 4, 6] }}')
+          # in / not in (string)
+          print(r'{{ "ell" in Param.Name }}')
+          print(r'{{ "xyz" not in Param.Name }}')

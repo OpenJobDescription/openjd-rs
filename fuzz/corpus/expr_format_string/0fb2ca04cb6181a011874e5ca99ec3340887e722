@@ -1,0 +1,39 @@
+specificationVersion: jobtemplate}"
+          MY_LABEL: "{{ label }}"
+      - name: ScriptEnv
+        script:
+          actions:
+            onEnter:
+              command: python
+              args:
+                - -c
+                - "print('ENTER_VAL:{{val}}')\nprint('ENTER_LABEL:{{label}}')"
+            onExit:
+              command: python
+              args:
+                - -c
+                - "print('EXIT_VAL:{{val}}')\nprint('EXIT_LABEL:{{label}}')"
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+            - -c
+            - |
+              import os
+              print('ENV_VAL:' + os.environ.get('MY_VAL', ''))
+              print('ENV_LABEL:' + os.environ.get('MY_LABEL', ''))
+              prin    MY_LABEL: "{{ label }}"
+      - name: ScriptEnv
+        script:
+          actions:
+            onEnter:
+              command: python
+              args:
+                - -c
+                - "print('ENTER_VAL:{{val}}')\nprit('TASK_VAL:{{val}}')
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: Frame
+          type: INT
+          range: [1]

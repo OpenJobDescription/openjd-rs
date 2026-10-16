@@ -1,0 +1,12 @@
+template:
+  specificationVersion: jotmpbelate-2022-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: X
+     steps:
+  - na        command: pythonr'VAL:{{ Param.X if Param.X > 0 else fail("must be positive") }}')
+expected:
+  output:
+  - VAL:2

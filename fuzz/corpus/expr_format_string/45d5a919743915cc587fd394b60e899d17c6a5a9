@@ -1,0 +1,18 @@
+
+sRAP_ACTIONS, EXPR, FEATURE_BUNDLE_1]
+environment:
+  name: Wrapper
+  script:
+    actions:
+      onWrapEnvEnter:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+      onWrapTaskRun:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]
+        cancelation:
+          mode: "{{WrappedAction.Cancelation.Mode}}"
+          notifyPeriodInSeconds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+      onWrapEnvExit:
+        command: echo
+        args: ["{{WrappedAction.Command}}"]

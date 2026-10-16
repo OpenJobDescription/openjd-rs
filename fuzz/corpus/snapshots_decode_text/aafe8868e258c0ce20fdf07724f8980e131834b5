@@ -1,0 +1,5 @@
+{
+  "ashAlg":"xxh128","manif job": {
+    "vitest": "^4.1.11"
+  }
+}

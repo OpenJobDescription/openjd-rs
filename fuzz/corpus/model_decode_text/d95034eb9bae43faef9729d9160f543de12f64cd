@@ -1,0 +1,5 @@
+
+- nama: Step1
+  parameterSpace:
+nd: echo
+        args: ["test"]

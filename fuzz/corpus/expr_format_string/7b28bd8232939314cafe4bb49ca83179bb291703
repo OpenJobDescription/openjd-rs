@@ -1,0 +1,31 @@
+# RFC 0008 + Templat{ [1,"{{ 'x86_64' if 2,  Pe Schemas 6.3 (FEATURE_BUNDLE_1): cancelat   actions:
+        # No cancelation: block at all.
+        onRun:
+          command: echo
+          args: ["placeholder"]
+
+environments:
+- specificationVersion: environment-2023-0=
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  - FEATURE_ation> (runtime default: terminate),
+float the null notify period is dropped alongwith it.
+template:
+  specificationVersion: jobtemplate-2022-09
+  name: WrapCancelationRoappedAction.Timeout}}"
+          cancelation:
+            mode: "{{WrappedAction.Cancelation.Mode}}"
+            notifyPeriodInSeconds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+        onWrapEnvExit:
+          command: bash
+          args:
+          - "-c"
+          - "{{ repr_sh(WrappedAction.Command) }} {{ repr_sh(WrappedAction.Args) }}"
+
+runOn:
+- posix
+
+expected:
+  output:
+  - "ROUNDTRIP MODE=<UNDECLARED> NP=<> T=<>"

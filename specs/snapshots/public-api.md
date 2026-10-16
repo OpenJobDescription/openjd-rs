@@ -130,7 +130,7 @@ pub fn with_files(self, files: Vec<FileEntry>) -> Self;
 pub fn with_dirs(self, dirs: Vec<DirEntry>) -> Self;
 pub fn with_parent_hash(self, hash: Option<String>) -> Self;
 pub fn clear_hashes(&mut self);
-pub fn recompute_total_size(&mut self);
+pub fn recompute_total_size(&mut self); // saturates at u64::MAX
 pub fn common_root(&self) -> Option<String>;
 ```
 

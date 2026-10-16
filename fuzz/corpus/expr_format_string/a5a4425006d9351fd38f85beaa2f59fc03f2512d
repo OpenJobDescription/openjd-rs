@@ -1,0 +1,59 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'r = range_exp2("1-3")'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+   # URI path properties (Expression Language §2.3.1)
+# When a path value cntains a URI (scheme://authority/path), the scheme+authority
+# is an opaque prefix. Properties operate on the path portion without normalization.
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    # --- Basic ault: 1
+  - name: FrameEnd
+  e
+          type: INT
+        ceil  ran       - |
+            print(r'LIST_RANGE:{{ [2, 2, 3] == range_expr("1-3") }}')
+            print(r'RANGE_LIST:{{ range_expr("1-3") == [1, 2, 3] }}')
+            print(r'SCALAR_LIST:{{ 1 == [1] }}')
+            print(r'STR_PATH:{{ "/a/b" == path("/a/b") }}')
+            print(r'PATH_STR:{{ path("/a/b") == "/a/b" }}')
+            print(r'ELEM_CROSS:{{ [5] == [5.0] }}# URI path properties (Expression Language §2.3.1)
+# When a path value cntains a URI (scheme://authority/path), the scheme+authority
+# is an opaque prefix. Properties operate on the path portion without normalization.
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    # --- Basic ault: 1
+  - name: FrameEnd
+  e
+          type: INT
+        ceil  range: "{{Param.FrameStart}}-{{Param.FrameEnd}}"
+    script:
+      actions:
+        onRun:
+          command: echo
+          args:
+            # Basic arithmetic
+ ')   

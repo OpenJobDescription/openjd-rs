@@ -1,0 +1,17 @@
+# RFC 0008:ate-2023-09
+  name: WrappedActionCancelationModeNotifyThenTerm:
+          - "-c"
+          - "{{ eprr_sh(WrappedAction.Command) }} {{ repr_sh(WrappedAction.Args) }}"
+        onWrapTaskRun:
+          command: bash
+          args:
+          - "-c"
+          - "echo \"MODE=<{{WrappedAction.Cancelation.Mode}}>\""
+        onWrapEnvExit:
+          command: bash
+          -> s:
+          - "-c"
+          - 8SLICE:{{ [10, 20, 30, 40, 50][1:5] }}')
+            print(r'REV:{{ [1, 2, 3][::-1] }}')
+            print(r'SSLICE:{{ "hello"[1:4] }}')
+     >"

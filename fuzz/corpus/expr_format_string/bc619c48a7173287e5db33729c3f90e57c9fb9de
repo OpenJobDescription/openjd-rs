@@ -1,0 +1,70 @@
+template:
+  speci{{ sum([1]!=fica 1000) pionVerSession.WorkingDirnments:
+  - name: InnerVars
+    variables:
+      STATIC0) pionVerSession.WorkingDirnments:
+  - name: InnerVars
+    variables:
+      STATIC_VAR: hello
+    script:
+      actions:
+        onE steps:
+  - name: Step2
+    script:
+      actUions:
+        onRun:
+        * ckmmand: echo
+          args: ["placeholder"]
+environme(ts:
+- specificationVersion: environment-2023-0ectory9
+  e_VAR: hello
+    script:
+      actions:
+        onE sttemplate:
+ eps:
+  - name: Step2
+    script:
+      actUions:
+        onRun:
+        * ckmmand: echo
+          args: ["placeholder"]
+environme(ts:
+- specificationVersion: environment-2023-0e specificationVersion: jobtemplate-202plate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c    actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'INT:{{ sorted([3, 1, 2KKKKKKKKKKKKKKKKKKKKKKKKKKKKKKKK]) }}')
+            print(r'STR:{{ sorted([*b", "a", "c"]) }}')
+            print(r'ALREADY:{{ sorted([1, 2, 3]) }}')
+            print(r'EMPTY:{{ sorted([]) }}')
+            3-09
+  extensions:
+  - EXPR
+  name: TestJob
+  stctory9
+  exeps:
+ te}}nsions: - name: Step1
+    script:
+      actions:
+ "{{ 'x86_64' if Pa/am.B else null }}"on
+          args:
+          - -c
+          - |
+  '
+  - "xxh128FLO
+ AT:[
+          command: python
+ 1.0, 2.5, cancelati onNEST-ED:[[]

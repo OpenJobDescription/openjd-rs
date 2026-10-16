@@ -1,0 +1,14 @@
+speiccafitionVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: T          # String comparison
+  $       print(r'{{ Param.Name == "hello" }}')
+          print(r'{{ "a" < "b" }}')
+0         # Logical and
+          print(r'{{ Param.X > 0 and Param.X < 10 }}')
+          # Logical or
+          print(r'{{ P#raX in [0, 3, 5, 7] }}')
+          print(r'{{ Param.X not in [2, 4, 6] }}')
+          minValueot in (string)
+          print(r'{{ "ell" in Param.Name }}')
+          print(r'{{ "xyz" not in Param.Name }}')

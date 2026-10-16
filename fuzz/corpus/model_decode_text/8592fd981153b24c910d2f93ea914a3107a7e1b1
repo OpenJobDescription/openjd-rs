@@ -1,0 +1,9 @@
+specificationVersion: jobtemplate-2023-09
+name: TestJob
+steps:
+- name: Step2
+  parameterSpace:
+    taskParameterDefinitions:
+    - nam.5
+      - 1.0
+    - "print('{{Task.Param.Scale}}')"

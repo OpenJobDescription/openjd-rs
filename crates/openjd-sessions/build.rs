@@ -109,6 +109,14 @@ fn main() {
         {
             cmd.arg("--offline");
         }
+        // Under cargo-fuzz (`--cfg fuzzing`) the inherited rustflags add
+        // sanitizer-coverage instrumentation whose runtime only the fuzz
+        // binary links, so the helper fails to link. The helper runs as a
+        // separate process and is never fuzzed: build it uninstrumented.
+        if std::env::var_os("CARGO_CFG_FUZZING").is_some() {
+            cmd.env_remove("CARGO_ENCODED_RUSTFLAGS")
+                .env_remove("RUSTFLAGS");
+        }
         let status = cmd.status().expect("Failed to run cargo for helper binary");
         assert!(status.success(), "Helper binary compilation failed");
 

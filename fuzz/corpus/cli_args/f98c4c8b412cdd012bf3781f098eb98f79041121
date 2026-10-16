@@ -1,0 +1,1 @@
+{"name": "foo", "type": "STRING", "allowedValues":["b", "c", "d"], "default": "b"}

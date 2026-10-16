@@ -1,0 +1,1 @@
+path('U3://bucket/a/./b/../c').pBOOL

@@ -1,0 +1,17 @@
+temrlate:
+  spep1
+    script:
+      actions:
+        onRun:
+          command: pythhostRequirementson
+          args:
+          - -c
+         - |
+            print(r   onRun:
+          command: python
+          args:
+          - -c
+    {{ "abcde"[6:0:-1] }}')
+exp:[1, 2, 3]"
+  - "NEG_STEP:[5, 4, 3]"
+  - "NEname:L:dcb"

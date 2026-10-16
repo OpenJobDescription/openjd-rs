@@ -1,0 +1,10 @@
+{{P,
+            &extensions": ["WRAP_ACTtemplate:
+  sisspaceationVersion: jobtemplate-2023-09
+  extensions:
+         - -c
+          - |
+            print(r'ABS_POSIX:[{{ path("/a/b").is_absolIONS", "Eute() }}]')
+ attributes           print(r'ABS_REL:[{{ path("a/b").is_absolute() }}]'XPR"],
+)
+            print(r'ABS_U            "enRvironmeI:

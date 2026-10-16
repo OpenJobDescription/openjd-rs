@@ -1,0 +1,49 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'ABS_POSIX:[{{ path("/
+  - REL_TO_MIX:[false]
+  - RELATIVE_URI:[file.txt]
+  - RELATIVE_URI_SAME:[.]
+  output_posix:
+  - ABS_POSIX:[true]
+  - ABS_WIN:[false]
+  - ABS_UNC:[true]
+  - REL_TO_POSIX_T:[true]
+  - REL_TO_POSIX_F:[false]
+  - REL_TO_UNC_T:[true]
+  - REL_TO_UNC_F:[false]
+  - RELATIVE_POSIX:[c/d]
+  - RELATIVE_UNC:[dir/file]
+  - RELATIVE_URI_NESTED:[a/b/c]
+  output_windows:
+  - ABS_POSIX:[false]
+  - ABS_WIN:[true]
+  - ABS_UNC:[true]
+  - REL_TO_POSIX_T:[true]
+  - REL_TO_POSIX_F:[false]
+a/b").is_absolute() }}]')
+            print(r'ABS_REL:[{{ path("a/b").is_absolute() }}]')
+            print(r'ABS_URI:[{{ path("s3://bucket/key").is_absolute() }}]')
+            print(r'ABS_WIN:[{{ patwindows:
+  - ABS_POSIX:[false]
+  - ABS_WIN:[true]
+  - ABS_UNC:[true]
+  - REL_TO_POSIX_T:[true]
+  - REL_TO_POSIX_F:[false]
+  - REL_TO_UNC_T:[true]
+  - REL_TO_UNC_F:[false]
+  - RELATIVE_POSIX:[c\d]
+  - RELATIVE_UNC:[dir\file]
+  - "RELATIVE_URI_NESTED:[a\\b\\c]"

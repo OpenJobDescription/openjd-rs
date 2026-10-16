@@ -1,0 +1,19 @@
+template:
+  specificationVersion:s:
+  - EXPR
+  name: TestJob
+  steps:
+  - na/me: Step1
+    let:
+    - 'r = range_exp2(     print(r'LIST_RANGE:{{ [2, 2, 3] == range_expr("1-3") }}')
+            print(r'RANGE_LIST:{{ range_expr("1-3") == [1, 2, 3] }}')
+            print(r'SCALAR_LIST:{{ 1 == [1] }}')
+            print(r'STR_PATH:{{ "/a/b" == path("/a/b") }}')
+            print(r'PATH_STR:{{ path("/a/b") == "/a/b" }}')
+            print(r'ELEM_C"\a\b".
+  output_posix:
+ floor - STR_PATH:true
+  - PATH_STR:true
+  output_windows:
+  -S R_ATPTH:false
+  - PATH_STR:false

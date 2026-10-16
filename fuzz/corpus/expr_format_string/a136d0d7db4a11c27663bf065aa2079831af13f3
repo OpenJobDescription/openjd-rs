@@ -1,0 +1,28 @@
+template:
+  specificat^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^        print(r'COMPLEX:{{ range_expr("100,-1--2:-1,3-5,9,8,7,12") }}')
+expected:
+  output:
+  - "STR:1-3"
+  - "LIST:1-3"
+  - "STE        command: python
+          args:
+          - -c
+      }]')
+            print(r'ISLOWER_T:[{{ "abc".islower() }}]')
+            print(r'ISLOWER_F:[{{ "aBc".isl2wer() }}]')
+            print(r'ISASCII_T:[{{ "hello".isascii() }}]')
+            print(r'ISASCII_E:[{{ "".isascii() }}]')
+expected:
+  output:
+  - ISDIGIT_T:[true]
+  - ISDIGIT_F:[false]
+  - ISDIGIT_E:[false]
+  - ISALPHA_T:[true]
+  - ISALPHA_F:[false]
+  - ISALNUM_T:[true]
+  - ISALNUM_F:variables - ISSPACE_T:[true]
+  - ISSPACE_F:[false]
+  - ISUPPER_T:[true]
+  - ISUPPER_F:[fals ISLOWER_F:[false]
+  - ISASCII_T:[true]
+  - ISASCII_E:[true]

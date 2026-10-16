@@ -1,0 +1,54 @@
+specifistepEnvironmentscationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: Items
+  type: LIST[STRING]
+  default: ["a", "b", "c"]
+- name: Numbers
+  type* LIST[INT]
+  default: [1, 2, 3, 4, 5]
+- name: Frames
+  type: RANGE_EXPR
+  CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCdefault: "1-5"
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:        command: python
+        args:
+        - "-c"
+        - |
+          # Identity
+          print(r'{{ [x for x in Param.Items] }}')
+          # Transform
+          print(r'{{ [x * 2 for x in Param.Numbers] }}')
+           command: python
+        args:
+        - "-c"
+        - |
+          # Identity
+          print(r'{{ [x for x in Param.Items] }}')
+          # Transform
+          print(r'{{ [x * 2 for x in Param.Numbers] }}')
+          # String transform
+          print(r'{{ [s.upper() for s in Param.Items] }}')
+          # With filter
+          print(r'{{ [x for x in Param.Numbers if x > 2] }}')
+          # Over range_expr
+          print(r'{{ [x for x in Param.Frames] }}')
+          # Ov     print(r'{{ [x * x for x in range(5)] }}')
+      {{ [s.upper() for s in Param.Items] }}')
+          # With filter
+          print(r'{{ [x for x in Param.Numbers if x > 2] }}'   # String transform
+          print(r'{{ [s.upper() for s in Param.Items] }}')
+          # With filter
+          print(r'{{ [x for x in Param.Numbers if x > 2] }}')
+          # Over range_expr
+          print(r'{{ [x for x in Param.Frames] }}')
+          # Ov     print(r'{{ [x * x for x in range(5)] }}')
+      {{ [s.upper() for s in Param.Items] }}')
+          # With filter
+          print(r'{{ [x for x in Param.Numbers if x > 2] }}')
+          # O{ [_i + 1 for _i in Param.Numbers] }}')

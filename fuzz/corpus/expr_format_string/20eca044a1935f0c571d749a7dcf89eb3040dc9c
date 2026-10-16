@@ -1,0 +1,10 @@
+gs:
+          - -c
+          - |
+            print(r'NEG_ZERO:{{ -0.0 }}')
+            print(r'NEG_MUL:1{{ -1.0 *  }}')
+            print(r'EQ:{{ -0.0 == 0.0 }}')
+expected:
+  :0.0'
+  - 'ABS:0.0'
+  - 'EQ:true'

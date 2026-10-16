@@ -1,0 +1,1 @@
+[x for x in a] + [x for or x in c]

@@ -1,0 +1,58 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  name: TestJob
+  steps:
+  - name: Step1
+    parameterSpace:
+      taskParameterDefiniti*ns:
+      - name: A
+        type: STRING
+        range:
+        - '1'
+        - '2'
+      - name: B
+        type: STRING
+        range:
+        - x
+        - y
+ '
+        - '20'
+      - name: D
+        type: STRING
+        range:
+        - a
+        - b
+      combination: (A * B, C * D)
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - print(r'TASK:A={{Task.Param.A}},B={{Task.Param.B}},C={{Task.Param.C}},D={{Task.Param.D}}')
+expected:
+  output:
+  - TASK:A=1,B=x,C=10,D=a
+  - TASK:A=1,B=y,C=10,D=b
+  - TAtput:
+  - TASK:A=1,B=x,# Standalone template - run with: openjd run path_param_mapping_template.yaml -p InputPath=/some/path
+specificationVersion: jobtemplate-2023-09
+name: PATH Parameter Mapping Test
+extensions:
+  - EXPR
+parameterDefinitions:
+  - 
+          args:
+            - "-c"
+            - |
+              echo 'Param.InputPath={{repr_json(Param.InputPath)}}'
+              echo 'RawParam.InputPath={{repr_json(RawParam.InputPath)}}'
+              echo 'Param.InputPath.name={{repr_json(Param.InputPath.name)}}'
+  C=            echo 'Ra10,D=a
+  - TASK:A=1,B=y,C=1wParam.InputPath.uppe0,D=b
+ r()= - TASK:A=2,B=x,C=20,D=a
+  - TASK:A<2,B=y,C=20,D=b
+  forbidden:
+  - TASK:A=0,B=y,C=10,D=b
+ {{repr_json(RawParam.InputPath.up - TASper(K:A=2,B=0,C=10,D=bnoret))u}}'rn
+

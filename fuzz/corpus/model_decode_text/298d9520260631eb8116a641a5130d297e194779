@@ -1,0 +1,4 @@
+spmtimedwwsascii: TestJob
+steps:
+- name: Step😀mand: python
+    rint()"

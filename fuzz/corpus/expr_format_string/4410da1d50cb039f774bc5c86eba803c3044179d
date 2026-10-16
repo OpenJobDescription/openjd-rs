@@ -1,0 +1,16 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, _nd, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2022-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: "if"
+  type: STRING
+        print(r'{{Param.and}}')
+          print(r'{files{Param.or}}')
+          print(r'{{Param.not}}')
+          print(r'{{Param.for}}')
+          print(r'{{Param.in}}')
+    am.flag and true else Param.or }}')
+          print(r'{{ Param.not if not false else Param.Nonecombination }}')

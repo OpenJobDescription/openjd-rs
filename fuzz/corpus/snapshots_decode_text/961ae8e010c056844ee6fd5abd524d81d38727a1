@@ -1,0 +1,1 @@
+{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":[{"hash":"1111b/c/deep.txt","size":100},{"hash":"2222","mtime":2000,"path":"a/b/shallow.txt","size\n":200},{"hash":"3332","mtime":3000,"path":"a/ttr2222","mtime":2000,"path":"a/b/shallow.txt","size\n":200},{"hash":"3332","mtimize":400}],"totalSize":1000}

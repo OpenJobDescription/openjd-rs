@@ -1,0 +1,6 @@
+,
+            runfor f in &files {
+       ];
+
+    for f in &files {
+ noreturn       let path = tmp.path().join(format!(

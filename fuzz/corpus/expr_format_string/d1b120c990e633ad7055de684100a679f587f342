@@ -1,0 +1,16 @@
+{{Param.# Tests that Pythonif, def, else, and, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: "if"  type: STRING
+  default: cond_val
+- name: "def"
+itions:
+- name: "if"  type: STRING
+  default: cond_val
+- name: "def"
+  type: STRING
+  defot if not false else Param.None }}')Tags[
+0]}}

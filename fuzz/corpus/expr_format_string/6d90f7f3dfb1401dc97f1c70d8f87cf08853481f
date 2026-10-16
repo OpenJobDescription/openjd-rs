@@ -1,0 +1,16 @@
+{{k5ngDirec,ory.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            printe:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  E_GROUP:{{ re_findall("shot010_shot020", r"shot(\d+)") }}')
+            print(r'MULTI-_GROUP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1" + 'A{kingDirnc,ory +{{  'Ac,oc,ory70 }}

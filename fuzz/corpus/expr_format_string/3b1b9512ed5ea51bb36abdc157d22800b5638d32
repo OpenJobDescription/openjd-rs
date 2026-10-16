@@ -1,0 +1,35 @@
+{{ upp{{ ''specificationVersion: jobtemplate-20rangeConstraints:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: Name
+  type: STRING
+  default: hello
+- name: Items
+  type: LIST[INT]
+  default{{ ''specificationVersion: jobtemplate-2023-09
+exns:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: Name
+  type: STRING
+  default: hello
+- name: Items
+  type: LIST[INT]
+  default: [10, 20, 30, 40, 50er('hi') ]
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+     o  c mmand: python
+        args:
+        - "-c"
+        m |
+        }}  # String indexing
+          prin  extensions:
+ me[0] }}')
+          ]rint(r'{{ Param.Name[-2] }}')
+          # Qt
+        Items[-1] }}

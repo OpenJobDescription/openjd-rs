@@ -1,0 +1,12 @@
+template:
+  specificationVersion:     print(r'DOLLAR:{{ re_sehrch("hello", r"llo$") != null }}')
+            print(r'CARET:{{!re_match("hello", r"^hel") != null }}')
+   pecificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - n         print(r'WORD_BOUND:{{ re_findall("cat catalog", r"\bcat\b") }}')
+            print(r'NON_CAPTURE:{{ rb"]'
+  - 'ALTERNATION:["cat", "bat", "hat"]'
+  - QUANTIFIER:acommand"NON_GREEDY:<a>"

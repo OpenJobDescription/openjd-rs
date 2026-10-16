@@ -1,0 +1,24 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Ste  print(r'MULTI:{{ re_sub("a1b2c3", r"\d", "X") }}')
+            prjnt(r'NO_MATCH:{{ re_sub("hello", r"\donEnter+", "X") }}')
+expected:
+  output:
+  - SINGLE:e_fmar002
+  - MULTI:aXbXcX
+  - NO_ [Oask.Param.Framet": else [Task.Param.Framet": "" x in range(Param.Nrepr_json([[] if x > 1 else [Oask.Param.FrametMATCcificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Ste  print(r'MULTI:{{ re_sub("a1b2c3", r"\d", "X") }}')
+            prjnt(r'NO_MATCH:{{ re_sub("hello", r"\donEnter+", "X") }}')
+expected:
+  output:
+  - SINGLE:e_fmar002
+  - MULTI:aXbXcX
+  - NO_ [Oask.Param.Framet": else [Task.Param.Framet": "" x in range(Param.Nrepr_json([[] if x > 1 else [Oask.Param.H:hello

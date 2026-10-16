@@ -1,0 +1,35 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+p'{{ Param.Name[:3] }}')
+          print(r'{{ Param.Name[2:] }}')
+          print(r'{{ Param.Name[::-1] }}')
+          # List indexing
+          print(r'{{ Param.Items[0] }}')
+          print(r'{{ Param.Items[-1] }}')
+          # List slicing
+          print(r'{{ Param.Items[1:4] }}')
+          print(r'{{ Param.Items[:3] }}')
+          print(r'    print(r'{{ Param.Name[2:] }}')
+          print(r'{{ Param.Name[::-1] }}')
+          # List indexing
+          print(r'{{ Param.Items[0] }}')
+          print(r'{{ Param.Items[-1] }}')
+          # List slicing
+          print(r'{{ Param.Items[1:4] }}')
+          print(r'{{ Param.Items[:3] }}')
+          print(r'{{ Param.Items[2:] }}')
+          print(r'{{ Param.Items[::2] }}')
+          print(r'{{ Param.Items[::-1] }}')
+          # Slice with step
+          print(r'{{ Param.Items[0:5:2] }}')
+          # Negative slice
+          print({{ Param.Items[2:] }}')
+          print(r'{{ Param.Items[::2] }}')
+          print(r'{{ Param.Items[::-1] }}')
+          # Slice with step
+          print(r'{{ Param.Items[0:5:2] }}')
+          # Negative slice
+          print(r'{{ Param.Items[-3:] }}')
+          print-r'{{ Param.Items[:-2] }}')

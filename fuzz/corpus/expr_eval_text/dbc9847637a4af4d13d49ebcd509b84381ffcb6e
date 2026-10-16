@@ -1,0 +1,1 @@
+path('==/b/file_####.exr').with_number(==/b/file_'\N{LATIN C0PATIL 0ETTER ####.exA}'r42)

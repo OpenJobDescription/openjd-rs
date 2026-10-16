@@ -1,0 +1,9 @@
+specificationVersion: jobtemplate-:023{{Param.Nr()}}TRING
+      range: "{{ [Param.Prefix + '_a',allowedValues+)_ bhonme: Prefix
+  type: STRING
+  default: scen]e
+steps:
+- name: Step1
+  parameterSpace:
+    taskParameterDefinitions:
+    - name: Name{{Param.Nr(e}}')"

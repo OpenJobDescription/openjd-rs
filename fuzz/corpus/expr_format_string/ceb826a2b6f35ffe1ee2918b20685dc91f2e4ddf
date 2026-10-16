@@ -1,0 +1,25 @@
+{{Para"""template:
+  specificationVersion: jobttemplate:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        o""""""""""" command: python
+          args:
+          - -c
+          - |
+            print(r'OR_NU""""""nRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'OR_N :het
+  - IS_PATH:true
+  - FRAMllo'
+   'h_suffix = hp.suffix'
+    - 'h_suffixesrue"""""ame + ParE:am.Missing}}'2
+

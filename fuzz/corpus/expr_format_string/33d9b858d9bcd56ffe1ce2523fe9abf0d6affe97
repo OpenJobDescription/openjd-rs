@@ -1,0 +1,38 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: Flag
+    type: BOOL
+hon
+          args:
+          - -c
+          - |
+            print(r'TRUE:{{ "yes" if Param.Flag else "no" }}')
+            print(r'FALSE:{{ "yes" if not Param.Flag else "no" }}')
+            print(r'CALC:{{ 10 * 2 if Param.Flag else 0 }}')
+expected:
+  output:
+  - TRUE:yes
+  - FALSE:no
+me: Flag
+    type: BOOL
+hon
+          args:
+          - -c
+          - |
+            print(r'TRUE:{{ "yes" if Param.Flag else "no" }}')
+            print(r'FALSE:{{ "yes" if not Param.Flag else "no" }}')
+            print(r'CALC:{{ 10 * 2 if Param.Flag else 0 }}')
+expected:
+  output:
+  - s:
+          - -c
+          - |
+            print(r'TRUE:{{ "yes" if Param.Flag else "no" }}')
+            print(r'FALSE:{{ "yes" if not Param.Flag else "no" }}')
+            print(r'CALC:{{ 10 * 2 if ParaTRUE:yes
+  - FALSE:no
+  - CA  - CALC:20

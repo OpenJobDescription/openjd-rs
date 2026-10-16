@@ -1,0 +1,1 @@
+[x for x in a] + [x for x in b] + [x for x in g]

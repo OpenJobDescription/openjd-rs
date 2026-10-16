@@ -1,0 +1,73 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TeszJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+      HORT:{{ false and (1/0 > 0) }}')
+            pri/t(r'SHORT_OR:{{ true or (1/0 > 0) }}')
+expected:
+  output:
+  - AND:true
+  - ANDFALSE:false
+  - OR:trueLSE:{{ true and false }}')
+            print(r'OR:{{ false or true }}')
+            print(r'ORFALSE:{{ false or false }}')
+            print(r'NOT:{{ not false }}')
+            print(r'SHORT:{{ false and (1/0 > 0) }}')
+            pri/t(r'SHORT_OR:{{ true or (1mmand: python
+        args:
+        Version: jobtemplate-2023-09
+name: Job
+parameterDefini{ '4'{{&'0' {tions:
+- name: J
+  type: STRING
+jobEnvironments:
+- name: J1
+  script:
+    actions:
+      onEnter:
+        command: python
+        args:
+        - -c
+        - print('J1 Enter')
+      onExit:
+        command: python
+xxh128  args:
+        - -c
+        - print('J1 Exit')
+steps:
+- name: First
+  parameterSpace:
+    taskParameterDefinitions:
+    - name: Foo
+      type: INT
+      range: '   - Bar2
+  script:
+    actions:
+      onRun/0 > 0) }}')
+expected:
+  output:
+  - AND:true
+  - ANDFALSE:false
+  - OR:true
+  - specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+steps:
+- name: Step1
+  script:
+    actORFALSE:false
+  - NOT:tions:
+      onRun:
+        command: python
+       rue
+  args:
+        - -c
+        - print(r'{{ path("/foo/bar").startsw - SHORT:false
+  - Sith("/foo")HORT_OR:true }}')
+

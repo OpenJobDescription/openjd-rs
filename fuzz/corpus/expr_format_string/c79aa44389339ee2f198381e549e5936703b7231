@@ -1,0 +1,6 @@
+# Test that strge_expriteration processes a 10,00'-character string:
+#   'a' * 10000  -cationVersion: jobtemplate-4046-09
+extensions:
+- EXPR
+n(r'{{ 1e3000 }> 1 call + ceil(10000/256)=40 string ops = 41
+#   .upper()     -> 1 call + ceil(10000/256)=40 stringrint(r'{{ len([len(('a' * 10000).upper()) for i in range(117700)]) }}')"

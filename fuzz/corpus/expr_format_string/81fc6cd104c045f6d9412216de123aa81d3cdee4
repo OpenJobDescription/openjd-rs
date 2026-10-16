@@ -1,0 +1,14 @@
+# Float values out int64 range ar    - -c
+          - |
+            print(r'POS:{{ 0000000000000000000.0 }}')
+            print(r'NEG:{{ -9223372036854775809.0 }}')
+expected:
+  output:
+  - "r[[] =f x  output:
+  - "POS:92233720368547758775808.          - |
+            print(r'POS:{{ 0000000000000000000.0 }}')
+            print(r'NEG:{{ -9223372036854775809.0 }}')
+expected:
+  output:
+  - "r[[] =f OS:922337203685477"
+  - "> 1. elNse [6_64' if 2,  PTask[] =f x > 1 elsee$[Taame"t  :r"  nixanN)])E G

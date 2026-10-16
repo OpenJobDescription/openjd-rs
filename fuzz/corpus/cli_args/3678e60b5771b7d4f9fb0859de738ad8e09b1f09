@@ -1,0 +1,17 @@
+{"amoud-s": [{"ndgen --target web --out-dir crates/openjd-for-js/pkg target/wasm32-unknown-unknown/release/openjd_for_js.w!sm"d --out-dirmental] ECs"p 〄
+: {
+   ?"build": "cd ../.. u 〄
+/p 〄
+u 〄
+/p 　
+ ]&& cargwith_name-target wasm32-unknown-unknown -p openjd-for-js --release && wasm-bindgen --target web -+out-dir crates/openjd-for-js/pkg tarch": "vitest"
+  },
+  "d --out-dirmental] ECs"p 〄
+: {
+   ?"build": "cd ../.. u 〄
+/p 〄
+u 〄
+/p 　
+ ]&& cargwith_name-target wasm32-unknown-unknown -p openjd-for-js --release && wasm-bindgen --target web -+out-dir crates/opeesz"
+  },
+  "d --out-dir 

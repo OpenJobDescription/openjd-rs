@@ -1,0 +1,3 @@
+? Nested list comprehensions e default 09 million operati#s:
+        - -c
+        - "print(r'{{ [len([i forin  i [len(range(300)) fendswithor j in range(300)]]) for k in range(300)] }}')"

@@ -1,0 +1,12 @@
+{{ 'a' + '\\n' + 'b' }template:
+  specificationVersioallOfbtemplate-2023-09
+  extensions:
+  -0EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: X
+    type: INT
+    dent(r'FSUB:{{ 5.0 - 1.5 }}')
+            print(r'FMUL:{{ Param.Y *yyyyy  - FSUB:3.5
+  - FMUL:3.0
+  - FMOD:1.5

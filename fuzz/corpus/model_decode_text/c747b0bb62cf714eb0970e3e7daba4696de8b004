@@ -1,0 +1,7 @@
+templlue-s:
+    - 30
+?    - 40
+    default: 0
+  steps:
+  - name: S
+      VAL: '{{Param.Value}}'

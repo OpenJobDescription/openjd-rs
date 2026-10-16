@@ -1,0 +1,14 @@
+template:
+  specificationVer: jobtemplat-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+          "variables": {"Noo": "{{Param.P}}"}
+        }
+  }]')
+            print(r'RSTRIP:[{{ rstrip("  hi  ") }}]')
+expected:
+  output:
+  - STRIP:[hi]
+  - "LSTRIP:[hi  ]"
+  - "RSTRIP:[  hi]"

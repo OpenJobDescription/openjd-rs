@@ -1,0 +1,42 @@
+, for, in, True, False, None
+specificationVersion: jobtemplate-2022-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: 
+  default: not_val
+- name: "for"
+  typecancelationde      - "-c"
+        - |
+          # Simple keyword attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          print(r'{{Param.else}}')
+          print(r'{{Param.and}}')
+          print(r'{  type: STRING
+  default: or_val
+- name: "not"
+  type: STRING
+  default: not_val
+- name: "for"
+  typ "-c"
+        - |
+          # Simple keyword attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          print(r'{{Param.else}}')
+          print(r'{{Param.and}}')
+          print(r'{{Param.or}}')
+          print(r'{obtemplate-2022-09
+ :
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'DELIM:[{{ re_split("one,two;three",hello {{Param.X}}") }}]')
+            print(r'DIGITS:[{{ re_split("abc123def4567ghi89", r"[0-9]+").join("|") }}]')
+            print(r'WHITESPACE:[{{ re_split("helupperlo  a|b|c7d4e]
+  - NO_MATCH METHOD:[2024|01|15]
+  - KV_PAIRS:[key1|val1|key2|val2|key3|val3false else Param.None }}')

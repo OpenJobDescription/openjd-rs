@@ -1,0 +1,28 @@
+---
+# Per Expression Languaga buggy evaluator coerces operands to strings before
+# the operator runs, the arithmetic and comparison cases below will
+# fail with a type error instead of producing the expected output.
+#
+# Note: BINOP_DIV asserts `10 / 4 = 2:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            # BinOp operanest slot must be evaluated unconstrained, body/orelse
+            # inherit the outer string target
+            print(r'IFEXP:{{ "big" if Param.Count > Param.Threshold else "small" }}')
+            # Compound: arithmetic feeding a comparison feeding a ternary
+            print(r'CHAIN:{{ "over" if Param.Count - Param.Threshold > 3 else "under" }}')
+expected:
+  output:
+  - "BINOP_SUB:9"
+  - "BINOP_MUL:20"
+  - "BINOP_DIV:2.5"
+  - "UNARY_NEG:-10"
+  - "UNARY_NOT:false"
+  - "CMP_GT:true"
+  - "CMP_LE:true"
+  - "IFEXP:big"
+  - "CHAIN:over"

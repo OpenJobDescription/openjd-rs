@@ -1,0 +1,11 @@
+template:
+  specificationVer      - |
+            print(r'MATCH:{{ replace("hello", "l", "r") }}')
+        icationVer      - |
+            print(r'MATCH:{{ replace("hello", "l", "r") }}')
+            print(r'NONE:{{ replace("hello", "xyz", "r") }}')
+expec    print(r'NONE:{{ replace("hello", "xyz", "r") }}')
+expected:
+  output:
+  - MATCH:herro
+  - NONE:hello

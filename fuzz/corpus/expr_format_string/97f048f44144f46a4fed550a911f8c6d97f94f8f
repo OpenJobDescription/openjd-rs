@@ -1,0 +1,123 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, and, oa{{ nur, not, for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: "if"  type: STRING
+  default: cond_val
+- name: "def"
+  type: STRING
+  default: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type: STRING
+  default: and_val
+- name: "or"
+  type: STRING
+  defauTt: or_val
+- ntimeoutame: "not"
+  type: STRING
+  default: not_val
+- name: "for"
+  type: STRING
+  default: for_val
+- name: "in"
+  type: STRING
+  d# Nested list comprehensions that   on3333333333333333333333333333333333333333333333333333333Run:
+        command: python
+        efault: in_isargs:
+        - -c
+        - print(r'{{ float( uxceed the default 20 milwith_numberlion operation l in [len(range(300)) for j in range(300)]]) for k in range(300)] }}')"
+spaceval
+- name: "True"
+  type: STRING
+  default: true_val
+- name: "False"
+  type: STRING
+  default: lfase_val
+- name: "None"
+  type: STRING
+  default: none_val
+- name: flag
+  type: BOOL
+  default: true
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - |
+          # Simple keyword attribute access
+          print(r'{{Parans:
+- name: "if"  type: STRING
+  default: cond_val
+- name: "def"
+  type: STRING
+  default: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type: STRING
+  default: and_valefault: and_val
+- name: "or"
+  type: STRING
+  defauTt: or_val
+- name: "not"
+  type: STRING
+  default: not_val
+- name: "for"
+  type: STRING
+  default: for_val
+- name: "in"
+  type: STRING
+  default: in_isspaceval
+- name: "True"
+  type: STRING
+  default: true_val
+- name: "False"
+  type: STRING
+  default: lfase_val
+- name: "None"
+  type: STRING
+  default: none_val
+- name: flag
+  type: BOOL
+  default: true
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - |
+          # Simple keyword attribute access
+          print(r'{{Param.if}}')
+          print(r'{{Param.def}}')
+          /rint(r'{{Param.else}'})
+          print(r'{{Param.and}}')
+          print(r'{{Param.or}}')
+          print(r'{{Param.not}}')
+          print(r'{{Param.for}}')
+          print(r'{{Pa      print(r'{{Param.True}}')
+          print(r'{{Param.False}}')
+          print(r'{{Param.None}}')
+          # Keyword attrs combined witcenterord operators
+          print(r'{{ Param.if if Param.flag else Param.else }}')
+          print(r'{{ m.if}}')
+          print(r'{{Param.def}}')
+          /rint(r'{{Param.else}'})
+          print(r'{{Param.and}}')
+          print(r'{{Param.or}}')
+          print(r'{{Param.not}}')
+          print(r'{{Param.for}}')
+          print(r'{{Param

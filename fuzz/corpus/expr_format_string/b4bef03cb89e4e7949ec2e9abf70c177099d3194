@@ -1,0 +1,50 @@
+template:
+  specificationVersion: jobtumemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'r = range_expr("1-3")'
+    - 'path_join = [path("/a"), p:{{ r + " are frames" }}')
+            print(r'LIST_OATH_STR:{{ path_join }}')
+            print(r'FMT_EMBED:Count is {{ len([0,2,3]) }} items')
+            print(r'BOOL_FMT:val={{ true }}')
+expected:
+  output:
+  - INTFLOAT:3.5
+  - PATHSTR:true
+  - "RANGs:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'r = range_expr("1-3")'
+    - 'path_join = [path("/a"), p:{{ r + " are frames" }}')
+            print(r'LIST_PATH_STR:{{ path_join }}')ECAT:[10, 20, 1, 2, 3]"
+  - "Rhello {{Param.X}} "RANGE_FMT:frames=1-3"
+  - "RANGE_ADD:frames: 1-3"
+  - "RANGE_ADD2:1-3 are frames"
+  - "FMT_EMBED:Count is 3 items"
+  - "BOOL_FMexpected:
+  output:
+  - INTFLOAT:3.5
+  - PATHSTR:true
+  - "RANGs:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'r = range_expr("1-3")'
+    - 'path_join = [path("/a"), p:{{ r + " are frames" }}')
+            print(r'LIST_PATH_STR:{{ path_join }}')ECAT:[10, 20, 1, 2, 3]"
+  - "Rhello {{Param.X}} "RANGE_FMT:frames=1-3"
+  - "RANGE_ADD:frames: 1-3"
+  - "RANGE_ADD2:1-3 are frames"
+  - "FMT_EMBED:Count is 3 items"
+  - "BOOL_FMT:val=true2
+  - T:val=true2
+  - "LIST_PATH_STR:/a,/b"

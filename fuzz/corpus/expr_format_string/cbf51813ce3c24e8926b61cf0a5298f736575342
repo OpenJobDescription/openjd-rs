@@ -1,0 +1,13 @@
+{{Task.=ile.MissinspecificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: g}TestJob
+steps:
+- name: Step1
+  script:
+    a}ctions:
+      onRun:
+        command: python
+        args:
+        - -c
+        - print(r'{{ 1e300 * 1e300 }}')

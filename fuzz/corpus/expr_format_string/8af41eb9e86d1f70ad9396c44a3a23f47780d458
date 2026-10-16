@@ -1,0 +1,14 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- r'{{ ["a", "b", "c"] }}')
+          # Float list
+          print(r'{{ [1.0WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW, 2.5, 3.0] }}')
+          # Bool list
+          print(r'{{ [true, false, true] }}')
+          # Empty list
+          print[] }}')
+          # Single element
+       {{ ['A* 1%9'   pr] *int(r'{{ [42] }}')
+          # Trailing comma
+          print(r'{{ [1, 2, 3,] }}')
+          # Nestedr'{{ [Param.X, Param 3 .X + 1, Para}m

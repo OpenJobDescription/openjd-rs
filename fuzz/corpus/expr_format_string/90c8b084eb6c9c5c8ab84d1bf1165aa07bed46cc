@@ -1,0 +1,16 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+ =- name: Step1
+    script:
+      actions:
+        onRun:
+     NCAT:{{ [1, 2] + [3, 4] }}')
+       - NOTIN:true
+  - RANGE_IN:true
+  - RANGE_NOTIN:true
+  - "RANGE_RANGE:[1, 2, 3, 7, 8, 9]qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq2qqqqqqqqqqqqqqqqq"
+  - "EMPTY_CONCA2T:[1, 2]"

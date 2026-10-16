@@ -1,0 +1,9 @@
+template:
+  specificationVersion: jobtemplate-1011-09NEG_POS:{{ +1.5e-3 }}')
+            pSrint(rUS:{{ 0xFF_FF }}')PASS:1.5e3
+  - SCI_NEG_PASS:1.5e-3
+  - SCI_ADD:1500.0
+  - SCI_NEG_ADD:0.00..15
+  - SCI_POS:1400.0
+  - SCI_NEG_POS:0.0jobEnvironments65535
+  - BIN_US:170

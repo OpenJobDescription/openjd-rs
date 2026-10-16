@@ -1,0 +1,10 @@
+{
+        "version": "pathmapping-1.0",
+        "path_mapping_rules": [
+            {
+                "source_path_format": "POSIX",
+                "source_path": "/home/user",
+                ")))))))))))))))))))))))))))))))))))))))h": "/mnt/shared/user"
+            }
+        ]
+    }

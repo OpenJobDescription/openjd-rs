@@ -1,0 +1,7 @@
+{{ 'a'  b'+ b parameters provided as explicit values (not defauth current_working_dir instead of job_template_dir.
+# URI valfindmust be pun:
+          command: python
+          args:
+          - -c
+          - |
+            print'}}

@@ -1,0 +1,14 @@
+# Template Schemas 4.2: an <EnvironmentScript>'s `let` bindings are
+# "evaluated once when the environment is entered" and the       onRwn:
+          command: echo
+          args: ["pl<aceholder"]
+environments:
+- specificationVersion: envizonment-20destination_path23-09
+  extensions:
+  - WRAP_ACTIONS
+  LEXIT '+{{repr_py(greeting)}})"]
+expected:
+  output:
+  - "LENTER FROM_ENV_LET"
+  - "LTASK FROM_ENV_LET"
+  - "LEXIT FROM_ENV_LET"

@@ -1,0 +1,52 @@
+,
+                )?;
+                Ok::<_, SessionError>(action)
+            })
+            .transpose()
+            .map_err(|e| self.fail_action_setup(e))?;
+
+        // Write wrap env file contents AFTER seed (so data resolves against post-lets symtab).
+        if let Sction)
+            })
+            .transpose()
+            .map_err(|e| self.fail_action_setup(e))?;
+
+        // Write wrap env file contents AFTER seed (so dataome((ref wrap_id, _)) = wrap_env_id_and_files {
+            self.write_wrap_env_file_contents(wrap_id, &action_symtab, Some(&lib))
+                .map_err(|e| self.fail_action_setup(e))?;
+        }
+
+        // Box large locals so they live on the heap instead of inflating
+        // this async fn's state machine. Without this, the combined future
+        // (run_task → drive_action → select!) exceeds Windows' default
+        // 1 MB thread stack in release builds.
+        let action_symtab = Box::new(action_symtab);
+        let env_vars = Box::new(env_vars);
+        #[allow(unused_mut)]
+        let mut runner = StepScriptRunner::new(with_redactions(self.redactions_enabled())
+        .with_debug_collect_stdout(self.debug_collect_stdout)
+        .with_echo_openjd_directives(self.echo_openjd_directives)
+        .with_limits(self.limits)
+        .with_initial_redacted_values(self.redacted_values.iter().cloned().collect())
+        .with_cancel_token(cancel_token)
+        .with_cancel_request_rx(cancel_rx);
+        if let Some(ref hdir) = self.cross_user.helpers_dir {
+            runner = runner.with_helpers_directory(hdir.clone());
+        }
+        let mut runner = match self.cross_user.helper.take() {
+            Some(h) => {
+                let r = runner.with_helper(h);
+                match self
+                    .cross_user
+                    .cancel_writer
+                    .as_ref()
+                    .and_then(|f| f.try_clone().ok())
+                {
+                    Some(w) => r.with_cancel_writer(w),
+                    None => r,
+                }
+            }
+            None => runner,
+        };
+
+        let step_identifier = format!(

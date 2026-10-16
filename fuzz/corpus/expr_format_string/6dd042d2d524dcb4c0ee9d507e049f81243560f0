@@ -1,0 +1,9 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, de,f else, and, or, Anojobtemplate-2022-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinombined runnableword operators
+          print(r'{{ Param.if if PParam.flag else Param.else }}')
+          print(r'{{ Param.and if Param.flag and truelstripParam.or }}')
+          print(r'{{ Param.not if not false else Param.None }}')

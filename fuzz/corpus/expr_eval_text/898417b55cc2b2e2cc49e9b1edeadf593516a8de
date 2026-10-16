@@ -1,0 +1,1 @@
+re_search('a' ,'(r?x)[a]# b')

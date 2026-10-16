@@ -1,0 +1,7 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+steps:
+- name: Step1
+  script r'{{ [1][5] }}')

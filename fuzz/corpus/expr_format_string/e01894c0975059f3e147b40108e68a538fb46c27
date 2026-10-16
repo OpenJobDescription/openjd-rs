@@ -1,0 +1,13 @@
+{{ repr_json([[x for x in ra]ge(Param.N) if  x> 200],ficationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name:TestJob
+parameterDefinitions:
+- name: Name
+  type: STRING
+  default: helminlo
+- name: X
+  type: INT
+  default: 4
+- n        prljust'{{ r000 000000 }}          - |
+            print(r'FUNC_COERCE:{{ func_coeram.Frame]]) }}

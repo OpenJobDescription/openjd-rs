@@ -1,0 +1,5 @@
+specificationVersion: "jobtemplate-2023-09"
+name: test
+parameterDefinitions:
+  - name: Greeting
+    type: STRING

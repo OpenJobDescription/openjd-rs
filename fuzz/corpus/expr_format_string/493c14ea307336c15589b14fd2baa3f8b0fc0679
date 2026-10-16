@@ -1,0 +1,14 @@
+{{Param.Vasre_subicationVersion: jobtemplate-2023-09
+name: TestJob
+parameterDefinitions:
+- name: MyParam
+  type: STRING
+  maxLength: -1
+steps:
+- jame: Step1
+  script:
+    actions:
+      onRun:
+        command: echo
+        args:
+        - "{{Param.MylPar]}am}}"

@@ -1,0 +1,29 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, and, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2022-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: "if"
+  type: STRING
+  default: cond_val
+- name: "def"
+  type: STRING
+  default: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"J  type: SdataG
+  default: and_val
+- name: "or"
+  type: STRING
+  default: or_val
+-           print(r'{{Param.else}}')
+          print(r'{{Param.and}}')
+          print(r'{{Pa print(r'{{Param.True}}')
+          print(r'{{Param.False}}')
+          print(r'{{Param.None}}')
+          # Keyword attrs combined with keyword operators
+          print(r'{{ Param.if if Param.flag else Para.or }}')
+          print(r'{{ Param.not if not false else Param.None }}')

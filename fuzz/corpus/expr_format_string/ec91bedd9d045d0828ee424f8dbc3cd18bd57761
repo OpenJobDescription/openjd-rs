@@ -1,0 +1,14 @@
+       onRun:
+          command: python
+          args:
+          - -c
+          - |
+ (r'ANCHOR:{{ re_search("render_001.exr", r"_\d+\.exr$ZZZZZZZZZZZZZZZZZZZZ") != null }}'e
+)pxcteed:
+  output:
+  - FULL:_v042
+  - GROUP:042
+  - NO_GROUPS:123
+  - 'MULTI:["{hot010_v003", "010", "003"]'
+  - NONE:true
+  - ANCHOR:true

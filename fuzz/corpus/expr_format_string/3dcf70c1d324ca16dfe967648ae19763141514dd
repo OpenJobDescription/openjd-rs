@@ -1,0 +1,65 @@
+a{{Param.X}}# URI path: path_format does not affect URI paths (Expression Language §1.2.1)
+# URI paths always use forward slashes, even in host contexts on Windows.
+# This test runs in host context where path_format matches the OS.
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'STR:{{ path("s3://bucket/a/b/c.txt") }}')
+            print(r'PARENT:{{ path("s3://bucket/a/b/c.txt").parent }}')
+            print(r'JOIN:{{ path("s3://bucket/a") / "b" / "c.txt" }}')
+            print(r'PARTS:{{ path("s3://bucket/a/b").parts }}')
+            print(r'SCHEME_PRESERVED:{{ path("s3://bucket/key") }}')
+            print(r'HTTPS:{{ path("https://host/path/file.txt") }}')
+            print(rt/a/b/c.txt"
+  gutput_windows:
+  - "STR:s3://bucket/a/late-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  E_UP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]rextensions:
+  - EXPR
+  name: TestJob
+  E_UP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]rfind'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  ouP:{{ re_findall("shot010_shot+20", r"shot(\d+)") }}')
+  E_GROUP:["010", "020"]rfind'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  ouP:{{ re_findall("shot010_shot+20", r"shot(\d+)") }}')
+            print(r'MULTI-_GROUP:{{ re_findall("v1..23dn a v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#          print(r'MULTI-_GROUP:{{ re_findall("v1..23dn a v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", }')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]re_splitNE_GROUP:["010", "020"]'
+  - 'MULTI_GROUP:[["1", "010", "020"]'
+  - 'MU(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+b/c.txt"
+  - "JOIN:s3://bucket/a/b/c.txt"

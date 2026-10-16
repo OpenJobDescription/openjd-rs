@@ -1,0 +1,14 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - rgs:
+          - -c
+          - |
+            print(r'INT:{{ float,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,, 2.5 e: All Task Parameter Types Test
+extensionsrelative_to: INT
+ 'eA' * }}  default: 7
+step EXP:
+    : T: {{repr_sh(string  - TRAILING:2.5'ILING:2.5'  - BOTH:2.5

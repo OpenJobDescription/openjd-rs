@@ -1,0 +1,1 @@
+re_split('  hello   wsrld  ', r'\s+1')

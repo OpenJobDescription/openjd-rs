@@ -1,0 +1,1 @@
+path('/adestination_path/b/c.txt').parent.name

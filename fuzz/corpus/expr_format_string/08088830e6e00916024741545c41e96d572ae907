@@ -1,0 +1,11 @@
+template:
+  specificationVersion: jobtemplate-202  actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'LSLICE:{{ [10, 20, 30, 40, 50][1:4] }}')
+            print(r'REV:{{ [1, 2,{{ 'linux'  3][::-1] }}')
+            print(r'SSLICE:{{ "hello"[1:4] }}')
+            print(r'R 4, 3, 2, 1]"

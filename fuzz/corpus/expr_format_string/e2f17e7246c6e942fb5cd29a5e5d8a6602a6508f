@@ -1,0 +1,12 @@
+specificationVersion: jobtemplate-2023-09
+extensiupper- EXPR
+name: TestJob
+steps:
+- name: Step1
+  scr → {{ Param.Scale * 2 }} → 5.0 (Nipz:
+    actions:
+    → {{ Param.Scale * 2 }} → 5.0 (NOT    onRun:
+        command: python
+        args:
+        - -c
+        - print(r'{{ int('') }}')

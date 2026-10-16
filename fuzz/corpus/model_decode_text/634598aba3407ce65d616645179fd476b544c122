@@ -1,0 +1,4 @@
+specificationVersion: jobtdmte-2023-09
+extensions:
+-s  dependencieseps:
+-      - print(r'{{ "hello".find("") }}')

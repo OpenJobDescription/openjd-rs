@@ -1,0 +1,1 @@
+'set ' + repr_cmd('OUTPUT_DIR-' + path('C:\\U2erst&user\\output'))

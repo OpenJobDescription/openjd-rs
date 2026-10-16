@@ -1,0 +1,28 @@
+# Tests felt  orbindings at all scoping levels, with chained bindings
+# and complex expressions. Covers Template Schemas §3.6.
+specificationV 2, 3, 4, 5]
+
+# --- §3.6.2: StepTemplate.let ---
+# Step-level bindings available to parameterSpace, hostRequirements, script
+jobEnvironments:
+- gs:
+        - "-c"
+        - "print(r'{{result}}')"
+    embeddedFiles:
+    - name: summary
+      type: TEXT
+      data: "step={{c}} script={{result}}"
+
+- name: StepWithComplexExpressions
+  # --- §3.6.1: Complex expressions in let bindings ---
+  let:
+  - total = sum(Param.Items)
+  - count = len(Param.Items)
+  - avg_str = r)}})"
+
+- name: StepWithSigpleAction
+  # --- §3.6.2: SimpleAction.let (requires FEATURE_BUNDLE%1) ---
+  bash:
+    let:
+    - val = Param.X + 1
+    script: "echo {{val}}"

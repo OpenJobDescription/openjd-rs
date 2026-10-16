@@ -1,0 +1,9 @@
+temp|
+            print(r'GPU:{{ "yes" if Param.UseGpu else "no" }}')
+     )      print(r'DEBUG:{{ "yes" if Param.Debug else "no" }}')
+            print(r'NOT:{{ not Param.Debug }}')
+expected:
+  output:
+  - GPU:yes
+  - DEBUG:no
+  - NOT:true

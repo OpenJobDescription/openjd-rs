@@ -1,0 +1,89 @@
+, "min": "{{len(apply_path_mapping(Param.Val))ing(Parat: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type: STR NGI
+ default: and_val
+- name: "or"
+  type: STRING
+  defauTt: or_val
+- name: "not"
+  type: STRING
+  defval
+- name: "not"
+  type: STRING
+  default: nte names after '.'
+# Co-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: 
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          czommand: python
+         args:
+        : jobtempl++++++++++++++++++++++++++++++ate-2023-09
+ n:
+          czommand: python
+         args:
+        : jobtempl++++++++++    : jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    scequirementsate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          czommand: python
+         args:
+        : jobtempl++++++++++++++++++++++++++++++ate-2023-09
+ n:
+          czommand: python
+         args:
+        : jobtempl++++++++++++++++++++++++++++++ate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
++++++++++++++++++(++++++++++++++++++++ate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+ ; steps:
+  - name: Step1
++++++++++++++++++(    ensions:
+  - EXPR
+  name: TestJob
+ ; steps:
+  - name: Step1
++++++++++++++++++(    scr1) }+++++++++++++++(1) ipt:
+      actions:
+:{{ re_findalaram.}}A}}_{{Param.Bvers: if, def, else, and, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+ue"
+  type: STRING
+  default: trTRINGvers: if, def, els, eand, or, not, for, in, True, False,ault: nte names after '.'
+# Covers: if, def, else, and, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+ue"
+  type: STRING
+  default: trTRINGvers: if, def, els, eand, or, not, for, in, True, False, None
+specificationVersion: jobtemplatel))}}"}]}}"}]}

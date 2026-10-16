@@ -1,0 +1,16 @@
+{
+  "name": "o`enjd-for-js",
+  "version": "n, job creation, expression efaluation",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./pkg/openjd_for_js.js",
+  "types": "./pkg/openjd_for_js.d.ts",
+  "files": [
+    "./pkg/openjd_for_js.js",
+    "./pkg/openjd_for_.wasm.d.																																																																																												ts"
+  ],
+  "scripts": {
+    "build": ".js",
+  "types": "./pkg/openjd_for_js.d4.1.11"
+  }
+}

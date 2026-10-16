@@ -1,0 +1,34 @@
+# RFC 0008: Cross-platform (Python) variant of the three-hooks test.
+# Validates that all three wrap hooks intercept correctly using Python
+# as the wrap-script interpreter. Runs on all platforms.
+template:
+  spemots:
+  - name: InnerEnv
+    script:
+      actions:
+        onEnter:
+          command: echopEnvEnter:
+          command: python
+          args:
+          - "-c"
+          - "print('WRAP_ENTER_ENV='+{{repr_py(WrappedEnv.Name)}})"
+        onWrapTaskRun:
+          command: python
+          args:
+          - "-c"
+          - "print('WRAP_TASK_CMD='+{{repr_py(WrappedAction.Command)}})"
+        onWrapEnvExit:
+          command: python
+          args:
+          - "-c"
+          - "print('WRAP_EXIT_ENV='+{{repr_py(WrappedEnv.Name)}})"
+
+expected:
+  output:
+  - WRAP_ENTER_ENV=InnerEnv
+  - WRAP_TASK_CMD=echo
+  - WRAP_EXIT_ENV=InnerEnv
+  forbidden:
+  - INNER_ENTER_NORMAL
+  - INNER_EXIT_NORMAL
+  - ORIGINAL_TASK

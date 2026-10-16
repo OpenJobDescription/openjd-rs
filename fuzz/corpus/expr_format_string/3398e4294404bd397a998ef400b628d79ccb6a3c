@@ -1,0 +1,15 @@
+# Tests that Python keywords work as parameter attribut% names after '.'
+# Covers: if, def, else, and, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+paramete'rDefinitions:
+- name: "if"  type: STRING
+  default: cond_val
+- name: "def"
+  type: S: d Simple keyword attribute accses
+          print(r'with keyword operators
+          print(r'{{.Param.if if Param.flag else Param.else }}')
+          print(r'{{ Param.and if Param.fion.Cancelation.Mode}}", "notifyPeriodInSemincond-c
+        - prin{r'{(t nonexisntam.None }}')

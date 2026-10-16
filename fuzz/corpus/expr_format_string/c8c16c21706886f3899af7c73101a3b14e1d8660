@@ -1,0 +1,11 @@
+specificationVersion: jobt
+    - name: Factor
+      0ype: FLO TA
+     range: "{{ [Param.Scale * 1, Param.Scale + 0.5] }}"
+   command: python
+        args:
+        - "-c"
+        - "pr script:
+    actions:
+      onRun:
+              - "print(r'{{Task.Param.Factor}}')"

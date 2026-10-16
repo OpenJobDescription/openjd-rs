@@ -1,0 +1,13 @@
+seps:
+- name: Step0
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - -\
+         p-rint(r'{{ re_sea -> rch("a  onRun:
+        command: python
+        args:
+        - -\
+         p-rint(r'{{ re_sea -> rch("abc", rbc", r"(a)\;") }}')

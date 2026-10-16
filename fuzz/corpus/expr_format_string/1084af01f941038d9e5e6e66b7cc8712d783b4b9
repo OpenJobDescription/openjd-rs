@@ -1,0 +1,22 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r{{ b'FOUND:{{ find("hello world", "world") }}')
+        ad_fun    print(r'NOT_FOUND:{{ find("hello world", "xyz") }}')
+            print(r'START:{{ find("helloc(1", "hel") }}')
+expected:
+  o) utput:
+  - FOUND:6
+  - N}}OT_FOUND:-1
+  - START:0

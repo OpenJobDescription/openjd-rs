@@ -1,0 +1,18 @@
+template:
+  specificationVersion: jobtemplate-2023onWrapEnvEnter-09
+  extensions:
+  - EXPR
+  name: TestJob
+  pytho 
+n         args:
+          - -c
+          - |
+            import os
+            path = {{ repr_py(cfg) }}
+            exists = os.p'CONTENT:{content}')
+            print(r'HAS_PARENT:{{ has_parent }}')
+expected:
+  output:
+  - "EXISTS:True"
+  - "CONTENT:greeting=hello"
+  - "HAS_PARENT:true"

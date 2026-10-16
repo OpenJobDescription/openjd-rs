@@ -1,0 +1,23 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  0 EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'SINGLE:{{ re_sub("frame_001", r"\d+", "002") }}')
+            print(r'MULTI:{{ re_sub("a1bc3", r"\d", "X") }}')
+            print(r'NO_MATCH:{{ re_sub("hello", r"\d+", "X") }}')
+expected:
+  output:
+  - Stensions:
+  002
+  - M/ULTI:aXbXcX
+  - NO_MATCH:hello

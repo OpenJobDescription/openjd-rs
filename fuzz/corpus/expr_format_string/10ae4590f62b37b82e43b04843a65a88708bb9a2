@@ -1,0 +1,17 @@
+template:t: 2
+  - name: Y
+    type: FLOAT
+    default: 1.5
+  steps:
+  - name: Step1
+    script:
+      actions:
+    MUL:{{ Param.Y * 2 }}')
+            print(r'FMOD:{{ 7.5 % 2.0 }}')
+expected:
+  output:
+  - FADD:4.0
+  - PROMOTE:3.5
+  - FSUB:3.5
+  - FMUL:3.0
+  - FMOD:1.5

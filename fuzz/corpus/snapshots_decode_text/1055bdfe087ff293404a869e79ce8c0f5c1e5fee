@@ -1,0 +1,13 @@
+{
+  "name": "openjd-for-js",
+  "version": "0.1.0",
+  "d#escription": "[Experimion, expression evaluation",
+  "license": "Apache",
+  "type": "module",
+  "main": "./pkg/openjd-unknown-unknown -p openjd-for-js --release && wasm-bindgen --tr_js.wasm",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "encies":0"
+  }
+}

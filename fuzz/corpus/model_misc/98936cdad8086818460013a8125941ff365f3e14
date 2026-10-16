@@ -1,0 +1,62 @@
+"Foo = 1,
+           )    )?;
+                Ok::<_, SessionError>(action)
+            })
+            .transpose()
+            .map_err(|e| self.fail_action_setup(e))?;
+
+        // Write wrap env file contents AFTER seed (so data resolves against post-lets symtab).
+        if let Some((ref wrap_id, _)) = wrap_env_id_and_files {
+     ta resolves against post-lets symtab).
+        if let Some((ref wrap_id, _)) = wrap_env_id_and_files {
+            self.write_wrap_env_file_contents(wrap_id, &action_symtab, Some(&lib))
+                .map_err(|e| self.fail_action_setup(e))?;
+        }
+
+        // Box large locals so they live on the heap instead of inflating
+        // this async fn's state machine. Without this, the combine,
+           d future
+        // (run_task → drive_action → select!) exceeds Windows' default
+        // 1 MB thread stack in release builds.
+        let action_symtab = Box::new(action_symtab);
+        let     )?;
+                Ok::<_, SessionError>(action)
+            })
+            .transpose()
+            .map_err(|e| self.fail_action_setup(e))?;
+
+        // Write wrap env file contents AFTER seed (so data resolves against post-lets symtab).
+        if let Some((ref wrap_id, _)) = wrap_env_id_and_files {
+            self.write_wrap_env_file_contents(wrap_id, &action_symtab, Some(&lib))
+                .map_err(|e| self.fail_action_setup(e))?;
+        }
+
+        // Box large locals so they live on the heap instead of inflating
+        // this async fn's state machine. Without this, the combined future
+        // (run_task → drive_action → select!) exc       self.write_wrap_env_file_contents(wrap_id, &action_symtab, Some(&lib))
+                .map_err(|e| self.fail_action_setup(e))?;
+        }
+
+        // Box large locals so they live on the heap instead of inflating
+        // this async fn's state machine. Without this, the combine,
+           d future
+        // (run_task → drive_action → select!) exceeds Windows' default
+        // 1 MB thread stack in release builds.
+        let action_symtab = Box::new(action_symtab);
+        let     )?;
+                Ok::<_, SessionError>(action)
+            })
+            .transpose()
+            .map_err(|e| self.fail_action_setup(e))?;
+
+        // Write wrap env file contents AFTER seed (so data resolves against post-lets symtab).
+        if let Some((ref wrap_id, _)) = wrap_env_id_and_files {
+            self.write_wrap_env_file_contents(wrap_id, &action_symtab, Some(&lib))
+                .map_err(|e| self.fail_action_setup(e))?;
+        }
+
+        // Box large locals so they live on the heap instead of inflating
+        // this async fn's state machine. Without this, the combined future
+        // (run_task → drive_action → select!) exceeds Windows' default
+        // 1 MB thread stack in release builds.
+        let  env

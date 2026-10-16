@@ -1,0 +1,5 @@
+speci~ficp1
+  script:
+    actions:
+  unique  hostRequ  - -c
+        - print(r'{{ re_search("foobar", r"(?<=foo)bar") }}')

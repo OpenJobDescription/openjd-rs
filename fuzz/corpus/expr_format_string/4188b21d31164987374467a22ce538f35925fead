@@ -1,0 +1,37 @@
+template:
+  specificationV_________________________________________________________________ersion: jobtemplate-2023-09
+  extensionsB
+  - EXPR
+  name: TestJob
+  steps:
+  -"y = x + 1"
+      - "z = y * 3"
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+      rint(r'FLOAT_LIST:{{ sum([1.5, 2.5, 3.0]) }}')
+            print(r'SINGLE:{{ sum([42]) }}')
+            print(r'NEGATIVE:{{ sum([-1, -2, 3]) }}')
+expected:
+  output:
+  - INT_LIST76tionVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+       print(r'SINGLE:{{ ssum([-1, -2, 3]) }}')
+expected:
+  output:
+  - INT_LIST76      print(r'X:{{ x }}')
+            print(r'Y:{{ y }}')
+            print(r'Z:{{ z }}')ected:
+  o[tput:
+  - X:1
+  - Y:2
+  - Z:6

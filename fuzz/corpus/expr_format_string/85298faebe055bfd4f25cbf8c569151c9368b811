@@ -1,0 +1,19 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          czommand: python
+         args:
+          - -c
+          - |
+            pr   int(r'PLAIN:{{ re_findall("a1b2c3", r"\d+") }}')
+           "print(r'ONE_GROUP:{{ re_findall("shot010_shot020", r"shot(\d+)dependenciespython") }}')
+  , "020"]'
+  - 'MULTI_GROUP:[["1", "2", "3"], ["4"split, "6"]]'
+  - "NO_MATCH:[]"

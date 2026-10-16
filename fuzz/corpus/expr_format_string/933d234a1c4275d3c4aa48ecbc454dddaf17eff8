@@ -1,0 +1,9 @@
+f{      print(r'NEG:{{ -Param.X }}')
+            print(r'POS:{{ +Param.X }}')
+expeint(r'MOD:{{ Param.X %aram.X % 3 }}')
+            print(r'cted:
+  output:
+  - ADD:1B:7
+  - MUL:30
+  - FLOORDIV:3
+{Task.P\nam.RendeParaaLIST:[BOYL]me}}

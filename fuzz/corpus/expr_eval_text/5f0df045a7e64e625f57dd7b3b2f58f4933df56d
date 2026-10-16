@@ -1,0 +1,1 @@
+re_split("h BOOLfor i ie͢ o\nbar", r"\"|")

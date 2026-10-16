@@ -1,0 +1,12 @@
+{{
+        "specificatitensions": ["endOfLineEXPR"],
+        "name": "Test",
+  [
+            {{"name": "J0", (variables": {{"V": "{x}"}}}},
+            {{"name": "J1", "script": {     "name": "Test",
+  [
+            {{"name": "J0", (variables": {{"V": "{x}"}}}},
+            {{"name": "J1", "script": {{"actions": {{"onEnter": {{"comma: [{{"name": "E", "variables": {{"V": "{x}"}}}}],
+"script": {{"actions": {{"onRun": {{"co}}}}}can~elation}}}
+        ]
+    }}

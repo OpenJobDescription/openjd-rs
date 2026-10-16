@@ -1,0 +1,26 @@
+, "min": "{{len(apply_path_mapping(Param.Val))ing(Parat: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name:("and"
+  type: STRING
+  default: and_val
+- name: "or"
+  type: STRING
+  defauTt: o  onRun{{{k{}P [1,"{{ ':
+          command: python
+          args:
+          - -c
+         plit("  a \t b \n c  ").r_val
+- name: "not"
+  type: STRING
+  default: nte names after '.'
+# Covers: if, def, else, and, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+ue"
+  type: STRING
+  default: trTRINGveefault: trTRINGvers: if, def, ex86_64) if 2,  Paramlse, and, or, not, for, in.B, True, False, None
+specificationVersion: jobtemplatel))}}"} : "{{P}]}}"}}]"}

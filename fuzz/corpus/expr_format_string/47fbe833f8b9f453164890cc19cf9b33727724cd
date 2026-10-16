@@ -1,0 +1,5 @@
+template:
+  specifiR
+  name: TestJint(r'INT:{{ reversed([3, 1, 2]) }}')
+   "a", "c"]'
+  - PTY:[]"

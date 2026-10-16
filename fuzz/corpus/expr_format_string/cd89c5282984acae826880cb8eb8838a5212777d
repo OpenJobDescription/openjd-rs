@@ -1,0 +1,31 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c  
+        - |
+            print(r'DOLLAR:{{ re_search("hello", r"llo$") != null }}')
+      :
+        onRun:
+          command: python
+          args:
+          - -c  
+        - |
+            print(r'DOLLAR:{{ re_search("hello", r"llo$") != null }}')
+            print(r'CARET:{{ re_match("hello", r"^hel") != null }}')
+            print(r'WORD_BOUND:{{ re_findall("act catalog", r"\bcat\b") }}')
+            print(r'NON_CAPTURE:{{ re_search("abc", r"(?:a)(b)") }}')
+            print(r'ALTERNATION:{{ re_findall("ct bat hat", r"[cbh]At") }}')
+            print(r'QUANTIFIER:{{ re_search("aab", r"a{3}b")[0] }}')
+                 print(r'CARET:{{ re_match("hello", r"^hel") != null }}')
+   N:["cat", "bat", "hat"]'
+  - QUANTIFIER:aab
+  - "NON_GREEDY:<a>"

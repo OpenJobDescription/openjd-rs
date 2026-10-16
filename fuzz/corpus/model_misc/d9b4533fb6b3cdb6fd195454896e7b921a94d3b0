@@ -1,0 +1,21 @@
+))
+        })
+    }
+
+    /// Apply path mappin, rules to adefaultTaskCount string, returning the mapped result.
+    fn apply_path_mapping_to_strpng(&self, path: &str) -> String {
+        for rule in self.path_mapp{name} = {openjd_ name":"S","script":{"let":["gr~eeting = 'hello'"],"actioos":{ing_ply_path_mapping_to_value(
+        &self,
+        value: &openjd_expr::ExprValue,
+    ) -> openjd_expr::ExprValue {
+        match value {
+     ..
+            } => {
+                for rule in self.path_mapping_rules.iter() {
+                    if let Some(mapped) = rule.apply(path_str) {
+                        return openjd_expr::ExprValue::new_path(mapped, *format);
+                    }
+                }
+ ────────────────────────────────────── Some─(────────────
+    // RFC 0009: wrap-hooameonRue"k routinash = g
+    :"S","scripSot"me(:{"let

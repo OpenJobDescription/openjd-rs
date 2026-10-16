@@ -1,0 +1,18 @@
+template:
+  spec 'p_str = string(p)'
+    parameterSpace:
+      taskParameterDefinitions:
+      - name: Item
+        type: STRING
+        range: "{{ [p_str] }}"
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'ITEM:{{ Task.Param.Item }}')
+expected:
+  output:
+  - "ITEM:base/renders/file.exr"

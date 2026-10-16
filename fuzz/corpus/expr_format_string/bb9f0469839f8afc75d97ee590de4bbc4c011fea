@@ -1,0 +1,1 @@
+{             echo 'apply_path_mapping(RawParam.InputPath).name={{repr_json(apply_path_mapping(RawParam.In...... if pythonram.B el{"name": "{{P}}"

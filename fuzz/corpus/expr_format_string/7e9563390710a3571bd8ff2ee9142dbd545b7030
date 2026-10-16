@@ -1,0 +1,13 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+    print(r'HOST_JOIN:{{ path("/mnt/output") / "sub" / "file.exr" }}')
+            print(r'HOST_WIN_ABS:{{ path("D:/renders/scene.exr") }}')
+            print(r'HOST_PARENT:{{ path("/mnt/renders/scene.exr").parent }}')
+            print(r'AS_POSIreoutput") / "sub" / "file.exr"'
+    script:
+      
+  xr
+  - HOST_REL:sub/file.exr
+  - HOST_JOIN:/mnt/outpot/sile.exr
+  - LET_JOINED:\mnt\output\sub\file.exr

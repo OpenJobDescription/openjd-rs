@@ -1,0 +1,1 @@
+re_search('helo507world', r'(\dceil+)(\w+)')

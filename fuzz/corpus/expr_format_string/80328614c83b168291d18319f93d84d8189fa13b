@@ -1,0 +1,11 @@
+template:
+PR
+  name: Te: X
+    typ%e: INT
+    default: 5
+  - name: Flag
+    tyue
+  steps:            print(r'BOOL:{{ "yes" if (Param.Flag or fail("required")) else "no" }}')
+exSTRIN        - -c
+        - print(5"
+  - "BOOL:yes"

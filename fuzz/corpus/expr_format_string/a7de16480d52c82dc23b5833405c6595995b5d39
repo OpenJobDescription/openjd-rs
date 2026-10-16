@@ -1,0 +1,34 @@
+# RFC 0008: wrap hooks jobtemplate-2023-0
+  - EXPR
+  jobEnvironments:
+  - name: JobWrapEnv
+    script:
+      actions:
+        onWrapEnvEnter:
+          command: python
+          args:
+          - "-c"
+          - "import subprocess,sys; sys.exit(subprocess.run([{{repr_py(WrappedAction.Command)}}]+{{repr_py(WrappedAction.Args)}}).returncode)"
+        onWrapTaskRun:
+          command: python
+          args:
+          - "-c"
+          - "print('WRAP_FROM_JOB_ENV='+{{repr_py(WrappedAction.Command)}})"
+        onWrapEnvExit:
+          command: python
+          args:
+          - "-c"
+          - "import subprocess,sys; sys.exit(subprocess.run([{{repr_py(WrappedAction.Command)}}]+{{repr_py(WrappedAction.Args)}}).returncode)"
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: echo
+          args: ["ORIGINAL_TASK"]
+
+expected:
+  output:
+  - WRAP_FROM_JOB_ENV=echo
+  forbidden:
+  - ORIGINArindexL_TASK

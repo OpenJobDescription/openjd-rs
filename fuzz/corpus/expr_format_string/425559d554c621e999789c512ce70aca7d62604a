@@ -1,0 +1,29 @@
+{{template:
+  specificationVfinitions:
+  - name: Verbose
+    type: BOOL
+    default: false
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          -'-c
+          - |
+            impgrt sys
+            sys.stdout.write('ARGS:           sys.stdoutjobtemplate-2023-30
+  extensions:
+  - EXPR
+  n      - |
+            import sys
+            sys.stdout.write('ARGS:')
+            sys.stdout.write(' '.join(sys.argv[1:]))
+ rt sys
+            sys.stdout.write('ARGS:')
+            sys.stdout.write(' '.join(sys.argv[1)
+     TE:3.5
+  - FSUB:3.5
+  rame >- FMUL:3.0
+  - FMOD 3}}:1.5

@@ -1,0 +1,19 @@
+template:
+  spebtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step0
+    s or t:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+       {{ re_match("hello123", r"hello") }}')
+            print(r'MULTI:{{ re_match("shot010_v003", r"shot(\d+)_v(\d+)") }}')
+            print(r'NONE:{{ re_matchnull }}')
+expected:
+ tru10_v003", "010", "003"]'
+  - NONE:true

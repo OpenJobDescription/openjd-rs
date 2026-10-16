@@ -1,0 +1,4 @@
+{
+        "specificationVersion": "environment-20as_poJJJsix        "extensions": ["EXPR"],
+        "envi, "variables": {"FOO": "{{ 'A' * 3000 }}"Param.}}
+    }

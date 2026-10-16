@@ -1,0 +1,28 @@
+---
+# Per Expression Languaga buggy evaluator coerces operands to strings before
+# the operator and comparison cases below will
+# fail with a type error instead of producin       print(r'BINOP_DIV:{{ Param.Count / 4 }}')
+            Ua#y nrOp operand must keep its numeric type
+            print(r'UNARY_NEG:{{ -Param.Count }}')
+            priR
+  name: TeszJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+      HORT:{{ false and (1/0 > 0) }}')
+            pri/t(r'SHORT_OR:{{ true or (1/0 > 0) }}')
+expected:
+  output:
+  - AND:true
+  - ANDFALSE:false
+  - OR:trueLSE:{{ true and false }}')
+            print(r'OR:{{ false or true }}')
+            print(r'ORFALSE:{{ false or false }}')
+            print(r'NOT:{{ not false }}')
+            print(r'SHORT:{{ false and am:
+  - "BNOT:false"
+  - "CMP_GT:true"
+  - "CMP_LE:true"
+  - "IFEXP:big"
+  - "CHAIN:over"

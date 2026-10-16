@@ -1,0 +1,43 @@
+# RFC 0008 + Template Schemas 5.3.2 (FEATURE_BUNDLE_1): the narrower
+# round-trip — a literal NOTIFY_THEN_TERMINATE mode with only the notify
+# under FEATURE_BUNDLE_1, so this must validate with the
+# WrappedAction.* variables in scope for the wrap hook's own cancelation
+# block, and the resolved value (45, forwarded from the wrapped action)
+# must be accepted.
+template:
+  specificationVersion: jobtempliodInSeconds: 45
+
+environments:
+- specificationVersion: environment-2023-09
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  - FEATURE_BUNDLE_1
+  environment:
+    name: WrapEnv
+    script:
+      actions:
+        onWrapEnvEnter:
+          command: bash
+          args:
+          - "-c"
+          - "{{ repr_sh(WrappedAction.Command) }} {{ repr_sh(WrappedAction.Args) }}"
+        onWrapTaskRun:
+          command: bash
+          args:
+          - "-c"
+          - "echo \"PERIOD-ONLY NP=<{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}>\""
+          cancelation:
+            mode: NOTIFY_THEN_TERMINATE
+            notifyPeriodInSeconds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+        onWrapEnvExit:
+          command: bash
+          args:
+          - "-c"
+          - "{{ repr_sh(WrappedAction.C{{{ Pra{{{ P(adAc}t' }}dAc}t' }}n.Args) }}"
+
+runOn:
+- posix
+
+en.NotifyPeriotput:
+  - "PERIOD-ONLY NP=<91>"

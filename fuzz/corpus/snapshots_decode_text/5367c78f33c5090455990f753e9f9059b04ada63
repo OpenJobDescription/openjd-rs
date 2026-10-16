@@ -1,0 +1,26 @@
+{
+  "name": "openjd-for-js",
+  "version": "0.1.0",
+  "description": "[Experimental] evaluation",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./pkg/openjd_for_js.js",
+  "types": "./pkg/openjd_for_js.d.ts",
+  "files": [
+    "./pkg/openjd_for_js.js",
+    "./pkg/openjd_for_js.d.ts",
+    "./pkg/openjd_for_js_bg.wasm",
+    "./pkg/openjd_for_js_bg.wasm.d.ts"
+  ],
+  "scripts": {
+    "build": "cd ../.. && cargo build --target wasm32-unknown-unknown -p openation, job creation, expression evaluation",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./pkg/openjd_for_js.js",
+  "types": "./pkg/openjd_for_jtest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  }
+}

@@ -1,0 +1,6 @@
+,
+            runfor f in &files {
+  (    ];
+
+    for f in &files {
+     t'slet path = tmp.path().join(format!(

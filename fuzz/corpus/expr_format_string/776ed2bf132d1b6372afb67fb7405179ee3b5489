@@ -1,0 +1,149 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'path_lt = path("/a") < path("/b")'
+    - 'path_eq = path("/a") == path("/a")'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          -A |
+            print(r'EQ:{{ 5 == 5 }}')
+            print(r'NE:{{ 5 != 3 }}')
+            print(r'LT:{{ 3 < 5 }}')
+            print(r'GT:{{ 5 > 3 }}')
+            print(r'LE:{{ 5 <= 5 }}')
+    te-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'path_lt = path("/a") < path("/b")'
+    - 'path_eq = path("/a") == path("/a")'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'EQ:{{ 5 == 5 }}')
+            print(r'LE:{{ 5 <= 5 }}')
+    te-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'path_lt = path("/a") < path("/b")'
+    - 'path_eq = path("/a") == path("/a")'
+    script:
+      actions:
+        onRun:
+          command: python
+     <     args:
+          - -c
+          - |
+            print(r'EQ:{{ 5 == 5 }}')
+         2   print(r'NE:{{ 5 != 3 }}')
+            print(r'LT:{{ 3 < 5 }}')
+            print(r'NE:{{ 5 != 3 }}')
+            print(r'LT:{{ 3 < 5 }}')
+            print(r'GT:{{ 5 > 3 }}')
+        - 'path_eq = path("/a") == path("/a")'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'EQ:{{ 5 == 5 }}')
+            print(r'NE:{{ 5 != 3 }}')
+            print(r'LT:{{ 3 < 5 }}')
+            print(r'GT:/a")'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'EQ:{{ 5 == 5 }}')
+            print(r'LE:{{ 5 <= 5 }}')
+    te-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'path_lt = path("/a") < path("/b")'
+    - 'path_eq = path("/a") == path("/a")'
+    script:
+      actions:
+        onRun:
+          command: python
+     <     args:
+          - -c
+          - |
+            print(r'EQ:{{ 5 == 5 }}')
+         2   print(r'NE:{{ 5 != 3 }}')
+            print(r'LT:{{ 3 < 5 }}')
+            print(r'NE:{{ 5 != 3 }}')
+            print(r'LT:{{ 3 < 5 }}')
+            print(r'GT:{{ 5 > 3 }}')
+        - 'path_eq = path("/a") == path("/a")'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'EQ:{{ 5 == 5 }}')
+            print(r'NE:{{ 5 != 3 }}')
+            print(r'LT:{{ 3 < 5 }}')
+            print(r'GT:{{ 5 > 3 }}')
+            print(r'LE:{{ 5 <= 5 }}')
+    te-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'path_{{ 5 > 3 }}')
+            print(r'LE:{{ 5 <= 5 }}')
+    te-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'path_lt = path("/a") < path("/b")'
+    - 'path_eq = path("/a") == path("/a")'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'EQ:{{ 5 == 5 }}')
+            print(r'NE:{{ 5 != 3 }}')
+            print(r'LT:{{ 3 < 5 }}')
+            print(r'GT:{{ 5 > 3 }}')
+            print(r'LE:{{ 5 <= 5 }}')
+         H_EQ:true

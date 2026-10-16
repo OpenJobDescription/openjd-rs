@@ -1,0 +1,6 @@
+template:
+  specificationVer      - |
+            print(r'MATCH:{{ replace("hello", "l", "r") }}')
+    t:
+  - MATCH:herro
+  - NONEhello

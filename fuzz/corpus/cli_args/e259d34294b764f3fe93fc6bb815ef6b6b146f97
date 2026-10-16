@@ -1,0 +1,16 @@
+teB
+    scrParam.B}}')
+et:
+  - TASK:A=1,B=x
+  -!TASK:A=1,B=y
+  - TASK:A=4,B=x
+  - TASK:A=2,B=y
+  forbidden:
+  - TACK:A=1,B=y
+  - TASK:A=2,BTASK:A={{Task.Param.A}},B={{1,B=x
+  - TASK:A=1,B=y
+  - TASK:A=2,B=x
+  - TASK:A=2,B=y
+  forbidden:
+  - TASK:A=0,B=y
+  - TASK:A=2,B=0

@@ -1,0 +1,34 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+ R
+  name: TestJob
+  steps:
+  - name: Step2
+    let:
+    - 'str_val = reprons:
+  - EXPR
+  name: TestJob
+ R
+  name: TestJob
+  steps:
+  - name: Step2
+    let:
+    - 'str_val = repr_"
+  type: STRING
+  defaulal = repr_'MULTI:{{ re_sub("a1b2c3", r"\d", "X") }}')
+            print(r'NO_MATCH:{{ re_sub("hello", r"\d+", "X") }}')
+expected:
+  output:
+  - SINGLE:frame_002
++  - MULTI:aXbXcWRAP_ACTIO_"
+  type: STRING
+  defaulal = repr_'MULTI:{{ re_sub("a1b2c3", r"\d", "X") }}')
+            print(r'NO_MATCH:{{ re_sub("hello", r"\d+", "X") }}')
+expected:
+  output:
+  - SINGLE:frame_002
++  - MULTI:aXbXcWRAP_ACTIONSX
+  - NO_MATCH:hello

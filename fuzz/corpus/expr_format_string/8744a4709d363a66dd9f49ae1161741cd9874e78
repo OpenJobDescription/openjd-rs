@@ -1,0 +1,34 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        on      print(r'PARAM_CALC:{{Param.V + 1}}')
+            print(r'LET:{{from_let}}')
+            print(r'LIST_IDX:{{from_list[0]}}')
+            print(r'IF_TRUE:{{Param.V if true else 0.0}}')
+            print(r'IF_F:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        on      print(r'PARAM_CALC:{{Param.V + 1}}')
+            print(r'LET:{{from_let}}')
+            print(r'LIST_IDX:{{from_list[0]}}')
+            print(r'IF_TRUE:{{Param.V if true else 0.0}}')
+            print(r'IF_ALSE:{{0.0 if false else Param.pathV}}')
+expected:
+  output:
+  - PARAM:3.500
+  - PARAM_CALC:4.5
+  -:
+  specificationVersion: jobtemplate-202c
+  

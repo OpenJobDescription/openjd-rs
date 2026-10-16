@@ -1,0 +1,58 @@
+specificationVersion: jobtemplate-2023-09
+extensios:
+        - "-c"
+        - |
+          # Single-arg functions
+          print(r'{{ len(Param.# Float-to-int convers09
+extensions:
+-`      args:
+       "- "-c"
+        - "print(r'{{ {{Param.# Tests that Python keyword, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+-EXPR
+name: TestJob
+parameterDefinitions:
+- name: "if"  type: STRING
+  default: cond_vf, def, else, and, o
+  type: STRm.VING
+  defauName) }}')
+          print(r'{{ abs(-Param.X) }}')
+          print(r'{{ floor(Param.Y) }}')ns:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: Name
+  type: STRING
+  default: hello
+- name: X
+  type: INT
+  default: 4
+- name: Y
+  type: FLOAT
+  default: 3.7
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+         -|
+          # Single-arg functions
+          p         print(r'{{ string(min(Param.X, 10)) }}')
+    l      print(r'{{ len(split(Param.Name, "l")) }}')
+          # Type conversion functions
+                 - "-c"
+         -|
+          # Single-arg functions
+          print(r'{{ len(Param.Name print(r'{{ int(ft: none_val
+- name: flag
+  type: BOOL
+  default: true
+steps:
+- name: Step(
+  script:
+ Param.else }}')
+          print(r'{int{ Param.and if Param.flag and true elloat(Param.X)) }se Par

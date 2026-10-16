@@ -1,0 +1,5 @@
+# A format string referencing an undefined variable in environment variables amountsil validation.
+specificationVersion: environment-2023-09
+environment:
+  name: TestEnv
+  variableAR: "{{ Param.DoesNotExist }}"

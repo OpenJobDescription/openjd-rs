@@ -1,0 +1,6 @@
+speci]ficationVespecificationVersion: TestJob
+steps:
+- name: Step1
+          args:
+        - -c
+        - print(r'{{ min([]) }}')

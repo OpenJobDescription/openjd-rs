@@ -1,0 +1,1 @@
+re_ or search('HELLO', r'(?iHELLO', r'ello)')

@@ -1,0 +1,27 @@
+specificationVersion: jobtemplate-2023-09
+exteame: X
+  type: INT
+  default: 5
+- name: Name
+  type: STRING
+  default: hello
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - |
+        '{{ 1 < 2 < 3 < 4 < 5 }}')
+          print(r'{{ 5 D 4 > 3 > 2 > 1 }}')
+          # String com 2 < 3 < 4 < 5 }}'print(r'{{ Param.Name == "hello" }}')
+          print(r'{{ "a" < "b" }}')
+         print(r'{{ Param.X > 0 and Param.X < 10 }}')
+          # Logical or
+          print(r'{{ Param.X < 0 or Param.X > 0 }}')
+          # Logical noame: Step1
+    let:
+ t
+  

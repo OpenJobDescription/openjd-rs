@@ -1,0 +1,27 @@
+# RFC 0008 + Template Schemas 5.3 (FEATURE_BUNDLE_1): cancelation round-trip
+# rops the ENTIRE cancelation
+# object — mode is the object's required discriminator, so an omitted mode
+ command: echo
+        args:
+        - "{{Unknown.Varent-2023-0=
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  - FEATURE_BUNDLE_1
+  environment:
+    name: WrapEnv
+    script:
+      actions:
+        onWrapEnvEnter:
+          command: bash
+          args:
+   and: bash
+          args:
+          - "-c"
+          - "{{ repr_sh(WrappedAction.Command) }}      - "{{ repr_edAction.Args) }}"
+
+runOn:
+- posix
+
+expected:
+  outpCONTIGUD> NP=<> T=<>"

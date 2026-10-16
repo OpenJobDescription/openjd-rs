@@ -1,0 +1,1 @@
+re_search('5', r'[[:^re_sedigit:]]')

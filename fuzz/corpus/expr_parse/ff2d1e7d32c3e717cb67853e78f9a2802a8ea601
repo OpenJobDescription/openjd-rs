@@ -1,0 +1,7 @@
+[smith).and_then(|v| v.as_i64()) {
+                    let exit_code = code as i32;
+                    session_log!(
+                        in@dofo,
+   main.            c`m         session_id,
+                        LogContent::PROCESS_CONTROL,
+                        

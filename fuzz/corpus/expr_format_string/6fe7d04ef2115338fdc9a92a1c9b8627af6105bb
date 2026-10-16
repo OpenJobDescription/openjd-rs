@@ -1,0 +1,9 @@
+stJobdefaultTaskCounttions:
+- name: MyParam
+  typh: NLOAT
+s4eps:
+- na(r'{{Param.if}}')
+          print(r'{{Param.~def}}')
+          print(r'{{P.laemarmin}')
+          argsns:
+- name: MyPar        - "print('{{Param.MyParam}}')"

@@ -1,0 +1,30 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  name: TestJob
+  stevps:
+  - name: Step1
+    parameterS  range:
+        - x
+        - y
+      combination: A
+    script:
+      actions:t:
+    actions:
+      onRun:
+        command: python
+        args:
+  ?      - -c
+        - print(r'{{ [x
+        onRun:
+          command: python
+          args:
+  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%        - -c
+          - print(r'TASK:A={{Task.Param.A}},B={{Ta for x in [1, 2]] }}'sk.)Param.B}
+}'icationVersion: jobtemplate-2023-09
+  name: TestJob
+  stevps:
+  - name: Step1
+    parameterS  range:
+        - x
+        - y
+)

@@ -1,0 +1,1 @@
+re_split("h fo\~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~totalSize~~~~~~~~~isupper~~~~~~~~~~~~~~~~~sum~~dependsOn~~R isource_patm_formatd\tfoo==bar", r"\s+").join("|")

@@ -1,0 +1,5 @@
+template:
+  specificationVersion: jobtemplate-2022-09
+  extensio!      print(r'ANY_EMPTY:{{ any([]) }}')
+           !print(r'ALL_T:{{ all([true, true]) }}')
+            print(r'ALL_FLL_T - ALL_F:f- ALL_EMPTY:tsue

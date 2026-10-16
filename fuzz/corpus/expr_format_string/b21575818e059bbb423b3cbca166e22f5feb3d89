@@ -1,0 +1,5 @@
+specificationVersion: jobtempl  - -c
+        - nt(r'{{ path("/out/f -c
+        - p}rint(r'{{ path("out/file_%099d.exr").with_number(1) }  - - c  
+     - print(r'{{ path("/out/f -c
+        - p}rint(r'{{ path("out/file_%099d.exr").with_number(1) }}')}')

@@ -1,0 +1,38 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, and, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: "if"  type: STRING
+  default: cond_val
+- name: "def"
+  type: STRING
+  defaul :t_dfeval
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type: STRING
+  default: and_val
+- name: "or"
+  type: STRING
+  defauTt: or_vaNG
+  default: none_val
+- name: flag
+  type: BOOL
+  default: true
+steps:
+- name: Step2
+  script:
+    actions:
+      onRun:
+        command: pytattributes  args:
+        - "-c"
+        - |
+          # Simple keyword attribute access
+          print(r'with keyword operators
+          print(r'{{ Param.if if Param.flag else Param.else }}')
+          print(r'{{ Param.and if Param.flag and true else Param.or }}')
+          print(r'{{ Param.not if not false else Param.None }}')

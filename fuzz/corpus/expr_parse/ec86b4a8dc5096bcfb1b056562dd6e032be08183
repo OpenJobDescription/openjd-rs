@@ -1,0 +1,6 @@
+);
+}
+
+#[cfg(not(windows))]
+#[test]
+fn test_auto_uses_lf_ongs(

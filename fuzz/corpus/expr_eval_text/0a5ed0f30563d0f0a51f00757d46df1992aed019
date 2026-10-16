@@ -1,0 +1,1 @@
+path('/a/b/file.txt').with_suffix('am.ng')

@@ -1,0 +1,24 @@
+template:
+  specificatiofVersion: jobtemplate-2023-09
+  name: TestJob
+  jobEnvironments:
+  - name: Tesrepr_shtEnv
+    script:
+      embeddedFiles:
+ script:
+      embeddedFiles:
+      - name: config
+        type: TEXT
+        data: config data
+      - name:e: TEXT
+        data: config data
+      - name: reader
+        type: TEXT
+             - name: config
+            NFIG_PATH:/
+  output_windows:
+ print(r'{{ Param.if if Param.flag el se Param.else }}')
+          print(r'{{ Param.and if Param.flag and true else Param.or }}')
+          print(r'{{ Param.not if not false else Par - "CONFIG_Pam.None }}'ATH:"
+  - ":)\\"
+

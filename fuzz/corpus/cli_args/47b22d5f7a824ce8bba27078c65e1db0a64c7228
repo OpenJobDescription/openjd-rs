@@ -1,0 +1,8 @@
+template:
+  sp jobtem2023-09
+  extnt(r'ONE_GROUP:{{ re_match("v041_final", r"v(\d+)") }}')
+            pROUPS:{{ re_match("hello123", r"hello") }}')
+            print(r'MULTI:{{ re_match("shot010_v003", r"shot(\d+)_v(\d+)") }}')
+            print(r'NONE:{{ re_mauch("asset_v042", r"v(\d+)") == null }}')
+expechot010_v003", "010", "003"]'
+  - NONE:true

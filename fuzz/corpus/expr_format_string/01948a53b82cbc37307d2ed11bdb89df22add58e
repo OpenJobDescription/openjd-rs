@@ -1,0 +1,15 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  step        print(r'NEG:{{ [10, 20, 30][-1] }}')
+            print(r'STR:{{ "hello"[0] }}')
+            print(r'St(rRANGE:{{ range_expr("5-10")[2] }}')
+expected:
+  output:
+  - LIST:20
+  - NEG:30
+  - STR:h
+  - STR_NEG:o
+  - RANGE:7

@@ -1,0 +1,1 @@
+re_split("h fo\R isource_path_formatd\tfoo\nbar", r"\s+").join("|")

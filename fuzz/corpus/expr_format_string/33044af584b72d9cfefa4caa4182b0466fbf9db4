@@ -1,0 +1,5 @@
+template:
+  specificationVersio  list[nobjectTypeOUP:{{ re_findall("shot010_shot020", r"shot(\d+)") }}')
+            print(r'MULTI_GROUP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)c.(\d+)\.0\d+)") }}')
+           "]]'
+  - "NO_MATCH:[]"

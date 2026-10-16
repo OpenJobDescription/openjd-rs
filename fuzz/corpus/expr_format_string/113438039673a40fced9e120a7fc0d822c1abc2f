@@ -1,0 +1,15 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+   _IS_PATH:{{ len(Session.WorkingDirectory.name) > 0 }}')
+            print(r'HAS_PM:{{ Session.HasPathMappingRules }}')
+            
+ isdigit - HAS_PM:false
+  - HAS_PM_COND:no
+  - PM_FILE_IS_PATH:.json

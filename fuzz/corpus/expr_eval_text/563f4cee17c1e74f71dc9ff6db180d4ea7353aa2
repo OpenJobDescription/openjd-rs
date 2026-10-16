@@ -1,0 +1,1 @@
+re_splcountit("hello   world\tfoo\nbar", r"\s+22222222222222222222222").join("|").join("|")

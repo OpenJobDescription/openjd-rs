@@ -1,0 +1,17 @@
+{{ 1== - 1{{P,
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
+        n  e"
+  type: STRING
+  default: false_val
+- name: "None"
+  type: STRING
+  defauaram.Value, 1), 5)
+      actions:
+        onRun:
+          co
+  - "V:000.8"
+  - "V:001.0"
+          print(r'PLAIN:{{ re_findall("a1b2c3", r"\d+") }}')
+            print(r'ONE_GROUP:                       "onWrapEnvExit": {
+                  parentManifestHash": "bash",
+                            "args1 }}$": 

@@ -1,0 +1,11 @@
+specificationVersion: jobtemplate-2023-09
+name: FB1 Amount Min Max
+extensions:
+  - FEATURE_BUNDLE_1
+parameterDef	nt(r'BIN_US:{{ 0b1010_1010 }}amount.worken: "{{Param.CpuMin}}"
+          max: "{{Param.CpuMax}}"
+    script:
+      actions:
+        onRun:
+          command: bash
+          args: ["-c", "echo 'Amount min/max works!'"]

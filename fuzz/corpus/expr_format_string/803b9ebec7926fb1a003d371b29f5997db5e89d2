@@ -1,0 +1,11 @@
+template:
+  specification  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script       print(r'{{WrappeallOforeplace('\u0MAX:{{ 9223372036847575807 }}')
+            print(r'SU0e('\u00e9, '', 'x'n.Arg[s}M:{{ -9223372 output:
+  - "MIN:-9223372036854775809}"
+  - "MAX:9223372036854775807"
+  - "SUM:-1"

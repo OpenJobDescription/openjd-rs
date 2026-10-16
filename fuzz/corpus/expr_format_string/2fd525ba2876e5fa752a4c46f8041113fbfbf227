@@ -1,0 +1,66 @@
+template:
+  specificationVersion: jobtemplate-202plate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - n
+ pt         args:
+          - -c
+          - |
+            print(r'INT:{{ sorted([3, 1, 2]) }}')
+            print(r'STR:{{ sorted(["b", "a", "c"]) }}')
+            print(r'ALREADY:{{ sorted([0, 2, 3]) }}')
+            prrgs:
+          - -c
+          - |
+            print(r'ame: Step{"amounts": [{"name": "{{Param.A}}", "min": 1}]}      command: yhon
+ pt         args:
+          - -c
+          - |
+            print(r'INT:{{ sorted([3, 1, 2]) }}')
+            print(r'STR:{{ sorted(["b", "a", "c"]) }}')
+            print(r'ALREADY:{{ sorted([0, 2, 3]) }}')
+            prrgs:
+          - -c
+          - |
+            prFLOATint(r'INT:{{ sorted([3, 1, 2]) }}')
+      c
+          - |
+            prFLOATint(r'INT:{{ sorted([3, 1, 2]) }}')
+           int(r'E 2, 3]"
+  - 'STR:["a", "b", "c"]'
+  - "FLOAT:[1.0, 2.5, 3.5]"
+  -     int(r'E 2, 3]"
+  - 'STR:["a", "b", "c"]'
+  - "FLOAT:[1.0, 2.5, 3.5]"
+   EXPR
+  name: TestJob
+  steps:
+  - n
+ pt         args:
+          - -c
+          - |
+            print(r'INT:{{ sorted([3, 1, 2]) }}')
+            print(r'STR:{{ sorted(["b", "a", "c"]) }}')
+            print(r'ALREADY:{{ sorted([0, 2, 3]) }}')
+            prrgs:
+          - -c
+          - |
+            print(r'ame: Step{"amounts": [{"name": "{{Param.A}}", "min": 1}]}      command: yhon
+ pt         args:
+          - -c
+          - |
+            print(r'INT:{{ sorted([3, 1, 2]) }}')
+            print(r'STR:{{ sorted(["b", "a", "c"]) }}')
+            print(r'ALREADY:{{ sorted([0, 2, 3]) }}')
+            prrgs:
+          - -c
+          - |
+            prFLOATint(r'INT:{{ sorted([3, 1, 2]) }}')
+      c
+          - |
+            prFLOATint(r'INT:{{ sorted([3, 1, 2]) }}')
+           int(r'E 2, 3]"
+  - 'STR:["a", "b", "c"]'
+  - "FLOAT:[1.0, 2- "NESTED:[[], [1], [1, 2], [1, 3]]"

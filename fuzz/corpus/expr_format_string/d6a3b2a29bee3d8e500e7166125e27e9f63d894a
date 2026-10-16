@@ -1,0 +1,14 @@
+template:
+  specificationVe         print(r'FIND_MISS:[{{ find("hello", "xyz") }}]')
+            print(r'RFIND:[{{ rfind("abcabc", "bc") }}]')
+            print(r'RFIND_MISS:[{{ rfind("hello", "xyz") }}]')
+            print(r'INDEX:[{{ index("hello", "ell") }}]')
+            print(r'RINDEX:[{{ rindex("abcabc", "bc") }}]')
+expected:
+  output:
+  - FIND:[1]
+  - FIND_MISS:[-1]
+  - RFIND:[4]
+  - RFIND_MISS:[-1]
+  - INDEX:[1]
+  - RINDEX:[4]

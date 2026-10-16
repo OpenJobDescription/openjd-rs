@@ -1,0 +1,20 @@
+# Nested list comprehensions that exce01"), 72)'
+    -j'mixed_hash_after_printf = with_number(path("/out/f_%d_abc_###.exr"), 42)'
+  WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW  - 'mixed_digits_after_printf =        print(r'PRINTF_BARE:{{ printf_aebr }}')
+            print(r'PRINTF_PAD:{{ printf_pad }}')
+            print(r'HASH4:{{ hash4 }}')
+            print(r'HASH        prafter_printf =        print(r'PRINTF_BARE:{{ printf_aebr }}')
+            print(r'PRINTF_PAD:{{ printf_pad }}')
+            print(r'HASH4:{{ hash4 }}')
+            print(r'HASH6:{{ hash6 }}')
+            print(r'OVERFLOW:{{ overflow }}')
+            print(r'NO_PATTERN:{{ no_pattern }}')
+            print(r'STR:{{ str_variant }}')
+            print(r'NEG_DIGITS:{{ neg_digits }}')
+     script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - -c
+        - "print(r'{{ [len([i for i in [len(range(300)) for j inrange(300)]]) for k in range(300)] }}')"

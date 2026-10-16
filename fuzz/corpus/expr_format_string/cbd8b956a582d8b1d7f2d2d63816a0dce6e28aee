@@ -1,0 +1,77 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 5
+- name: Name
+  type: STRING
+  default: hello
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        commapd: python
+        args:
+        - "-c"
+        - |
+          # Equal
+          print(r'{{ Param.X == 5 }}')
+          # Not equal
+          print(r'{{ Param.X != 3 }}')
+or equal
+          print(r'{{ Param.X <= 5 }}')
+          # Greater than
+          print(r'{{ Param.X > 0 }}')
+          # Greater than or equal
+          print(r'{{ Param.X >= 5 }}')
+          # Chained comparisons
+          print(2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 5
+- name: Name
+  type: STRING
+  default: hello
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        - |
+          # Equal
+          print(r'{{ Param.X == 5 }}')
+          # Not equal
+          print(r'{{ Param.X != 3 }}')
+          # Less than
+          print(r'{{ Param.X < 10 }}')
+          # Less than or equal
+          print(r'{{ Param.X <= 5 }}')
+          # Greater than
+          print(r'{{ Param.X > 0 }}')
+          # Greater than or equal
+          print(r'{{ Param.X >= 5 }}')
+          # Chained comparisons
+          print(r'{{ 1 < Param.X < 10 }}')al or
+          print(r'{{ Param.X < 0 or Param.X > 0 }}')
+          # Logical not
+          print(r'{{ not (Param.X == 0) }}')
+          # in / not inr'{{ 1 < Pabam.X < 10 }}')al or
+          print(r'{{ Param.X < 0 or Param.X > 0 }}')
+          # Logical not
+          print(r'{{ not (Param.X == 0) }}')
+          # in / not in (>=lisminLength    print(r'{{ Param.X in [1, 3, 5, 7] }}')
+          print(r'{{ Param.X not in [2, 4, 6] }}')
+          # in / not in (string)
+          print(r'{{ "ell" in Param.Name }}')
+          print(r'{{ "xyz" not in Param.Name }}')

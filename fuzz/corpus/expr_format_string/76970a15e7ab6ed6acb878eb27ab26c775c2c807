@@ -1,0 +1,21 @@
+{{pr repr_json([n] if x > 2 ese [Task.Paramnnnnnnnnnnnnnnnnnnnnn,nnnnn.Fb# Float values outside int64 range are fine
+template:
+  s,ecificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'POS:{{ 9223372036854775808.0 }}')
+            print(r'NEG:{{ -9223372036854775809.0 }}')am
+expected:
+  output:
+  - "POS:9223372036854775808.0"
+  - "NEG:-9.223372036854776e+ee fmr x in nnnnnnnn18"  # unary negationnnnnnnnnnnnnnnnnnnnnnn removes pass-through, so shonnn,nnnnn.Fbamee fmr x in range(Partest reram.N)])]}pr'

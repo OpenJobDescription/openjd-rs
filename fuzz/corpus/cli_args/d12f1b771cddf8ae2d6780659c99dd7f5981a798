@@ -1,0 +1,7 @@
+{
+        "speificationVersion": "jobtemplate-20209",
+   "name": "Test",
+                "actions": {"onRun": {"command": "foo"}}
+            }
+        }]
+    }

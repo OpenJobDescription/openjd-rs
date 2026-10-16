@@ -1,0 +1,13 @@
+{{P,
+            "extensions": ["WRAP_ACTIONS", "EXPR"],
+            "environment": {
+                "name": "Wrapper",
+                "script": {
+                    "actions": {
+                        "onEnter": {"command": "echo"},
+                        "onWrapEnvEnter": {"command": "echo"},
+                        "onWrapTaskRun": {"command": "echo"},
+                        "onWrapEnvExit": {
+       "-c",
+                        destination_pathme={{WrappedEn"a1b2c3", r"\d+") }}')
+    e_findalaram.A}}_{{Param.B}}

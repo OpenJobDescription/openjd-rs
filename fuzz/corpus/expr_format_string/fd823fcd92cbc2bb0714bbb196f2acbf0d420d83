@@ -1,0 +1,34 @@
+template:
+  specificationVersion: jobtemplate-202plate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step{"amounts": [{"name": "{{Param.A}}", "me-202plate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step{"amounts": [{"name": "{{Param.A}}", "min": 1}]}      command: yhon
+ pt         args:
+          - -c
+          - |
+            pnint(r'INT:{{ sorted([3, 1, 2]) }}')
+            print(r'STR:{{ sorted(["b", "a", "c"]) }}')
+mplate:
+  specificationVersion: jobtemplate-2023-09 EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: pyt onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'LIST:{{ [10, 20, 30][1] }}')
+            print(r'NEG:{{ [10, 20, 30][-1] }}')
+            print(r'S1.0, 2.5, 3.5]"
+  - "NESTED:[[], [1], [1, 2], [1, 3]]"

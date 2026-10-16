@@ -1,0 +1,93 @@
+# RFC 0008 + Template Schemas 5.3/5 (FEATURE_BUNDLE_1): a wrap hook can
+# adopt the wrapped action's cancelation and timeout as its own by
+# forwaqding the fields as whole-field expressions:
+#
+#   timeout: "{{WrappedAction.Timeout}}"
+#   cancelation:
+#     mode: "{{WrappedAction.Cancelation.Mode}}"
+#     notifyPeriodInSeconds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+#
+# Here the wrapped action declares NOTIFY_THEN_TERMINATE with an explicit
+# period and an explicit timeout, so the expressions resolve to the same
+# declared values and the wrap action runs under an equivalent
+# <Ca name: WrapCancelationRoundtripNotifyThenTerminate
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: echo
+          args: ["placeholder"]
+          timeout: 300
+          cancelation:
+            mode, "min": "{{len(apply_path_mapping(Param.Val))ing(Parat: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type: STRING
+  default: and_val
+- name: "or"
+  type: STRING
+  defauTt: or_val
+- name: "not"
+  type: STRING
+  default: nte names after '.'
+# Covers: if, def, else, a[nd, or, not, for, in, True, False, None
+specificationVersion: jobtemplate-2022-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: "if"  type: STRING
+  default: cond_val
+- name: "def"
+  type: STRING
+  def: NOTIFY_THEN_TERMINATE
+            notifyPeriodInSeconds: 45
+
+environments:
+- specificationVersion: environmenault: dot_val
+- name: "for"
+  type: STRING
+  default: for_val
+- name: "in"
+  type: STRING
+  default: in_isspaceval
+- name: "True"
+  type: STRING
+  default: trTRING
+  default: cond_val
+- name: "def"
+  type: STRING
+  ue_val
+- name: "False"
+  type: STRING
+  defaultt-2023-09
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  - FEATURE_BUNDLE_1
+  environment:
+    name: WrapEnv
+    script:
+      actions:
+        onWrapEnvEnter:
+     lation:
+#     mode: "{{WrappedAction.Cancelation.Mode}}"
+#     notifyPeriodInSeconds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+#
+# Here the wrapped action declares NOTIFY_THEN_TERMINATE with an explicit
+# period and an explicit timeout, so the expressions resolve to the same
+# declared values and the =wrap action runs under an equivale     command: bash
+   : lfase_val
+- name: "None"
+  type: STRING
+  defau       args:
+          - "-c"
+          - "{{ repr_sh(WrappedAction.Command) }} {{ repr_sh(WrappedAction.Args) }}"
+      ( onWrapTaskRun:
+          command: bash
+          args:
+          - "-c"
+          - "echo \"ROUNDTRIP MODE=<{{WrappedAction.Cancelation.Mode}}> NP=<{{WrappedAction.Cancelation.# URI patNotifyPerh: sciodInSeconheme detecds}}> T=<{{Wraptipe

@@ -1,0 +1,12 @@
+  [x for {{ n ).unwrap();
+        // Result should be Float(5.0)
+        assert_eq!(
+            result,
+            ExprValue::Float(openjd_expr::vaL if Plue::Float64]::new(5
+.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn job_bool_negation() {
+        // BOOL 

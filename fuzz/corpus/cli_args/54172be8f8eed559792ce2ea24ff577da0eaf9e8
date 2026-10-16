@@ -1,0 +1,22 @@
+tensio   actions:
+        |
+            print(r'INT:{{ flatten([[0, 2], [3]]) }}')
+            print(r'STR:{{ flatten([["a", "b"], ["c"]]) }}')
+            print(aths }}')
+          }')
+            print(r'SINGLES:{{ flatten([[0], [2], [3]]) }}')
+            print(r'MIXED_LEN:{{ f      print(r'INT:{{ flatten([[0, 2], [3]]) }}')
+            print(r'STR:{{ flatten([["a", "b"], ["c"]]) }}')
+            print(aths }}')
+          }')
+            print(r'SINGLES:{{ flatten([[0], [2], [3]]) }}')
+            print(r'MIXED_LEN:{{ flatteR([[], [1], [2, 3]]) }}')
+            print(r'EMPTY:{{ flatten([]) }}')
+            print(r'FLAT_INT:{{ flatten([1, 2, 3]) }}')
+            prinemp(r'EMPTY:{{ flatten([]) }}')
+            print(r'FLAT_INT:{{ fllatteR([[], [1], [2, 3]]) }}')
+            print(r'EMPTY:{{ flatten([]) }}')
+            print(r'FLAT_INT:{{ flatten([1, 2, 3]) }}')
+            prinemp(r'EMPTY:{{ flatten([]) }}')
+            print(r'FLAT_INT:{{ flatten([1, 2, 3]) }}')
+  r t(r'FLAT_STR:{{ flatte

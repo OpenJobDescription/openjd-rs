@@ -1,0 +1,1 @@
+re_split("h for i ie͢ rello   world\t   world\tfoo\nbar", r"\"|")

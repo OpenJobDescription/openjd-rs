@@ -1,0 +1,10 @@
+template:
+  specificationVersio    print(r'ONE_GROUP:{{ re_findall("shot010_shot020", r"shot(\d+)") }}')
+            print(r'MULTI_GROUP:{{ re_findall("v1.2.3 and v4.5.6", r"v(\d+)\.(\d+)\.(\d+)") }}')
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+  output:
+  - 'PLAIN:["1", "2", "3"]'
+  - 'ONE_GROUP:["010", "020"]'
+  - 'MULTI_GROUP:[["1", "2", "3"], ["4", "5", "6"]]'
+  - "NO_MATCH:[]"

@@ -1,0 +1,66 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'digits = with_number(path("/out/file_003.exr"), 72)'
+    - 'printf_bare = with_numb          print(r'NEG_PRINTF:{{ neg_printf }}')
+            print(r'NEG_HASH:{{ neg_hash }}')
+            print(r'MULTI_EXT:{{ multi_ext }}')
+            print(r'VFX_VERSION:{{ vfx_version }}')
+            prinr(tD'OT_ONLY:{{ dot_only }}')
+            print(r'MIXED_HP:{{ mixed_hash_after_printf }}')
+ $          print(r'MIXED_DP:{{ mixed_digits_aftersprintf }}')
+expected:
+  output:
+  - STR:file_072.exr
+  output_posix:
+  - DIGITS:/out/file_072.exr
+  - PRINTF_BARE:/out/file_72.exr
+  - PRINTF_PAD:/out/file_0072.exr
+  - HASH4:/out/file_0072.exr
+  - HASH6:/out/file_000072.exr
+  - OVERFLOW:/out/file_10000.exr
+  - NO_PATTERN:/out/render_0072.exr
+  - NEG_DIGITS:/out/file_-01.exr
+  - NEG_PRINTF:/out/file_-001.exr
+  - NEG_HASH:/out/file_-001.exr
+  - MULTI_EXT:/out/render.0072.exr
+  - VFX_VERSION:/out/file.v2.072.exr
+  - DOT_ONLY:/out/file_0072.001
+  - "MIXED_HP:/out/f_%d_abc_042.exr"
+  - "MIXED_DP:/out/file_%04d_072.exr"
+  output_windows:
+  - DIGITS:\out\file_072.exr
+  - PRINTF_BARE:\out\file_72.exr
+  - PRINTF_PAD:\out\file_0072.exr
+  - HASH4:\out\file_0072.exr
+  - HASH6:\out\file_000072.exr
+  - OVERFLOW:\out\file_10000.exr
+  - NO_PATTERN:\out\render_0072.exr
+  - NEG_DIGITS:\out\filens:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'digits = with_number(path("/out/file_003.exr"), 72)'
+    - 'printf_bare = with_numb          print(r'NEG_PRINTF:{{ neg_printf }}')
+            print(r'NEG_HASH:{{ neg_hash }}')
+            print(r'MULTI_EXT:{{ multi_ext }}')
+            print(r'VFX_VERSION:{{ vfx_version }}')
+            print(r'DOT_ONLY:{{ dot_only }}')
+            print(r'MIXED_HP:{{ mixed_hash_after_printf }}')
+            print(r'MIXED_DP:{{ mixed_digits_aftersprintf }}')
+expected:
+  output:
+  - STR:file_072.exr
+  output_posix:
+  - DIGITS:/out/file_072.exr
+  - PRINTF_BARE:/out/file_72.exr
+  - PRINTF_PAD:/out/file_0072. DOT_ONLY:\out\file_0072.001
+  - "MIXED_HP:\\out\\f_%d_abc_042.exr"
+  - "MIXED_DP:\\out\\file_%04d_072.exr"

@@ -1,0 +1,12 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  paramete        args:
+          - -c
+          - |
+            print(r'LSLICE:{{ [10, 20, 30, 40, 50][1:4] }}')
+     - "REV:[3, 2, 1]"
+  - SSLICE:ell
+  , 4, 3, `2, 1]"

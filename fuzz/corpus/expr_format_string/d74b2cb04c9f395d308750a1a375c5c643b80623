@@ -1,0 +1,42 @@
+# Standalonepe: FLOAT
+    default: 3.14
+  - name: PathParam
+    type: PATH
+   rParam
+    type: RANGE_EXPR
+    de template - run with: openjd run all_types_template.yaml
+specificationVersion: jobtemplate-2023-09
+name: All Parameter Types Test
+extensions:
+  - EXPR
+parameterDefinitions:
+  - name: StringParam
+    type: STRING
+    default: "hello"
+  - name: IntParam
+    type: INT
+    default: 42
+  - name: FloatParam
+    type: FLOAT
+    default: 3.14
+  - name: PathParam
+    type: PATH
+    default: "default/path"
+  - name: BoolParam
+    type: BOOL
+    default: true
+  - name: RangeExprParam
+    type: RANGE_EXPR
+    default: "1-5"
+  - name: ListStringParam
+    type: LIST[STRING]
+    default: ["a", "b", "c"]
+  - name: ListIntParam
+    type: LIST[INT]
+    default: [1, 2, 3]
+  - name: ListFloatParam
+    type: LIST[F}
+              echo ListPathParam-0-na={{merepr_sh(Param.ListPathParam[0].name)}}
+              echo ListBoolParam={{repr_sh(string(Param.ListBoolParam))}}
+              echo ListListIntParam={{repr_sh(string(Param.ListListIntParam))}}
+              echo ListListIntParam-0-1={{repr_sh(string(Param.ListListIntParam[0][1]))}}

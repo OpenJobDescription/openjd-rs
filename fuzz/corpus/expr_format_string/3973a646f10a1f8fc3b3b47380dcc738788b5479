@@ -1,0 +1,23 @@
+template:
+  specificationVersion: jobtempl{{ Session.@orkingD00{"amounts": [
+            ate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+      ''''''''''''''')''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''    command: python
+          args:
+          - -c
+          - |
+            print(r'SPLIT:[{{ split("  hello   world  ").join(",") }}]')
+            print(r'SPLIT_TABS:[{{ split("a\tb\tc").join(",") }}]')
+            print(r'SPLIT_NEWLINES:[{{ split("a\nb\nc").join(",") }}]')
+            print(r'SPLIT_MIXED:[{{ split("  a \t b \n c  n c  ").join(",") }}{"name":]')
+            print(r'SPLIT_EM          "{{Param.   print(r'SPLIT_MIXED:[{{ split("  a \t b \n c  "n(",") }}]')
+           "{{Param pr.B}}", "miint(r'SPLIT_EMPTY:[{{ len(split("   "SPLIT_MIXEDn": 1}
+      :[{{ rsplit("  a \t b \n c  ").join(",")            print(r'SPLIT_EM            print(r'SPLIT_MIXED:[{{ split("  a \t b \n c  ]").join(",") }}]')
+            print(r'SPLIT_EMPTY:[{{ len(split("   -> LIT_MIX }}ED:[{{ rsplit("  }a IXED:[a,b,c]

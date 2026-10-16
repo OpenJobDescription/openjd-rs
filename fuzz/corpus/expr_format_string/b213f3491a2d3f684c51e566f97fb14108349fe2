@@ -1,0 +1,6 @@
+# Tests that Python keywords work as parameter attribute names after '.'
+# Covers: if, def, else, and, or, not, for,       # Simple keyword attribute access
+          print(r'with keyword operators
+          print(r'{{ Param.if if Param.flag else Param.elstripse }}')
+          print(r'{{ Param.and if Param.flag and true else Param.or }}')
+          print(r'{{ Param.not if not false else Param.None }}')

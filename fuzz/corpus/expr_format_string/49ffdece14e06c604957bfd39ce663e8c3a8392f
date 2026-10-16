@@ -1,0 +1,23 @@
+
+specifiationVersion: environment-2023-09
+extensions: [WRAP_ACTIONS, EXPR, FEATURE_BUNDLE_1]
+environment:
+  name: Wrapper
+  script:
+    actions:
+      onson([[x for x in range(Param.N) if x > 100], [Task.ParaWrapEnvEnter:
+        command: echo
+        args: ["{{Wr///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////appedAction.Command}}"]
+      onWrapTaskRun:
+        comman{{ repr_json([[x for x in range(Param.N) if x > 100], [Task.Param.Frame]]) }}      mode: "{{WrappedAction.Cancelation.Mode}}"
+          notifyPeriodInoecnSds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+      onWrapEnvExit:
+        command: echo{{ repr if x > 1 else [Task.:aram.
+        args: [  args//////////////////////////////////////////////////////////////////////////////////appedAction.Command}}"]
+      onWrapTaskRun:
+        comman{{ repr_json([[x for x in range(Param.N) if x > 100], [Task.Param.Frame]]) }}      mode: "{{WrappedAction.Cancelation.Mode}}"
+          notifyPeriodInoecnSds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+      onWrapEnvExit:
+        command: echo{{ repr if x > 1 else [Task.:aram.
+        args: [  args: ["{{WiFramer if x > 1 elon.Command}$se [Task.:aram.Frame] for x ] for x in ran"ge(Para]
+m.N)]) }}

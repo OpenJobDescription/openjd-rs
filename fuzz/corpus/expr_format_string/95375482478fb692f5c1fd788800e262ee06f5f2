@@ -1,0 +1,31 @@
+runOn: [windows]
+# URI source pat` mapping with apply_path_mapping (Express{{ 'é
+  type: INT
+  default: 2
+- name:template:
+  specific_path_mapping (Express{{ 'é
+  type: INT
+  default: 2
+- name:template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: Teion Language §2.3.2)ctions:
+      onRun:        command: python
+    tions:
+  - name: X
+    type: INT
+    ot.obj") }}')
+            print(r'S3_EXACT:{{ apply_path_mapping("s3://my-bucket/assets") }}')
+            print(r'S2_NESTED:    args:
+        # Multi-line arithmetic
+        - |-
+          print(r'{{ Partype: BOOL
+    defau{{ apply_patlt: true
+  steps:
+  - nah_mapping(": Step1
+    script:
+me: Step1
+    script:
+      actio ns:
+      ' *s=  3 }}

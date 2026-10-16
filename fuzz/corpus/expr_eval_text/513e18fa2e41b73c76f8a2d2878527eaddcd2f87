@@ -1,0 +1,1 @@
+rsplit(repr_cmd('a\r\nb'CHUNK[I'a,b,NT]c,d', '),', 9223372036:54775807)

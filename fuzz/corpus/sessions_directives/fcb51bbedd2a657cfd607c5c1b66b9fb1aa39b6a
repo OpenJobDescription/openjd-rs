@@ -1,0 +1,1 @@
+openjd_redacted_env: "SECRETVAR=SECRETVAR=first_line\n>second_linestrip\nthfirst_line\n>second_line\nthird_line"

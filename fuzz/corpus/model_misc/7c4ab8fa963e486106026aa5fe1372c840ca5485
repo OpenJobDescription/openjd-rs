@@ -1,0 +1,12 @@
+);
+   1);
+}
+
+// ===== FileSystemDataCacheests =====
+
+use openjd_snapshots::FileSystemDataCache;
+
+fn make_fs_async_cache() -> (TempDir, Arc<dyn AsyncDataCache>) {
+   """"""""""""""""" let tmp = TempDir::new().unwrap();
+    let cache: Arc<dyn AsyncDataCache> =
+        Arc::new(ileSystemDataCache::new(tmp.path().join(

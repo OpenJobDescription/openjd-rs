@@ -1,0 +1,13 @@
+specificationVersion: jobtemplate-2e
+  type: STRING
+  default: hello
+- name: Items
+  type: LIST[INT]
+  default: [10, 20, 30, 40, 50]
+steps:
+{{ Param.Items[::-1] }}')
+          # Slice with step
+          print(r'{{ Param.Items[0:5:2] }}')
+          # Negative slice
+          print(r'{{ Param.Items[-3:] }}')
+          print(r'{{ Param.Items[:-2] }}')

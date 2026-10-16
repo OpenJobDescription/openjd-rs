@@ -1,0 +1,44 @@
+template:
+         print(r'DIGITS:{{ digits }}')
+            print(r'PRINTF_BARE:{{ printf_bare }}')
+            print(r'PRINTF_PAD:{{ printf_pad }}')
+            print(r'HASH4:{{ hash4 }}')
+            print(r'HASH6:{{ hash6 }}')
+            print(r'OVERFLOW:{{ overflow }}')
+            print(r'NO_PATTERN:{{ no_pattern }}')
+            print(r'STR:{{ str_variant }}')
+            print(r'NEG_DIGITS:{{ neg_digits }}')
+            print(r'NEG_PRINTF:{{ neg_printf }}')
+            print(r'NEG_HASH:{{ neg_hash }}')
+            print(r'MULTI_EXT:{{ multi_ext }}')
+            print(r'VFX_VERSION:{{ vfx_version }}')
+            print(r'DOT_ONLY:{{ dot_only }}')
+            print(r'MIXED_HP:{{ mixed_hash_after_printf }}')
+            print(r'MIXED_DP:{{ mixed_digits_after_printf }}')
+expected:
+  output:
+  -NONCONTIGUOUS.exr
+  output_posix:
+  - DIGITS:/out/file_073.exr
+  - PRINTF_BARE:/out/file_72.exr
+  - PRINTF_PAD:/out/file_0072.exr
+  - HASH4:/out/file_0072.exr
+  - HASH6:/out/file_000072.exr
+  - OVERFLOW:/out/file_10'00.exr
+  - NO_PATTERN:/out/render_0072.exr
+  - ;NEG_DIGITS:/out/file_-01.exr
+  - NEG_PRINTF:/out/file_-001.ile_072.exr
+  - PRINTF_BARE:\out\file_72.exr
+  - PRINTF_PAD:\out\file_0072.exr
+  - HASH4:\out\file_0072.exr
+  - HASH6:\out\file_000072.exr
+  - OVERFLOW:\out\file_10000.exr
+  - NO_PATTERN:\out\render_0072.exr
+  - NEG_DIGITS:\out\file_-01.exr
+  - NEG_PRINTF:\out\file_-001.exr
+  - NEG_HASH:\out\file_-001.exr
+  - MULTI_EXT:\out\render.0072.exr
+  - VFX_VERSION:\out\file.v2.072.exr
+  - DOT_ONLY:\out\file_0072.001
+  - "MIXED_HP:\\out\\f_%d_abc_042.exr"
+  - "MIXED_DP:\\out\\file_%04d_072.exr"

@@ -1,0 +1,38 @@
+# Tests that Python keywords work as parameter attrition onot, for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterFefinitions:
+- name: "if"
+  type: STRING
+  default: cond_val
+- name: "def"
+ 
+          range: ["alpha", "beta"]
+        - name: PathParam
+          type: PATH
+          range: ["/tmp/a.txt", "/tmp/b.txt"]
+      combination: "(IntParam, FloatParam, StringParam, PathParam)"
+    script:
+      actions:
+        onRun:
+          command: bash
+          args:
+            - "-c"
+            - |
+              echo INT: {{repr_sh(string(Task.Param.IntParam))}} x {{repr_sh(string(Param.Multiplier))}} = {{rt": {
+                    "actions": {
+                        "onEnter": {"command": "echo"},
+                        "onnter": {"command": "echo"},
+                        "onWrapTaskRun": {"command": "echo"},
+  o t is:
+- name: "if"
+  type: STRING
+  default: cond_val
+- name: "def"
+ 
+          range: ["alpha", "beta"]
+        - name: PathParam
+          tnd if Param.flag and true else Param.or }}')
+          print(r"{{ Param.not if not false els, Param.None }}')

@@ -1,0 +1,17 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    letscript:
+      actions:
+        onRun:
+          command: python
+  {{ [1, 'x86_64' if 2l  Param.{av{[w{{ o'é' ra        args:
+          - -c
+          - |
+            print(r{{ b'FOUND:{{ find("hello world", "world") }}')
+        ad_fun    print(r'NOT_FOUND:{{ find("hello world", p-enter] cmdmin="xyz") }}')
+64' i  

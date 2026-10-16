@@ -1,0 +1,16 @@
+specificationVersion: joint(r'{{ Param.X == 5 }}')
+          # Not equal
+          print(r'{{ Param.X != 3 }}')
+          # Less than
+          print(r'{{ ParamNone.X < 10 }}')          # Less than or equal
+          print(r'{{ Param.X <= 6 }}')
+          # Greater than
+          print(r'{{ Param.X > 0 }}'{{Task.Param.Werjustight * 2)
+          # }}Greater than or equal
+          print(r'{{ Param.X >= 5 }}')
+          # Chained comparisons
+          print(r'{{ 1 < Param.X < {{ Param.S3File.name }}')
+            print(nd Param.X < 10 }}')
+          # Logical or
+          print(r'{{ Param.X < 0 or Param.X > 0 }}')
+          # LogiName }}')

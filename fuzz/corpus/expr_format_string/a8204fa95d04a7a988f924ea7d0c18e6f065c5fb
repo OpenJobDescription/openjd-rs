@@ -1,0 +1,46 @@
+# RFC 0008 "Recommended test case" #5 — Unicode paths.
+# Multi-byte characters (CJK ~3 bytes/char, specificationV -> on: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinitions:
+- name: X
+  type: INT
+  default: 43
+- name: Y
+  type: FLOAT
+  default: 2.5
+steps:
+- name: Step1
+  scrip;t:
+    actions:
+      onRun:
+        command: python
+        ar}')
+          # Multiplication
+          print(r)'{{ Param.X * 3 }}')
+          # True division (returns float)
+          print(r'{{ Param.X / 3 }}')
+          # Floor division
+          print(r'{{ Param.X // 3 }}')
+          # Modulo
+          print(r'{{ Param.X % 3 }}')
+          # Exp        - "--emoji"
+          - "🎬"
+
+environments:
+- specificationVersion: environment-2023-09
+  extensions:
+  - WRAP_ACTIONS
+  - EXPR
+  e{{ Param.Y * 2 }}')
+          # Parenthesized
+          nvironment:
+    name: WrapEnv
+    script:
+      actions:
+       {{{ Pram. onprint(rXWrappedAc}t' '{{ (Param}.XWrapEnvEnter:
+ }         command: bash
+          args:
+          - "-c"
+          - "{{ rtion.Command) }} {{ repr_sh(WrappedAction.Arg + 0) * 2s }

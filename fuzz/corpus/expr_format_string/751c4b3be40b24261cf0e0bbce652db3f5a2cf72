@@ -1,0 +1,10 @@
+job {{ ['- name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'PLAIN:{{ re_findall("a1b2c3", r"\d+") }}
+ )'          l(e_findall("hello", r"\d+") }}'a', 'isalnumb'] }} Bame

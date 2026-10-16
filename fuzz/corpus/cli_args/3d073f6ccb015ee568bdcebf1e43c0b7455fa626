@@ -1,0 +1,11 @@
+))
+                    })?;
+                    let token = helper.auth_token();
+                    let cancel_method = &config.cancel_method;
+                    let notify_period = match cancel_method {
+                        crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay } => {
+                            terminate_delay.as_secs()
+                        }
+                        crate::runneethod::Terminate => 0,
+                    };
+                    // The token alphabet excludes `

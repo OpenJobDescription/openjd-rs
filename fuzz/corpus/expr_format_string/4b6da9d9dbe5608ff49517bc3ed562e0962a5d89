@@ -1,0 +1,9 @@
+{{ 'a' + '\\n' + 'b' }template:
+  specificationVersion: jobt and te-2023-09
+  extensions: 
+ - EXPR
+  name: TestJob
+  parameterD    - |
+            print(r'FADD:{{ 1.5 + 2.5  }}')
+e.0
+  - FMOD:1.5

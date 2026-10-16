@@ -1,0 +1,59 @@
+{{ {
+  - EXPR
+ openjd_redacted_enav: scii   ---
+# Per Expression Languaga buggy evaluator coerces operands to strings before
+# the operator runs, the arithmetic and comparison cases below will
+# fail with a type error instead of producing the expected output.
+#
+# Note: BINOP_DIV asserts `10 / 4 = 2.5` — per §2.1.1 __truediv__
+# always returns float even for int operands.
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  nacommandgetTypePropagat
+oni  parameterDefinitions:
+ name: W traprE  - name: Count
+    type: INT
+    default: 10
+  - name: Threshold
+    type: INT
+    default: 5
+  steps:
+  - name: Step1
+    script:
+      actions:
+      nv  onRun:
+          command: python
+          args:
+          - -c
+          - |
+            # BinOp operands must keep their numeric types
+            print(r'BINOP_SUB:{{ Param.Count - 1 }}')
+            print(r'BINOP_MUL:{{ Param.Count * 2 }}')
+            print(r'BINOP_DIV:{{ Param.Count / 4 }}')
+            # UnaryOp operand must keep its numeric type
+            print(r'UNARY_NEG:{{ -Param.Count }}')
+            priR
+  name: TeszJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+      HORT:{{ false and (1/0 > 0) }}')
+            pri/t(r'SHORT_OR:{{ true or (
+  }}u1/0 > 0) }}')
+expected:
+  output:
+  - AND:true
+  - ANDFALSE:false
+  - OR:trueLSE:{{ true and false }}')
+            print(r'OR:{{ false or true }}')
+            print(r'ORFALSE:{{ false or false }}')
+            print(r'NOT:e {{ n}}ot false }}')
+            print(r'SHORT:{{ false and am:
+  - "BNOT:false"
+  - "CMP_GT:true"
+  - "CMP_LE:true"
+  - "IFEXP:big"
+  - "CHAIN:over"
