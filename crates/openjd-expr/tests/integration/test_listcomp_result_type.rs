@@ -1207,3 +1207,66 @@ fn empty_lists_keep_their_element_type() {
         );
     }
 }
+
+// ── Audit round 8 ──
+
+#[test]
+fn bare_unresolved_element_type_binds_any() {
+    // F1 of audit round 8: a `list[unresolved]` iterable (built through
+    // `ExprType::new`) panicked in union normalization; base typed it.
+    let mut st = states()[0].clone();
+    let bare = ExprType::new(TypeCode::Unresolved, vec![]);
+    st.set("LU", ExprValue::unresolved(ExprType::list(bare.clone())))
+        .unwrap();
+    st.set("U", ExprValue::unresolved(bare)).unwrap();
+    for (expr, ty) in [
+        ("[x for x in LU]", "unresolved[list[any]]"),
+        ("[x for x in U]", "unresolved[list[any]]"),
+        (
+            "[x for x in Param.L if U]",
+            "unresolved[list[int | nulltype]]",
+        ),
+    ] {
+        assert_eq!(eval(expr, &st).expr_type(), tp(ty), "{expr}");
+    }
+}
+
+#[test]
+fn concatenation_with_an_any_operand_on_either_side_keeps_its_signature_type() {
+    // F2 of audit round 8: an `any` element type on the right was untested.
+    // A `list[any]` value may be a `list[string]`, so `+ 'a'` on an element
+    // must not be rejected.
+    let lib = FunctionLibrary::for_profile(&ExprProfile::current());
+    for args in [["list[any]", "list[int]"], ["list[int]", "list[any]"]] {
+        let args = args.map(tp);
+        assert_eq!(
+            lib.derive_return_type("__add__", &args),
+            Some(tp("list[T3]")),
+            "{args:?}"
+        );
+    }
+    let [mut p8, _, _] = states();
+    p8.set("Task.Param.A", ExprValue::unresolved(tp("list[any]")))
+        .unwrap();
+    assert_eq!(
+        eval("(Param.L + Task.Param.A)[0] + 'a'", &p8).expr_type(),
+        tp("unresolved[string]")
+    );
+}
+
+#[test]
+fn the_failure_named_is_the_indexed_comprehensions() {
+    // F3 of audit round 8: the absorbed failure is that of the comprehension
+    // being indexed, not of another one in the same expression.
+    let expr = "[[x.upper() for x in Param.L], [None for x in Param.L][0]]";
+    assert_err_in(
+        expr,
+        &states()[0],
+        "pass 8",
+        &[
+            "Index out of bounds: the list is always empty\n",
+            &format!("  {expr}\n"),
+            "                                 ~~~~~~~~~~~~~~~~~~~~~~~^~~",
+        ],
+    );
+}

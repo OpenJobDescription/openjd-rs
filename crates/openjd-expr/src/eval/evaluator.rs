@@ -2429,5 +2429,8 @@ mod tests {
         ] {
             assert!(!is_bool_compatible(&tp(t)), "{t}");
         }
+        // A bare `unresolved` (any type), as `ExprType::new` builds it.
+        let bare = ExprType::new(crate::types::TypeCode::Unresolved, vec![]);
+        assert!(is_bool_compatible(&bare));
     }
 }
