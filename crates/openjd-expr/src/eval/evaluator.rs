@@ -1688,6 +1688,7 @@ impl<'a> Evaluator<'a> {
             if inner != ExprType::INT
                 && inner.code() != crate::types::TypeCode::Unresolved
                 && inner.code() != crate::types::TypeCode::Any
+                && !is_type_variable(&inner)
             {
                 let mut err = ExpressionError::new("Index must be an integer");
                 if let Some(src) = self.expr_source {
@@ -2258,6 +2259,19 @@ fn is_bool_compatible(t: &ExprType) -> bool {
     };
     can_be_bool(&t)
         || (t.code() == crate::types::TypeCode::Union && t.params().iter().any(can_be_bool))
+}
+
+/// Whether `t` is a bare type variable (`T`, `T1`, `T2`, `T3`): a type left
+/// unbound by typing an operation on values of unknown type, which says
+/// nothing of the value a run has.
+fn is_type_variable(t: &ExprType) -> bool {
+    matches!(
+        t.code(),
+        crate::types::TypeCode::TypeVarT
+            | crate::types::TypeCode::TypeVarT1
+            | crate::types::TypeCode::TypeVarT2
+            | crate::types::TypeCode::TypeVarT3
+    )
 }
 
 /// Unwrap unresolved[T] to T, or return the type as-is if not unresolved.

@@ -451,6 +451,8 @@ impl FunctionLibrary {
     /// `list[int]`) has their common element type, of unknown ones (or an
     /// operand of unknown type) `list[any]`, and of no common type the
     /// signature's type (`list[T3]`, or `list[T2]` for the range overloads).
+    /// Any other call with an argument of unknown type (`any`, a bare type
+    /// variable) is `any`.
     pub fn derive_return_type(
         &self, name: &str, arg_types: &[ExprType],
     ) -> Option<ExprType>;

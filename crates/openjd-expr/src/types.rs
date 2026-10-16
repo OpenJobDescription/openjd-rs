@@ -494,8 +494,10 @@ fn join_element_inner(a: &ExprType, b: &ExprType, nested: bool) -> Option<ExprTy
         return Some(a.clone());
     }
     match (a.code, b.code) {
-        (TypeCode::Any, _) => Some(b.clone()),
-        (_, TypeCode::Any) => Some(a.clone()),
+        // An element of unknown type need not have the other's type
+        // (`[s, path('/b')]` with `s` a string is a `list[string]`): the
+        // values decide.
+        (TypeCode::Any, _) | (_, TypeCode::Any) => Some(ExprType::ANY),
         (TypeCode::NullType, _) if nested => Some(b.clone()),
         (_, TypeCode::NullType) if nested => Some(a.clone()),
         (TypeCode::Union, _) => join_union_members(&a.params, b, nested),
@@ -617,7 +619,7 @@ pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
             // `any`, an unconstrained `unresolved`, a type variable, or a
             // type that cannot be iterated: the type of an unresolved value
             // may come from typing an operation on values of unknown type
-            // (`T3 * 2` is typed `int`), which says less than it seems, so
+            // (a `string` member from a branch the run never takes), so
             // only a run, which has the value, can tell.
             _ => elems.push(ExprType::ANY),
         }
@@ -2017,7 +2019,8 @@ mod tests {
             join("unresolved[list[nulltype]]", "list[int]").as_deref(),
             Some("list[int]")
         );
-        assert_eq!(join("any", "list[int]").as_deref(), Some("list[int]"));
+        assert_eq!(join("any", "list[int]").as_deref(), Some("any"));
+        assert_eq!(join("path", "any").as_deref(), Some("any"));
     }
 
     #[test]

@@ -211,6 +211,12 @@ impl FunctionLibrary {
                 let ret = refined_return_type(name, &arg_types, ret);
                 return Ok(ExprValue::unresolved(ret));
             }
+            // An argument of unknown type (`any`, or a bare type variable
+            // the signatures' own variables capture) that matches no
+            // signature says nothing of the value a run passes.
+            if arg_types.iter().any(is_unknown_type) {
+                return Ok(ExprValue::unresolved(ExprType::ANY));
+            }
         }
 
         // Phase 1: exact match (non-generic)
@@ -349,7 +355,8 @@ impl FunctionLibrary {
     /// as a `list[int]`) has their common element type, as concatenating
     /// values gives, of unknown ones (or an operand of unknown type)
     /// `list[any]`, and of no common type the signature's type (`list[T3]`,
-    /// or `list[T2]` for the range overloads).
+    /// or `list[T2]` for the range overloads). Any other call with an
+    /// argument of unknown type (`any`, a bare type variable) is `any`.
     pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
         self.derive_return_type_by_signature(name, arg_types)
             .map(|ret| refined_return_type(name, arg_types, ret))
@@ -622,21 +629,24 @@ fn refined_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Exp
     if concat != ret {
         return concat;
     }
-    let unknown = |t: &ExprType| {
-        matches!(
-            t.code(),
-            crate::types::TypeCode::Any
-                | crate::types::TypeCode::TypeVarT
-                | crate::types::TypeCode::TypeVarT1
-                | crate::types::TypeCode::TypeVarT2
-                | crate::types::TypeCode::TypeVarT3
-        )
-    };
-    if arg_types.iter().any(unknown) {
+    if arg_types.iter().any(is_unknown_type) {
         ExprType::ANY
     } else {
         ret
     }
+}
+
+/// Whether an argument's type is not known: `any`, or a bare type variable
+/// such as the `T3` of an element of a `list[T3]`.
+fn is_unknown_type(t: &ExprType) -> bool {
+    matches!(
+        t.code(),
+        crate::types::TypeCode::Any
+            | crate::types::TypeCode::TypeVarT
+            | crate::types::TypeCode::TypeVarT1
+            | crate::types::TypeCode::TypeVarT2
+            | crate::types::TypeCode::TypeVarT3
+    )
 }
 
 /// The combinations of the arguments' list forms

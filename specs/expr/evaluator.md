@@ -651,7 +651,8 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     or a list of one (`list[T1]`, as `sorted` of an `any` is typed), binds
     `any`, as `any` does. An unresolved iterable whose type cannot be
     iterated also binds `any`: its type may come from typing an operation on
-    values of unknown type (`T3 * 2` is typed `int`), so only a run can tell,
+    values of unknown type (a union member typed `int` from `x * 2` when `x`
+    is `any` but its other branches are lists), so only a run can tell,
     and a concrete one fails with "Cannot iterate over `T`". Other errors in
     the iterable are not absorbed.
 - Operation count: +1 per iteration

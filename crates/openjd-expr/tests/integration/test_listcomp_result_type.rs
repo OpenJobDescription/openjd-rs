@@ -618,7 +618,7 @@ fn unresolved_iterable_that_cannot_be_iterated() {
     // An iterable whose value is not known, and whose type cannot be
     // iterated, is not rejected at validation (loop audit 2, round 2): its
     // type may come from typing an operation on values of unknown type
-    // (`T3 * 2` is typed `int`), so the loop variable is `any`. A run, which
+    // (round 4 makes such operations `any`), so the loop variable is `any`. A run, which
     // has the value, reports it.
     let expr = "[x for x in Task.Param.I]";
     let [p8, g2, rt] = states();
@@ -776,7 +776,7 @@ fn empty_list_overloads_apply_only_to_the_empty_list() {
 #[test]
 fn calls_past_the_form_combination_cap_are_typed_by_the_argument_types() {
     // F1 and F5 of audit round 6: past 64 combinations of forms a call was
-    // typed `any`, and `any[0]` takes the `string` overload, so validation
+    // typed `any`, and `any[0]` then took the `string` overload, so validation
     // rejected `+ 1` though every run gives an int. The body has nine
     // types, so each comprehension's element type has ten forms, and `+`
     // of two has a hundred.
@@ -1438,7 +1438,7 @@ fn concatenation_with_a_range_or_unknown_elements_types_its_uses() {
         states_with_any_list(ExprValue::make_list(vec![], ExprType::NULLTYPE).unwrap());
     let expr = "[x if x > 1 else (Task.Param.A + [1])[0] for x in Param.L]";
     assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved[list[any]]"));
-    assert_eq!(eval(expr, &g2).expr_type(), tp("unresolved[list[int]]"));
+    assert_eq!(eval(expr, &g2).expr_type(), tp("unresolved[list[any]]"));
     assert_eq!(eval(expr, &rt).to_display_string(), "[1, 2, 3]");
 }
 
@@ -1587,4 +1587,94 @@ fn every_non_iterable_member_type_binds_any() {
             "{expr}"
         );
     }
+}
+
+// ── Audit loop 2, round 5 ──
+
+/// [`states`] with `Param.LLS` a `list[list[string]]`, `[['a']]` at run
+/// time, and `Task.Param.C` false there.
+fn states_with_nested_strings() -> [SymbolTable; 3] {
+    let [mut p8, mut g2, mut rt] = states();
+    p8.set("Param.LLS", ExprValue::unresolved(tp("list[list[string]]")))
+        .unwrap();
+    let lls = ExprValue::make_list(
+        vec![ExprValue::make_list(vec![ExprValue::String("a".into())], ExprType::STRING).unwrap()],
+        ExprType::list(ExprType::STRING),
+    )
+    .unwrap();
+    g2.set("Param.LLS", lls.clone()).unwrap();
+    rt.set("Param.LLS", lls).unwrap();
+    rt.set("Task.Param.C", ExprValue::Bool(false)).unwrap();
+    [p8, g2, rt]
+}
+
+#[test]
+fn list_literal_with_an_element_of_unknown_type_is_a_list_of_any() {
+    // A-F1: `[s, path('/b')]` with `s` of unknown type joined as
+    // `list[path]`, so `.upper()` on an element was rejected at validation,
+    // though a run with a string gives `list[string]`.
+    let [p8, g2, rt] = states_with_nested_strings();
+    let xs = "[y for y in (Param.Z if Task.Param.C else Param.LLS[0])][0]";
+    for expr in [
+        format!("[{xs}.upper(), path('/b')][0].upper()"),
+        "[[x.upper(), path('/b')][0].upper() for x in (Param.LLS[0] if not Task.Param.C else Param.Z)][0]".to_string(),
+    ] {
+        for st in [&p8, &g2] {
+            assert!(
+                ParsedExpression::new(&expr)
+                    .and_then(|p| p.evaluate(st))
+                    .is_ok(),
+                "{expr}"
+            );
+        }
+        assert_eq!(eval(&expr, &rt).to_display_string(), "A", "{expr}");
+    }
+}
+
+#[test]
+fn type_variable_index_or_membership_item_is_of_unknown_type() {
+    // H1: `flatten` of a `list[any]` is a `list[T1]`; its element as an
+    // index was "Index must be an integer", and as an `in` item matched no
+    // signature, though every run succeeds.
+    let [p8, _, rt] = states();
+    let flat = "flatten([x for x in (Param.Z if Task.Param.C else Param.EL)])[0]";
+    let mut rt = rt;
+    rt.set(
+        "Param.EL",
+        ExprValue::make_list(
+            vec![ExprValue::ListInt(vec![1]), ExprValue::ListInt(vec![2, 3])],
+            ExprType::list(ExprType::INT),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    rt.set("Task.Param.C", ExprValue::Bool(false)).unwrap();
+    for (expr, ty, value) in [
+        (format!("'abcdefg'[{flat}]"), "unresolved", "b"),
+        (format!("{flat} in [1, 2]"), "unresolved[bool]", "true"),
+        (format!("Param.L[{flat}] + 1"), "unresolved", "3"),
+    ] {
+        assert_eq!(eval(&expr, &p8).expr_type(), tp(ty), "{expr}");
+        assert_eq!(eval(&expr, &rt).to_display_string(), value, "{expr}");
+    }
+}
+
+#[test]
+fn every_unknown_argument_type_gives_any() {
+    // M1, L1: each type-variable code and `any`, through `call` and
+    // `derive_return_type`.
+    let lib = FunctionLibrary::for_profile(&ExprProfile::current());
+    for t in ["any", "T", "T1", "T2", "T3"] {
+        for (name, args) in [("len", vec![tp(t)]), ("__add__", vec![tp(t), tp("int")])] {
+            assert_eq!(
+                lib.derive_return_type(name, &args),
+                Some(ExprType::ANY),
+                "{name}({t})"
+            );
+        }
+    }
+    assert_eq!(
+        lib.derive_return_type("__getitem__", &[tp("any"), tp("int")]),
+        Some(ExprType::ANY)
+    );
 }

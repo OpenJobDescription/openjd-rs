@@ -162,6 +162,10 @@ nothing (`unresolved[nulltype]`, e.g. `None if H else None`) — reporting the
 construct's run-time error: "null is not allowed in list literals" for a list
 literal, "Cannot create list from null elements" for a comprehension.
 
+An element of unknown type (`any`) joins with any element as `any`: its value
+need not have the other element's type (`[s, path('/b')]` with `s` a string is a
+`list[string]`), so the values decide.
+
 Conflicts include `bool` against `int`, a scalar against a list,
 `range_expr` against `list[int]` (unlike `unify_binding`), `list[int]` against
 `list[string]`, a top-level `nulltype` (a list literal cannot hold `null`), and
