@@ -269,6 +269,12 @@ type variable operand on the right can still be captured by the signature's own
 variables (`list[int] + T1` finds no signature); that is part of the first-match
 dispatch limitation.
 
+An argument whose type is not known (`any`, or a bare type variable such as the `T3`
+of an element of a `list[T3]`) matches the first signature in dispatch order (`any[0]`
+matches `__getitem__(string, int)`), which says nothing of the value a run passes, so a
+type-only call with one is `any` (`refined_return_type`), unless it is a list
+concatenation, typed above.
+
 Indexing has a `(list[nulltype], int) -> noreturn` overload, registered before
 the generic `(list[T1], int) -> T1`: the empty list has no element, so indexing
 it is always out of bounds, and the empty form of `list[int | nulltype]` adds

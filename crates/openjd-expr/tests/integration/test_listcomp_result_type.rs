@@ -339,7 +339,7 @@ fn type_variable_iterable_binds_any() {
     for st in [&p8, &g2] {
         assert_eq!(
             eval(expr, st).expr_type(),
-            tp("unresolved[list[int | nulltype]]"),
+            tp("unresolved[list[any]]"),
             "{expr}"
         );
     }
@@ -1168,7 +1168,7 @@ fn any_iterable_binds_any() {
     p8.set("U", ExprValue::unresolved(ExprType::ANY)).unwrap();
     assert_eq!(
         eval("[x.upper() for x in U]", &p8).expr_type(),
-        tp("unresolved[list[string | nulltype]]")
+        tp("unresolved[list[any]]")
     );
 }
 
@@ -1276,7 +1276,7 @@ fn concatenation_with_an_any_operand_on_either_side_is_a_list_of_any() {
         .unwrap();
     assert_eq!(
         eval("(Param.L + Task.Param.A)[0] + 'a'", &p8).expr_type(),
-        tp("unresolved[string]")
+        tp("unresolved")
     );
 }
 
@@ -1489,7 +1489,7 @@ fn union_iterable_member_of_a_non_iterable_type_binds_any() {
         ),
         (
             format!("[x + 1 for x in ({e1} if Task.Param.C else Param.LS)][0]"),
-            "unresolved[int]",
+            "unresolved",
             "6",
         ),
     ] {
@@ -1531,6 +1531,60 @@ fn concatenation_with_an_operand_of_unknown_type_is_a_list_of_any() {
         .unwrap();
     assert_eq!(
         eval("[y + 1 for y in (A + Task.Param.LL)[0] + [1]][0]", &p8).expr_type(),
-        tp("unresolved[int]")
+        tp("unresolved")
     );
+}
+
+// ── Audit loop 2, round 4 ──
+
+#[test]
+fn operation_on_an_argument_of_unknown_type_is_of_unknown_type() {
+    // A-F1: with a non-iterable union member binding `any`, `x[0]` took
+    // the first `__getitem__` overload (`string`), so `+ 1` was rejected
+    // at validation though every run gives 2. An argument of unknown type
+    // matches the first signature in the dispatch order, which says nothing
+    // of the run's value: the result is `any`.
+    let [p8, _, mut rt] = states();
+    rt.set(
+        "Param.EL",
+        ExprValue::make_list(
+            vec![ExprValue::ListInt(vec![1]), ExprValue::ListInt(vec![2, 3])],
+            ExprType::list(ExprType::INT),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    rt.set("Task.Param.C", ExprValue::Bool(false)).unwrap();
+    let expr = "[x for x in (Param.Z if Task.Param.C else Param.EL)][0][0] + 1";
+    assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved"));
+    assert_eq!(eval(expr, &rt).to_display_string(), "2");
+    let mut st = states()[0].clone();
+    st.set("U", ExprValue::unresolved(ExprType::ANY)).unwrap();
+    for expr in ["U[0] + 1", "U + 1", "len(U) + 1"] {
+        assert!(
+            ParsedExpression::new(expr)
+                .and_then(|p| p.evaluate(&st))
+                .is_ok(),
+            "{expr}"
+        );
+    }
+    assert_eq!(eval("U[0]", &st).expr_type(), tp("unresolved"));
+}
+
+#[test]
+fn every_non_iterable_member_type_binds_any() {
+    // L2: float, bool and path members, like int and string, bind `any`.
+    let mut st = states()[0].clone();
+    for (name, ty) in [("F", "float"), ("B", "bool"), ("P", "path")] {
+        st.set(&format!("Task.Param.{name}"), ExprValue::unresolved(tp(ty)))
+            .unwrap();
+    }
+    for name in ["F", "B", "P"] {
+        let expr = format!("[x for x in (Task.Param.{name} if Task.Param.C else Param.L)]");
+        assert_eq!(
+            eval(&expr, &st).expr_type(),
+            tp("unresolved[list[any]]"),
+            "{expr}"
+        );
+    }
 }

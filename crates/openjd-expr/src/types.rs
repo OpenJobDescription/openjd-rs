@@ -565,7 +565,8 @@ where
 pub(crate) enum ComprehensionVar {
     /// The loop variable has this type.
     Typed(ExprType),
-    /// The iterable can only be the empty list: the body never runs.
+    /// The iterable can only be the empty list, or `null` (which fails
+    /// every run): the body never runs.
     EmptyOnly,
 }
 
@@ -575,9 +576,9 @@ pub(crate) enum ComprehensionVar {
 /// `any` for `any`, a type variable, a list whose element is one (or a bare
 /// `unresolved`), or a type that cannot be iterated (it may come from
 /// typing an operation on values of unknown type; a run reports it). A
-/// `nulltype` element member contributes nothing (§1.2.1: it marks the
-/// list as possibly empty), nor does a `nulltype` member (a `null`
-/// iterable fails every run). `unresolved[T]` is read as `T`.
+/// `nulltype` list element contributes nothing (§1.2.1: it marks the
+/// list as possibly empty), nor does a `nulltype` iterable or union member
+/// (a `null` iterable fails every run). `unresolved[T]` is read as `T`.
 pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
     let t = match (t.code, t.params.as_slice()) {
         (TypeCode::Unresolved, [inner]) => inner,

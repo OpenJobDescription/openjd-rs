@@ -208,7 +208,7 @@ impl FunctionLibrary {
         // matched by their forms (`unresolved_return_type`).
         if any_unresolved {
             if let Some(ret) = unresolved_return_type(entries, &arg_types, skip_receiver_coercion) {
-                let ret = concat_return_type(name, &arg_types, ret);
+                let ret = refined_return_type(name, &arg_types, ret);
                 return Ok(ExprValue::unresolved(ret));
             }
         }
@@ -352,7 +352,7 @@ impl FunctionLibrary {
     /// or `list[T2]` for the range overloads).
     pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
         self.derive_return_type_by_signature(name, arg_types)
-            .map(|ret| concat_return_type(name, arg_types, ret))
+            .map(|ret| refined_return_type(name, arg_types, ret))
     }
 
     fn derive_return_type_by_signature(
@@ -607,6 +607,35 @@ fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Expr
     match crate::types::join_list_element(&left, &right) {
         Some(joined) => crate::types::simplify_joined_list_element(joined),
         None => ret,
+    }
+}
+
+/// The return type of a type-only call that matched a signature as `ret`,
+/// refined from the argument types: a list concatenation's element type
+/// ([`concat_return_type`]); otherwise `any` when an argument's type is not
+/// known (`any`, or a bare type variable such as the `T3` of an element of
+/// a `list[T3]`). Such an argument matches the first signature in the
+/// dispatch order (`any[0]` matches `__getitem__(string, int)`), which says
+/// nothing of the value a run passes, so the result may be any type.
+fn refined_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> ExprType {
+    let concat = concat_return_type(name, arg_types, ret.clone());
+    if concat != ret {
+        return concat;
+    }
+    let unknown = |t: &ExprType| {
+        matches!(
+            t.code(),
+            crate::types::TypeCode::Any
+                | crate::types::TypeCode::TypeVarT
+                | crate::types::TypeCode::TypeVarT1
+                | crate::types::TypeCode::TypeVarT2
+                | crate::types::TypeCode::TypeVarT3
+        )
+    };
+    if arg_types.iter().any(unknown) {
+        ExprType::ANY
+    } else {
+        ret
     }
 }
 

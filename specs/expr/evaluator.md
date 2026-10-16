@@ -643,7 +643,8 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   - The loop variable's type is `types::comprehension_var` of the
     iterable's type: `E` for `list[E]`, `int` for `range_expr`, `any` for
     `any`, and for a union the union of its members' element types (a
-    `nulltype` element or member contributes nothing; a member whose type
+    `nulltype` element or member contributes nothing, as does a `null`
+    iterable, which is typed like an iterable that can only be `[]`; a member whose type
     cannot be iterated binds `any`, as below). An iterable that can only be `[]` gives
     `list[nulltype]` with the body neither run nor type-checked
     (`[x * 2 for x in []]`). An iterable typed as a type variable (`T3`),
