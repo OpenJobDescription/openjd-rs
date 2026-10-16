@@ -213,8 +213,13 @@ impl FunctionLibrary {
             }
             // An argument of unknown type (`any`, or a bare type variable
             // the signatures' own variables capture) that matches no
-            // signature says nothing of the value a run passes.
-            if arg_types.iter().any(is_unknown_type) {
+            // signature of its arity says nothing of the value a run
+            // passes. A wrong argument count is still an error.
+            if arg_types.iter().any(is_unknown_type)
+                && entries
+                    .iter()
+                    .any(|e| e.signature.sig_params().len() == arg_types.len())
+            {
                 return Ok(ExprValue::unresolved(ExprType::ANY));
             }
         }
@@ -356,7 +361,9 @@ impl FunctionLibrary {
     /// values gives, of unknown ones (or an operand of unknown type)
     /// `list[any]`, and of no common type the signature's type (`list[T3]`,
     /// or `list[T2]` for the range overloads). Any other call with an
-    /// argument of unknown type (`any`, a bare type variable) is `any`.
+    /// argument of unknown type (`any`, a bare type variable) that matches a
+    /// signature is `any`; one that matches none is `None` here (`call`
+    /// types it `any` when a signature has its arity).
     pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
         self.derive_return_type_by_signature(name, arg_types)
             .map(|ret| refined_return_type(name, arg_types, ret))
@@ -598,9 +605,8 @@ fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Expr
     if name != "__add__" || !ret.is_symbolic() || !left.is_list() || !right.is_list() {
         return ret;
     }
-    // `any` joins as the other type, which a value of it need not be
-    // (`list[any] + list[int]` may be a `list[string]`), and a type
-    // variable joins with nothing.
+    // `any` and type variables join as `any`, and `unresolved` reads as
+    // its constraint: an operand of unknown elements gives `list[any]`.
     fn unknown(t: &ExprType) -> bool {
         matches!(
             t.code(),

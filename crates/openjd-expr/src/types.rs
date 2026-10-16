@@ -412,16 +412,16 @@ fn unify_inner(a: &ExprType, b: &ExprType, as_list_element: bool) -> Option<Expr
 ///   of the members' joins. A value of the union type that is an
 ///   incompatible member fails at run time, so only the compatible members
 ///   describe a list that is actually built.
-/// - `unresolved[T]` joins as `T`; `any` (a failed binding's placeholder)
-///   yields to the other type.
+/// - `unresolved[T]` joins as `T`; `any` or an unbound type variable
+///   joins with anything as `any` (its values need not have the other's
+///   type).
 /// - Each side is first reduced to its [`list_element_contribution`]: a
 ///   top-level `nulltype` union member is dropped (a `null` element always
 ///   fails), so `int?` joins as `int` and `int?` against `string?` is a
 ///   conflict.
 /// - Everything else is a conflict — notably `bool` against `int`, a scalar
 ///   against a list, `range_expr` against `list[int]`, a top-level
-///   `nulltype` (a list literal cannot hold `null`), and an unbound type
-///   variable against anything but itself.
+///   `nulltype` (a list literal cannot hold `null`).
 pub(crate) fn join_list_element(a: &ExprType, b: &ExprType) -> Option<ExprType> {
     let a = list_element_contribution(a)?;
     let b = list_element_contribution(b)?;
@@ -494,10 +494,26 @@ fn join_element_inner(a: &ExprType, b: &ExprType, nested: bool) -> Option<ExprTy
         return Some(a.clone());
     }
     match (a.code, b.code) {
-        // An element of unknown type need not have the other's type
-        // (`[s, path('/b')]` with `s` a string is a `list[string]`): the
-        // values decide.
-        (TypeCode::Any, _) | (_, TypeCode::Any) => Some(ExprType::ANY),
+        // An element of unknown type (`any`, or a type variable left
+        // unbound, such as the `T1` of `flatten` of a `list[any]`) need not
+        // have the other's type (`[s, path('/b')]` with `s` a string is a
+        // `list[string]`): the values decide.
+        (
+            TypeCode::Any
+            | TypeCode::TypeVarT
+            | TypeCode::TypeVarT1
+            | TypeCode::TypeVarT2
+            | TypeCode::TypeVarT3,
+            _,
+        )
+        | (
+            _,
+            TypeCode::Any
+            | TypeCode::TypeVarT
+            | TypeCode::TypeVarT1
+            | TypeCode::TypeVarT2
+            | TypeCode::TypeVarT3,
+        ) => Some(ExprType::ANY),
         (TypeCode::NullType, _) if nested => Some(b.clone()),
         (_, TypeCode::NullType) if nested => Some(a.clone()),
         (TypeCode::Union, _) => join_union_members(&a.params, b, nested),
@@ -1937,7 +1953,8 @@ mod tests {
         assert_eq!(join("list[int]", "list[string]"), None);
         assert_eq!(join("list[int]", "list[bool]"), None);
         // Unbound type variables are not joined (item 26 binds them).
-        assert_eq!(join("list[int]", "list[T3]"), None);
+        // An unbound type variable says nothing of its values: `any`.
+        assert_eq!(join("list[int]", "list[T3]").as_deref(), Some("list[any]"));
     }
 
     #[test]

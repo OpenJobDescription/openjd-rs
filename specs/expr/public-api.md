@@ -452,7 +452,8 @@ impl FunctionLibrary {
     /// operand of unknown type) `list[any]`, and of no common type the
     /// signature's type (`list[T3]`, or `list[T2]` for the range overloads).
     /// Any other call with an argument of unknown type (`any`, a bare type
-    /// variable) is `any`.
+    /// variable) that matches a signature is `any`; one that matches none
+    /// is `None`.
     pub fn derive_return_type(
         &self, name: &str, arg_types: &[ExprType],
     ) -> Option<ExprType>;

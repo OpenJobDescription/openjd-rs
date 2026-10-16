@@ -1678,3 +1678,67 @@ fn every_unknown_argument_type_gives_any() {
         Some(ExprType::ANY)
     );
 }
+
+// ── Audit loop 2, round 6 ──
+
+/// [`states`] with `Param.EL = [[1], [2, 3]]` and `Task.Param.C` false at
+/// run time.
+fn states_with_matrix() -> [SymbolTable; 3] {
+    let [p8, mut g2, mut rt] = states();
+    let el = ExprValue::make_list(
+        vec![ExprValue::ListInt(vec![1]), ExprValue::ListInt(vec![2, 3])],
+        ExprType::list(ExprType::INT),
+    )
+    .unwrap();
+    g2.set("Param.EL", el.clone()).unwrap();
+    rt.set("Param.EL", el).unwrap();
+    rt.set("Task.Param.C", ExprValue::Bool(false)).unwrap();
+    [p8, g2, rt]
+}
+
+#[test]
+fn list_literal_with_a_type_variable_element_is_a_list_of_any() {
+    // A-F1, B-H1: `flatten` of a `list[any]` is a `list[T1]`; beside a typed
+    // element in a list literal it was "incompatible types", though every
+    // run builds the list. B-M1: also nested one level.
+    let [p8, g2, rt] = states_with_matrix();
+    let flat = "flatten([x for x in (Param.Z if Task.Param.C else Param.EL)])";
+    for (expr, value) in [
+        (format!("[{flat}[0], 1]"), "[1, 1]"),
+        (format!("[{flat}, Param.L]"), "[[1, 2, 3], [1, 2, 3]]"),
+        (format!("[[({flat}[0] + 1)], [1]]"), "[[2], [1]]"),
+    ] {
+        for st in [&p8, &g2] {
+            assert!(
+                ParsedExpression::new(&expr)
+                    .and_then(|p| p.evaluate(st))
+                    .is_ok(),
+                "{expr}"
+            );
+        }
+        assert_eq!(eval(&expr, &rt).to_display_string(), value, "{expr}");
+    }
+    // B-M2: an index of unknown type (`any`) is accepted.
+    let expr = format!("Param.L[({flat}[0] + 1)]");
+    assert_eq!(eval(&expr, &p8).expr_type(), tp("unresolved"));
+    assert_eq!(eval(&expr, &rt).to_display_string(), "3");
+}
+
+#[test]
+fn wrong_argument_count_with_an_argument_of_unknown_type_is_an_error() {
+    // F3 / L6: an argument of unknown type does not hide a wrong number of
+    // arguments, which fails every run.
+    let mut st = states()[0].clone();
+    st.set("U", ExprValue::unresolved(ExprType::ANY)).unwrap();
+    let expr = "len(U, 1)";
+    assert_err_in(
+        expr,
+        &st,
+        "pass 8",
+        &[
+            "len() takes 1 argument(s), but 2 were given\n",
+            &format!("  {expr}\n"),
+            "  ^~~~~~~~~",
+        ],
+    );
+}

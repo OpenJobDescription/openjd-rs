@@ -136,7 +136,7 @@ concrete) accepting the same combinations.
 | `list[A]` and `list[B]` | `list[join(A, B)]`, where inside a list a `nulltype` element (the empty list `[]`) yields to the other |
 | a union and a type | the union of the joins of the members that join; a conflict if none does |
 | `unresolved[T]` and a type | as `T` |
-| `any` and a type | the other type |
+| `any` or an unbound type variable, and a type | `any` |
 | anything else | conflict |
 
 Before joining, each element type — including a lone element's — is reduced
@@ -162,14 +162,14 @@ nothing (`unresolved[nulltype]`, e.g. `None if H else None`) — reporting the
 construct's run-time error: "null is not allowed in list literals" for a list
 literal, "Cannot create list from null elements" for a comprehension.
 
-An element of unknown type (`any`) joins with any element as `any`: its value
+An element of unknown type (`any`, or an unbound type variable such as the `T1`
+of `flatten` of a `list[any]`) joins with any element as `any`: its value
 need not have the other element's type (`[s, path('/b')]` with `s` a string is a
 `list[string]`), so the values decide.
 
 Conflicts include `bool` against `int`, a scalar against a list,
 `range_expr` against `list[int]` (unlike `unify_binding`), `list[int]` against
-`list[string]`, a top-level `nulltype` (a list literal cannot hold `null`), and
-an unbound type variable against anything but itself. The fold is pairwise, so
+`list[string]`, and a top-level `nulltype` (a list literal cannot hold `null`). The fold is pairwise, so
 `[1, 2.0, 'a', path('b')]` is a conflict: the int/float and path/string pairs
 do not make all four types compatible.
 
