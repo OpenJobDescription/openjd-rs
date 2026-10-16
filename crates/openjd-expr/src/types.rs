@@ -771,7 +771,8 @@ fn normalize_union(types: Vec<ExprType>) -> ExprType {
     let mut non_unresolved = Vec::new();
     for m in &members {
         if m.code == TypeCode::Unresolved {
-            unresolved_constraints.push(m.params[0].clone());
+            // A bare `unresolved` (any type) is `unresolved[any]`.
+            unresolved_constraints.push(m.params.first().cloned().unwrap_or(ExprType::ANY));
         } else {
             non_unresolved.push(m.clone());
         }
@@ -989,12 +990,16 @@ impl ExprType {
         if self.code == TypeCode::Any || other.code == TypeCode::Any {
             return Some(HashMap::new());
         }
-        // UNRESOLVED delegates to constraint
+        // UNRESOLVED delegates to constraint (a bare `unresolved` is any type)
         if self.code == TypeCode::Unresolved {
-            return self.params[0].match_type(other);
+            return self
+                .params
+                .first()
+                .unwrap_or(&ExprType::ANY)
+                .match_type(other);
         }
         if other.code == TypeCode::Unresolved {
-            return self.match_type(&other.params[0]);
+            return self.match_type(other.params.first().unwrap_or(&ExprType::ANY));
         }
         // UNION: matches if any member matches
         if self.code == TypeCode::Union && other.code == TypeCode::Union {

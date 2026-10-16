@@ -1270,3 +1270,62 @@ fn the_failure_named_is_the_indexed_comprehensions() {
         ],
     );
 }
+
+// ── Audit round 9 ──
+
+#[test]
+fn bare_unresolved_types_do_not_panic() {
+    // F1 of audit round 9: a bare `unresolved` (built through
+    // `ExprType::new`) as a comprehension body, or inside a list element
+    // union, panicked in union normalization. It reads as `unresolved[any]`.
+    let mut st = states()[0].clone();
+    let bare = ExprType::new(TypeCode::Unresolved, vec![]);
+    st.set("Task.Param.X", ExprValue::unresolved(bare.clone()))
+        .unwrap();
+    let elem = ExprType::new(
+        TypeCode::Union,
+        vec![ExprType::INT, ExprType::new(TypeCode::List, vec![bare])],
+    );
+    st.set(
+        "Task.Param.Y",
+        ExprValue::unresolved(ExprType::new(TypeCode::List, vec![elem])),
+    )
+    .unwrap();
+    for (expr, ty) in [
+        ("[Task.Param.X for y in Param.L]", "unresolved[list[any]]"),
+        ("Task.Param.Y[0]", "unresolved[int | list[any]]"),
+    ] {
+        assert_eq!(eval(expr, &st).expr_type(), tp(ty), "{expr}");
+    }
+}
+
+#[test]
+fn every_type_variable_iterable_binds_any() {
+    // F2 of audit round 9: a `T1`-typed iterable (an element of a
+    // `list[list[T1]]`), not only `T3`, binds `any`.
+    let mut st = states()[0].clone();
+    st.set("U", ExprValue::unresolved(ExprType::ANY)).unwrap();
+    assert_eq!(
+        eval("[y for y in (([] + [U])[0] + [['y']])[0][0]]", &st).expr_type(),
+        tp("unresolved[list[any]]")
+    );
+}
+
+#[test]
+fn concatenation_of_a_list_and_a_range_names_the_range() {
+    // F3 of audit round 9: with the range on the right, the error names it.
+    let [_, g2, rt] = states();
+    let expr = "['a'] + Param.R";
+    for (stage, st) in [("gate 2", &g2), ("run time", &rt)] {
+        assert_err_in(
+            expr,
+            st,
+            stage,
+            &[
+                "Cannot concatenate list[string] and range_expr\n",
+                &format!("  {expr}\n"),
+                "  ~~~~~~^~~~~~~~~",
+            ],
+        );
+    }
+}
