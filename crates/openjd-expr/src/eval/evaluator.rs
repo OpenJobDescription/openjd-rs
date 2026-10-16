@@ -807,8 +807,9 @@ impl<'a> Evaluator<'a> {
             }
         }
         // Fall back: evaluate the value, then access the attribute via library.
-        // If the base evaluation fails (e.g., "Param" is a subtable not a value),
-        // and we had a dotted path, report the dotted path as undefined with suggestions.
+        // If the base is undefined (e.g., "Param" is a subtable, not a value)
+        // and we had a dotted path, report the dotted path as undefined with
+        // suggestions; any other base error is kept.
         //
         // Both fallback arms below replace the original error with a
         // friendlier one. A budget error is never replaced: the rewritten
@@ -2212,19 +2213,6 @@ fn unwrap_unresolved(t: &ExprType) -> ExprType {
     }
 }
 
-/// The validation-time result for a list whose elements include an
-/// `Unresolved` value: a **top-level** `unresolved(list[T])`, never a list
-/// nesting an `Unresolved` — the invariant that makes
-/// [`ExprValue::is_unresolved`] a complete concreteness check.
-///
-/// The element type `T` is the fold of [`crate::types::join_list_element`]
-/// over the elements' types (an unresolved element contributes its
-/// constraint) — the same join `ExprValue::make_list` applies to the
-/// concrete list, so a mix of concrete and unresolved elements is accepted
-/// when some resolution of the unresolved ones builds a list, and
-/// `T` is the element type that list has (a union when different
-/// resolutions give different types). Used by list literal evaluation and
-/// by list comprehensions whose body produced unresolved elements;
 /// The element type a comprehension binds when iterating a value of the
 /// (unresolved) type `t`, or `None` if no value of that type is iterable.
 /// Unknown types (`any`, type variables, an unresolved placeholder) bind
@@ -2257,6 +2245,19 @@ fn unresolved_iteration_element(t: &ExprType) -> Option<ExprType> {
     }
 }
 
+/// The validation-time result for a list whose elements include an
+/// `Unresolved` value: a **top-level** `unresolved(list[T])`, never a list
+/// nesting an `Unresolved` — the invariant that makes
+/// [`ExprValue::is_unresolved`] a complete concreteness check.
+///
+/// The element type `T` is the fold of [`crate::types::join_list_element`]
+/// over the elements' types (an unresolved element contributes its
+/// constraint) — the same join `ExprValue::make_list` applies to the
+/// concrete list, so a mix of concrete and unresolved elements is accepted
+/// when some resolution of the unresolved ones builds a list, and
+/// `T` is the element type that list has (a union when different
+/// resolutions give different types). Used by list literal evaluation and
+/// by list comprehensions whose body produced unresolved elements;
 /// `ExprValue::make_list` itself rejects unresolved elements, since it
 /// constructs concrete lists.
 fn unresolved_list_from_elements(

@@ -148,7 +148,8 @@ pub fn encode_snapshot_v2023(manifest: &Snapshot) -> Result<String> {
     Ok(canonical_json(&obj))
 }
 
-/// Encode a SnapshotDiff to v2023 JSON (drops deletions).
+/// Encode a SnapshotDiff to v2023 JSON (drops deletions). Fails with
+/// `SnapshotError::Validation` if the file sizes sum past `u64::MAX`.
 pub fn encode_snapshot_diff_v2023(manifest: &SnapshotDiff) -> Result<String> {
     validate_symlink_targets_relative(&manifest.files)?;
     if manifest.file_chunk_size_bytes != WHOLE_FILE_CHUNK_SIZE {

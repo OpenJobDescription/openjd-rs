@@ -408,6 +408,8 @@ impl<P, K> Manifest<P, K> {
         }
     }
 
+    /// Recalculate `total_size` as the sum of the sizes of the non-deleted,
+    /// non-symlink files, saturating at `u64::MAX` rather than overflowing.
     pub fn recompute_total_size(&mut self) {
         // Saturating: sizes come from decoded (untrusted) manifests, and a
         // plain `sum` panics (debug) or wraps (release) on overflow.

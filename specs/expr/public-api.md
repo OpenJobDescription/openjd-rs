@@ -1188,7 +1188,8 @@ pub const format_string::MAX_STATIC_RESOLVED_VALUE_LEN: usize = 10 * 1024 * 1024
 
 /// Escape `{{` and `}}` in a string so the format-string parser treats
 /// them as literals — necessary when synthesizing format strings from
-/// user input that may contain double braces.
+/// user input that may contain double braces. A lone `{` directly before
+/// `}}` is escaped too.
 pub fn escape_format_string(value: &str) -> String;
 ```
 

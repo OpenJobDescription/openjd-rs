@@ -108,7 +108,7 @@ Both provide accessor methods via a macro: `files()`, `dirs()`, `hash_alg()`, `f
 | `with_dirs(dirs)` | Builder: set dirs |
 | `with_parent_hash(hash)` | Builder: set parent_manifest_hash |
 | `clear_hashes()` | Set `hash` and `chunk_hashes` to `None` for all regular files |
-| `recompute_total_size()` | Recalculate `total_size` from file entries |
+| `recompute_total_size()` | Recalculate `total_size` from file entries (saturates at `u64::MAX`; the v2023 diff encoder instead rejects a sum that overflows) |
 | `validate()` | Run all validation checks (requires `P: ValidatePaths, K: ValidateKind`) |
 
 ## FileEntry

@@ -1048,6 +1048,8 @@ impl<'a> FormatStringOptions<'a> {
 }
 
 /// Escape `{{` and `}}` in a string so the format string parser treats them as literals.
+/// A lone `{` directly before `}}` is escaped too, so it cannot join the
+/// escape's opening `{{`.
 #[must_use]
 pub fn escape_format_string(value: &str) -> String {
     let mut result = String::new();
