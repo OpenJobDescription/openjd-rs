@@ -59,8 +59,10 @@ impl TempDir {
 
 `TempDir::new(dir, prefix, user)`:
 
-1. Generate a unique directory name: `{prefix}{random_hex}` (16 hex chars)
-2. Create the directory via `std::fs::create_dir()`
+1. Generate a directory name: `{prefix}{random_hex}`, where `random_hex` is a
+   v4 UUID in simple form (32 lower-case hex characters)
+2. Create the directory via `std::fs::create_dir()`. An existing directory of
+   that name is an error; there is no retry
 3. Set permissions:
    - Same-user: 0o700 (owner rwx only)
    - Cross-user: 0o770 (owner + group rwx) after `chown` to set group
@@ -105,13 +107,64 @@ The sticky bit check is a defense-in-depth measure. `/tmp` on most Linux distrib
 has the sticky bit set, so this warning rarely fires. Failing would break sessions on
 misconfigured systems where the operator may not have control over `/tmp` permissions.
 
+## Session working directory name
+
+The session working directory is created by the crate-internal
+`TempDir::new_session_working_dir(root, user)`, not by `TempDir::new`. Its name
+is 8 random characters and nothing else:
+
+- **Alphabet.** `abcdefghijklmnopqrstuvwxyz0123456789_`, drawn uniformly from
+  the OS CSPRNG (`getrandom`, with rejection sampling). Lower case only, so
+  two names never differ only in case (which case-insensitive filesystems
+  treat as the same name), and no character is reserved on Windows. An
+  8-character name cannot be a Windows device name (`CON`, `COM1`, ...).
+- **Collisions.** Each candidate is created with an exclusive
+  `std::fs::create_dir()`. If the name already exists, a fresh name is tried,
+  up to 10,000 attempts. An existing directory is never reused, and concurrent
+  sessions in one root never share a path. Any other error is returned at
+  once. If every attempt collides, creation fails with `SessionError::TempDir`
+  naming the root and `No usable temporary directory name found after 10000
+  attempts`.
+- **Permissions** are applied as for `TempDir::new` (see Construction above).
+
+### Why 8 random characters
+
+Windows applications that a job runs, such as After Effects and Cinema 4D,
+use the legacy Win32 file APIs and so are limited to `MAX_PATH` (260
+characters) regardless of the `LongPathsEnabled` registry value or a
+`\\?\` prefix. The working directory's path counts against that limit for
+everything beneath it. A short random name keeps that cost low while staying
+unique.
+
+The name carries no part of the session ID. To trace a retained or orphaned
+directory to its session, use the session log: `Session::with_config()` logs
+`Initializing Open Job Description Session: <session_id>` and
+`Session Working Directory: <path>`, and every `session_log!` record carries
+the session ID.
+
+### Differences from Python
+
+This matches openjd-sessions-for-python PR #348, with two differences:
+
+- This crate makes at most 10,000 attempts on every platform. Python's limit
+  depends on the platform.
+- On Windows, Python also retries when creating the directory fails with
+  `PermissionError` in a writable parent, because a name pending deletion
+  reports access denied. This crate retries only on `AlreadyExists`, so that
+  case fails the session. It needs a random name to match one pending
+  deletion out of 37^8 (about 3.5 × 10^12) names, so the simpler rule was
+  kept.
+
 ## Integration with Session
 
-`Session::with_config()` creates two `TempDir` instances:
+`Session::with_config()` creates two directories:
 
-1. **Working directory**: `TempDir::new(root, "session-", user)` — the session's scratch
-   space, referenced as `Session.WorkingDirectory` in the symbol table
-2. **Files directory**: `TempDir::new(working_dir, "files-", user)` — subdirectory for
-   embedded files, referenced by `EmbeddedFiles`
+1. **Working directory**: `TempDir::new_session_working_dir(root, user)` — the
+   session's scratch space, named as described above, referenced as
+   `Session.WorkingDirectory` in the symbol table
+2. **Files directory**: `TempDir::new(working_dir, "embedded_files", user)` —
+   subdirectory for embedded files, referenced by `EmbeddedFiles`, named
+   `embedded_files` followed by 32 hex characters. Python uses 8 random
+   characters after `embedded_files`; that difference is not yet resolved.
 
 Both are stored in the `Session` struct and cleaned up by `Session::cleanup()`.
