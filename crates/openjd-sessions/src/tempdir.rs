@@ -302,8 +302,9 @@ fn random_hex() -> String {
 pub(crate) const SESSION_DIR_NAME_LENGTH: usize = 8;
 
 /// Characters a session working directory's name is drawn from. Lower case
-/// only, so two names never differ only in case, and no character is
-/// reserved on Windows.
+/// only, so two names never differ only in case (which case-insensitive
+/// filesystems treat as the same name), and no character is reserved on
+/// Windows.
 pub(crate) const SESSION_DIR_NAME_ALPHABET: &[u8; 37] = b"abcdefghijklmnopqrstuvwxyz0123456789_";
 
 /// How many names [`TempDir::new_session_working_dir`] tries before giving
