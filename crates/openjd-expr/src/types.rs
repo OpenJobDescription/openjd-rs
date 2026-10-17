@@ -483,6 +483,17 @@ pub(crate) fn simplify_joined_list_element(t: ExprType) -> ExprType {
     ExprType::union(t.params.into_iter().filter(|m| *m != empty_list).collect())
 }
 
+fn is_unknown_element(t: &ExprType) -> bool {
+    matches!(
+        t.code,
+        TypeCode::Any
+            | TypeCode::TypeVarT
+            | TypeCode::TypeVarT1
+            | TypeCode::TypeVarT2
+            | TypeCode::TypeVarT3
+    )
+}
+
 fn join_element_inner(a: &ExprType, b: &ExprType, nested: bool) -> Option<ExprType> {
     if let (TypeCode::Unresolved, [inner]) = (a.code, a.params.as_slice()) {
         return join_element_inner(inner, b, nested);
@@ -490,30 +501,16 @@ fn join_element_inner(a: &ExprType, b: &ExprType, nested: bool) -> Option<ExprTy
     if let (TypeCode::Unresolved, [inner]) = (b.code, b.params.as_slice()) {
         return join_element_inner(a, inner, nested);
     }
-    if a == b {
+    if a == b && !is_unknown_element(a) {
         return Some(a.clone());
     }
     match (a.code, b.code) {
         // An element of unknown type (`any`, or a type variable left
         // unbound, such as the `T1` of `flatten` of a `list[any]`) need not
         // have the other's type (`[s, path('/b')]` with `s` a string is a
-        // `list[string]`): the values decide.
-        (
-            TypeCode::Any
-            | TypeCode::TypeVarT
-            | TypeCode::TypeVarT1
-            | TypeCode::TypeVarT2
-            | TypeCode::TypeVarT3,
-            _,
-        )
-        | (
-            _,
-            TypeCode::Any
-            | TypeCode::TypeVarT
-            | TypeCode::TypeVarT1
-            | TypeCode::TypeVarT2
-            | TypeCode::TypeVarT3,
-        ) => Some(ExprType::ANY),
+        // `list[string]`), nor does another one (two `T1` elements may be
+        // an int and a float): the values decide.
+        _ if is_unknown_element(a) || is_unknown_element(b) => Some(ExprType::ANY),
         (TypeCode::NullType, _) if nested => Some(b.clone()),
         (_, TypeCode::NullType) if nested => Some(a.clone()),
         (TypeCode::Union, _) => join_union_members(&a.params, b, nested),
@@ -1952,7 +1949,7 @@ mod tests {
         );
         assert_eq!(join("list[int]", "list[string]"), None);
         assert_eq!(join("list[int]", "list[bool]"), None);
-        // Unbound type variables are not joined (item 26 binds them).
+        // Unbound type variables join as `any`.
         // An unbound type variable says nothing of its values: `any`.
         assert_eq!(join("list[int]", "list[T3]").as_deref(), Some("list[any]"));
     }

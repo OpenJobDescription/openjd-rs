@@ -1742,3 +1742,61 @@ fn wrong_argument_count_with_an_argument_of_unknown_type_is_an_error() {
         ],
     );
 }
+
+// ── Audit loop 2, round 7 ──
+
+#[test]
+fn type_variable_elements_join_as_any_on_either_side() {
+    // M1, F2, F4: a type-variable element on the right, and two of them
+    // (which may be an int and a float), give `list[any]`.
+    let [p8, g2, rt] = states_with_matrix();
+    let flat = "flatten([x for x in (Param.Z if Task.Param.C else Param.EL)])";
+    for (expr, ty, value) in [
+        (format!("[1, {flat}[0]]"), "unresolved[list[any]]", "[1, 1]"),
+        (
+            format!("[Param.L, {flat}]"),
+            "unresolved[list[list[any]]]",
+            "[[1, 2, 3], [1, 2, 3]]",
+        ),
+        (
+            format!("[[1], [{flat}[0]]]"),
+            "unresolved[list[list[any]]]",
+            "[[1], [1]]",
+        ),
+        (
+            format!("[{flat}[0], {flat}[1]]"),
+            "unresolved[list[any]]",
+            "[1, 2]",
+        ),
+        (format!("[{flat}[0], 1]"), "unresolved[list[any]]", "[1, 1]"),
+    ] {
+        for st in [&p8, &g2] {
+            assert_eq!(eval(&expr, st).expr_type(), tp(ty), "{expr}");
+        }
+        assert_eq!(eval(&expr, &rt).to_display_string(), value, "{expr}");
+    }
+}
+
+#[test]
+fn argument_of_unknown_type_with_several_arities() {
+    // M2: `max` has signatures of several arities; one of the call's arity
+    // is enough. L1: too few arguments is still an error.
+    let [p8, _, rt] = states_with_matrix();
+    let flat = "flatten([x for x in (Param.Z if Task.Param.C else Param.EL)])";
+    let expr = format!("max(1.5, 1, {flat}[0])");
+    assert_eq!(eval(&expr, &p8).expr_type(), tp("unresolved"));
+    assert_eq!(eval(&expr, &rt).to_display_string(), "1.5");
+    let mut st = p8.clone();
+    st.set("U", ExprValue::unresolved(ExprType::ANY)).unwrap();
+    let expr = "startswith(U)";
+    assert_err_in(
+        expr,
+        &st,
+        "pass 8",
+        &[
+            "startswith() takes 2 argument(s), but 1 were given\n",
+            &format!("  {expr}\n"),
+            "  ^~~~~~~~~~~~",
+        ],
+    );
+}
