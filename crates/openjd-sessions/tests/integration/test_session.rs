@@ -210,7 +210,9 @@ fn working_dir_name(session: &Session) -> String {
         .to_string()
 }
 
-/// The name is exactly 8 characters from `[a-z0-9_]`.
+/// The working directory is created directly under the root, named with
+/// exactly 8 characters from `[a-z0-9_]`, and holds the embedded-files
+/// directory.
 #[tokio::test]
 async fn test_working_directory_name_is_8_chars_from_alphabet() {
     let tmp = TempDir::new().unwrap();
@@ -223,6 +225,10 @@ async fn test_working_directory_name_is_8_chars_from_alphabet() {
         "working directory name {name:?} has a character outside [a-z0-9_]"
     );
     assert_eq!(session.working_directory().parent(), Some(tmp.path()));
+    assert_eq!(
+        session.files_directory().parent(),
+        Some(session.working_directory())
+    );
     session.cleanup();
 }
 

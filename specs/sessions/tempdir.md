@@ -115,8 +115,8 @@ is 8 random characters and nothing else:
 
 - **Alphabet.** `abcdefghijklmnopqrstuvwxyz0123456789_`, drawn uniformly from
   the OS CSPRNG (`getrandom`, with rejection sampling). Lower case only, so
-  names cannot collide on case-insensitive filesystems, and no character is
-  reserved on Windows. An 8-character name cannot be a Windows device name
+  two names never differ only in case (which case-insensitive filesystems
+  treat as the same name), and no character is reserved on Windows. An 8-character name cannot be a Windows device name
   (`CON`, `COM1`, ...).
 - **Collisions.** Each candidate is created with an exclusive
   `std::fs::create_dir()`. If the name already exists, a fresh name is tried,
@@ -131,9 +131,10 @@ is 8 random characters and nothing else:
 
 Windows applications that a job runs, such as After Effects and Cinema 4D,
 use the legacy Win32 file APIs and so are limited to `MAX_PATH` (260
-characters) regardless of the `LongPathsEnabled` registry value or a `\\?\` prefix, and the working
-directory's path counts against that limit for everything beneath it. A
-short random name keeps that cost low while staying unique.
+characters) regardless of the `LongPathsEnabled` registry value or a
+`\\?\` prefix. The working directory's path counts against that limit for
+everything beneath it. A short random name keeps that cost low while staying
+unique.
 
 The name carries no part of the session ID. To trace a retained or orphaned
 directory to its session, use the session log: `Session::with_config()` logs
@@ -148,10 +149,11 @@ This matches openjd-sessions-for-python PR #348, with two differences:
 - This crate makes at most 10,000 attempts on every platform. Python's limit
   depends on the platform.
 - On Windows, Python also retries when creating the directory fails with
-  `PermissionError` in a writable parent. This crate retries only on
-  `AlreadyExists`, so that case fails the session. Retrying on access denied
-  without first checking that the parent is writable would make a real
-  permission error spin through all 10,000 attempts.
+  `PermissionError` in a writable parent, because a name pending deletion
+  reports access denied. This crate retries only on `AlreadyExists`, so that
+  case fails the session. It needs a random name to match one pending
+  deletion out of 37^8 (about 3.5 × 10^12) names, so the simpler rule was
+  kept.
 
 ## Integration with Session
 
