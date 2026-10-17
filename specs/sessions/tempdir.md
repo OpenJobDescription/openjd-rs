@@ -116,8 +116,8 @@ is 8 random characters and nothing else:
 - **Alphabet.** `abcdefghijklmnopqrstuvwxyz0123456789_`, drawn uniformly from
   the OS CSPRNG (`getrandom`, with rejection sampling). Lower case only, so
   two names never differ only in case (which case-insensitive filesystems
-  treat as the same name), and no character is reserved on Windows. An 8-character name cannot be a Windows device name
-  (`CON`, `COM1`, ...).
+  treat as the same name), and no character is reserved on Windows. An
+  8-character name cannot be a Windows device name (`CON`, `COM1`, ...).
 - **Collisions.** Each candidate is created with an exclusive
   `std::fs::create_dir()`. If the name already exists, a fresh name is tried,
   up to 10,000 attempts. An existing directory is never reused, and concurrent
