@@ -842,7 +842,7 @@ fn type_variable_element_type_is_not_a_list_of_lists() {
     // F1 of audit round 5: a body typed with a type variable does not say
     // what its values are; counting `list[list[T1]]` as a list of lists made
     // the comprehension `list[nulltype]` and its index an error, though
-    // every run builds `[[1, 2]]`. (The body here is now a `list[T3]`;
+    // every run builds `[[1, 2]]`. (The body here is now a `list[any]`;
     // `comprehension_too_deep`'s unit test covers `list[list[T1]]`.)
     let [p8, g2, rt] =
         states_with_any_list(ExprValue::make_list(vec![], ExprType::list(ExprType::INT)).unwrap());
@@ -1799,4 +1799,61 @@ fn argument_of_unknown_type_with_several_arities() {
             "  ^~~~~~~~~~~~",
         ],
     );
+}
+
+// ── Audit loop 2, round 8 ──
+
+#[test]
+fn union_index_with_a_member_that_can_be_an_int() {
+    // B-H1: `T1 | int` (and `string | int`) as an index was "Index must be
+    // an integer", though a run that takes the int succeeds.
+    let [p8, g2, mut rt] = states();
+    rt.set("Task.Param.C", ExprValue::Bool(false)).unwrap();
+    let t1 = "flatten([x for x in (Param.Z if Task.Param.C else [[1]])])[0]";
+    for (expr, value) in [
+        (format!("[1, 2][{t1} if Task.Param.C else 0]"), "1"),
+        (format!("'ab'[{t1} if Task.Param.C else 0]"), "a"),
+        (
+            "[1, 2][Param.LS[0] if Task.Param.C else Task.Param.I - 1]".to_string(),
+            "2",
+        ),
+    ] {
+        for st in [&p8, &g2] {
+            assert!(
+                ParsedExpression::new(&expr)
+                    .and_then(|p| p.evaluate(st))
+                    .is_ok(),
+                "{expr}"
+            );
+        }
+        assert_eq!(eval(&expr, &rt).to_display_string(), value, "{expr}");
+    }
+    // A `T3` index (no common element type) is accepted too (B-M1).
+    let expr = "[1, 2][(Param.L + Param.LS)[0]]";
+    assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved"));
+    // An index that can never be an int is still an error.
+    let expr = "[1, 2][Param.LS[0]]";
+    assert_err_in(
+        expr,
+        &p8,
+        "pass 8",
+        &[
+            "Index must be an integer\n",
+            &format!("  {expr}\n"),
+            "  ~~~~~~^~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn conditional_test_of_unknown_type_can_be_a_boolean() {
+    // B-H2: a conditional whose test is a type variable was "Condition must
+    // be a boolean, got T1", though the run's value is a bool.
+    let [p8, g2, mut rt] = states();
+    rt.set("Task.Param.C", ExprValue::Bool(false)).unwrap();
+    let expr = "1 if flatten([x for x in (Param.Z if Task.Param.C else [[True]])])[0] else 2";
+    for st in [&p8, &g2] {
+        assert_eq!(eval(expr, st).expr_type(), tp("unresolved[int]"), "{expr}");
+    }
+    assert_eq!(eval(expr, &rt).to_display_string(), "1");
 }

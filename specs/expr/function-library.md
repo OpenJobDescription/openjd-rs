@@ -276,7 +276,8 @@ type-only call with one is `any` (`refined_return_type`, also applied by
 `derive_return_type`), unless it is a list concatenation, typed above. So is one with
 such an argument that matches no signature (the signature's own variables can capture
 a bare type variable), when a signature of the call's arity exists; a wrong argument
-count is still an error. A comparison or membership test is a `bool`. An index of unknown type is accepted the same way.
+count is still an error. (The evaluator types a comparison or membership test as a
+`bool` before dispatch; `derive_return_type("__eq__", [any, int])` is `any`.) An index of unknown type is accepted the same way.
 
 Indexing has a `(list[nulltype], int) -> noreturn` overload, registered before
 the generic `(list[T1], int) -> T1`: the empty list has no element, so indexing

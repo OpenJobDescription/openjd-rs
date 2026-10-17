@@ -201,7 +201,9 @@ the same constraint: `IfExp.test` uses `None` rather than `{BOOL}`
 instead of a generic coercion failure), subscript indices use `None`
 rather than `{INT}` ("Index must be an integer"), and list
 comprehension conditions use `None` rather than `{BOOL}` ("List
-comprehension filter must be a boolean, got X").
+comprehension filter must be a boolean, got X"). An unresolved test or index of
+unknown type (`any`, a type variable), or a union with a member that can be
+a `bool` (an `int`), is accepted: a run's value may be one.
 
 ## AST Node Evaluation
 
@@ -627,9 +629,9 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     succeed, when no run that keeps an element can: nothing is left of
     `T` (the body can only be `null`), `T` is `noreturn`, every form of `T`
     is a list of lists (the comprehension would nest three levels, which
-    no value can, 2026-02 §1.2.1; a form holding a type variable, such as
-    the `list[list[T1]]` of `x + [2]` with `x: T3`, does not say what its
-    values are and does not count), or the filter or body fails to type —
+    no value can, 2026-02 §1.2.1; a form holding a type variable, such as a
+    `list[list[T1]]` from a signature that leaves `T1` unbound, does not say what
+    its values are and does not count), or the filter or body fails to type —
     a type error, a value error on concrete operands, a filter that can
     never be a boolean, or a reference to an undefined symbol or unknown
     function, as in a conditional branch that may not run. The failure is

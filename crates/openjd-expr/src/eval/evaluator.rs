@@ -1240,14 +1240,11 @@ impl<'a> Evaluator<'a> {
         // inherit the parent target.
         let test = self.eval_node(&i.test, None)?;
         if test.is_unresolved() {
-            // Check that the unresolved type is compatible with bool
+            // Check that the unresolved type is compatible with bool (the
+            // comprehension filter's rule: a type variable or `any` may be
+            // one).
             let inner = unwrap_unresolved(&test.expr_type());
-            let is_bool_compatible = inner == ExprType::BOOL
-                || inner.code() == crate::types::TypeCode::Unresolved
-                || inner.code() == crate::types::TypeCode::Any
-                || (inner.code() == crate::types::TypeCode::Union
-                    && inner.params().contains(&ExprType::BOOL));
-            if !is_bool_compatible {
+            if !is_bool_compatible(&inner) {
                 let err =
                     ExpressionError::new(format!("Condition must be a boolean, got {}", inner));
                 self.release(&test);
@@ -1685,11 +1682,18 @@ impl<'a> Evaluator<'a> {
         // Check index type for unresolved values
         if slice.is_unresolved() {
             let inner = unwrap_unresolved(&slice.expr_type());
-            if inner != ExprType::INT
-                && inner.code() != crate::types::TypeCode::Unresolved
-                && inner.code() != crate::types::TypeCode::Any
-                && !is_type_variable(&inner)
-            {
+            // An integer, or a type a run's value may make one: `any`, a
+            // type variable, or a union with such a member.
+            let can_be_int = |t: &ExprType| {
+                *t == ExprType::INT
+                    || t.code() == crate::types::TypeCode::Unresolved
+                    || t.code() == crate::types::TypeCode::Any
+                    || is_type_variable(t)
+            };
+            let index_ok = can_be_int(&inner)
+                || (inner.code() == crate::types::TypeCode::Union
+                    && inner.params().iter().any(can_be_int));
+            if !index_ok {
                 let mut err = ExpressionError::new("Index must be an integer");
                 if let Some(src) = self.expr_source {
                     use ruff_text_size::Ranged;
