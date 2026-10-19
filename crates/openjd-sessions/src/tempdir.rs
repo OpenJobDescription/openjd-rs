@@ -306,10 +306,15 @@ mod tests {
         // Excluding the effective gid rules out the only membership readable
         // portably here, since `getgroups` is unavailable on Apple targets. A
         // remaining supplementary membership is handled by the `Ok` arm below.
+        // `nogroup` is deliberately absent: its gid is -1 on macOS, and chown
+        // to (gid_t)-1 is a POSIX no-op that returns success, so picking it
+        // would make this test skip while reporting a group membership that
+        // isn't the reason.
         let egid = nix::unistd::getegid();
-        let group = ["daemon", "nogroup", "bin", "sys", "wheel"]
-            .into_iter()
-            .find(|g| matches!(nix::unistd::Group::from_name(g), Ok(Some(grp)) if grp.gid != egid));
+        let group = ["daemon", "bin", "sys", "wheel"].into_iter().find(|g| {
+            matches!(nix::unistd::Group::from_name(g), Ok(Some(grp))
+                if grp.gid != egid && grp.gid.as_raw() != u32::MAX)
+        });
         let Some(group) = group else {
             eprintln!("skipping: no candidate group resolved on this host");
             return;
