@@ -268,9 +268,10 @@ async fn test_cross_user_subprocess_terminate_tree() {
 /// Note on including UIDs in assertion messages:
 /// A numeric POSIX UID is not sensitive information. UIDs are public on any
 /// POSIX system — visible via `id`, `ps`, `stat`, `/proc`, and `/etc/passwd`.
-/// This test runs in an isolated Docker container (`#[cfg(unix)] #[ignore]`,
-/// executed only by the Cross-User (Linux) CI job) against a throwaway test
-/// account whose UID has no meaning outside that container.
+/// This test is `#[cfg(unix)] #[ignore]` and runs only where the cross-user
+/// fixtures are provisioned: the Cross-User (Linux) job's container, and the
+/// Cross-User (macOS) job's ephemeral runner. Either way the UID belongs to a
+/// throwaway test account and has no meaning outside that environment.
 ///
 /// The entire purpose of this test is to verify that the subprocess runs as
 /// the expected UID, so including both the observed and expected UIDs in the
@@ -745,7 +746,7 @@ async fn test_cross_user_embedded_file_runnable_permissions() {
 // === Cross-user helper stdout framing regression tests ===
 //
 // Exercise the bounded, non-blocking stdout reader in `helper/src/runner.rs`.
-// `#[ignore]`; need the Docker + sudo fixtures like `test_cross_user_subprocess_basic`.
+// `#[ignore]`; need the provisioned sudo fixtures like `test_cross_user_subprocess_basic`.
 
 /// Invalid UTF-8 (0x97) between valid lines must not abort the run: it streams
 /// on, backslash-escaped. Pre-fix `read_line` returned InvalidData.
