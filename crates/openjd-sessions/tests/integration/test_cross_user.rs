@@ -4,12 +4,21 @@
 
 //! Cross-user tests for openjd-sessions.
 //!
-//! All tests are `#[ignore]` — they require a Docker container with sudo
-//! configured and the following env vars set:
+//! All tests are `#[ignore]` — they require a provisioned multi-user POSIX
+//! environment with passwordless sudo. CI provides that two ways: a Docker
+//! container on Linux, and users provisioned on the runner itself on macOS
+//! (see `specs/sessions/cross-user-testing.md`).
+//!
+//! Required environment:
 //!   OPENJD_TEST_SUDO_TARGET_USER / OPENJD_TEST_SUDO_SHARED_GROUP
 //!   OPENJD_TEST_SUDO_DISJOINT_USER / OPENJD_TEST_SUDO_DISJOINT_GROUP
+//!   TMPDIR — must be world-traversable. The target user has to traverse it to
+//!     reach the session working directory and execute the extracted helper
+//!     binary, so the macOS default (`/var/folders/<hash>/T`, mode 0700) fails
+//!     with "Helper process closed stdout unexpectedly".
 //!
-//! Run with: cargo test -p openjd-sessions --features test-utils -- --include-ignored
+//! Run with: cargo test -p openjd-sessions --features test-utils --test integration \
+//!   -- --include-ignored test_cross_user::
 //!
 //! These tests are POSIX-only (sudo, process groups, file ownership).
 #![cfg(unix)]
@@ -23,6 +32,7 @@ use openjd_sessions::action::ActionState;
 use openjd_sessions::session::{Session, SessionCancelHandle, SessionConfig};
 use openjd_sessions::session_user::PosixSessionUser;
 use openjd_sessions::tempdir::TempDir;
+use openjd_sessions::SessionError;
 
 fn target_user() -> Option<Arc<PosixSessionUser>> {
     let user = std::env::var("OPENJD_TEST_SUDO_TARGET_USER").ok()?;
@@ -98,8 +108,10 @@ async fn test_cross_user_subprocess_basic() {
     session.cleanup();
 }
 
-/// Run long_running.sh (traps SIGTERM) with a timeout — process should be killed
-/// before completing all iterations, and the trap handler should fire.
+/// Run long_running.sh (traps SIGTERM) with a timeout — the process should be
+/// killed before completing all iterations. The trap handler does NOT fire: the
+/// timeout path kills the process group with SIGKILL directly (see the NOTE
+/// below), so this test asserts a mid-flight kill, not graceful trap handling.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_subprocess_notify() {
@@ -122,18 +134,37 @@ async fn test_cross_user_subprocess_notify() {
         "Expected Timeout or Failed, got {:?}",
         r.state
     );
+    // NOTE: run_subprocess's timeout uses CancelMethod::Terminate (immediate
+    // SIGKILL), so the workload's SIGTERM trap is intentionally NOT expected to
+    // fire here — asserting "Trapped" would be wrong. Assert instead that the
+    // workload ran as the target user and was cut off mid-flight (distinguishing
+    // a real kill from a failure-to-launch, which also yields Failed). The
+    // SIGTERM/notify path is covered by test_cross_user_notify_delivers_sigterm.
     assert!(
         r.stdout.contains("Log from test 0"),
-        "Should see early output"
+        "Should see early output; stdout: {:?}",
+        r.stdout
     );
     assert!(
         !r.stdout.contains("Log from test 19"),
-        "Should not complete all iterations"
+        "Should not complete all iterations; stdout: {:?}",
+        r.stdout
     );
     session.cleanup();
 }
 
-/// Run long_running.sh with timeout — SIGKILL cannot be trapped.
+/// Run long_running_ignore.sh with a timeout — the workload traps SIGTERM and
+/// never exits on it, so only an untrappable signal can stop it.
+///
+/// NOTE: there is no SIGTERM->SIGKILL escalation on this path. `run_subprocess`'s
+/// timeout uses `CancelMethod::Terminate`, which sends SIGKILL to the process
+/// group directly (subprocess.rs: "Action timed out, sending SIGKILL to process
+/// group"), so the workload's TERM trap never fires. That makes the outcome here
+/// identical to long_running.sh; this test's value is proving that a workload
+/// which *ignores* SIGTERM is still reaped cross-user, which is the property that
+/// would regress if the timeout path ever switched to a trappable signal without
+/// a follow-up kill. Genuine SIGTERM delivery is covered by
+/// test_cross_user_notify_delivers_sigterm.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_subprocess_terminate() {
@@ -155,6 +186,20 @@ async fn test_cross_user_subprocess_terminate() {
         r.state == ActionState::Timeout || r.state == ActionState::Failed,
         "Expected Timeout or Failed, got {:?}",
         r.state
+    );
+    // Assert the workload actually ran and was cut off mid-flight, rather than
+    // failing to launch as the target user (which would also yield `Failed` and
+    // is otherwise indistinguishable from a successful kill). The script prints
+    // bare iteration numbers.
+    assert!(
+        r.stdout.contains('0'),
+        "Should see early output; stdout: {:?}",
+        r.stdout
+    );
+    assert!(
+        !r.stdout.contains("19"),
+        "SIGKILL should have stopped the loop before completion; stdout: {:?}",
+        r.stdout
     );
     session.cleanup();
 }
@@ -182,13 +227,36 @@ async fn test_cross_user_subprocess_terminate_tree() {
         "Expected Timeout or Failed, got {:?}",
         r.state
     );
+    // spawn_child.sh launches long_running.sh ("Log from test N") and runs its
+    // own loop ("Log from runner N") CONCURRENTLY -- it does not `wait` first.
+    // That concurrency is what makes these assertions meaningful: both processes
+    // are mid-loop when the kill lands, so each "did not reach iteration 19"
+    // check is real evidence that process died rather than a side effect of it
+    // never having started.
+    //
+    // The child assertions carry the actual tree-kill property: if a kill reaped
+    // only the parent and orphaned the child, the child would keep printing and
+    // reach "Log from test 19". That is the failure mode a pgid-based kill exists
+    // to prevent, and it is directly observable here.
     assert!(
         r.stdout.contains("Log from test 0"),
-        "Should see early output"
+        "Child process should have produced early output; stdout: {:?}",
+        r.stdout
     );
     assert!(
         !r.stdout.contains("Log from test 19"),
-        "Should not complete all iterations"
+        "Child should have been killed with the group, not orphaned to completion; stdout: {:?}",
+        r.stdout
+    );
+    assert!(
+        r.stdout.contains("Log from runner 0"),
+        "Parent should have produced early output concurrently with the child; stdout: {:?}",
+        r.stdout
+    );
+    assert!(
+        !r.stdout.contains("Log from runner 19"),
+        "Parent should have been killed before completion; stdout: {:?}",
+        r.stdout
     );
     session.cleanup();
 }
@@ -200,9 +268,10 @@ async fn test_cross_user_subprocess_terminate_tree() {
 /// Note on including UIDs in assertion messages:
 /// A numeric POSIX UID is not sensitive information. UIDs are public on any
 /// POSIX system — visible via `id`, `ps`, `stat`, `/proc`, and `/etc/passwd`.
-/// This test runs in an isolated Docker container (`#[cfg(unix)] #[ignore]`,
-/// executed only by the Cross-User (Linux) CI job) against a throwaway test
-/// account whose UID has no meaning outside that container.
+/// This test is `#[cfg(unix)] #[ignore]` and runs only where the cross-user
+/// fixtures are provisioned: the Cross-User (Linux) job's container, and the
+/// Cross-User (macOS) job's ephemeral runner. Either way the UID belongs to a
+/// throwaway test account and has no meaning outside that environment.
 ///
 /// The entire purpose of this test is to verify that the subprocess runs as
 /// the expected UID, so including both the observed and expected UIDs in the
@@ -367,6 +436,58 @@ fn spawn_cancel_with_retry(
     })
 }
 
+/// A notify-then-terminate cancel must actually deliver SIGTERM to the
+/// cross-user workload's process group — not go straight to SIGKILL. The trap
+/// script (`long_running.sh`, `trap 'echo Trapped; exit 1' TERM`) prints
+/// "Trapped" only if SIGTERM reaches it; cancelling with a grace period gives
+/// the trap time to fire and flush before escalation. This is the only test
+/// that pins the SIGTERM path across the sudo boundary (the timeout tests use
+/// CancelMethod::Terminate, i.e. immediate SIGKILL, so the trap never fires
+/// there).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_notify_delivers_sigterm() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    // Grace period: SIGTERM, wait up to 3s for the trap to run + flush, then SIGKILL.
+    let canceller = {
+        let handle = session.cancel_handle();
+        tokio::spawn(async move {
+            for _ in 0..60 {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                if handle.cancel(Some(Duration::from_secs(3)), false) {
+                    return true;
+                }
+            }
+            false
+        })
+    };
+
+    let script = support_dir().join("long_running.sh");
+    let r = session
+        .run_subprocess(&script.to_string_lossy(), None, None, None, true, None)
+        .await
+        .unwrap();
+    let delivered = canceller.await.expect("canceller task must not panic");
+
+    assert!(
+        delivered,
+        "handle must find the in-flight action and cancel it"
+    );
+    assert!(
+        r.stdout.contains("Log from test 0"),
+        "workload should have run as the target user; stdout: {:?}",
+        r.stdout
+    );
+    assert!(
+        r.stdout.contains("Trapped"),
+        "SIGTERM should have reached the workload's process group and fired its \
+         trap before SIGKILL escalation; stdout: {:?}",
+        r.stdout
+    );
+    session.cleanup();
+}
+
 /// A `SessionCancelHandle` must be able to cancel a subprocess that runs via
 /// the cross-user helper: the helper path registers per-action cancel state,
 /// and the handle delivers the cancel command over the helper pipe. This is
@@ -504,24 +625,47 @@ async fn test_cross_user_tempdir_cleanup() {
 #[ignore]
 async fn test_cross_user_tempdir_disjoint_fails() {
     let user = require_disjoint_user();
-    let result = TempDir::new(None, None, Some(&*user));
-    // Python raises RuntimeError. In Rust, chown failure is currently silent
-    // (let _ = nix::unistd::chown...), so the dir may be created but with wrong group.
-    if let Ok(td) = result {
-        use std::os::unix::fs::MetadataExt;
-        let meta = std::fs::metadata(td.path()).unwrap();
-        let disjoint_gid = nix::unistd::Group::from_name(&user.group)
-            .unwrap()
-            .unwrap()
-            .gid
-            .as_raw();
-        assert_ne!(
-            meta.gid(),
-            disjoint_gid,
-            "Should not be able to chown to disjoint group"
-        );
+    // The process user is not a member of the disjoint user's group, so the
+    // chown to that group must fail. TempDir::new chowns before chmod and
+    // propagates the failure (SessionError::PathPermissions) rather than
+    // silently creating a directory with the wrong group — so this must be an
+    // Err. Snapshot the parent so we can also assert the just-created directory
+    // is removed on failure (the TempDir struct, and its Drop cleanup, never
+    // exist when chown fails, so TempDir::new must remove it explicitly).
+    //
+    // The parent is private to this test, not the shared openjd_temp_dir(None).
+    // The before/after comparison below is only sound if nothing else writes to
+    // the parent, and the shared one is used by every other TempDir in this test
+    // binary -- including test_tempdir_default_parent, which is not #[ignore]d.
+    // The Linux cross-user container runs the suite without --test-threads=1, so
+    // against the shared parent an unrelated test's directory would appear in
+    // `after` and be reported as an orphan this test had leaked.
+    let private_parent = tempfile::tempdir().expect("failed to create a private parent dir");
+    let parent = private_parent.path().to_path_buf();
+    let before: std::collections::HashSet<PathBuf> = std::fs::read_dir(&parent)
+        .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect())
+        .unwrap_or_default();
+
+    let result = TempDir::new(Some(&parent), None, Some(&*user));
+    match result {
+        Err(SessionError::PathPermissions { .. }) => {}
+        Err(other) => panic!("Expected PathPermissions error, got {other:?}"),
+        Ok(td) => panic!(
+            "Expected chown to the disjoint group to fail, but a directory was created at {}",
+            td.path().display()
+        ),
     }
-    // Err is also acceptable — means the crate properly rejects it
+
+    // No orphaned directory: the set of entries under the parent is unchanged.
+    let after: std::collections::HashSet<PathBuf> = std::fs::read_dir(&parent)
+        .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect())
+        .unwrap_or_default();
+    assert_eq!(
+        before,
+        after,
+        "failed cross-user TempDir::new must not leave a directory behind under {}",
+        parent.display()
+    );
 }
 
 // === Cross-user embedded files permission tests ===
@@ -602,7 +746,7 @@ async fn test_cross_user_embedded_file_runnable_permissions() {
 // === Cross-user helper stdout framing regression tests ===
 //
 // Exercise the bounded, non-blocking stdout reader in `helper/src/runner.rs`.
-// `#[ignore]`; need the Docker + sudo fixtures like `test_cross_user_subprocess_basic`.
+// `#[ignore]`; need the provisioned sudo fixtures like `test_cross_user_subprocess_basic`.
 
 /// Invalid UTF-8 (0x97) between valid lines must not abort the run: it streams
 /// on, backslash-escaped. Pre-fix `read_line` returned InvalidData.

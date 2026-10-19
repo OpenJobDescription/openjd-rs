@@ -10,7 +10,9 @@ LDAP-based user management.
 
 The infrastructure uses Docker containers to create isolated environments with the
 required user/group/sudo configuration. Tests are gated by `#[ignore]` and only run
-inside these containers via `--include-ignored`.
+inside these containers via `--include-ignored`. On macOS (which has no Docker in CI),
+the same tests run directly on the runner with users provisioned through Directory
+Services — see [macOS](#macos) below.
 
 This design was ported from the Python `openjd-sessions-for-python` library's Docker
 test infrastructure.
@@ -96,12 +98,23 @@ fn require_target_user() -> Arc<PosixSessionUser> {
 ```
 
 Each test is `#[ignore]` and calls `require_target_user()` or `require_disjoint_user()`
-as its first line. Outside Docker, `cargo test` skips them. Inside Docker,
-`cargo test -- --include-ignored` runs them.
+as its first line, so a plain `cargo test` skips them wherever it runs. The
+environments that provision the users run them with
+`cargo test -- --include-ignored`: the Linux containers, and the macOS CI job,
+which provisions the users on the runner itself rather than in a container.
 
 ## Test Inventory
 
-### Subprocess Tests (4)
+The tables below describe what each category covers. They are not a complete
+roster, and the per-category counts they used to carry drifted as tests were
+added. For the current set, ask the test binary:
+
+```bash
+cargo test -p openjd-sessions --features test-utils --test integration -- \
+  --include-ignored test_cross_user:: --list
+```
+
+### Subprocess Tests
 
 | Test | Validates |
 |---|---|
@@ -115,7 +128,7 @@ These use shell scripts in `tests/support/`:
 - `long_running_ignore.sh` — Same but trap handler doesn't exit (tests SIGKILL escalation)
 - `spawn_child.sh` — Spawns `long_running.sh` as child, then prints its own messages
 
-### Runner Identity Tests (3)
+### Runner Identity Tests
 
 | Test | Validates |
 |---|---|
@@ -123,7 +136,7 @@ These use shell scripts in `tests/support/`:
 | `test_cross_user_runner_env_vars` | Explicit env vars are propagated to cross-user subprocess |
 | `test_cross_user_no_env_inheritance` | Host process env vars do NOT leak into cross-user subprocess |
 
-### Session Tests (2)
+### Session Tests
 
 | Test | Validates |
 |---|---|
@@ -135,13 +148,58 @@ The cleanup test creates files via `sudo -u targetuser` with restrictive permiss
 the two-phase cleanup: `sudo rm -rf` as the session user, then `remove_dir_all` as the
 process user.
 
-### TempDir Tests (3)
+### TempDir Tests
 
 | Test | Validates |
 |---|---|
 | `test_cross_user_tempdir_permissions` | Group ownership matches target user's group, mode is 0o770 |
 | `test_cross_user_tempdir_cleanup` | Cleanup works when target user has created files inside |
-| `test_cross_user_tempdir_disjoint_fails` | TempDir with disjoint user (no shared group) fails or has wrong group |
+| `test_cross_user_tempdir_disjoint_fails` | TempDir with disjoint user (no shared group) fails with `PathPermissions`, and leaves no orphaned directory behind |
+
+## macOS
+
+The full POSIX cross-user suite passes on macOS with no code changes — the crate's
+mechanism (`process_group(0)` at spawn, `killpg` for signalling, no `setsid(1)` binary,
+no `pgrep`, no procfs) is pure POSIX syscalls, all present on macOS. The
+`cross-user-macos` CI job runs the suite on `macos-latest`, where the runner has
+passwordless sudo, so users are provisioned directly on the host instead of in Docker.
+
+macOS-specific provisioning differences (encoded in the CI job):
+
+| Concern | Linux (Docker) | macOS |
+|---|---|---|
+| Create users/groups | `useradd`/`groupadd` | `sysadminctl -addUser` / `dseditgroup -o create` |
+| Self-named user group | Created automatically by `useradd` | Must be created explicitly (`sysadminctl` assigns primary group `staff`); the tempdir cleanup test chowns to `user:user` |
+| Temp root | `/tmp` (world-writable) | The default per-user `TMPDIR` (`/var/folders/<hash>/T`) is mode `0700`, so the target user cannot traverse to the session working directory or execute the extracted helper binary. The CI job sets a world-traversable `TMPDIR`; running the suite locally on macOS needs the same override. |
+| Resolve new users | immediate | `dscacheutil -flushcache` after provisioning |
+
+> **Deployment note:** the `TMPDIR` constraint applies to real macOS hosts too — the
+> session root must be traversable by the session user (e.g. the Deadline Cloud worker
+> agent uses `/var/lib/deadline/sessions` on macOS). A session root under a `0700`
+> per-user directory fails with "Helper process closed stdout unexpectedly" because
+> `sudo -u <user> -i <helper_path>` cannot reach the helper binary. Whether this bites
+> depends on launch context: launchd sets the private per-user `TMPDIR` for per-user
+> domain services and login sessions, whereas system `LaunchDaemon`s typically get
+> `/tmp`. So the same binary can work as a daemon and fail when run from a terminal —
+> which is why the caller should set an explicit session root rather than relying on
+> `std::env::temp_dir()`. `TempDir` does not currently pre-check ancestor traversability
+> (see the `#[ignore]`d `tempdir_under_untraversable_parent_is_currently_created` test,
+> which pins this).
+
+> **Default-group sharp edge (macOS):** `PosixSessionUser::new(user, None)` defaults the
+> group to the process's effective group. On macOS an ordinary local account's effective
+> group is `staff`, so a cross-user `TempDir`/helper created with a `None` group is
+> chmod'd `0o770`/`0o750` with group `staff` — readable/writable by *all* local users.
+> This is inherited parity with the Python reference implementation
+> (`grp.getgrgid(os.getegid())`), not a Rust-specific defect, but callers on macOS should
+> pass an explicit dedicated group.
+
+There is no macOS equivalent of the LDAP variant. The macOS job provisions **local**
+Directory Services accounts, which is the same local-node resolution path any ordinary
+macOS user takes — it does not exercise a networked directory the way the Linux LDAP
+container does. `nix::unistd::User::from_name()` does go through Directory Services
+rather than reading `/etc/passwd` directly, but that is not equivalent to
+networked-directory (LDAP/Active Directory) coverage.
 
 ## Entry Script
 
@@ -188,5 +246,8 @@ Docker container.
 | Localuser Docker | ✅ | ✅ | ✅ |
 | LDAP Docker | ✅ | ✅ | ✅ |
 
-Windows cross-user tests from the Python library are out of scope — the Rust crate does
-not yet have Windows cross-user support.
+Windows cross-user tests are out of scope **for this document**, which covers the POSIX
+suite. The crate does implement Windows cross-user execution: see
+[cross-user.md](cross-user.md) and [../windows-cross-user-helper.md](../windows-cross-user-helper.md)
+for the design, `tests/integration/test_cross_user_windows.rs` for the tests, and the
+Cross-User (Windows) CI job that runs them.

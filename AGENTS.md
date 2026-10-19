@@ -98,7 +98,7 @@ Local job execution runtime. Manages session lifecycle, runs actions via subproc
 - **Action filter** (`src/action_filter.rs`) — Real-time stdout/stderr message parsing, redaction, and annotation.
 - **Cross-user** (`src/cross_user_helper.rs`) — Subprocess execution as a different OS user via an embedded helper binary.
 - **Embedded helper** (`src/helper/`) — **Separate Cargo project** with its own `Cargo.toml` and `Cargo.lock`. Built by `build.rs` and embedded into the sessions binary. CI runs clippy and tests on it independently. Platform-specific runners: `src/helper/src/runner.rs` (Unix) and `runner_win.rs` (Windows).
-- **Platform-specific code** — `win32.rs`, `win32_permissions.rs`, `win32_locate.rs` use `#[cfg(target_os = "windows")]`. Cross-user tests require Docker (Linux) or a test user account (Windows).
+- **Platform-specific code** — `win32.rs`, `win32_permissions.rs`, `win32_locate.rs` are gated by `#[cfg(windows)]` in `lib.rs`. There is no `target_os` gating anywhere in the crate, so macOS compiles and runs the same POSIX paths as Linux. Cross-user tests require Docker (Linux), locally provisioned test users (macOS), or a test user account (Windows).
 
 Spec entry point: `specs/sessions/README.md`
 
@@ -266,6 +266,7 @@ PRs run these checks (all must pass):
 | **Documentation** | `cargo doc --no-deps --workspace` with `-D warnings` |
 | **Compliance** | Copyright header check |
 | **Cross-User (Linux)** | Docker-based cross-user tests: localuser and LDAP variants |
+| **Cross-User (macOS)** | POSIX cross-user tests with `sysadminctl`-provisioned users and a world-traversable `TMPDIR` override |
 | **Cross-User (Windows)** | Windows cross-user and permissions tests with a temporary test user |
 | **openjd-for-js** | Builds the wasm32 crate with `wasm-bindgen` and runs the vitest suite |
 

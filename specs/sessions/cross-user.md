@@ -12,7 +12,7 @@ actions as a different user (the job's designated user). This is required for pr
 deployments where the worker agent runs as root or a service account but actions must
 run with the job submitter's permissions.
 
-Fully implemented for POSIX/Linux and Windows, both via the embedded cross-user
+Fully implemented for POSIX (Linux and macOS) and Windows, both via the embedded cross-user
 helper binary. See the Windows section below for the Windows specifics.
 
 ## SessionUser Trait
