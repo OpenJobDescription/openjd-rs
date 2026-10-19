@@ -248,7 +248,7 @@ binary's protected DACL still enforces read-only for the session user.
 - Integration test: helper protocol round-trip (spawn helper, send command,
   read output, send cancel, verify exit)
 - E2E: the existing worker agent cancellation tests that currently fail
-- DACL tests in `tests/test_cross_user_windows.rs`:
+- DACL tests in `tests/integration/test_cross_user_windows.rs`:
   - `test_cross_user_helpers_dir_dacl_protects_from_session_user`
   - `test_cross_user_helper_binary_dacl_protects_from_session_user`
   - `test_cross_user_session_user_cannot_overwrite_helper_binary`

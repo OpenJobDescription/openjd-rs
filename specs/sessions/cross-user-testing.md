@@ -105,7 +105,16 @@ which provisions the users on the runner itself rather than in a container.
 
 ## Test Inventory
 
-### Subprocess Tests (4)
+The tables below describe what each category covers. They are not a complete
+roster, and the per-category counts they used to carry drifted as tests were
+added. For the current set, ask the test binary:
+
+```bash
+cargo test -p openjd-sessions --features test-utils --test integration -- \
+  --include-ignored test_cross_user:: --list
+```
+
+### Subprocess Tests
 
 | Test | Validates |
 |---|---|
@@ -119,7 +128,7 @@ These use shell scripts in `tests/support/`:
 - `long_running_ignore.sh` — Same but trap handler doesn't exit (tests SIGKILL escalation)
 - `spawn_child.sh` — Spawns `long_running.sh` as child, then prints its own messages
 
-### Runner Identity Tests (3)
+### Runner Identity Tests
 
 | Test | Validates |
 |---|---|
@@ -127,7 +136,7 @@ These use shell scripts in `tests/support/`:
 | `test_cross_user_runner_env_vars` | Explicit env vars are propagated to cross-user subprocess |
 | `test_cross_user_no_env_inheritance` | Host process env vars do NOT leak into cross-user subprocess |
 
-### Session Tests (2)
+### Session Tests
 
 | Test | Validates |
 |---|---|
@@ -139,7 +148,7 @@ The cleanup test creates files via `sudo -u targetuser` with restrictive permiss
 the two-phase cleanup: `sudo rm -rf` as the session user, then `remove_dir_all` as the
 process user.
 
-### TempDir Tests (3)
+### TempDir Tests
 
 | Test | Validates |
 |---|---|
@@ -237,5 +246,8 @@ Docker container.
 | Localuser Docker | ✅ | ✅ | ✅ |
 | LDAP Docker | ✅ | ✅ | ✅ |
 
-Windows cross-user tests from the Python library are out of scope — the Rust crate does
-not yet have Windows cross-user support.
+Windows cross-user tests are out of scope **for this document**, which covers the POSIX
+suite. The crate does implement Windows cross-user execution: see
+[cross-user.md](cross-user.md) and [../windows-cross-user-helper.md](../windows-cross-user-helper.md)
+for the design, `tests/integration/test_cross_user_windows.rs` for the tests, and the
+Cross-User (Windows) CI job that runs them.

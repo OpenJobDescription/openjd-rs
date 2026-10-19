@@ -41,17 +41,18 @@ permissions on the parent.
 ```rust
 pub struct TempDir {
     path: PathBuf,
+    cleaned_up: bool,
 }
 
 impl TempDir {
     pub fn new(
-        dir: &Path,
-        prefix: &str,
-        user: Option<&PosixSessionUser>,
+        dir: Option<&Path>,
+        prefix: Option<&str>,
+        user: Option<&dyn SessionUser>,
     ) -> Result<Self, SessionError>;
 
     pub fn path(&self) -> &Path;
-    pub fn cleanup(self) -> Result<(), SessionError>;
+    pub fn cleanup(&mut self) -> Result<(), SessionError>;
 }
 ```
 

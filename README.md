@@ -72,7 +72,7 @@ scripts/run_cross_user_tests.sh
 scripts/run_cross_user_tests.sh --ldap
 ```
 
-This runs 12 cross-user tests covering subprocess execution, signal delivery (SIGTERM/SIGKILL), process tree killing, session cleanup, and TempDir permissions. See [the proposal](docs/proposals/docker-based-cross-user-tests.md) for details.
+This runs the POSIX cross-user suite, covering subprocess execution, signal delivery (SIGTERM/SIGKILL), process tree killing, session cleanup, and TempDir permissions. See [specs/sessions/cross-user-testing.md](specs/sessions/cross-user-testing.md) for the test inventory and the environment each test needs.
 
 ### Code coverage
 

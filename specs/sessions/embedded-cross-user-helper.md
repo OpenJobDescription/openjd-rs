@@ -602,14 +602,22 @@ The existing per-action sudo path remains as fallback for non-helper sessions.
 
 ## Testing
 
-All 13 cross-user tests in `tests/test_cross_user.rs` pass in the Docker
+The cross-user tests in `tests/integration/test_cross_user.rs` pass in the Docker
 localuser container, validating the helper end-to-end:
 
 ```bash
 cd ~/openjd-rs
 docker build -t openjd-cross-user -f testing_containers/localuser_sudo_environment/Dockerfile .
 docker run --rm openjd-cross-user
-# test result: ok. 12 passed; 0 failed
+```
+
+They also run on the macOS CI job, which provisions the users on the runner
+instead of in a container. For the current list, ask the test binary rather
+than this document:
+
+```bash
+cargo test -p openjd-sessions --features test-utils --test integration -- \
+  --include-ignored test_cross_user:: --list
 ```
 
 Tests cover: basic execution, stdout streaming, notify-then-terminate cancel,

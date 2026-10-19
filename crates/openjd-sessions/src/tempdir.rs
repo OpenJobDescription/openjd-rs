@@ -281,6 +281,73 @@ fn random_hex() -> String {
 mod tests {
     use super::*;
 
+    /// `TempDir::new` must remove the directory it just created when the
+    /// ownership/permission setup fails. The `TempDir` value does not exist
+    /// yet at that point, so its `Drop` cleanup cannot do it.
+    ///
+    /// This lives in the default suite on purpose. The behavior is otherwise
+    /// covered only by `test_cross_user_tempdir_disjoint_fails`, which is
+    /// `#[ignore]`d and needs provisioned users, so deleting the
+    /// `remove_dir_all` below leaves every gate-time test green. This test
+    /// needs no provisioning: the cross-user `chown` fails for any existing
+    /// group the process user is not a member of.
+    #[cfg(unix)]
+    #[test]
+    fn tempdir_new_removes_its_directory_when_setup_permissions_fails() {
+        use crate::session_user::PosixSessionUser;
+
+        if nix::unistd::geteuid().is_root() {
+            eprintln!("skipping: root can chown to any group");
+            return;
+        }
+
+        // The group must exist: `setup_permissions` skips the chown entirely
+        // when `Group::from_name` does not resolve, and then creation succeeds.
+        // Excluding the effective gid rules out the only membership readable
+        // portably here, since `getgroups` is unavailable on Apple targets. A
+        // remaining supplementary membership is handled by the `Ok` arm below.
+        let egid = nix::unistd::getegid();
+        let group = ["daemon", "nogroup", "bin", "sys", "wheel"]
+            .into_iter()
+            .find(|g| matches!(nix::unistd::Group::from_name(g), Ok(Some(grp)) if grp.gid != egid));
+        let Some(group) = group else {
+            eprintln!("skipping: no candidate group resolved on this host");
+            return;
+        };
+
+        let entries = |dir: &Path| -> std::collections::HashSet<PathBuf> {
+            std::fs::read_dir(dir)
+                .map(|rd| rd.filter_map(|e| e.ok().map(|e| e.path())).collect())
+                .unwrap_or_default()
+        };
+
+        // A private parent, so the before/after comparison cannot pick up a
+        // directory some other test created.
+        let parent = tempfile::TempDir::new().unwrap();
+        let before = entries(parent.path());
+
+        // The user name must differ from the process user, or
+        // `setup_permissions` takes the same-user branch and never chowns.
+        let user = PosixSessionUser::new("openjd-no-such-user", Some(group));
+        match TempDir::new(Some(parent.path()), Some("orphan-test-"), Some(&user)) {
+            Err(SessionError::PathPermissions { .. }) => {
+                assert_eq!(
+                    entries(parent.path()),
+                    before,
+                    "TempDir::new left a directory behind under {} after the chown to group {} failed",
+                    parent.path().display(),
+                    group,
+                );
+            }
+            Err(other) => panic!("expected PathPermissions, got {other:?}"),
+            Ok(_td) => {
+                eprintln!(
+                    "skipping: this process is a member of group {group}, so the chown succeeded"
+                );
+            }
+        }
+    }
+
     #[test]
     fn tempdir_debug() {
         let td = TempDir::new(None, None, None).unwrap();
