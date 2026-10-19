@@ -99,29 +99,43 @@ debugging without silently leaking temp directories.
 ## Sticky Bit Validation
 
 ```rust
-pub fn validate_sticky_bit(root_dir: &Path)
+#[cfg(unix)]
+pub fn find_missing_sticky_bit(root_dir: &Path) -> Option<PathBuf>;
 ```
 
 On POSIX, checks parent directories for world-writable directories missing the sticky
-bit. A world-writable directory without the sticky bit allows any user to rename or
-delete files created by other users — a security risk for session working directories.
+bit, returning the first offending path or `None` if all parents are safe. A
+world-writable directory without the sticky bit allows any user to rename or delete
+files created by other users — a security risk for session working directories.
 
-If found, logs a warning via `log::warn!`. Does not fail — the session continues, but
-the operator is alerted to fix the directory permissions.
+The function only reports; what happens next is the caller's policy decision.
+`Session::with_config()` applies `SessionConfig::sticky_bit_policy`
+(`StickyBitPolicy`, default `Strict`):
 
-### Why warn instead of fail
+| Policy | Behavior on a hit |
+|---|---|
+| `Strict` (default) | Returns `Err(SessionError::PathPermissions)`, naming the path and suggesting `chmod +t` or `StickyBitPolicy::Warn` |
+| `Warn` | Logs via `log::warn!` to target `openjd.sessions` and continues |
+| `Disabled` | Skips the check entirely |
 
-The sticky bit check is a defense-in-depth measure. `/tmp` on most Linux distributions
-has the sticky bit set, so this warning rarely fires. Failing would break sessions on
-misconfigured systems where the operator may not have control over `/tmp` permissions.
+### Why the default fails closed
+
+Refusing the session is the secure choice: a caller that has not thought about the
+risk gets the safe behavior. `/tmp` on most Linux distributions has the sticky bit
+set, so `Strict` rarely fires in practice. An operator who cannot control the
+offending directory's permissions can opt into `Warn` or `Disabled` deliberately,
+which makes the decision explicit rather than silent.
 
 ## Integration with Session
 
 `Session::with_config()` creates two `TempDir` instances:
 
-1. **Working directory**: `TempDir::new(root, "session-", user)` — the session's scratch
-   space, referenced as `Session.WorkingDirectory` in the symbol table
-2. **Files directory**: `TempDir::new(working_dir, "files-", user)` — subdirectory for
-   embedded files, referenced by `EmbeddedFiles`
+1. **Working directory**: `TempDir::new(Some(&root_dir), Some(&config.session_id),
+   config.user.as_deref())` — the session's scratch space, referenced as
+   `Session.WorkingDirectory` in the symbol table. The prefix is the session id, so
+   the directory name identifies the session that owns it.
+2. **Files directory**: `TempDir::new(Some(working_dir.path()), Some("embedded_files"),
+   config.user.as_deref())` — subdirectory for embedded files, referenced by
+   `EmbeddedFiles`
 
 Both are stored in the `Session` struct and cleaned up by `Session::cleanup()`.
