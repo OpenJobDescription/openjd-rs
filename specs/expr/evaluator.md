@@ -316,6 +316,17 @@ validation time. Only the value is deferred, not the type check. A chain with
 any unresolved link evaluates to `Unresolved(BOOL)` unless an earlier link is
 statically `false`.
 
+A chain is its links joined by `and` (2026-02 Expression Language §1.3.6), so
+the links after one whose result is unresolved are evaluated speculatively, as
+`and` operands after an unresolved one are (see [Speculative
+evaluation](#speculative-evaluation)): a run may stop at that link's `false`
+before reaching them. A later link that fails with a value error — its operand
+fails, or its operands match no signature — is absorbed, and the chain is
+`Unresolved(BOOL)`: `Task.Param.I == 5 == len(1)` type-checks, as
+`Task.Param.I == 5 and 5 == len(1)` does, and fails only on a run where
+`Task.Param.I` is 5. The first link always runs, so its failure is an error. The
+carried operand the absorbed link took is released with it.
+
 Chained comparisons short-circuit: `a < b < c` evaluates `a < b`, and only if true,
 evaluates `b < c`. The intermediate value `b` is reused. All comparison operands
 are evaluated unconstrained (see [Target Type
@@ -460,9 +471,10 @@ other operand.
 
 ### Speculative evaluation
 
-Three constructs evaluate sub-expressions whose failure they may absorb rather
+Four constructs evaluate sub-expressions whose failure they may absorb rather
 than propagate: the branches of an unresolved-test conditional, the operands of a
-boolop after an unresolved one, and the filter and body of a list comprehension
+boolop after an unresolved one, the links of a chained comparison after an
+unresolved one, and the filter and body of a list comprehension
 typed over an unresolved iterable or filter. All use one helper, `speculate`
 (`eval_speculative` for a single node), which applies two rules:
 
@@ -479,8 +491,10 @@ typed over an unresolved iterable or filter. All use one helper, `speculate`
   sub-expression failed.
 
 The caller decides what an absorbed failure means: an `Unresolved` of the other
-branch's type, a runtime short-circuit, a compound "both branches fail" error, or a
-comprehension that only a run keeping no element survives (`list[nulltype]`).
+branch's type, a runtime short-circuit, a compound "both branches fail" error, a
+chained comparison that is an unknown `bool` (a run may stop at an earlier
+`false` link), or a comprehension that only a run keeping no element survives
+(`list[nulltype]`).
 
 The first rule requires that every construct between the budget failure and
 the absorbing one passes the error through unchanged. Two places replace

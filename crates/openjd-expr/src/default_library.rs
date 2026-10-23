@@ -924,6 +924,16 @@ mod tests {
             ),
             Some(tp("list[int]"))
         );
+        // An operand whose element type holds a type variable, at any
+        // depth, has elements of unknown type: `list[any]`.
+        assert_eq!(
+            lib.derive_return_type("__add__", &[tp("list[T1]"), tp("list[T1]")]),
+            Some(tp("list[any]"))
+        );
+        assert_eq!(
+            lib.derive_return_type("__add__", &[tp("list[int]"), tp("list[list[T1]]")]),
+            Some(tp("list[any]"))
+        );
     }
 
     #[test]

@@ -1180,28 +1180,54 @@ impl<'a> Evaluator<'a> {
         let mut seen_unresolved = false;
         let last_index = c.ops.len().saturating_sub(1);
         for (index, (op, right_node)) in c.ops.iter().zip(comparators.iter()).enumerate() {
-            let right = self.eval_node(right_node, None)?;
             let dispatch = table.cmpop(*op)?;
             let op_name = dispatch.dunder;
-
-            // Dispatch consumes and releases both operands. When the
-            // chain continues, `right` is also the next link's `left`,
-            // so it is cloned first and the clone is tracked below as
-            // the value the chain carries. Each operand is therefore
-            // charged once and released by the link that consumes it.
             let is_last = index == last_index;
-            let carried = if is_last { None } else { Some(right.clone()) };
-            // For 'in'/'not in', container is first arg (right), item is second (left)
-            let args = if dispatch.container_first {
-                vec![right, left]
-            } else {
-                vec![left, right]
+            // One link: evaluate its right operand and dispatch. Dispatch
+            // consumes and releases both operands. When the chain
+            // continues, `right` is also the next link's `left`, so it is
+            // cloned first and the clone is tracked below as the value the
+            // chain carries. Each operand is therefore charged once and
+            // released by the link that consumes it.
+            let link = |s: &mut Self,
+                        left: ExprValue|
+             -> Result<(ExprValue, Option<ExprValue>), ExpressionError> {
+                let right = s.eval_node(right_node, None)?;
+                let carried = if is_last { None } else { Some(right.clone()) };
+                // For 'in'/'not in', container is first arg (right), item is second (left)
+                let args = if dispatch.container_first {
+                    vec![right, left]
+                } else {
+                    vec![left, right]
+                };
+                // Use the compare expression's range for error caret
+                // positioning without cloning the entire ExprCompare node.
+                use ruff_text_size::Ranged;
+                let result_val = s.dispatch_with_span(op_name, args, c.range())?;
+                Ok((result_val, carried))
             };
-
-            // Use the compare expression's range for error caret positioning
-            // without cloning the entire ExprCompare node.
-            use ruff_text_size::Ranged;
-            let result_val = self.dispatch_with_span(op_name, args, c.range())?;
+            // A chain is its links joined by `and` (2026-02 §1.3.6): after
+            // a link whose result is unresolved, a run may stop at a
+            // `false` before reaching the next one, so a later link is
+            // evaluated speculatively, as an `and` operand after an
+            // unresolved one is. A value error is absorbed: the run that
+            // reaches it fails, and one that stops before it is `false`,
+            // so the chain is a `bool` not known here. A budget error
+            // propagates.
+            let (result_val, carried) = if seen_unresolved {
+                let left_size = left.memory_size();
+                match self.speculate(|s| link(s, left))? {
+                    Speculative::Value(v) => v,
+                    Speculative::Absorbed(_) => {
+                        // The footprint is reset to before the link, which
+                        // still counts the carried `left` the link took.
+                        self.current_memory = self.current_memory.saturating_sub(left_size);
+                        return self.track(ExprValue::unresolved(ExprType::BOOL));
+                    }
+                }
+            } else {
+                link(self, left)?
+            };
             let result = match &result_val {
                 ExprValue::Bool(b) => *b,
                 other => {
@@ -1791,9 +1817,12 @@ impl<'a> Evaluator<'a> {
     }
 
     /// Evaluate `node` where the caller may absorb a failure: the
-    /// branches of an unresolved-test conditional, or the operands of a
-    /// boolop after an unresolved one. Both absorption rules live here so
-    /// that every absorbing construct applies both:
+    /// branches of an unresolved-test conditional, the operands of a
+    /// boolop after an unresolved one, the links of a chained comparison
+    /// after an unresolved one, or a comprehension's filter and body typed
+    /// over an unresolved iterable or filter (through [`Self::speculate`]).
+    /// Both absorption rules live here so that every absorbing construct
+    /// applies both:
     ///
     /// - A budget error (`MemoryLimitExceeded` / `OperationLimitExceeded`,
     ///   directly or inside a compound error's sub-errors) is returned as
@@ -1805,7 +1834,8 @@ impl<'a> Evaluator<'a> {
     ///   count keep what the attempt consumed.
     ///
     /// The caller decides what an absorbed failure means: an `Unresolved`
-    /// result, a short-circuit, or a compound error.
+    /// result, a short-circuit, a compound error, an unknown `bool` (a
+    /// chained comparison), or a comprehension of type `list[nulltype]`.
     fn eval_speculative(
         &mut self,
         node: &ast::Expr,
@@ -1815,8 +1845,9 @@ impl<'a> Evaluator<'a> {
     }
 
     /// [`Self::eval_speculative`] for an arbitrary evaluation `f` (a
-    /// nested `and`/`or` evaluated to its outcomes), with the same two
-    /// absorption rules.
+    /// nested `and`/`or` evaluated to its outcomes, a chained comparison's
+    /// link, or a comprehension's filter and body typed once), with the
+    /// same two absorption rules.
     fn speculate<T>(
         &mut self,
         f: impl FnOnce(&mut Self) -> Result<T, ExpressionError>,

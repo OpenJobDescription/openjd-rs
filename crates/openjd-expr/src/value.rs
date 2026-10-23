@@ -593,21 +593,18 @@ impl ExprValue {
                     )))
                 }
             };
-        // Convert empty ListList([], NULLTYPE) elements to match typed list siblings.
-        // e.g. in [[], [1]], the empty [] should become ListInt([]) not ListList([], NULLTYPE).
+        // Convert empty ListList([], NULLTYPE) elements to the joined list
+        // element type: in [[], [1]] the empty [] becomes ListInt([]), and
+        // beside a typed empty list[string] it becomes ListString([]), so
+        // every element of a list value has its element type (§1.2.1).
         let has_empty_listlist = elements.iter().any(
             |e| matches!(e, Self::ListList(v, et, _) if v.is_empty() && *et == ExprType::NULLTYPE),
         );
         if has_empty_listlist {
-            // Find the first typed list sibling to determine the target variant
-            let sibling_code = elements.iter().find_map(|e| match e {
-                Self::ListBool(v) if !v.is_empty() => Some(crate::types::TypeCode::Bool),
-                Self::ListInt(v) if !v.is_empty() => Some(crate::types::TypeCode::Int),
-                Self::ListFloat(_) => Some(crate::types::TypeCode::Float),
-                Self::ListString(v, _) if !v.is_empty() => Some(crate::types::TypeCode::String),
-                Self::ListPath(v, _, _) if !v.is_empty() => Some(crate::types::TypeCode::Path),
+            let sibling_code = match joined.as_ref().map(|t| (t.code(), t.params())) {
+                Some((crate::types::TypeCode::List, [elem])) => Some(elem.code()),
                 _ => None,
-            });
+            };
             if let Some(code) = sibling_code {
                 for e in &mut elements {
                     if matches!(e, Self::ListList(v, et, _) if v.is_empty() && *et == ExprType::NULLTYPE)

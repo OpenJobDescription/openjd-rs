@@ -2040,3 +2040,95 @@ fn lone_list_element_with_a_member_of_unknown_type_is_any() {
         tp("unresolved[list[any]]")
     );
 }
+
+// ── Audit loop 3, round 3 ──
+
+#[test]
+fn chained_comparison_past_an_unresolved_link_absorbs_a_failing_link() {
+    // A-F1: `a == b == c` is `a == b and b == c` (§1.3.6). A run stops at
+    // a `false` link, so a later link that fails to type (an always-empty
+    // index, or no signature) does not make the chain an error, as it
+    // does not in the `and` form.
+    for expr in [
+        "Task.Param.I == 5 == [][Task.Param.I]",
+        "Task.Param.I == 5 == [[x] for x in Param.EL][0]",
+        "Task.Param.I == 5 == len(1)",
+    ] {
+        assert_stages(
+            expr,
+            "unresolved[bool]",
+            "unresolved[bool]",
+            "bool",
+            "false",
+        );
+    }
+    // The first link always runs, so its failure is an error.
+    let expr = "len(1) == Task.Param.I == 5";
+    assert_err_all(
+        expr,
+        &[
+            "No matching signature for len(int)\n",
+            &format!("  {expr}\n"),
+            "  ^~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn empty_list_beside_a_typed_empty_list_takes_its_type() {
+    // A-F2: in `[B, []]` with `B` an empty `list[string]` the run kept the
+    // `[]` element untyped, so `sum` of it succeeded, while validation
+    // (and a run with a non-empty `B`) typed it `list[string]`. A list
+    // value's elements have its element type (§1.2.1).
+    let mut p8 = SymbolTable::new();
+    p8.set(
+        "Param.B",
+        ExprValue::unresolved(ExprType::list(ExprType::STRING)),
+    )
+    .unwrap();
+    let mut rt = SymbolTable::new();
+    rt.set(
+        "Param.B",
+        ExprValue::make_list(vec![], ExprType::STRING).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        eval("[Param.B, []][1]", &rt).expr_type(),
+        tp("list[string]")
+    );
+    let expr = "sum([Param.B, []][1])";
+    for (stage, st) in [("pass 8", &p8), ("run time", &rt)] {
+        assert_err_in(
+            expr,
+            st,
+            stage,
+            &[
+                "No matching signature for sum(list[string])\n",
+                &format!("  {expr}\n"),
+                "  ^~~~~~~~~~~~~~~~~~~~~",
+            ],
+        );
+    }
+}
+
+#[test]
+fn list_literal_element_of_a_range_concatenation_with_no_common_type_is_any() {
+    // B-F2: `range_expr + list[string]` has no common element type
+    // (`list[T2]`), and its element joins with another element as `any`.
+    let [p8, _, _] = states();
+    assert_eq!(
+        eval("[(Param.R + Param.LS)[0], 1]", &p8).expr_type(),
+        tp("unresolved[list[any]]")
+    );
+}
+
+#[test]
+fn indexing_a_list_with_a_non_empty_form_is_not_always_empty() {
+    // B-F3: only a receiver every form of which is the empty list is
+    // "always empty"; `Task.Param.I if c else []` has an `int` form.
+    let [p8, _, _] = states();
+    assert_eq!(
+        eval("(Task.Param.I if Task.Param.C else [])[0]", &p8).expr_type(),
+        tp("unresolved[noreturn]")
+    );
+}

@@ -156,7 +156,10 @@ joined result: `[([] if H else ['a'])]` is
 element is the untyped empty list: `sum` of that element is `0`, which a
 `list[list[string]]` type would reject. Two elements do join the empty list
 into the other's type — `[[], ['a']]` is `list[list[string]]`, the inner `[]`
-yielding inside a list — since both are in the list every run builds.
+yielding inside a list — since both are in the list every run builds. A run
+builds the `[]` as an empty list of that type (`ExprValue::make_list`),
+beside a typed empty list too, so `[B, []][1]` with `B` an empty
+`list[string]` is a `list[string]`, as it is with a non-empty `B`.
 Dropping a top-level `nulltype` makes `[Task.Param.I if H else None]`
 `unresolved[list[int]]`, and `int?` against `string?` the `int` / `string`
 conflict — every value of that literal fails at run time — rather than a
