@@ -12,7 +12,7 @@ use openjd_model::CallerLimits;
 
 fn yaml_val(s: &str) -> serde_json::Value {
     let options = serde_saphyr::options! {
-        reject_non_finite_typeless_float: false,
+        non_finite_float_policy: serde_saphyr::NonFiniteFloatPolicy::AsString,
     };
     serde_saphyr::from_str_with_options(s, options).unwrap()
 }

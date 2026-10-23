@@ -126,7 +126,7 @@ pub fn parse_tasks_arg(
             // Preserve non-finite scalars for downstream task-parameter validation.
             let options = serde_saphyr::options! {
                 strict_booleans: true,
-                reject_non_finite_typeless_float: false,
+                non_finite_float_policy: serde_saphyr::NonFiniteFloatPolicy::AsString,
             };
             let v: serde_json::Value = serde_saphyr::from_str_with_options(&content, options)?;
             v

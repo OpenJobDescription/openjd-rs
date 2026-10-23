@@ -68,7 +68,7 @@ pub fn document_string_to_object(
             let options = serde_saphyr::options! {
                 strict_booleans: true,
                 // Keep non-finite scalars as strings for field-specific model validation.
-                reject_non_finite_typeless_float: false,
+                non_finite_float_policy: serde_saphyr::NonFiniteFloatPolicy::AsString,
                 budget: serde_saphyr::budget! {
                     max_depth: MAX_DOCUMENT_DEPTH,
                 },
