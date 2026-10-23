@@ -103,7 +103,8 @@ A typical session lifecycle flows through these modules:
 ```
 SessionConfig ──► Session::with_config()
                       │
-                      ├── TempDir::new() ──► working_directory, files_directory
+                      ├── TempDir::new_session_working_dir() ──► working_directory
+                      ├── TempDir::new() ──► files_directory
                       ├── build_symbol_table() ──► SymbolTable with Param.*, Session.*
                       └── materialize_path_mapping() ──► JSON file + Session.HasPathMappingRules
                       │

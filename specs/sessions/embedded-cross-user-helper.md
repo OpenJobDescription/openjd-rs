@@ -23,14 +23,14 @@ Session::with_config(user=job-user)
   │    (128 bits of entropy, 6 bits per char via byte & 0x3F)
   │
   ├─ Create helpers directory in session working directory
-  │    /sessions/<session-id>/.helpers-<uuid>/
+  │    <session-root>/<8-char-name>/.helpers-<uuid>/
   │    mkdir 700, chown :job-user-group, chmod 750
   │
   ├─ Write helper binary with randomized name
-  │    /sessions/<session-id>/.helpers-<uuid>/h-<uuid>
+  │    <session-root>/<8-char-name>/.helpers-<uuid>/h-<uuid>
   │    chmod 750, chown :job-user-group
   │
-  ├─ Spawn: sudo -u job-user -i /sessions/<session-id>/.helpers-<uuid>/h-<uuid> \
+  ├─ Spawn: sudo -u job-user -i <session-root>/<8-char-name>/.helpers-<uuid>/h-<uuid> \
   │           --auth-token <TOKEN>
   │    (1 second login cost, paid once; token passed as CLI arg)
   │

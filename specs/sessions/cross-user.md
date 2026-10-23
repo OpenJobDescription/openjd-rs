@@ -104,7 +104,9 @@ worker-agent → sudo → openjd_helper → script
 
 ### Working directory
 
-`TempDir::new()` accepts an optional `&PosixSessionUser`. When provided:
+`TempDir::new_session_working_dir()` and `TempDir::new()` (used for the
+embedded-files directory) accept an optional session user. When it is
+provided and is not the process user:
 - `nix::unistd::chown(path, None, Some(group_gid))` sets group ownership
 - Permissions are set to 0o770 (owner + group rwx) instead of 0o700
 

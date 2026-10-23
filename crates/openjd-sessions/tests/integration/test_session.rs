@@ -173,6 +173,141 @@ async fn test_root_dir_permissions_posix() {
     );
 }
 
+// === TestSessionWorkingDirectoryName ===
+//
+// Mirrors Python TestSessionWorkingDirectoryName (openjd-sessions-for-python
+// PR #348).
+
+/// Session ID shaped like a Deadline Cloud session ID: `session-<32 hex>`.
+const DEADLINE_SHAPED_ID: &str = "session-0123456789abcdef0123456789abcdef";
+
+fn config_in_root(root: &std::path::Path, session_id: &str) -> SessionConfig {
+    SessionConfig {
+        limits: Default::default(),
+        session_id: session_id.into(),
+        job_parameter_values: Default::default(),
+        session_root_directory: Some(root.to_path_buf()),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: None,
+        os_env_vars: None,
+        user: None,
+        profile: None,
+        cancel_token: None,
+        debug_collect_stdout: true,
+        echo_openjd_directives: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
+    }
+}
+
+fn working_dir_name(session: &Session) -> String {
+    session
+        .working_directory()
+        .file_name()
+        .expect("working directory has a final component")
+        .to_str()
+        .expect("working directory name is UTF-8")
+        .to_string()
+}
+
+/// The working directory is created directly under the root, named with
+/// exactly 8 characters from `[a-z0-9_]`, and holds the embedded-files
+/// directory.
+#[tokio::test]
+async fn test_working_directory_name_is_8_chars_from_alphabet() {
+    let tmp = TempDir::new().unwrap();
+    let mut session = Session::with_config(config_in_root(tmp.path(), DEADLINE_SHAPED_ID)).unwrap();
+    let name = working_dir_name(&session);
+    assert_eq!(name.len(), 8, "working directory name {name:?}");
+    assert!(
+        name.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'),
+        "working directory name {name:?} has a character outside [a-z0-9_]"
+    );
+    assert_eq!(session.working_directory().parent(), Some(tmp.path()));
+    assert_eq!(
+        session.files_directory().parent(),
+        Some(session.working_directory())
+    );
+    session.cleanup();
+}
+
+/// Neither the session ID, `session`, nor any tail of the ID of 4 or more
+/// characters appears in the name.
+#[tokio::test]
+async fn test_working_directory_name_carries_no_session_id() {
+    let tmp = TempDir::new().unwrap();
+    let mut session = Session::with_config(config_in_root(tmp.path(), DEADLINE_SHAPED_ID)).unwrap();
+    let name = working_dir_name(&session);
+    assert!(!name.contains(DEADLINE_SHAPED_ID), "name {name:?}");
+    assert!(!name.contains("session"), "name {name:?}");
+    for n in 4..DEADLINE_SHAPED_ID.len() {
+        let tail = &DEADLINE_SHAPED_ID[DEADLINE_SHAPED_ID.len() - n..];
+        assert!(
+            !name.contains(tail),
+            "name {name:?} contains the session ID's tail {tail:?}"
+        );
+    }
+    session.cleanup();
+}
+
+/// The log records the full session ID and the working directory's path.
+#[tokio::test]
+async fn test_working_directory_logged_with_full_session_id() {
+    testing_logger::setup();
+    let tmp = TempDir::new().unwrap();
+    let mut session = Session::with_config(config_in_root(tmp.path(), DEADLINE_SHAPED_ID)).unwrap();
+    let wd = session.working_directory().display().to_string();
+    session.cleanup();
+    testing_logger::validate(|captured_logs| {
+        let bodies: Vec<&str> = captured_logs.iter().map(|l| l.body.as_str()).collect();
+        let init = format!("Initializing Open Job Description Session: {DEADLINE_SHAPED_ID}");
+        let wd_line = format!("Session Working Directory: {wd}");
+        assert!(bodies.contains(&init.as_str()), "logs: {bodies:?}");
+        assert!(bodies.contains(&wd_line.as_str()), "logs: {bodies:?}");
+    });
+}
+
+/// Many sessions open at once in one root get distinct directories.
+#[tokio::test]
+async fn test_many_sessions_in_one_root_get_distinct_directories() {
+    let tmp = TempDir::new().unwrap();
+    let mut sessions: Vec<Session> = (0..64)
+        .map(|i| Session::with_config(config_in_root(tmp.path(), &format!("session-{i}"))).unwrap())
+        .collect();
+    let names: std::collections::HashSet<String> = sessions.iter().map(working_dir_name).collect();
+    assert_eq!(names.len(), sessions.len(), "names: {names:?}");
+    assert!(sessions.iter().all(|s| s.working_directory().is_dir()));
+    assert!(sessions.iter().all(|s| s.files_directory().is_dir()));
+    for s in &mut sessions {
+        s.cleanup();
+    }
+}
+
+/// Sessions created concurrently in one root get distinct directories.
+#[tokio::test]
+async fn test_concurrent_sessions_in_one_root_get_distinct_directories() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    let handles: Vec<_> = (0..16)
+        .map(|i| {
+            let root = root.clone();
+            std::thread::spawn(move || {
+                Session::with_config(config_in_root(&root, &format!("session-{i}")))
+            })
+        })
+        .collect();
+    let mut sessions: Vec<Session> = handles
+        .into_iter()
+        .map(|h| h.join().unwrap().unwrap())
+        .collect();
+    let names: std::collections::HashSet<String> = sessions.iter().map(working_dir_name).collect();
+    assert_eq!(names.len(), 16, "names: {names:?}");
+    for s in &mut sessions {
+        s.cleanup();
+    }
+}
+
 // === StickyBitPolicy tests ===
 
 /// Strict mode rejects a session root under a world-writable dir without sticky bit.

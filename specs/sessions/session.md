@@ -110,7 +110,8 @@ always on — it is not part of `SessionLimits`.)
 The Python library accepts `session_root_directory` and creates the actual working
 directory internally via `TempDir`. This is important because:
 
-1. The session needs to control the directory name (random hex suffix for uniqueness)
+1. The session needs to control the directory name (8 random characters, retried on
+   collision; see [tempdir.md](tempdir.md#session-working-directory-name))
 2. The session needs to set permissions (0o700, or 0o770 for cross-user)
 3. The session creates both a working directory and a files subdirectory within it
 
@@ -147,8 +148,10 @@ the agent would need to track and cancel each action individually.
 `Session::with_config(config: SessionConfig) -> Result<Self, SessionError>`:
 
 1. Creates the session root directory via `custom_gettempdir()` if not provided
-2. Creates the working directory via `TempDir::new()` with the session user for
-   cross-user permissions
+2. Creates the working directory via `TempDir::new_session_working_dir()` with the
+   session user for cross-user permissions. Its name is 8 random characters from
+   `[a-z0-9_]` and carries no part of the session ID (see
+   [tempdir.md](tempdir.md#session-working-directory-name))
 3. Creates the files subdirectory within the working directory
 4. Validates sticky bit on parent directories (POSIX security check)
 5. Logs host info (version, platform, architecture)
