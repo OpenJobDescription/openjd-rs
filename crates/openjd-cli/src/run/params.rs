@@ -321,4 +321,23 @@ mod tests {
             assert_eq!(task["Value"], expected);
         }
     }
+
+    #[test]
+    fn yaml_tasks_keep_non_finite_floats_as_strings() {
+        // Task parameter values are strings, so YAML's non-finite float
+        // spellings must reach validation as text rather than be rejected
+        // by the YAML parser or lost as JSON null.
+        let mut file = tempfile::NamedTempFile::with_suffix(".yaml").unwrap();
+        for value in [".nan", ".inf", "-.inf"] {
+            writeln!(file, "- Value: {value}").unwrap();
+        }
+        let arg = format!("file://{}", file.path().display());
+
+        let tasks = parse_tasks_arg(&arg).unwrap();
+
+        assert_eq!(tasks.len(), 3);
+        for (task, expected) in tasks.iter().zip([".nan", ".inf", "-.inf"]) {
+            assert_eq!(task["Value"], expected);
+        }
+    }
 }
