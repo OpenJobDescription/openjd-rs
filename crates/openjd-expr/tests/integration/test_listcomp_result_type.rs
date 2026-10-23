@@ -779,13 +779,14 @@ fn calls_past_the_form_combination_cap_are_typed_by_the_argument_types() {
     // typed `any`, and `any[0]` then took the `string` overload, so validation
     // rejected `+ 1` though every run gives an int. The body has nine
     // types, so each comprehension's element type has ten forms, and `+`
-    // of two has a hundred.
+    // of two has a hundred. The element's `+ 1` is typed by its nine forms
+    // (`2.5 + 1` is a float).
     let b = "(1 if Param.Z == 0 else 2.5 if Param.Z == 1 else 'a' if Param.Z == 2 \
              else True if Param.Z == 3 else [1] if Param.Z == 4 else ['a'] if Param.Z == 5 \
              else [2.5] if Param.Z == 6 else Param.R if Param.Z == 7 else [True])";
     assert_stages(
         &format!("([{b} for x in Param.L] + [{b} for x in Param.L])[0] + 1"),
-        "unresolved[int]",
+        "unresolved[float | int]",
         "int",
         "int",
         "2",
@@ -1856,4 +1857,122 @@ fn conditional_test_of_unknown_type_can_be_a_boolean() {
         assert_eq!(eval(expr, st).expr_type(), tp("unresolved[int]"), "{expr}");
     }
     assert_eq!(eval(expr, &rt).to_display_string(), "1");
+}
+
+// ── Audit loop 3, round 1 ──
+
+#[test]
+fn union_of_list_types_is_typed_by_its_members() {
+    // A-F1/B-F5: a union of list types, as a conditional gives, was
+    // dispatched by its first member, so `(LS if c else L)[0]` was an
+    // `int` and `.upper()` of it was rejected, though a run that takes
+    // `LS` succeeds. `list[A] | list[B]` has the forms of `list[A | B]`
+    // (§1.2.1).
+    assert_stages(
+        "(Param.LS if Task.Param.C else Param.L)[0].upper()",
+        "unresolved[string]",
+        "unresolved[string]",
+        "string",
+        "A",
+    );
+    assert_stages(
+        "'a' in (Param.LS if Task.Param.C else Param.L)",
+        "unresolved[bool]",
+        "unresolved[bool]",
+        "bool",
+        "true",
+    );
+    assert_stages(
+        "([] if not Task.Param.C else Param.LS)[0].upper()",
+        "unresolved[string]",
+        "unresolved[string]",
+        "string",
+        "A",
+    );
+    assert_stages(
+        "sum(Param.L if Task.Param.C else [2.5])",
+        "unresolved[float | int]",
+        "unresolved[float | int]",
+        "int",
+        "6",
+    );
+    // A-F2: concatenating a union of list types took no common element
+    // type (`list[T3]`), so `1 in` it was rejected. The operand reads as the
+    // one list type it equals (`list[string | nulltype]`).
+    assert_stages(
+        "Param.L + (Param.LS if not Task.Param.C else [])",
+        "unresolved[list[int]]",
+        "unresolved[list[int]]",
+        "list[int]",
+        "[1, 2, 3]",
+    );
+    assert_stages(
+        "1 in Param.L + (Param.LS if not Task.Param.C else [])",
+        "unresolved[bool]",
+        "unresolved[bool]",
+        "bool",
+        "true",
+    );
+}
+
+#[test]
+fn lone_list_element_of_unknown_type_is_any() {
+    // A-F2: a one-element list literal whose element is a type variable
+    // (`flatten` of a `list[any]` is a `list[T1]`) kept it as the element
+    // type (`list[T1]`), so `1 in` it was rejected, though two such
+    // elements join as `any` (§ Operations on Values of Unknown Type).
+    let mut p8 = SymbolTable::new();
+    p8.set("Param.A", ExprValue::unresolved(ExprType::ANY))
+        .unwrap();
+    let mut rt = SymbolTable::new();
+    rt.set("Param.A", ExprValue::ListInt(vec![1])).unwrap();
+    assert_eq!(
+        eval("flatten([Param.A])[0]", &p8).expr_type(),
+        tp("unresolved[T1]")
+    );
+    assert_eq!(
+        eval("[flatten([Param.A])[0]]", &p8).expr_type(),
+        tp("unresolved[list[any]]")
+    );
+    let expr = "1 in [flatten([Param.A])[0]]";
+    assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved[bool]"));
+    assert_eq!(eval(expr, &rt).to_display_string(), "true");
+}
+
+#[test]
+fn conditional_test_that_never_gives_a_value_is_an_error() {
+    // B-F1: a `noreturn` test fails every run, so it is rejected as before,
+    // although a comprehension filter accepts one.
+    let [p8, _, _] = states();
+    let expr = "1 if fail(Param.LS[0]) else 2";
+    assert_err_in(
+        expr,
+        &p8,
+        "pass 8",
+        &[
+            "Condition must be a boolean, got noreturn\n",
+            &format!("  {expr}\n"),
+            "       ^~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn union_index_with_no_member_that_can_be_an_int_is_an_error() {
+    // B-F3: only a union with a member that can be an int is accepted as
+    // an index.
+    let [p8, g2, _] = states();
+    let expr = "Param.L[Param.LS[0] if Task.Param.C else path('/a')]";
+    for (stage, st) in [("pass 8", &p8), ("gate 2", &g2)] {
+        assert_err_in(
+            expr,
+            st,
+            stage,
+            &[
+                "Index must be an integer\n",
+                &format!("  {expr}\n"),
+                "  ~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+            ],
+        );
+    }
 }

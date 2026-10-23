@@ -130,13 +130,13 @@ concrete) accepting the same combinations.
 
 | Element types | Join |
 |---|---|
-| identical types | that type |
+| identical types, other than `any` or a type variable | that type |
 | `int` and `float` | `float` |
 | `path` and `string` | `string` |
 | `list[A]` and `list[B]` | `list[join(A, B)]`, where inside a list a `nulltype` element (the empty list `[]`) yields to the other |
 | a union and a type | the union of the joins of the members that join; a conflict if none does |
 | `unresolved[T]` and a type | as `T` |
-| `any` or an unbound type variable, and a type | `any` |
+| `any` or an unbound type variable, and a type (itself included) | `any` |
 | anything else | conflict |
 
 Before joining, each element type — including a lone element's — is reduced
@@ -144,7 +144,9 @@ to what it contributes to a built list (`types::list_element_contribution`,
 crate-internal): `unresolved[T]` contributes `T`; a top-level `nulltype`
 contributes nothing (a `null` element always fails), so a union drops its
 `nulltype` member (`int?` contributes `int`) and a bare `nulltype` element is
-a conflict. A union's `list[nulltype]` member is kept for the join — the
+a conflict. A lone element of unknown type (an unbound type variable, or a
+union with one) is `any`, as its join with another element would be:
+`[flatten([x])[0]]` with `x: any` is `list[any]`, not `list[T1]`. A union's `list[nulltype]` member is kept for the join — the
 empty list still joins with any list, so `[([] if H else [1]), ['a']]`
 (which builds `[[], ['a']]` when `H` holds) joins to `list[string]` even
 though `list[int]` and `list[string]` conflict. The **joined result** is then
@@ -195,7 +197,7 @@ Crate-internal helpers (`pub(crate)`, not part of the public API):
 | `types::comprehension_list_type(&ExprType) -> ExprType` | The type of a comprehension over an unresolved iterable (or with an unresolved filter) from its body's type (§1.3.7): `T` is the body without `nulltype`, its unions of lists merged; `list[T \| nulltype]`, the run that keeps no element included; `list[nulltype]` if nothing is left, the body is `noreturn`, or `T` is a list of lists (`comprehension_too_deep`) |
 | `types::comprehension_too_deep(&ExprType) -> bool` | Is every form of a comprehension element type `T` (each union member's `list_forms`, `nulltype` aside) a list of lists, so the comprehension would nest three levels? |
 | `types::merge_list_union(ExprType) -> ExprType` | A union's list members as the one list type they equal (`list[A] \| list[B]` is `list[A \| B]`), at every depth |
-| `types::list_forms(&ExprType) -> Vec<ExprType>` | The list types a type with union list element types stands for (`list[int \| nulltype]` gives `list[int]` and `list[nulltype]`), at every depth; a top-level union is not expanded |
+| `types::list_forms(&ExprType) -> Vec<ExprType>` | The types a type with unions in it stands for (`list[int \| nulltype]` gives `list[int]` and `list[nulltype]`, at every depth); a top-level union has its members' forms (`list[int] \| list[string]` the same as `list[int \| string]`, `int \| string` gives `int` and `string`) |
 
 ### Lists with union element types
 
@@ -215,9 +217,11 @@ They arise from comprehensions over an unresolved iterable, whose result
 ListComp](evaluator.md#listcomp-eval_listcomp)), and from
 hoisted list literals with union-typed elements. Operations treat them by
 their forms ([function-library.md § Three-Phase
-Dispatch](function-library.md#three-phase-dispatch)): indexing
-`list[int | nulltype]` gives `int` (the empty form's `__getitem__` is
-`noreturn`), and `sum` of a `list[float | int | nulltype]` is
+Dispatch](function-library.md#three-phase-dispatch)), and treat a union of
+list types (as a conditional gives) the same way, since it stands for the
+same values: indexing `list[int | nulltype]` gives `int` (the empty form's
+`__getitem__` is `noreturn`), indexing `list[int] | list[string]` gives
+`int | string`, and `sum` of a `list[float | int | nulltype]` is
 `float | int`.
 
 ## Union Normalization

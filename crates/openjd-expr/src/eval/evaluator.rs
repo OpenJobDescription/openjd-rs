@@ -1242,9 +1242,10 @@ impl<'a> Evaluator<'a> {
         if test.is_unresolved() {
             // Check that the unresolved type is compatible with bool (the
             // comprehension filter's rule: a type variable or `any` may be
-            // one).
+            // one). A `noreturn` test, which the filter accepts, is
+            // rejected here: it fails every run.
             let inner = unwrap_unresolved(&test.expr_type());
-            if !is_bool_compatible(&inner) {
+            if inner == ExprType::NORETURN || !is_bool_compatible(&inner) {
                 let err =
                     ExpressionError::new(format!("Condition must be a boolean, got {}", inner));
                 self.release(&test);

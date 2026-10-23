@@ -242,19 +242,24 @@ library.call(name, &args, ctx)
 
 **With an unresolved argument** the call is type-only (`unresolved_return_type`):
 the same phases are applied to the argument types, and the result is
-`unresolved` of the matched signature's return type. A list argument whose
-element type is a union stands for one list type per member
+`unresolved` of the matched signature's return type. An argument whose type is
+a union, or a list whose element type is one, stands for one type per form
 ([type-system.md § Lists with union element
-types](type-system.md#lists-with-union-element-types)), so the call is typed
-for every combination of the arguments' forms (`types::list_forms`): the
-result is the union of the return types of the combinations that match, its
-list members merged into one list type (`types::merge_list_union`), and the
-call fails as usual when none matches. `sum` of a `list[float | int | nulltype]`
-is `float | int` (from `sum(list[float])`, `sum(list[int])`, and
-`sum(list[nulltype])`); `sorted` of it is `list[float | int | nulltype]`. Past
-64 combinations the call is typed by the argument types as they are, without
-expanding their forms. A top-level union argument is not expanded
-(it dispatches as before). `derive_return_type` expands list forms the same way.
+types](type-system.md#lists-with-union-element-types)): `int | string` is an
+`int` or a `string`, `list[int | string]` and `list[int] | list[string]` are
+each a `list[int]` or a `list[string]`. So the call is typed for every
+combination of the arguments' forms (`types::list_forms`), each typed by the
+phases on its own (the first signature a `string` matches, not the one an `int`
+matches): the result is the union of the return types of the combinations
+that match, its list members merged into one list type
+(`types::merge_list_union`), and the call fails as usual when none matches.
+`sum` of a `list[float | int | nulltype]` is `float | int` (from
+`sum(list[float])`, `sum(list[int])`, and `sum(list[nulltype])`); `sorted` of
+it is `list[float | int | nulltype]`; `(LS if c else L)[0]` with
+`LS: list[string]`, `L: list[int]` is `int | string`, so `.upper()` of it is a
+`string`. Past 64 combinations the call is typed by the argument types as they
+are, without expanding their forms. `derive_return_type` expands forms the
+same way.
 
 List concatenation's `(list[T1], list[T2]) -> list[T3]` (and the range overloads'
 `list[T2]`) leaves the element type unbound; with unresolved operands the call (and
@@ -264,7 +269,13 @@ concatenating the values uses, a `range_expr` operand counting as a `list[int]`
 is `list[int]`; see List concatenation below). An operand whose element type is not
 known (it holds `any` or a type variable at any depth, or is itself of unknown type)
 gives `list[any]`; operands with no common
-type keep the signature's type (`list[T3]`, or `list[T2]` for the range overloads). A
+type keep the signature's type (`list[T3]`, or `list[T2]` for the range overloads). An
+operand that is a union of list types reads as the one list type it equals
+(`list[string] | list[nulltype]` as `list[string | nulltype]`). A call typed by forms
+is refined for each combination and then for the operands as a whole, so a form with
+no common type, which no run builds, does not leave its type variable in the result:
+`L + (LS if c else [])` is `list[int]`, and `list[int | nulltype] + list[string]` is
+`list[string]`. A
 type variable operand on the right can still be captured by the signature's own
 variables (`list[int] + T1` finds no signature); that is part of the first-match
 dispatch limitation.

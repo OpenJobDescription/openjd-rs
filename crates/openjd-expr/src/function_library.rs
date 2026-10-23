@@ -207,8 +207,9 @@ impl FunctionLibrary {
         // types, with list arguments whose element type is a union
         // matched by their forms (`unresolved_return_type`).
         if any_unresolved {
-            if let Some(ret) = unresolved_return_type(entries, &arg_types, skip_receiver_coercion) {
-                let ret = refined_return_type(name, &arg_types, ret);
+            if let Some(ret) =
+                unresolved_return_type(name, entries, &arg_types, skip_receiver_coercion)
+            {
                 return Ok(ExprValue::unresolved(ret));
             }
             // An argument of unknown type (`any`, or a bare type variable
@@ -353,9 +354,11 @@ impl FunctionLibrary {
     }
 
     /// Derive the return type without evaluation (for static type checking).
-    /// Accepts union types in arg_types and returns a union of all possible return types.
-    /// A list argument whose element type is a union is typed by its
-    /// forms (`list[int | nulltype]` as `list[int]` and `list[nulltype]`).
+    /// An argument whose type is a union, or a list whose element type is
+    /// one, is typed by its forms (`int | string` as `int` and `string`,
+    /// `list[int | nulltype]` as `list[int]` and `list[nulltype]`): the
+    /// result is the union of the return types of the combinations of forms
+    /// that match, or `None` when none does.
     /// A list concatenation of known element types (a `range_expr` counting
     /// as a `list[int]`) has their common element type, as concatenating
     /// values gives, of unknown ones (or an operand of unknown type)
@@ -365,6 +368,26 @@ impl FunctionLibrary {
     /// signature is `any`; one that matches none is `None` here (`call`
     /// types it `any` when a signature has its arity).
     pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
+        // Past `MAX_FORM_COMBINATIONS` the arguments are typed as they are.
+        match form_combinations(arg_types) {
+            Some(combinations) if combinations.len() > 1 => {
+                let returns: Vec<ExprType> = combinations
+                    .iter()
+                    .filter_map(|c| self.derive_form_return_type(name, c))
+                    .collect();
+                if returns.is_empty() {
+                    return None;
+                }
+                let ret = crate::types::merge_list_union(ExprType::union(returns));
+                Some(concat_return_type(name, arg_types, ret))
+            }
+            Some(combinations) => self.derive_form_return_type(name, &combinations[0]),
+            None => self.derive_form_return_type(name, arg_types),
+        }
+    }
+
+    /// [`Self::derive_return_type`] for one combination of forms.
+    fn derive_form_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
         self.derive_return_type_by_signature(name, arg_types)
             .map(|ret| refined_return_type(name, arg_types, ret))
     }
@@ -374,20 +397,6 @@ impl FunctionLibrary {
         name: &str,
         arg_types: &[ExprType],
     ) -> Option<ExprType> {
-        // A list argument whose element type is a union is typed by its
-        // forms, as `call` types an unresolved one (2026-02 Expression
-        // Language §1.2.1). Past `MAX_FORM_COMBINATIONS` they are typed as
-        // they are, below.
-        if let Some(combinations) = form_combinations(arg_types).filter(|c| c.len() > 1) {
-            let returns: Vec<ExprType> = combinations
-                .iter()
-                .filter_map(|c| self.derive_return_type_by_signature(name, c))
-                .collect();
-            if returns.is_empty() {
-                return None;
-            }
-            return Some(crate::types::merge_list_union(ExprType::union(returns)));
-        }
         // Fast path: if no union args, try exact match first (matches Python's singleton optimization)
         let has_unions = arg_types
             .iter()
@@ -577,9 +586,18 @@ const MAX_FORM_COMBINATIONS: usize = 64;
 /// common element type (2026-02 §2.1.3), by the join a list literal
 /// holding both lists uses, as concatenating the values does
 /// (`list[list[int]] + list[list[float]]` is `list[list[float]]`). An
-/// operand whose element type is not known (it holds `any`, `unresolved`,
-/// or a type variable) makes it `list[any]`: the values decide. Any other
-/// call, or operands with no common type, keep `ret`.
+/// operand that is a union of list types reads as the one list type it
+/// equals (`list[string] | list[nulltype]` as `list[string | nulltype]`,
+/// [`crate::types::merge_list_union`]). An operand whose element type is
+/// not known (it holds `any`, `unresolved`, or a type variable) makes it
+/// `list[any]`: the values decide. Any other call, or operands with no
+/// common type, keep `ret`.
+///
+/// A call typed by forms is refined both per combination of forms and, by
+/// this, for the arguments as a whole: a form with no common type
+/// (`list[int] + list[string]`, a run that always fails) leaves a type
+/// variable that the whole operands' join replaces
+/// (`list[int | nulltype] + list[string]` is `list[string]`).
 fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> ExprType {
     let as_list = |t: &ExprType| {
         let t = match (t.code(), t.params()) {
@@ -595,6 +613,7 @@ fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Expr
             | crate::types::TypeCode::TypeVarT1
             | crate::types::TypeCode::TypeVarT2
             | crate::types::TypeCode::TypeVarT3 => ExprType::list(ExprType::ANY),
+            crate::types::TypeCode::Union => crate::types::merge_list_union(t),
             _ => t,
         }
     };
@@ -683,36 +702,43 @@ fn form_combinations(arg_types: &[ExprType]) -> Option<Vec<Vec<ExprType>>> {
 
 /// The return type of a call with an unresolved argument, typed from the
 /// argument types by the same phases [`FunctionLibrary::call`] applies
-/// to values (exact, coerced, then generic), or `None` when no signature
-/// matches.
+/// to values (exact, coerced, then generic) and refined by
+/// [`refined_return_type`], or `None` when no signature matches.
 ///
-/// A list argument whose element type is a union stands for one list
-/// type per member (2026-02 Expression Language §1.2.1:
-/// `list[int | nulltype]` is a `list[int]` or the empty `list[nulltype]`),
+/// An argument whose type is a union, or a list whose element type is
+/// one, stands for one type per form (2026-02 Expression Language §1.2.1:
+/// `list[int | nulltype]` is a `list[int]` or the empty `list[nulltype]`,
+/// and `list[int] | list[string]` is a `list[int]` or a `list[string]`),
 /// so the call is typed for each combination of forms: the result is the
 /// union of the return types of the combinations that match, a union of
 /// list types read as one list type (`list[int] | list[nulltype]` is
 /// `list[int | nulltype]`). It is `None` when no combination matches.
 /// Past [`MAX_FORM_COMBINATIONS`] the arguments are typed as they are.
 fn unresolved_return_type(
+    name: &str,
     entries: &[FunctionEntry],
     arg_types: &[ExprType],
     skip_receiver_coercion: bool,
 ) -> Option<ExprType> {
+    let form_return_type = |args: &[ExprType]| {
+        phase_return_type(entries, args, skip_receiver_coercion)
+            .map(|ret| refined_return_type(name, args, ret))
+    };
     let Some(combinations) = form_combinations(arg_types) else {
-        return phase_return_type(entries, arg_types, skip_receiver_coercion);
+        return form_return_type(arg_types);
     };
     if let [only] = combinations.as_slice() {
-        return phase_return_type(entries, only, skip_receiver_coercion);
+        return form_return_type(only);
     }
     let returns: Vec<ExprType> = combinations
         .iter()
-        .filter_map(|c| phase_return_type(entries, c, skip_receiver_coercion))
+        .filter_map(|c| form_return_type(c))
         .collect();
     if returns.is_empty() {
         return None;
     }
-    Some(crate::types::merge_list_union(ExprType::union(returns)))
+    let ret = crate::types::merge_list_union(ExprType::union(returns));
+    Some(concat_return_type(name, arg_types, ret))
 }
 
 /// Whether `entry` has a `list[nulltype]` parameter whose argument is not
@@ -1134,6 +1160,66 @@ mod tests {
         assert_eq!(
             lib.derive_return_type("len", &[union_arg]),
             Some(ExprType::INT)
+        );
+    }
+
+    #[test]
+    fn derive_return_type_types_every_combination_of_forms() {
+        // Each argument with several forms (a union, or a list with a union
+        // element type) multiplies the combinations, and each combination
+        // picks one form per argument.
+        let tp = |s: &str| ExprType::parse(s).unwrap();
+        let mut lib = FunctionLibrary::new();
+        lib.register_sig("f", "(int, list[int]) -> int", dummy_impl)
+            .unwrap();
+        lib.register_sig("f", "(int, list[string]) -> string", dummy_impl)
+            .unwrap();
+        // A later argument's forms.
+        assert_eq!(
+            lib.derive_return_type("f", &[ExprType::INT, tp("list[int | string]")]),
+            Some(tp("int | string"))
+        );
+        let mut lib = FunctionLibrary::new();
+        for sig in [
+            "(list[int], list[int]) -> int",
+            "(list[int], list[string]) -> string",
+            "(list[string], list[int]) -> path",
+            "(list[string], list[string]) -> bool",
+        ] {
+            lib.register_sig("g", sig, dummy_impl).unwrap();
+        }
+        // Two arguments of two forms each: all four combinations.
+        assert_eq!(
+            lib.derive_return_type(
+                "g",
+                &[tp("list[int | string]"), tp("list[int] | list[string]")]
+            ),
+            Some(tp("bool | int | path | string"))
+        );
+        // Combinations that match no signature contribute nothing.
+        assert_eq!(
+            lib.derive_return_type("g", &[tp("list[int] | int"), tp("list[string] | path")]),
+            Some(ExprType::STRING)
+        );
+    }
+
+    #[test]
+    fn derive_return_type_refines_only_list_concatenation() {
+        // A function other than `__add__` whose return type leaves a type
+        // variable unbound keeps it: only concatenation takes the operands'
+        // common element type.
+        let mut lib = FunctionLibrary::new();
+        lib.register_sig("h", "(list[T1], list[T2]) -> list[T3]", dummy_impl)
+            .unwrap();
+        assert_eq!(
+            lib.derive_return_type(
+                "h",
+                &[
+                    ExprType::list(ExprType::INT),
+                    ExprType::list(ExprType::FLOAT)
+                ]
+            ),
+            Some(ExprType::parse("list[T3]").unwrap())
         );
     }
 

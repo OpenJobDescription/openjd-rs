@@ -494,6 +494,18 @@ fn is_unknown_element(t: &ExprType) -> bool {
     )
 }
 
+/// `t` with an element of unknown type ([`is_unknown_element`]), or a
+/// union member of one, as `any` (which absorbs the union).
+fn unknown_element_as_any(t: ExprType) -> ExprType {
+    if is_unknown_element(&t)
+        || (t.code == TypeCode::Union && t.params.iter().any(is_unknown_element))
+    {
+        ExprType::ANY
+    } else {
+        t
+    }
+}
+
 fn join_element_inner(a: &ExprType, b: &ExprType, nested: bool) -> Option<ExprType> {
     if let (TypeCode::Unresolved, [inner]) = (a.code, a.params.as_slice()) {
         return join_element_inner(inner, b, nested);
@@ -550,8 +562,9 @@ fn join_union_members(members: &[ExprType], other: &ExprType, nested: bool) -> O
 /// that cannot join the elements before it. Every element, including a
 /// lone one, is reduced to its [`list_element_contribution`]; a first
 /// element that contributes nothing (`nulltype`) fails as
-/// `Err((t, t))`. The joined type is finished with
-/// [`simplify_joined_list_element`].
+/// `Err((t, t))`, and a lone one of unknown type (a type variable, or a
+/// union with one) is `any`, as its join with another element is. The
+/// joined type is finished with [`simplify_joined_list_element`].
 pub(crate) fn join_list_element_types<I>(types: I) -> Result<Option<ExprType>, (ExprType, ExprType)>
 where
     I: IntoIterator<Item = ExprType>,
@@ -559,8 +572,10 @@ where
     let mut acc: Option<ExprType> = None;
     for t in types {
         acc = Some(match acc {
+            // A lone element of unknown type (a type variable) is `any`,
+            // as it is when it joins another element.
             None => match list_element_contribution(&t) {
-                Some(c) => c,
+                Some(c) => unknown_element_as_any(c),
                 None => return Err((t.clone(), t)),
             },
             Some(prev) => match join_list_element(&prev, &t) {
@@ -733,15 +748,18 @@ pub(crate) fn merge_list_union(t: ExprType) -> ExprType {
 
 /// The forms of a type whose list element types may be unions (§1.2.1):
 /// `list[int | float | nulltype]` has the forms `list[int]`,
-/// `list[float]`, and `list[nulltype]`, at every depth. A type with no
-/// union element type is its own single form. A top-level union is kept
-/// as it is: only list element types are expanded.
+/// `list[float]`, and `list[nulltype]`, at every depth. A top-level union
+/// has its members' forms, since a value of the union is a value of one
+/// member: `list[int] | list[string]` has the same forms as
+/// `list[int | string]`, and `int | string` has `int` and `string`. A
+/// type with no union in it is its own single form.
 pub(crate) fn list_forms(t: &ExprType) -> Vec<ExprType> {
     match (t.code, t.params.as_slice()) {
         (TypeCode::List, [elem]) => element_forms(elem)
             .into_iter()
             .map(ExprType::list)
             .collect(),
+        (TypeCode::Union, _) => element_forms(t),
         _ => vec![t.clone()],
     }
 }

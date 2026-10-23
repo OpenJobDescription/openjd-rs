@@ -897,6 +897,33 @@ mod tests {
             lib.derive_return_type("upper", &[tp("list[int | nulltype]")]),
             None
         );
+        // A top-level union of list types has the same forms as the list
+        // with the union element type: each member is typed by its own
+        // signature, not the first member's.
+        assert_eq!(
+            lib.derive_return_type(
+                "__getitem__",
+                &[tp("list[int] | list[string]"), ExprType::INT]
+            ),
+            Some(tp("int | string"))
+        );
+        assert_eq!(
+            lib.derive_return_type(
+                "__contains__",
+                &[tp("list[int] | list[string]"), ExprType::STRING]
+            ),
+            Some(ExprType::BOOL)
+        );
+        // A concatenation is refined for the operands as a whole: the
+        // `list[int] + list[string]` form, which no run builds, does not
+        // leave its type variable in the result.
+        assert_eq!(
+            lib.derive_return_type(
+                "__add__",
+                &[tp("list[int]"), tp("list[string] | list[nulltype]")]
+            ),
+            Some(tp("list[int]"))
+        );
     }
 
     #[test]

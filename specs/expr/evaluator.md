@@ -202,8 +202,12 @@ instead of a generic coercion failure), subscript indices use `None`
 rather than `{INT}` ("Index must be an integer"), and list
 comprehension conditions use `None` rather than `{BOOL}` ("List
 comprehension filter must be a boolean, got X"). An unresolved test or index of
-unknown type (`any`, a type variable), or a union with a member that can be
-a `bool` (an `int`), is accepted: a run's value may be one.
+unknown type (`any`, a type variable) is accepted: a run's value may be one. So
+is a union with a member that can be one: for a test, a `bool` (or a member of
+unknown type); for an index, an `int` (or a member of unknown type). A
+conditional's test of type `noreturn` is rejected ("Condition must be a boolean,
+got noreturn"), as it fails every run; a comprehension filter of type `noreturn`
+is accepted (see [ListComp](#listcomp-eval_listcomp)).
 
 ## AST Node Evaluation
 

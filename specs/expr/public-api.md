@@ -443,10 +443,11 @@ impl FunctionLibrary {
     ) -> Result<ExprValue, ExpressionError>;
 
     /// Static type-checking: derive the return type of a call from
-    /// argument types, without evaluating. Accepts union types in
-    /// `arg_types` and returns a union of possible return types. A list
-    /// argument whose element type is a union is typed by its forms
-    /// (`list[int | nulltype]` as `list[int]` and `list[nulltype]`). A list
+    /// argument types, without evaluating. An argument whose type is a
+    /// union, or a list whose element type is one, is typed by its forms
+    /// (`int | string` as `int` and `string`, `list[int | nulltype]` as
+    /// `list[int]` and `list[nulltype]`): the result is the union of the
+    /// return types of the combinations that match. A list
     /// concatenation of known element types (a `range_expr` counting as a
     /// `list[int]`) has their common element type, of unknown ones (or an
     /// operand of unknown type) `list[any]`, and of no common type the
