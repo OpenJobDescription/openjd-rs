@@ -6959,6 +6959,10 @@ fn preprocess_accepts_its_own_nested_list_output() {
 // then refused when the output is resubmitted. A default whose joined path satisfies
 // the constraint round trips, and `create_job` accepts it, because every stage after
 // decode measures the same joined string.
+//
+// The first-pass refusals overlap `path_default_max_length_checked_after_join` and
+// `env_template_path_defaults_checked_after_join` (#421), which call preprocessing once.
+// The tests here add the second pass and `create_job`, so they pin the round trip.
 
 /// The template dir joined with `relative`, as the first pass resolves a PATH default.
 fn joined_default(td: &TestDirs, relative: &str) -> String {
@@ -7114,15 +7118,16 @@ fn string_default_with_max_length_round_trips() {
 #[test]
 fn submitted_relative_path_is_checked_joined_at_every_stage() {
     // A submitted relative value is joined with the current working dir (§2.2), and
-    // job creation checks the joined value. maxLength is exactly the joined length, so
-    // preprocessing, the resubmission, and create_job all measure the joined path: any
-    // stage measuring something longer would refuse it.
+    // job creation checks the joined value. minLength and maxLength are both exactly the
+    // joined length, so preprocessing, the resubmission, and create_job all measure the
+    // joined path: any stage measuring something shorter (such as the value as typed)
+    // or longer would refuse it.
     let td = TestDirs::new();
     let joined = joined_submitted(&td, "in");
     let jt = decode_job_template(
         minimal_expr_job_template(&format!(
-            r#"{{"name": "P", "type": "PATH", "maxLength": {}}}"#,
-            joined.len()
+            r#"{{"name": "P", "type": "PATH", "minLength": {len}, "maxLength": {len}}}"#,
+            len = joined.len()
         )),
         Some(&["EXPR"]),
         &CallerLimits::default(),
@@ -7131,7 +7136,7 @@ fn submitted_relative_path_is_checked_joined_at_every_stage() {
     let mut input = JobParameterInputValues::new();
     input.insert("P".into(), openjd_expr::ExprValue::String("in".into()));
     let filled = preprocess_job_parameters(&jt, &input, &[], &round_trip_options(&td))
-        .expect("the joined submitted value meets maxLength");
+        .expect("the joined submitted value meets minLength and maxLength");
     assert!(
         matches!(&filled["P"].value, openjd_expr::ExprValue::String(s) if *s == joined),
         "P arrived as {:?}, expected the joined path {joined}",
