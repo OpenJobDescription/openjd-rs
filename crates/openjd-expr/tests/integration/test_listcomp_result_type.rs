@@ -1918,23 +1918,26 @@ fn union_of_list_types_is_typed_by_its_members() {
 #[test]
 fn lone_list_element_of_unknown_type_is_any() {
     // A-F2: a one-element list literal whose element is a type variable
-    // (`flatten` of a `list[any]` is a `list[T1]`) kept it as the element
-    // type (`list[T1]`), so `1 in` it was rejected, though two such
-    // elements join as `any` (§ Operations on Values of Unknown Type).
+    // kept it as the element type (`list[T1]`), so `1 in` it was rejected,
+    // though two such elements join as `any` (§ Operations on Values of
+    // Unknown Type). A call types an argument's type variable as `any`
+    // (loop 3 round 5 A-F1), so an element of a `list[T1]` is `any`; a
+    // symbol of a type left unbound still reaches the join.
     let mut p8 = SymbolTable::new();
     p8.set("Param.A", ExprValue::unresolved(ExprType::ANY))
         .unwrap();
+    p8.set("Param.V", ExprValue::unresolved(tp("T1"))).unwrap();
     let mut rt = SymbolTable::new();
-    rt.set("Param.A", ExprValue::ListInt(vec![1])).unwrap();
+    rt.set("Param.V", ExprValue::Int(1)).unwrap();
     assert_eq!(
         eval("flatten([Param.A])[0]", &p8).expr_type(),
-        tp("unresolved[T1]")
+        tp("unresolved")
     );
     assert_eq!(
-        eval("[flatten([Param.A])[0]]", &p8).expr_type(),
+        eval("[Param.V]", &p8).expr_type(),
         tp("unresolved[list[any]]")
     );
-    let expr = "1 in [flatten([Param.A])[0]]";
+    let expr = "1 in [Param.V]";
     assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved[bool]"));
     assert_eq!(eval(expr, &rt).to_display_string(), "true");
 }
@@ -2027,18 +2030,43 @@ fn lone_list_element_with_a_member_of_unknown_type_is_any() {
     // B-F1: a lone element whose type is a union with a type variable is
     // `any`, as it is when it joins another element.
     let mut p8 = SymbolTable::new();
-    p8.set("Param.A", ExprValue::unresolved(ExprType::ANY))
-        .unwrap();
+    p8.set("Param.V", ExprValue::unresolved(tp("T1"))).unwrap();
     p8.set("Task.Param.C", ExprValue::unresolved(ExprType::BOOL))
         .unwrap();
     assert_eq!(
-        eval("flatten([Param.A])[0] if Task.Param.C else 1", &p8).expr_type(),
+        eval("Param.V if Task.Param.C else 1", &p8).expr_type(),
         tp("unresolved[T1 | int]")
     );
     assert_eq!(
-        eval("[flatten([Param.A])[0] if Task.Param.C else 1]", &p8).expr_type(),
+        eval("[Param.V if Task.Param.C else 1]", &p8).expr_type(),
         tp("unresolved[list[any]]")
     );
+}
+
+#[test]
+fn argument_type_variable_is_not_captured_by_the_signature() {
+    // Loop 3 round 5 A-F1 (a regression): `flatten(list[list[T1]]) ->
+    // list[T1]` bound its `T1` to the argument's own `list[T1]` (`flatten`
+    // of a `list[any]`), typing a second `flatten` `list[list[T1]]`, so
+    // `[flatten(flatten(..)), [1]]` was rejected though a run builds it.
+    // An argument's type variable is typed as `any`.
+    let [p8, g2, rt] = states();
+    let mut p8a = p8.clone();
+    p8a.set("Task.Param.A", ExprValue::unresolved(ExprType::ANY))
+        .unwrap();
+    assert_eq!(
+        eval("flatten(flatten([Task.Param.A]))", &p8a).expr_type(),
+        tp("unresolved[list[T1]]")
+    );
+    let expr = "[flatten(flatten([x for x in (Param.EL if Task.Param.C else Param.Z)])), [1]]";
+    for (stage, st) in [("pass 8", &p8), ("gate 2", &g2)] {
+        assert_eq!(
+            eval(expr, st).expr_type(),
+            tp("unresolved[list[list[any]]]"),
+            "{stage}"
+        );
+    }
+    assert_eq!(eval(expr, &rt).to_display_string(), "[[], [1]]");
 }
 
 // ── Audit loop 3, round 3 ──

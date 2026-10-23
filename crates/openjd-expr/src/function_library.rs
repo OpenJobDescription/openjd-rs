@@ -219,15 +219,22 @@ impl FunctionLibrary {
         // are: a top-level union by every signature one of its members
         // matches, which covers the one a run's value selects.
         if any_unresolved {
-            let ret = match form_combinations(&arg_types) {
+            // A type variable in an argument's type is one static typing
+            // left unbound: the argument holds values of unknown type. It
+            // is typed as `any`, so the signature's own variables cannot
+            // capture it (`flatten(list[list[T1]]) -> list[T1]` would bind
+            // its `T1` to an argument's `list[T1]`, typing `flatten` of a
+            // `list[T1]` as `list[list[T1]]`).
+            let typing_args: Vec<ExprType> = arg_types.iter().map(unbound_as_any).collect();
+            let ret = match form_combinations(&typing_args) {
                 Some(combinations) => unresolved_return_type(
                     name,
                     entries,
                     &combinations,
-                    &arg_types,
+                    &typing_args,
                     skip_receiver_coercion,
                 ),
-                None => self.derive_return_type(name, &arg_types),
+                None => self.derive_return_type(name, &typing_args),
             };
             if let Some(ret) = ret {
                 return Ok(ExprValue::unresolved(ret));
@@ -698,7 +705,24 @@ fn is_unknown_type(t: &ExprType) -> bool {
     )
 }
 
-/// The combinations of the arguments' list forms
+/// `t` with every type variable in it, at any depth, as `any`: the type of
+/// a value whose parts static typing left unbound (`list[T1]` is a
+/// `list[any]`). A union is renormalized, so `T1 | int` is `any`.
+fn unbound_as_any(t: &ExprType) -> ExprType {
+    use crate::types::TypeCode;
+    match (t.code(), t.params()) {
+        (
+            TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3,
+            _,
+        ) => ExprType::ANY,
+        (_, []) => t.clone(),
+        _ if !t.is_symbolic() => t.clone(),
+        (TypeCode::Union, members) => ExprType::union(members.iter().map(unbound_as_any).collect()),
+        (TypeCode::List, [elem]) => ExprType::list(unbound_as_any(elem)),
+        (TypeCode::Unresolved, [inner]) => ExprType::unresolved(unbound_as_any(inner)),
+        (code, params) => ExprType::new(code, params.iter().map(unbound_as_any).collect()),
+    }
+}
 /// ([`crate::types::list_forms`]): one argument list per way of picking a
 /// form for each argument. `None` past [`MAX_FORM_COMBINATIONS`].
 fn form_combinations(arg_types: &[ExprType]) -> Option<Vec<Vec<ExprType>>> {

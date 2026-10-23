@@ -2066,6 +2066,15 @@ mod tests {
     }
 
     #[test]
+    fn bare_unresolved_matches_as_unresolved_any() {
+        // A bare `unresolved` (never built by `parse`) is read as
+        // `unresolved[any]` by `match_type` as the receiver.
+        let bare = ExprType::new(TypeCode::Unresolved, vec![]);
+        assert!(bare.match_type(&ExprType::STRING).is_some());
+        assert!(bare.match_type(&ExprType::list(ExprType::INT)).is_some());
+    }
+
+    #[test]
     fn merge_list_union_merges_at_every_depth() {
         let m = |t: &str| merge_list_union(ExprType::parse(t).unwrap()).to_string();
         assert_eq!(m("list[int] | list[string]"), "list[int | string]");

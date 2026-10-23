@@ -2151,6 +2151,9 @@ impl<'a> Evaluator<'a> {
                 crate::types::ComprehensionVar::Typed(elem_type) => {
                     self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type)
                 }
+                // `EmptyOnly` cannot happen here: an element reached the
+                // filter, so the iterable is not empty-only. The arm keeps
+                // the match total without a panic.
                 _ => self.track(ExprValue::unresolved(ExprType::list(ExprType::NULLTYPE))),
             };
         }

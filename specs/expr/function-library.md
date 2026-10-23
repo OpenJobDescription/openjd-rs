@@ -293,8 +293,14 @@ as `flatten` of a `list[any]`, or a `list[T3]`: a list of elements of unknown ty
 that matches no signature (the signature's own variables capture the type variable:
 `__contains__(list[T], T)` binds `T` to `T1` and then fails on `1 in` the list), when a
 signature of the call's arity exists; a wrong argument count is still an error. So
-`1 in flatten([x])` with `x: any` is a `bool`. (The evaluator types a comparison or membership test as a
-`bool` before dispatch; `derive_return_type("__eq__", [any, int])` is `any`.) An index of unknown type is accepted the same way.
+`1 in flatten([x])` with `x: any` is a `bool`. The evaluator types a comparison or
+membership test with an unresolved operand as a `bool` whatever type dispatch returns
+(`Task.X == 1` with `X: any` is `unresolved[bool]`), while
+`derive_return_type("__eq__", [any, int])` is `any`. An argument's type
+variable, at any depth, is typed as `any` before a type-only call is matched, so the
+signature's own variables cannot capture it: `flatten(list[list[T1]]) -> list[T1]` would
+otherwise bind its `T1` to the argument's `list[T1]` and type `flatten` of a `list[T1]`
+as `list[list[T1]]`; it is a `list[T1]`, and an element of it `any`. An index of unknown type is accepted the same way.
 
 Indexing has a `(list[nulltype], int) -> noreturn` overload, registered before
 the generic `(list[T1], int) -> T1`: the empty list has no element, so indexing
