@@ -4,3 +4,7 @@
 # than Linux/macOS, which can lead to cache keys that are needlessly
 # fragmented or that never match a previously-saved entry.
 Cargo.lock text eol=lf
+
+# The public API listings are compared byte-for-byte with cargo-public-api's
+# LF output by scripts/check_public_api.sh, on Windows as well.
+specs/*/public-api*.txt text eol=lf

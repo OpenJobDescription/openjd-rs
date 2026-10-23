@@ -2,6 +2,12 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
+//! Build script for `openjd-sessions`. When the target or the build host is
+//! Unix or Windows, which covers every supported build, it builds the
+//! cross-user helper binary from `src/helper/` (a separate Cargo project) for
+//! the current target. Otherwise it writes an empty placeholder. Either way it
+//! sets `OPENJD_HELPER_BINARY_PATH` so the crate can embed the result.
+
 use std::path::{Path, PathBuf};
 
 fn copy_dir_recursive(src: &Path, dst: &Path) {

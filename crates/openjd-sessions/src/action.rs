@@ -14,6 +14,10 @@
 /// assert_ne!(state, ActionState::Failed);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ActionState {
     Running,
     Success,
@@ -36,6 +40,10 @@ impl std::fmt::Display for ActionState {
 
 /// A parsed openjd stdout message from a running action.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ActionMessage {
     /// `openjd_progress: <number>`
     Progress(f64),
@@ -71,6 +79,10 @@ impl std::fmt::Display for ActionMessage {
 
 /// Result of running an action.
 #[derive(Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ActionResult {
     pub state: ActionState,
     pub exit_code: Option<i32>,

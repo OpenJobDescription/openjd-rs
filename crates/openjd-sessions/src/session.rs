@@ -72,6 +72,10 @@ use crate::session_user::SessionUser;
 /// assert_eq!(format!("{state}"), "READY");
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum SessionState {
     Ready,
     Running,
@@ -99,6 +103,10 @@ pub type EnvironmentIdentifier = String;
 pub type SessionCallbackType = Box<dyn Fn(&str, &ActionStatus) + Send + Sync>;
 
 /// Configuration for creating a new Session.
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct SessionConfig {
     pub session_id: String,
     pub job_parameter_values: JobParameterValues,
@@ -482,6 +490,10 @@ fn derive_library(
     openjd_expr::FunctionLibrary::for_profile(&expr_profile)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct Session {
     session_id: String,
     state: SessionState,
@@ -807,6 +819,10 @@ impl Session {
         })
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_path_mapping(mut self, mut rules: Vec<PathMappingRule>) -> Self {
         rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
         self.path_mapping_rules = Arc::new(rules);
@@ -885,18 +901,38 @@ impl Session {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn state(&self) -> SessionState {
         self.state
     }
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn working_directory(&self) -> &Path {
         &self.working_directory
     }
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn files_directory(&self) -> &Path {
         &self.files_directory
     }
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn environments_entered(&self) -> &[EnvironmentIdentifier] {
         &self.environments_entered
     }

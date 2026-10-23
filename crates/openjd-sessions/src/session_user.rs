@@ -5,6 +5,10 @@
 //! Session user types for cross-user execution — mirrors Python `_session_user.py`.
 
 /// Trait for session user identity.
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub trait SessionUser: Send + Sync + std::fmt::Debug {
     fn user(&self) -> &str;
     fn group(&self) -> &str;
@@ -20,7 +24,13 @@ pub trait SessionUser: Send + Sync + std::fmt::Debug {
 #[cfg(unix)]
 #[derive(Debug, Clone)]
 pub struct PosixSessionUser {
+    /// User name to run actions as. When it isn't the process user, actions
+    /// run through `sudo -u`.
     pub user: String,
+    /// Group given to session files and directories when `user` isn't the
+    /// process user, so both users can reach them. It should include both
+    /// users. [`PosixSessionUser::new`] defaults it to the process's effective
+    /// group.
     pub group: String,
 }
 
@@ -78,6 +88,10 @@ impl SessionUser for PosixSessionUser {
 /// Error for incorrect username or password.
 #[cfg(windows)]
 #[derive(Debug, thiserror::Error)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum BadCredentialsError {
     #[error("The username or password is incorrect.")]
     LogonFailure,

@@ -8,17 +8,37 @@ use std::io::Read;
 use std::path::Path;
 use xxhash_rust::xxh3::{xxh3_128, Xxh3Default};
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub const DEFAULT_FILE_CHUNK_SIZE: i64 = 256 * 1024 * 1024;
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub const WHOLE_FILE_CHUNK_SIZE: i64 = -1;
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub const DEFAULT_S3_MULTIPART_PART_SIZE: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum HashAlgorithm {
     #[serde(rename = "xxh128")]
     Xxh128,
 }
 
 impl HashAlgorithm {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn extension(&self) -> &'static str {
         match self {
             Self::Xxh128 => "xxh128",

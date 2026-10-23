@@ -41,6 +41,8 @@ cargo test -p openjd-expr                # Single crate
 cargo clippy --all-features --all-targets --workspace -- -D warnings  # Lint
 cargo fmt --all                          # Apply formatting
 cargo doc --no-deps --workspace          # Build docs
+bash scripts/check_public_api.sh         # Check public API listings (--update to regenerate)
+cargo mutants -p openjd-expr -f <file>   # Mutation testing, scoped (see quality-criteria §6)
 scripts/coverage.sh                      # Code coverage (see COVERAGE_REPORT.md)
 ```
 
@@ -146,7 +148,7 @@ Spec entry point: `specs/openjd-for-js/spec.md`
 
 The `specs/` directory is the primary resource for understanding each crate's design. Specs and code evolve together — within a coding session, you might edit the code first and then update the spec, or write the spec first and then implement, or iterate on both simultaneously. The order doesn't matter, but **before committing, always confirm the spec and code line up.** If you changed behavior, the spec must reflect it. If you changed the spec, the code must match.
 
-Every crate's spec directory must include a `public-api.md` that fully describes the crate's public API — all public types, functions, traits, and constants with their signatures. When adding or changing public API surface, update `public-api.md` in the same commit.
+Every crate's spec directory must include a `public-api.md` that describes the crate's public API — all public types, functions, traits, and constants, what they are for, and how they fit together. The library crates (expr, model, sessions, snapshots) also have a generated `public-api.txt` listing every public item with its signature (`public-api.<os>.txt` where the API differs by platform). CI checks it against the code. When adding or changing public API surface, regenerate the listing with `bash scripts/check_public_api.sh --update` and update `public-api.md` in the same commit.
 
 The structure:
 
@@ -246,7 +248,7 @@ fn empty_command() {
 
 - `cargo fmt` before committing (nightly rustfmt for some options).
 - `cargo clippy` clean with `-D warnings` — no warnings allowed.
-- All public items must have `///` documentation comments.
+- All public items must have `///` documentation comments. The `missing_docs` lint (enabled in `[workspace.lints]`) enforces this. Older items carry an item-level `missing-docs burn-down` allow. Don't add new ones, and document anything you add inside an allowed item (a field or variant), because the lint can't see it.
 - Prefer `Result` types over panicking.
 - See [DEVELOPMENT.md](DEVELOPMENT.md) for more.
 
@@ -265,6 +267,7 @@ PRs run these checks (all must pass):
 | **MSRV** | `cargo check --workspace` with Rust 1.97.0 |
 | **Documentation** | `cargo doc --no-deps --workspace` with `-D warnings` |
 | **Compliance** | Copyright header check |
+| **Public API** | `scripts/check_public_api.sh` on Linux and Windows: the committed `specs/<crate>/public-api*.txt` listings match the code |
 | **Cross-User (Linux)** | Docker-based cross-user tests: localuser and LDAP variants |
 | **Cross-User (Windows)** | Windows cross-user and permissions tests with a temporary test user |
 | **openjd-for-js** | Builds the wasm32 crate with `wasm-bindgen` and runs the vitest suite |

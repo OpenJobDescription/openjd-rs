@@ -26,6 +26,10 @@ enum Segment {
 }
 
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct FormatString {
     raw: String,
     segments: Vec<Segment>,
@@ -113,6 +117,10 @@ impl FormatString {
         })
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn raw(&self) -> &str {
         &self.raw
     }
@@ -522,6 +530,10 @@ impl FormatString {
             .collect()
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_literal(&self) -> bool {
         self.segments
             .iter()

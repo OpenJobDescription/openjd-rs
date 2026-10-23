@@ -40,17 +40,29 @@ fn is_python_space(c: char) -> bool {
     in_table(SPACE, c)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn upper_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
     Ok(ExprValue::String(s.to_uppercase()))
 }
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn lower_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
     Ok(ExprValue::String(s.to_lowercase()))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn strip_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
@@ -66,6 +78,10 @@ pub fn strip_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn lstrip_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
@@ -81,6 +97,10 @@ pub fn lstrip_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn rstrip_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
@@ -96,6 +116,10 @@ pub fn rstrip_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn removeprefix_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     let prefix = get_str(&a[1])?;
@@ -105,6 +129,10 @@ pub fn removeprefix_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn removesuffix_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     let suffix = get_str(&a[1])?;
@@ -114,6 +142,10 @@ pub fn removesuffix_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn replace_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     let old = get_str(&a[1])?;
@@ -130,18 +162,30 @@ pub fn replace_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(budget.finish(s.replace(old, new)))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn startswith_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
     Ok(ExprValue::Bool(s.starts_with(get_str(&a[1])?)))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn endswith_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
     Ok(ExprValue::Bool(s.ends_with(get_str(&a[1])?)))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn find_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     let sub = get_str(&a[1])?;
@@ -156,6 +200,10 @@ pub fn find_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn rfind_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     let sub = get_str(&a[1])?;
@@ -170,6 +218,10 @@ pub fn rfind_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn index_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     let sub = get_str(&a[1])?;
@@ -185,6 +237,10 @@ pub fn index_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn rindex_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     let sub = get_str(&a[1])?;
@@ -200,6 +256,10 @@ pub fn rindex_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn count_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     let sub = get_str(&a[1])?;
@@ -227,6 +287,10 @@ fn maxsplit_arg(a: &[ExprValue]) -> Option<usize> {
     })
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     if a.len() == 1 {
@@ -258,6 +322,10 @@ pub fn split_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ExprValue::make_list_checked(ctx, parts, ExprType::STRING)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     if a.len() == 1 {
@@ -292,6 +360,10 @@ pub fn rsplit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ExprValue::make_list_checked(ctx, parts, ExprType::STRING)
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn isdigit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     use super::unicode_tables::{in_table, DIGIT};
     let s = get_str(&a[0])?;
@@ -300,6 +372,10 @@ pub fn isdigit_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         !s.is_empty() && s.chars().all(|c| in_table(DIGIT, c)),
     ))
 }
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn isalpha_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     use super::unicode_tables::{in_table, ALPHA};
     let s = get_str(&a[0])?;
@@ -308,6 +384,10 @@ pub fn isalpha_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         !s.is_empty() && s.chars().all(|c| in_table(ALPHA, c)),
     ))
 }
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn isalnum_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     use super::unicode_tables::{in_table, ALNUM};
     let s = get_str(&a[0])?;
@@ -316,6 +396,10 @@ pub fn isalnum_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         !s.is_empty() && s.chars().all(|c| in_table(ALNUM, c)),
     ))
 }
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn isspace_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     use super::unicode_tables::{in_table, SPACE};
     let s = get_str(&a[0])?;
@@ -324,6 +408,10 @@ pub fn isspace_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         !s.is_empty() && s.chars().all(|c| in_table(SPACE, c)),
     ))
 }
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn isupper_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     use super::unicode_tables::{in_table, CASED, UPPER};
     let s = get_str(&a[0])?;
@@ -339,6 +427,10 @@ pub fn isupper_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                 .all(|c| in_table(UPPER, c)),
     ))
 }
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn islower_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     use super::unicode_tables::{in_table, CASED, LOWER};
     let s = get_str(&a[0])?;
@@ -352,6 +444,10 @@ pub fn islower_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                 .all(|c| in_table(LOWER, c)),
     ))
 }
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn isascii_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
@@ -404,6 +500,10 @@ fn push_titled(c: char, out: &mut String) {
     }
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn title_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     use super::unicode_tables::{in_table, CASED};
     let s = get_str(&a[0])?;
@@ -430,6 +530,10 @@ pub fn title_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::String(result))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn capitalize_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     ctx.count_string_ops(s.len())?;
@@ -465,6 +569,10 @@ pub(super) fn preflight_padding(
     Ok((budget, width, char_len, output_bytes))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn center_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     let requested_width = match &a[1] {
@@ -489,6 +597,10 @@ pub fn center_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(budget.finish(result))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn ljust_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     let requested_width = match &a[1] {
@@ -504,6 +616,10 @@ pub fn ljust_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(budget.finish(result))
 }
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn rjust_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     let s = get_str(&a[0])?;
     let requested_width = match &a[1] {

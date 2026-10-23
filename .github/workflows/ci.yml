@@ -69,6 +69,56 @@ jobs:
       - name: Check copyright headers
         run: bash scripts/check_copyright_headers.sh
 
+  # Checks the committed public API listings (specs/<crate>/public-api*.txt)
+  # against the code, so quality-criteria Q2's "every public item, with its
+  # signature" is enforced mechanically instead of by review. openjd-sessions'
+  # API differs between Unix and Windows, so this runs on both. macOS shares
+  # the Unix cfg and is not checked separately.
+  public-api:
+    name: Public API listings (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      # Pinned together with cargo-public-api, which reads rustdoc's unstable
+      # JSON format. Keep in sync with TOOLCHAIN in scripts/check_public_api.sh.
+      PUBLIC_API_TOOLCHAIN: nightly-2026-07-09
+      CARGO_PUBLIC_API_VERSION: 0.52.0
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install the pinned nightly toolchain
+        shell: bash
+        run: rustup toolchain install "$PUBLIC_API_TOOLCHAIN" --profile minimal
+      # The installed binary lives in ~/.cargo/bin, which no other cache
+      # covers. Keyed on the exact version, so it is rebuilt only on a bump.
+      - name: Restore cargo-public-api
+        id: public-api-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-public-api*
+          key: cargo-public-api-${{ runner.os }}-${{ runner.arch }}-${{ env.CARGO_PUBLIC_API_VERSION }}
+      - name: Install cargo-public-api
+        if: steps.public-api-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: cargo install cargo-public-api --locked --version "$CARGO_PUBLIC_API_VERSION"
+      - name: Check public API listings
+        shell: bash
+        run: bash scripts/check_public_api.sh
+      # On drift, regenerate this OS's listings and upload them, so a
+      # contributor without this OS can commit the result after reviewing it.
+      - name: Regenerate listings on failure
+        if: failure()
+        shell: bash
+        run: bash scripts/check_public_api.sh --update
+      - name: Upload regenerated listings
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: public-api-listings-${{ matrix.os }}
+          path: specs/*/public-api*.txt
+
   # Build, test, and conformance share a single release-profile target/ cache.
   # This avoids maintaining separate debug and release caches for the same
   # workspace and keeps the total cache footprint well under 10 GB.

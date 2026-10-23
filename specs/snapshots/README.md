@@ -15,7 +15,8 @@ and adapted for the idiomatic Rust implementation.
 | Document | Description |
 |----------|-------------|
 | [snapshot_overview.md](snapshot_overview.md) | Top-level overview, glossary, use cases, operations summary, design choices |
-| [public-api.md](public-api.md) | Complete public API reference: all types, functions, traits, and constants |
+| [public-api.md](public-api.md) | Public API reference: types, functions, traits, and constants |
+| [public-api.txt](public-api.txt) | Generated listing of every public item and signature, checked by CI (`scripts/check_public_api.sh`) |
 | [snapshot_manifest_types.md](snapshot_manifest_types.md) | Manifest structs, entry types, phantom type parameters, validation, serde |
 | [snapshot_data_cache.md](snapshot_data_cache.md) | `AsyncDataCache` / `MultipartDataCache` / `RangeReadDataCache` traits, `S3DataCache`, `FileSystemDataCache` |
 | [snapshot_symlink_handling.md](snapshot_symlink_handling.md) | `SymlinkPolicy` enum, escaping detection, collapsing, cycle handling |

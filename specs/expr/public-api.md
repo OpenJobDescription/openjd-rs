@@ -2,9 +2,12 @@
 
 [README](README.md) · Public API
 
-This document is the authoritative reference for the `openjd-expr` crate's public
-API. All public types, functions, traits, and constants are listed here with
-their signatures, organized by module role.
+This document is the reference for the `openjd-expr` crate's public API. It
+describes the public types, functions, traits, and constants and their
+signatures, organized by module role. The generated, CI-checked
+[`public-api.txt`](public-api.txt) is the complete list of public items and the
+authority on their exact signatures. Where the two disagree, this document is
+wrong.
 
 The crate implements the format-string syntax from the 2023-09 Template Schemas
 ([§7.3](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas#73-format-strings))

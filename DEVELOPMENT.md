@@ -24,7 +24,9 @@ user account (Windows) — see `specs/sessions/cross-user-testing.md`.
 Every change touches some subset of three artifacts that must stay aligned:
 
 1. **Specs** in `specs/<crate>/`. These describe goals, design decisions, and the public
-   API. Every crate has a `public-api.md` that is authoritative for its surface.
+   API. Every crate has a `public-api.md` that describes its surface, and each library
+   crate has a generated, CI-checked `public-api.txt` listing every public item and
+   signature.
 2. **Implementation** in `crates/openjd-<crate>/src/`.
 3. **Tests** in-crate and under `crates/openjd-<crate>/tests/`.
 
@@ -71,7 +73,7 @@ loop; land the RFC when the implementation validates it.
 1. Read any existing RFC drafts and the relevant wiki spec. Have the agent summarize
    them and identify the crates affected.
 2. Start a branch for the implementation. Update `specs/<crate>/` with the Rust-side
-   design, including `public-api.md`.
+   design, including `public-api.md` and, for API changes, the regenerated `public-api.txt`.
 3. Implement enough to evaluate the design in practice — it doesn't have to be complete
    or merge-ready. Write tests that exercise the interesting cases, especially edge
    cases the RFC is uncertain about.
@@ -159,8 +161,16 @@ cargo test -p openjd-expr                                              # one cra
 cargo clippy --all-features --all-targets --workspace -- -D warnings   # lint
 cargo fmt --all                                                        # apply formatting
 cargo doc --no-deps --workspace                                        # docs
+bash scripts/check_public_api.sh                                       # public API listings (--update to regenerate)
+cargo mutants -p openjd-expr -f <file>                                 # mutation testing, scoped to a file
 scripts/coverage.sh                                                    # coverage report
 ```
+
+`scripts/check_public_api.sh` needs a pinned nightly toolchain and
+`cargo-public-api`. The script's header gives the install commands.
+`cargo mutants` needs `cargo install cargo-mutants --locked --version 27.1.0`
+(the version `eval_crate.yml` pins). Run it scoped (`-f`, `--in-diff`): a
+whole crate has thousands of mutants and takes hours.
 
 See AGENTS.md for CI jobs, the conformance suite, and S3 integration tests.
 
@@ -182,7 +192,10 @@ If the path doesn't exist the harness falls back to the `PATH` probe.
 
 - `cargo fmt` before committing (nightly rustfmt).
 - `cargo clippy` clean with `-D warnings`.
-- All public items documented with `///`.
+- All public items documented with `///`. The `missing_docs` lint enforces
+  this. Don't add new `missing-docs burn-down` allows, and document new
+  fields or variants you add inside an item that already has one: the lint
+  can't check those.
 - Prefer `Result` over panicking.
 - Conventional commit messages.
 - Copyright headers on new files (CI checks this).

@@ -139,6 +139,10 @@ pub fn merge_job_parameter_definitions(
 /// Constraints are tightened per §1.2.1: allowedValues are intersected,
 /// min values take the maximum, max values take the minimum.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct MergedParameterDefinition {
     pub name: String,
     pub param_type: JobParameterType,

@@ -25,6 +25,10 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum FileType {
     Text,
 }
@@ -40,6 +44,10 @@ impl fmt::Display for FileType {
 /// End-of-line mode for embedded files (FEATURE_BUNDLE_1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum EndOfLine {
     Lf,
     Crlf,
@@ -59,6 +67,10 @@ impl fmt::Display for EndOfLine {
 /// §2.2 PATH parameter objectType.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ObjectType {
     File,
     Directory,
@@ -76,6 +88,10 @@ impl fmt::Display for ObjectType {
 /// §2.2 PATH parameter dataFlow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum DataFlow {
     None,
     In,
@@ -97,6 +113,10 @@ impl fmt::Display for DataFlow {
 /// Specification revision identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum SpecificationRevision {
     V2023_09,
 }
@@ -127,12 +147,20 @@ impl fmt::Display for SpecificationRevision {
 /// must not be a breaking change for downstream crates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum TemplateSpecificationVersion {
     JobTemplate2023_09,
     Environment2023_09,
 }
 
 impl TemplateSpecificationVersion {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::JobTemplate2023_09 => "jobtemplate-2023-09",
@@ -140,14 +168,26 @@ impl TemplateSpecificationVersion {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_job_template(&self) -> bool {
         matches!(self, Self::JobTemplate2023_09)
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_environment_template(&self) -> bool {
         matches!(self, Self::Environment2023_09)
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn revision(&self) -> SpecificationRevision {
         match self {
             Self::JobTemplate2023_09 | Self::Environment2023_09 => SpecificationRevision::V2023_09,
@@ -174,6 +214,10 @@ impl std::str::FromStr for TemplateSpecificationVersion {
 /// and the `List[…]` family) without a SemVer break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum JobParameterType {
     String,
     Int,
@@ -261,6 +305,10 @@ impl fmt::Display for JobParameterType {
 /// chunked variants) without a SemVer break.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum TaskParameterType {
     Int,
     Float,
@@ -314,6 +362,10 @@ impl fmt::Display for TaskParameterType {
 
 /// A processed job parameter value.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobParameterValue {
     pub param_type: JobParameterType,
     pub value: openjd_expr::ExprValue,
@@ -321,6 +373,10 @@ pub struct JobParameterValue {
 
 /// A processed task parameter value.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct TaskParameterValue {
     pub param_type: TaskParameterType,
     pub value: openjd_expr::ExprValue,
@@ -353,6 +409,10 @@ pub type Extensions = std::collections::HashSet<ModelExtension>;
 /// element is guaranteed to be a known extension.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ModelExtension {
     TaskChunking,
     RedactedEnvVars,
@@ -374,6 +434,10 @@ impl ModelExtension {
         Self::WrapActions,
     ];
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::TaskChunking => "TASK_CHUNKING",
@@ -610,6 +674,10 @@ impl Default for ModelProfile {
 /// extensions) and the caller's policy overrides. When only the
 /// profile is needed, take `&ModelProfile` directly.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ValidationContext {
     pub profile: ModelProfile,
     pub caller_limits: CallerLimits,

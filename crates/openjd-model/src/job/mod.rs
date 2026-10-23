@@ -68,6 +68,10 @@ fn hash_f64<H: Hasher>(v: f64, state: &mut H) {
 /// A fully instantiated job — all format strings resolved, parameters bound.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct Job {
     pub name: String,
     pub description: Option<String>,
@@ -93,6 +97,10 @@ impl Hash for Job {
 /// A resolved job parameter (name + type + bound value).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct JobParameter {
     pub name: String,
     pub param_type: JobParameterType,
@@ -102,6 +110,10 @@ pub struct JobParameter {
 /// A fully instantiated step.
 #[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct Step {
     pub name: String,
     pub description: Option<String>,
@@ -120,6 +132,10 @@ pub struct Step {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct StepScript {
     #[serde(rename = "let", alias = "letBindings")]
     pub let_bindings: Option<Vec<String>>,
@@ -129,12 +145,20 @@ pub struct StepScript {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct StepActions {
     pub on_run: Action,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct Action {
     pub command: FormatString,
     pub args: Option<Vec<FormatString>>,
@@ -144,6 +168,10 @@ pub struct Action {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct Environment {
     pub name: String,
     pub description: Option<String>,
@@ -175,6 +203,10 @@ impl Hash for Environment {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct EnvironmentScript {
     #[serde(rename = "let", alias = "letBindings")]
     pub let_bindings: Option<Vec<String>>,
@@ -184,6 +216,10 @@ pub struct EnvironmentScript {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct EnvironmentActions {
     pub on_enter: Option<Action>,
     /// RFC 0008 — wraps inner environments' `onEnter` actions.
@@ -202,6 +238,10 @@ crate::template::impl_environment_actions_helpers!(EnvironmentActions, Action);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct EmbeddedFile {
     pub name: String,
     #[serde(alias = "type")]
@@ -223,6 +263,10 @@ pub struct EmbeddedFile {
 /// rationale). A `null` resolution (whole-field expressions only) means
 /// the whole cancelation object is treated as never declared.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum CancelationMode {
     Terminate,
     NotifyThenTerminate {
@@ -325,6 +369,10 @@ impl<'de> Deserialize<'de> for CancelationMode {
 /// Resolved parameter space with concrete ranges.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct StepParameterSpace {
     pub task_parameter_definitions: IndexMap<String, TaskParameter>,
     pub combination: Option<String>,
@@ -342,6 +390,10 @@ impl Hash for StepParameterSpace {
 /// A resolved task parameter with concrete range values.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum TaskParameter {
     Int {
         range: TaskParamRange<i64>,
@@ -397,6 +449,10 @@ impl Hash for TaskParameter {
     rename_all = "camelCase",
     bound(deserialize = "T: serde::de::DeserializeOwned")
 )]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum TaskParamRange<T: Serialize> {
     List(Vec<T>),
     RangeExpr(RangeExpr),
@@ -405,6 +461,10 @@ pub enum TaskParamRange<T: Serialize> {
 /// Chunks config with all format strings resolved.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ResolvedChunks {
     pub default_task_count: usize,
     pub target_runtime_seconds: Option<usize>,
@@ -414,6 +474,10 @@ pub struct ResolvedChunks {
 /// Resolved host requirements — no FormatStrings.
 #[derive(Debug, Clone, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct HostRequirements {
     pub amounts: Option<Vec<AmountRequirement>>,
     pub attributes: Option<Vec<AttributeRequirement>>,
@@ -421,6 +485,10 @@ pub struct HostRequirements {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct AmountRequirement {
     pub name: String,
     pub min: Option<f64>,
@@ -445,6 +513,10 @@ impl Hash for AmountRequirement {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct AttributeRequirement {
     pub name: String,
     pub any_of: Option<Vec<String>>,
@@ -453,6 +525,10 @@ pub struct AttributeRequirement {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct StepDependency {
     pub depends_on: String,
 }

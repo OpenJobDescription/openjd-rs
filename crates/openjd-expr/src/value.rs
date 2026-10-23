@@ -306,6 +306,10 @@ impl PartialOrd<f64> for Float64 {
 /// enforce the separator-normalization invariant).
 #[derive(Debug, Clone, serde::Serialize)]
 #[non_exhaustive]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ExprValue {
     Null,
     Bool(bool),
@@ -1413,6 +1417,10 @@ impl ExprValue {
         serde_json::json!({"type": type_str, "value": value})
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn transport_value(&self) -> serde_json::Value {
         match self {
             val if val.is_list() => {
@@ -1438,6 +1446,10 @@ impl ExprValue {
         Self::from_transport_value(value, &expr_type, path_format)
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn from_transport_value(
         value: &serde_json::Value,
         target: &ExprType,
@@ -1886,6 +1898,10 @@ impl From<crate::types::ExprType> for ExprValue {
 }
 
 /// Zero-allocation iterator over list elements.
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum ListIter<'a> {
     Bool(std::slice::Iter<'a, bool>),
     Int(std::slice::Iter<'a, i64>),
@@ -1921,6 +1937,10 @@ impl<'a> Iterator for ListIter<'a> {
 
 impl<'a> ExactSizeIterator for ListIter<'a> {}
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub fn format_float(f: f64) -> String {
     if f == 0.0 {
         return "0.0".to_string();

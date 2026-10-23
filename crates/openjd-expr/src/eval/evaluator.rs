@@ -191,6 +191,10 @@ pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;
 
 /// Result of expression evaluation.
 #[derive(Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct EvalResult {
     pub value: ExprValue,
     pub peak_memory: usize,

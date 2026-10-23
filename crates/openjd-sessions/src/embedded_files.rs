@@ -23,12 +23,20 @@ use crate::session_user::SessionUser;
 
 /// Scope for embedded file symbol table entries.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum EmbeddedFilesScope {
     Step,
     Env,
 }
 
 impl EmbeddedFilesScope {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn prefix(&self) -> &'static str {
         match self {
             EmbeddedFilesScope::Step => "Task.File",
@@ -370,6 +378,10 @@ impl EmbeddedFiles {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_user(mut self, user: Option<Arc<dyn SessionUser>>) -> Self {
         self.user = user;
         self
@@ -385,6 +397,10 @@ impl EmbeddedFiles {
         self
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn allocate_file_paths(
         &mut self,
         files: &[EmbeddedFile],
@@ -500,6 +516,10 @@ impl EmbeddedFiles {
         Ok(())
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn write_file_contents(
         &self,
         symtab: &SymbolTable,

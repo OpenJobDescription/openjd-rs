@@ -23,11 +23,19 @@ use crate::let_bindings::evaluate_let_bindings;
 use crate::session_user::SessionUser;
 use crate::subprocess::SubprocessResult;
 
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct StepScriptRunner {
     base: ScriptRunnerBase,
 }
 
 impl StepScriptRunner {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn new(
         session_id: &str,
         working_directory: PathBuf,
@@ -39,11 +47,19 @@ impl StepScriptRunner {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_redactions(mut self, enabled: bool) -> Self {
         self.base.redactions_enabled = enabled;
         self
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_debug_collect_stdout(mut self, collect: bool) -> Self {
         self.base.debug_collect_stdout = collect;
         self
@@ -64,16 +80,28 @@ impl StepScriptRunner {
         self
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_initial_redacted_values(mut self, values: Vec<String>) -> Self {
         self.base.initial_redacted_values = values;
         self
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_cancel_token(mut self, token: CancellationToken) -> Self {
         self.base.cancel_token = token;
         self
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn with_cancel_request_rx(
         mut self,
         rx: tokio::sync::watch::Receiver<Option<Duration>>,
@@ -179,10 +207,18 @@ impl StepScriptRunner {
             .await
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn cancel(&self) {
         self.base.cancel_token.cancel();
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn state(&self) -> ScriptRunnerState {
         self.base.state
     }

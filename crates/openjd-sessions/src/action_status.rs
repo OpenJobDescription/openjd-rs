@@ -9,6 +9,10 @@ use std::time::SystemTime;
 
 /// Status of the currently running or most recently completed action.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ActionStatus {
     pub state: ActionState,
     pub progress: Option<f64>,

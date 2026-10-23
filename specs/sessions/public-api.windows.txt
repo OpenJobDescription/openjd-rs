@@ -1,0 +1,849 @@
+pub mod openjd_sessions
+pub use openjd_sessions::PathFormat
+pub use openjd_sessions::PathMappingRule
+pub use openjd_sessions::path_mapping
+pub mod openjd_sessions::action
+pub enum openjd_sessions::action::ActionMessage
+pub openjd_sessions::action::ActionMessage::CancelMarkFailed
+pub openjd_sessions::action::ActionMessage::CancelMarkFailed::fail_message: alloc::string::String
+pub openjd_sessions::action::ActionMessage::Fail(alloc::string::String)
+pub openjd_sessions::action::ActionMessage::Progress(f64)
+pub openjd_sessions::action::ActionMessage::RedactedEnv
+pub openjd_sessions::action::ActionMessage::RedactedEnv::name: alloc::string::String
+pub openjd_sessions::action::ActionMessage::RedactedEnv::value: alloc::string::String
+pub openjd_sessions::action::ActionMessage::SetEnv
+pub openjd_sessions::action::ActionMessage::SetEnv::name: alloc::string::String
+pub openjd_sessions::action::ActionMessage::SetEnv::value: alloc::string::String
+pub openjd_sessions::action::ActionMessage::Status(alloc::string::String)
+pub openjd_sessions::action::ActionMessage::UnsetEnv
+pub openjd_sessions::action::ActionMessage::UnsetEnv::name: alloc::string::String
+impl core::clone::Clone for openjd_sessions::action::ActionMessage
+pub fn openjd_sessions::action::ActionMessage::clone(&self) -> openjd_sessions::action::ActionMessage
+impl core::fmt::Debug for openjd_sessions::action::ActionMessage
+pub fn openjd_sessions::action::ActionMessage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::action::ActionMessage
+pub fn openjd_sessions::action::ActionMessage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum openjd_sessions::action::ActionState
+pub openjd_sessions::action::ActionState::Canceled
+pub openjd_sessions::action::ActionState::Failed
+pub openjd_sessions::action::ActionState::Running
+pub openjd_sessions::action::ActionState::Success
+pub openjd_sessions::action::ActionState::Timeout
+impl core::clone::Clone for openjd_sessions::action::ActionState
+pub fn openjd_sessions::action::ActionState::clone(&self) -> openjd_sessions::action::ActionState
+impl core::cmp::Eq for openjd_sessions::action::ActionState
+impl core::cmp::PartialEq for openjd_sessions::action::ActionState
+pub fn openjd_sessions::action::ActionState::eq(&self, &openjd_sessions::action::ActionState) -> bool
+impl core::fmt::Debug for openjd_sessions::action::ActionState
+pub fn openjd_sessions::action::ActionState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::action::ActionState
+pub fn openjd_sessions::action::ActionState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_sessions::action::ActionState
+impl core::marker::StructuralPartialEq for openjd_sessions::action::ActionState
+pub struct openjd_sessions::action::ActionResult
+pub openjd_sessions::action::ActionResult::exit_code: core::option::Option<i32>
+pub openjd_sessions::action::ActionResult::state: openjd_sessions::action::ActionState
+pub openjd_sessions::action::ActionResult::stdout: alloc::string::String
+impl core::fmt::Debug for openjd_sessions::action::ActionResult
+pub fn openjd_sessions::action::ActionResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod openjd_sessions::action_status
+pub struct openjd_sessions::action_status::ActionStatus
+pub openjd_sessions::action_status::ActionStatus::ended_at: core::option::Option<std::time::SystemTime>
+pub openjd_sessions::action_status::ActionStatus::exit_code: core::option::Option<i32>
+pub openjd_sessions::action_status::ActionStatus::fail_message: core::option::Option<alloc::string::String>
+pub openjd_sessions::action_status::ActionStatus::progress: core::option::Option<f64>
+pub openjd_sessions::action_status::ActionStatus::started_at: core::option::Option<std::time::SystemTime>
+pub openjd_sessions::action_status::ActionStatus::state: openjd_sessions::action::ActionState
+pub openjd_sessions::action_status::ActionStatus::status_message: core::option::Option<alloc::string::String>
+impl core::clone::Clone for openjd_sessions::action_status::ActionStatus
+pub fn openjd_sessions::action_status::ActionStatus::clone(&self) -> openjd_sessions::action_status::ActionStatus
+impl core::default::Default for openjd_sessions::action_status::ActionStatus
+pub fn openjd_sessions::action_status::ActionStatus::default() -> Self
+impl core::fmt::Debug for openjd_sessions::action_status::ActionStatus
+pub fn openjd_sessions::action_status::ActionStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod openjd_sessions::embedded_files
+pub use openjd_sessions::embedded_files::EndOfLine
+pub enum openjd_sessions::embedded_files::EmbeddedFilesScope
+pub openjd_sessions::embedded_files::EmbeddedFilesScope::Env
+pub openjd_sessions::embedded_files::EmbeddedFilesScope::Step
+impl openjd_sessions::embedded_files::EmbeddedFilesScope
+pub fn openjd_sessions::embedded_files::EmbeddedFilesScope::prefix(&self) -> &'static str
+impl core::clone::Clone for openjd_sessions::embedded_files::EmbeddedFilesScope
+pub fn openjd_sessions::embedded_files::EmbeddedFilesScope::clone(&self) -> openjd_sessions::embedded_files::EmbeddedFilesScope
+impl core::cmp::Eq for openjd_sessions::embedded_files::EmbeddedFilesScope
+impl core::cmp::PartialEq for openjd_sessions::embedded_files::EmbeddedFilesScope
+pub fn openjd_sessions::embedded_files::EmbeddedFilesScope::eq(&self, &openjd_sessions::embedded_files::EmbeddedFilesScope) -> bool
+impl core::fmt::Debug for openjd_sessions::embedded_files::EmbeddedFilesScope
+pub fn openjd_sessions::embedded_files::EmbeddedFilesScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_sessions::embedded_files::EmbeddedFilesScope
+impl core::marker::StructuralPartialEq for openjd_sessions::embedded_files::EmbeddedFilesScope
+pub struct openjd_sessions::embedded_files::EmbeddedFiles
+impl openjd_sessions::embedded_files::EmbeddedFiles
+pub fn openjd_sessions::embedded_files::EmbeddedFiles::allocate_file_paths(&mut self, &[openjd_model::job::EmbeddedFile], &mut openjd_expr::symbol_table::SymbolTable) -> core::result::Result<(), openjd_sessions::error::SessionError>
+pub fn openjd_sessions::embedded_files::EmbeddedFiles::new(openjd_sessions::embedded_files::EmbeddedFilesScope, std::path::PathBuf, &str) -> Self
+pub fn openjd_sessions::embedded_files::EmbeddedFiles::with_limits(self, openjd_sessions::limits::SessionLimits) -> Self
+pub fn openjd_sessions::embedded_files::EmbeddedFiles::with_user(self, core::option::Option<alloc::sync::Arc<dyn openjd_sessions::session_user::SessionUser>>) -> Self
+pub fn openjd_sessions::embedded_files::EmbeddedFiles::write_file_contents(&self, &openjd_expr::symbol_table::SymbolTable, core::option::Option<&openjd_expr::function_library::FunctionLibrary>) -> core::result::Result<(), openjd_sessions::error::SessionError>
+pub fn openjd_sessions::embedded_files::chown_for_user(&std::path::Path, &dyn openjd_sessions::session_user::SessionUser, bool) -> core::result::Result<(), openjd_sessions::error::SessionError>
+pub fn openjd_sessions::embedded_files::convert_line_endings(&str, openjd_model::types::EndOfLine) -> alloc::vec::Vec<u8>
+pub fn openjd_sessions::embedded_files::symtab_key(openjd_sessions::embedded_files::EmbeddedFilesScope, &str) -> alloc::string::String
+pub fn openjd_sessions::embedded_files::write_embedded_file(&std::path::Path, &str) -> core::result::Result<(), core::io::error::Error>
+pub fn openjd_sessions::embedded_files::write_embedded_file_with_options(&std::path::Path, &str, bool, core::option::Option<openjd_model::types::EndOfLine>) -> core::result::Result<(), core::io::error::Error>
+pub mod openjd_sessions::error
+#[non_exhaustive] pub enum openjd_sessions::error::SessionError
+pub openjd_sessions::error::SessionError::DuplicateEnvironment
+pub openjd_sessions::error::SessionError::DuplicateEnvironment::id: alloc::string::String
+pub openjd_sessions::error::SessionError::EmbeddedFile
+pub openjd_sessions::error::SessionError::EmbeddedFile::name: alloc::string::String
+pub openjd_sessions::error::SessionError::EmbeddedFile::source: core::io::error::Error
+pub openjd_sessions::error::SessionError::EmbeddedFilePath
+pub openjd_sessions::error::SessionError::EmbeddedFilePath::filename: alloc::string::String
+pub openjd_sessions::error::SessionError::EmbeddedFilePath::name: alloc::string::String
+pub openjd_sessions::error::SessionError::EmbeddedFilePath::reason: alloc::string::String
+pub openjd_sessions::error::SessionError::EnvironmentScriptFailed
+pub openjd_sessions::error::SessionError::EnvironmentScriptFailed::action: alloc::string::String
+pub openjd_sessions::error::SessionError::EnvironmentScriptFailed::name: alloc::string::String
+pub openjd_sessions::error::SessionError::EnvironmentScriptFailed::reason: alloc::string::String
+pub openjd_sessions::error::SessionError::FormatString
+pub openjd_sessions::error::SessionError::FormatString::context: alloc::string::String
+pub openjd_sessions::error::SessionError::FormatString::reason: alloc::string::String
+pub openjd_sessions::error::SessionError::HelperCommunication(alloc::string::String)
+pub openjd_sessions::error::SessionError::InvalidState
+pub openjd_sessions::error::SessionError::InvalidState::current: openjd_sessions::session::SessionState
+pub openjd_sessions::error::SessionError::InvalidState::expected: alloc::vec::Vec<openjd_sessions::session::SessionState>
+pub openjd_sessions::error::SessionError::LifoViolation
+pub openjd_sessions::error::SessionError::LifoViolation::expected: alloc::string::String
+pub openjd_sessions::error::SessionError::LifoViolation::got: alloc::string::String
+pub openjd_sessions::error::SessionError::MultipleWrapEnvironments
+pub openjd_sessions::error::SessionError::MultipleWrapEnvironments::entering: alloc::string::String
+pub openjd_sessions::error::SessionError::MultipleWrapEnvironments::existing: alloc::string::String
+pub openjd_sessions::error::SessionError::PathPermissions
+pub openjd_sessions::error::SessionError::PathPermissions::path: alloc::string::String
+pub openjd_sessions::error::SessionError::PathPermissions::reason: alloc::string::String
+pub openjd_sessions::error::SessionError::Runtime(alloc::string::String)
+pub openjd_sessions::error::SessionError::SubprocessStart
+pub openjd_sessions::error::SessionError::SubprocessStart::command: alloc::string::String
+pub openjd_sessions::error::SessionError::SubprocessStart::source: core::io::error::Error
+pub openjd_sessions::error::SessionError::TempDir
+pub openjd_sessions::error::SessionError::TempDir::path: std::path::PathBuf
+pub openjd_sessions::error::SessionError::TempDir::source: core::io::error::Error
+pub openjd_sessions::error::SessionError::UnknownEnvironment
+pub openjd_sessions::error::SessionError::UnknownEnvironment::identifier: alloc::string::String
+pub openjd_sessions::error::SessionError::WorkingDirectory
+pub openjd_sessions::error::SessionError::WorkingDirectory::path: std::path::PathBuf
+pub openjd_sessions::error::SessionError::WorkingDirectory::source: core::io::error::Error
+impl core::error::Error for openjd_sessions::error::SessionError
+pub fn openjd_sessions::error::SessionError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for openjd_sessions::error::SessionError
+pub fn openjd_sessions::error::SessionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::error::SessionError
+pub fn openjd_sessions::error::SessionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub mod openjd_sessions::let_bindings
+pub use openjd_sessions::let_bindings::evaluate_let_bindings
+pub mod openjd_sessions::limits
+pub struct openjd_sessions::limits::SessionLimits
+pub openjd_sessions::limits::SessionLimits::max_eval_memory_bytes: core::option::Option<usize>
+pub openjd_sessions::limits::SessionLimits::max_eval_operations: core::option::Option<usize>
+pub openjd_sessions::limits::SessionLimits::max_resolved_arg_len: core::option::Option<usize>
+pub openjd_sessions::limits::SessionLimits::max_resolved_data_len: core::option::Option<usize>
+impl core::clone::Clone for openjd_sessions::limits::SessionLimits
+pub fn openjd_sessions::limits::SessionLimits::clone(&self) -> openjd_sessions::limits::SessionLimits
+impl core::cmp::Eq for openjd_sessions::limits::SessionLimits
+impl core::cmp::PartialEq for openjd_sessions::limits::SessionLimits
+pub fn openjd_sessions::limits::SessionLimits::eq(&self, &openjd_sessions::limits::SessionLimits) -> bool
+impl core::convert::From<&openjd_model::types::CallerLimits> for openjd_sessions::limits::SessionLimits
+pub fn openjd_sessions::limits::SessionLimits::from(&openjd_model::types::CallerLimits) -> Self
+impl core::default::Default for openjd_sessions::limits::SessionLimits
+pub fn openjd_sessions::limits::SessionLimits::default() -> openjd_sessions::limits::SessionLimits
+impl core::fmt::Debug for openjd_sessions::limits::SessionLimits
+pub fn openjd_sessions::limits::SessionLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_sessions::limits::SessionLimits
+impl core::marker::StructuralPartialEq for openjd_sessions::limits::SessionLimits
+pub mod openjd_sessions::logging
+pub struct openjd_sessions::logging::LogContent(_)
+impl openjd_sessions::logging::LogContent
+pub const openjd_sessions::logging::LogContent::BANNER: Self
+pub const openjd_sessions::logging::LogContent::COMMAND_OUTPUT: Self
+pub const openjd_sessions::logging::LogContent::EXCEPTION_INFO: Self
+pub const openjd_sessions::logging::LogContent::FILE_CONTENTS: Self
+pub const openjd_sessions::logging::LogContent::FILE_PATH: Self
+pub const openjd_sessions::logging::LogContent::HOST_INFO: Self
+pub const openjd_sessions::logging::LogContent::PARAMETER_INFO: Self
+pub const openjd_sessions::logging::LogContent::PROCESS_CONTROL: Self
+impl openjd_sessions::logging::LogContent
+pub const fn openjd_sessions::logging::LogContent::all() -> Self
+pub const fn openjd_sessions::logging::LogContent::bits(&self) -> u32
+pub const fn openjd_sessions::logging::LogContent::complement(self) -> Self
+pub const fn openjd_sessions::logging::LogContent::contains(&self, Self) -> bool
+pub const fn openjd_sessions::logging::LogContent::difference(self, Self) -> Self
+pub const fn openjd_sessions::logging::LogContent::empty() -> Self
+pub const fn openjd_sessions::logging::LogContent::from_bits(u32) -> core::option::Option<Self>
+pub const fn openjd_sessions::logging::LogContent::from_bits_retain(u32) -> Self
+pub const fn openjd_sessions::logging::LogContent::from_bits_truncate(u32) -> Self
+pub fn openjd_sessions::logging::LogContent::from_name(&str) -> core::option::Option<Self>
+pub fn openjd_sessions::logging::LogContent::insert(&mut self, Self)
+pub const fn openjd_sessions::logging::LogContent::intersection(self, Self) -> Self
+pub const fn openjd_sessions::logging::LogContent::intersects(&self, Self) -> bool
+pub const fn openjd_sessions::logging::LogContent::is_all(&self) -> bool
+pub const fn openjd_sessions::logging::LogContent::is_empty(&self) -> bool
+pub fn openjd_sessions::logging::LogContent::remove(&mut self, Self)
+pub fn openjd_sessions::logging::LogContent::set(&mut self, Self, bool)
+pub const fn openjd_sessions::logging::LogContent::symmetric_difference(self, Self) -> Self
+pub fn openjd_sessions::logging::LogContent::toggle(&mut self, Self)
+pub const fn openjd_sessions::logging::LogContent::union(self, Self) -> Self
+impl openjd_sessions::logging::LogContent
+pub const fn openjd_sessions::logging::LogContent::iter(&self) -> bitflags::iter::Iter<openjd_sessions::logging::LogContent>
+pub const fn openjd_sessions::logging::LogContent::iter_names(&self) -> bitflags::iter::IterNames<openjd_sessions::logging::LogContent>
+impl bitflags::traits::Flags for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Bits = u32
+pub const openjd_sessions::logging::LogContent::FLAGS: &'static [bitflags::traits::Flag<openjd_sessions::logging::LogContent>]
+pub fn openjd_sessions::logging::LogContent::all_named() -> openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bits(&self) -> u32
+pub fn openjd_sessions::logging::LogContent::from_bits_retain(u32) -> openjd_sessions::logging::LogContent
+impl bitflags::traits::PublicFlags for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Internal = InternalBitFlags
+pub type openjd_sessions::logging::LogContent::Primitive = u32
+impl core::clone::Clone for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::clone(&self) -> openjd_sessions::logging::LogContent
+impl core::cmp::Eq for openjd_sessions::logging::LogContent
+impl core::cmp::PartialEq for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::eq(&self, &openjd_sessions::logging::LogContent) -> bool
+impl core::fmt::Binary for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Debug for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::LowerHex for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Octal for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::UpperHex for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::iter::traits::collect::Extend<openjd_sessions::logging::LogContent> for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::extend<T: core::iter::traits::collect::IntoIterator<Item = Self>>(&mut self, T)
+impl core::iter::traits::collect::FromIterator<openjd_sessions::logging::LogContent> for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::from_iter<T: core::iter::traits::collect::IntoIterator<Item = Self>>(T) -> Self
+impl core::iter::traits::collect::IntoIterator for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::IntoIter = bitflags::iter::Iter<openjd_sessions::logging::LogContent>
+pub type openjd_sessions::logging::LogContent::Item = openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::into_iter(self) -> Self::IntoIter
+impl core::marker::Copy for openjd_sessions::logging::LogContent
+impl core::marker::StructuralPartialEq for openjd_sessions::logging::LogContent
+impl core::ops::arith::Sub for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Output = openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::sub(self, Self) -> Self
+impl core::ops::arith::SubAssign for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::sub_assign(&mut self, Self)
+impl core::ops::bit::BitAnd for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Output = openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bitand(self, Self) -> Self
+impl core::ops::bit::BitAndAssign for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bitand_assign(&mut self, Self)
+impl core::ops::bit::BitOr for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Output = openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bitor(self, openjd_sessions::logging::LogContent) -> Self
+impl core::ops::bit::BitOrAssign for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bitor_assign(&mut self, Self)
+impl core::ops::bit::BitXor for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Output = openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bitxor(self, Self) -> Self
+impl core::ops::bit::BitXorAssign for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bitxor_assign(&mut self, Self)
+impl core::ops::bit::Not for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Output = openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::not(self) -> Self
+impl log::kv::value::ToValue for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::to_value(&self) -> log::kv::value::Value<'_>
+pub fn openjd_sessions::logging::log_section_banner(&str, &str)
+pub fn openjd_sessions::logging::log_subsection_banner(&str, &str)
+pub fn openjd_sessions::logging::timestamp_usec() -> u64
+pub mod openjd_sessions::runner
+pub mod openjd_sessions::runner::env_script
+pub struct openjd_sessions::runner::env_script::EnvironmentScriptRunner
+impl openjd_sessions::runner::env_script::EnvironmentScriptRunner
+pub fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::cancel(&self)
+pub async fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::enter(&mut self, &openjd_model::job::Environment, &openjd_expr::symbol_table::SymbolTable, core::option::Option<&openjd_expr::function_library::FunctionLibrary>, &std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>, tokio::sync::mpsc::unbounded::UnboundedSender<openjd_sessions::action::ActionMessage>) -> core::result::Result<openjd_sessions::SubprocessResult, openjd_sessions::error::SessionError>
+pub async fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::exit(&mut self, &openjd_model::job::Environment, &openjd_expr::symbol_table::SymbolTable, core::option::Option<&openjd_expr::function_library::FunctionLibrary>, &std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>, tokio::sync::mpsc::unbounded::UnboundedSender<openjd_sessions::action::ActionMessage>) -> core::result::Result<openjd_sessions::SubprocessResult, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::new(&str, std::path::PathBuf, std::path::PathBuf, core::option::Option<alloc::sync::Arc<dyn openjd_sessions::session_user::SessionUser>>) -> Self
+pub async fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::run_wrap_action(&mut self, &openjd_model::job::Action, &openjd_expr::symbol_table::SymbolTable, core::option::Option<&openjd_expr::function_library::FunctionLibrary>, &std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>, tokio::sync::mpsc::unbounded::UnboundedSender<openjd_sessions::action::ActionMessage>, core::option::Option<core::time::Duration>) -> core::result::Result<openjd_sessions::SubprocessResult, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::state(&self) -> openjd_sessions::runner::ScriptRunnerState
+pub fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::with_cancel_request_rx(self, tokio::sync::watch::Receiver<core::option::Option<core::time::Duration>>) -> Self
+pub fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::with_cancel_token(self, tokio_util::sync::cancellation_token::CancellationToken) -> Self
+pub fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::with_debug_collect_stdout(self, bool) -> Self
+pub fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::with_echo_openjd_directives(self, bool) -> Self
+pub fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::with_initial_redacted_values(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::with_limits(self, openjd_sessions::limits::SessionLimits) -> Self
+pub fn openjd_sessions::runner::env_script::EnvironmentScriptRunner::with_redactions(self, bool) -> Self
+pub mod openjd_sessions::runner::step_script
+pub struct openjd_sessions::runner::step_script::StepScriptRunner
+impl openjd_sessions::runner::step_script::StepScriptRunner
+pub fn openjd_sessions::runner::step_script::StepScriptRunner::cancel(&self)
+pub fn openjd_sessions::runner::step_script::StepScriptRunner::new(&str, std::path::PathBuf, std::path::PathBuf, core::option::Option<alloc::sync::Arc<dyn openjd_sessions::session_user::SessionUser>>) -> Self
+pub async fn openjd_sessions::runner::step_script::StepScriptRunner::run(&mut self, &openjd_model::job::StepScript, &openjd_expr::symbol_table::SymbolTable, core::option::Option<&openjd_expr::function_library::FunctionLibrary>, &std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>, tokio::sync::mpsc::unbounded::UnboundedSender<openjd_sessions::action::ActionMessage>) -> core::result::Result<openjd_sessions::SubprocessResult, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::runner::step_script::StepScriptRunner::state(&self) -> openjd_sessions::runner::ScriptRunnerState
+pub fn openjd_sessions::runner::step_script::StepScriptRunner::with_cancel_request_rx(self, tokio::sync::watch::Receiver<core::option::Option<core::time::Duration>>) -> Self
+pub fn openjd_sessions::runner::step_script::StepScriptRunner::with_cancel_token(self, tokio_util::sync::cancellation_token::CancellationToken) -> Self
+pub fn openjd_sessions::runner::step_script::StepScriptRunner::with_debug_collect_stdout(self, bool) -> Self
+pub fn openjd_sessions::runner::step_script::StepScriptRunner::with_echo_openjd_directives(self, bool) -> Self
+pub fn openjd_sessions::runner::step_script::StepScriptRunner::with_initial_redacted_values(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn openjd_sessions::runner::step_script::StepScriptRunner::with_limits(self, openjd_sessions::limits::SessionLimits) -> Self
+pub fn openjd_sessions::runner::step_script::StepScriptRunner::with_redactions(self, bool) -> Self
+pub enum openjd_sessions::runner::CancelMethod
+pub openjd_sessions::runner::CancelMethod::NotifyThenTerminate
+pub openjd_sessions::runner::CancelMethod::NotifyThenTerminate::terminate_delay: core::time::Duration
+pub openjd_sessions::runner::CancelMethod::Terminate
+impl core::clone::Clone for openjd_sessions::runner::CancelMethod
+pub fn openjd_sessions::runner::CancelMethod::clone(&self) -> openjd_sessions::runner::CancelMethod
+impl core::fmt::Debug for openjd_sessions::runner::CancelMethod
+pub fn openjd_sessions::runner::CancelMethod::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::runner::CancelMethod
+pub fn openjd_sessions::runner::CancelMethod::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum openjd_sessions::runner::ScriptRunnerState
+pub openjd_sessions::runner::ScriptRunnerState::Canceled
+pub openjd_sessions::runner::ScriptRunnerState::Canceling
+pub openjd_sessions::runner::ScriptRunnerState::Failed
+pub openjd_sessions::runner::ScriptRunnerState::Ready
+pub openjd_sessions::runner::ScriptRunnerState::Running
+pub openjd_sessions::runner::ScriptRunnerState::Success
+pub openjd_sessions::runner::ScriptRunnerState::Timeout
+impl core::clone::Clone for openjd_sessions::runner::ScriptRunnerState
+pub fn openjd_sessions::runner::ScriptRunnerState::clone(&self) -> openjd_sessions::runner::ScriptRunnerState
+impl core::cmp::Eq for openjd_sessions::runner::ScriptRunnerState
+impl core::cmp::PartialEq for openjd_sessions::runner::ScriptRunnerState
+pub fn openjd_sessions::runner::ScriptRunnerState::eq(&self, &openjd_sessions::runner::ScriptRunnerState) -> bool
+impl core::fmt::Debug for openjd_sessions::runner::ScriptRunnerState
+pub fn openjd_sessions::runner::ScriptRunnerState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::runner::ScriptRunnerState
+pub fn openjd_sessions::runner::ScriptRunnerState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_sessions::runner::ScriptRunnerState
+impl core::marker::StructuralPartialEq for openjd_sessions::runner::ScriptRunnerState
+pub mod openjd_sessions::session
+pub enum openjd_sessions::session::SessionState
+pub openjd_sessions::session::SessionState::Canceling
+pub openjd_sessions::session::SessionState::Ended
+pub openjd_sessions::session::SessionState::Ready
+pub openjd_sessions::session::SessionState::ReadyEnding
+pub openjd_sessions::session::SessionState::Running
+impl core::clone::Clone for openjd_sessions::session::SessionState
+pub fn openjd_sessions::session::SessionState::clone(&self) -> openjd_sessions::session::SessionState
+impl core::cmp::Eq for openjd_sessions::session::SessionState
+impl core::cmp::PartialEq for openjd_sessions::session::SessionState
+pub fn openjd_sessions::session::SessionState::eq(&self, &openjd_sessions::session::SessionState) -> bool
+impl core::fmt::Debug for openjd_sessions::session::SessionState
+pub fn openjd_sessions::session::SessionState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::session::SessionState
+pub fn openjd_sessions::session::SessionState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_sessions::session::SessionState
+impl core::marker::StructuralPartialEq for openjd_sessions::session::SessionState
+pub struct openjd_sessions::session::Session
+impl openjd_sessions::session::Session
+pub fn openjd_sessions::session::Session::action_status(&self) -> core::option::Option<openjd_sessions::action_status::ActionStatus>
+pub fn openjd_sessions::session::Session::build_symbol_table(&self, core::option::Option<&openjd_model::types::TaskParameterSet>, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>) -> core::result::Result<openjd_expr::symbol_table::SymbolTable, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::session::Session::cancel_action(&mut self, core::option::Option<core::time::Duration>, bool) -> core::result::Result<(), openjd_sessions::error::SessionError>
+pub fn openjd_sessions::session::Session::cancel_handle(&self) -> openjd_sessions::session::SessionCancelHandle
+pub fn openjd_sessions::session::Session::cleanup(&mut self)
+pub fn openjd_sessions::session::Session::clone_cancel_writer(&self) -> core::option::Option<std::fs::File>
+pub async fn openjd_sessions::session::Session::enter_environment(&mut self, &openjd_model::job::Environment, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, core::option::Option<&str>, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<alloc::string::String, openjd_sessions::error::SessionError>
+pub async fn openjd_sessions::session::Session::enter_environment_with_output(&mut self, &openjd_model::job::Environment, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, core::option::Option<&str>, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<(alloc::string::String, alloc::string::String), openjd_sessions::error::SessionError>
+pub fn openjd_sessions::session::Session::environments_entered(&self) -> &[openjd_sessions::session::EnvironmentIdentifier]
+pub fn openjd_sessions::session::Session::evaluate_env_vars(&self, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>
+pub async fn openjd_sessions::session::Session::exit_environment(&mut self, &openjd_sessions::session::EnvironmentIdentifier, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, bool, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<alloc::string::String, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::session::Session::extend_path_mapping_rules(&mut self, alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>)
+pub fn openjd_sessions::session::Session::files_directory(&self) -> &std::path::Path
+pub fn openjd_sessions::session::Session::get_enabled_extensions(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn openjd_sessions::session::Session::job_parameter_values(&self) -> &openjd_model::types::JobParameterValues
+pub fn openjd_sessions::session::Session::override_action_state(&mut self, openjd_sessions::action::ActionState)
+pub fn openjd_sessions::session::Session::path_mapping_rules(&self) -> &[openjd_expr::path_mapping::PathMappingRule]
+pub fn openjd_sessions::session::Session::redact(&self, &str) -> alloc::string::String
+pub async fn openjd_sessions::session::Session::run_subprocess(&mut self, &str, core::option::Option<&[alloc::string::String]>, core::option::Option<core::time::Duration>, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>, bool, core::option::Option<&str>) -> core::result::Result<openjd_sessions::SubprocessResult, openjd_sessions::error::SessionError>
+pub async fn openjd_sessions::session::Session::run_task(&mut self, &str, &openjd_model::job::StepScript, core::option::Option<&openjd_model::types::TaskParameterSet>, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<openjd_sessions::action::ActionResult, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::session::Session::session_id(&self) -> &str
+pub fn openjd_sessions::session::Session::state(&self) -> openjd_sessions::session::SessionState
+pub fn openjd_sessions::session::Session::with_config(openjd_sessions::session::SessionConfig) -> core::result::Result<Self, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::session::Session::with_path_mapping(self, alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> Self
+pub fn openjd_sessions::session::Session::with_profile(self, openjd_model::types::ModelProfile) -> Self
+pub fn openjd_sessions::session::Session::working_directory(&self) -> &std::path::Path
+impl core::ops::drop::Drop for openjd_sessions::session::Session
+pub fn openjd_sessions::session::Session::drop(&mut self)
+pub struct openjd_sessions::session::SessionCancelHandle
+impl openjd_sessions::session::SessionCancelHandle
+pub fn openjd_sessions::session::SessionCancelHandle::cancel(&self, core::option::Option<core::time::Duration>, bool) -> bool
+pub struct openjd_sessions::session::SessionConfig
+pub openjd_sessions::session::SessionConfig::callback: core::option::Option<openjd_sessions::session::SessionCallbackType>
+pub openjd_sessions::session::SessionConfig::cancel_token: core::option::Option<tokio_util::sync::cancellation_token::CancellationToken>
+pub openjd_sessions::session::SessionConfig::debug_collect_stdout: bool
+pub openjd_sessions::session::SessionConfig::echo_openjd_directives: bool
+pub openjd_sessions::session::SessionConfig::job_parameter_values: openjd_model::types::JobParameterValues
+pub openjd_sessions::session::SessionConfig::limits: openjd_sessions::limits::SessionLimits
+pub openjd_sessions::session::SessionConfig::os_env_vars: core::option::Option<std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>
+pub openjd_sessions::session::SessionConfig::path_mapping_rules: core::option::Option<alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>>
+pub openjd_sessions::session::SessionConfig::profile: core::option::Option<openjd_model::types::ModelProfile>
+pub openjd_sessions::session::SessionConfig::retain_working_dir: bool
+pub openjd_sessions::session::SessionConfig::session_id: alloc::string::String
+pub openjd_sessions::session::SessionConfig::session_root_directory: core::option::Option<std::path::PathBuf>
+pub openjd_sessions::session::SessionConfig::sticky_bit_policy: openjd_sessions::tempdir::StickyBitPolicy
+pub openjd_sessions::session::SessionConfig::user: core::option::Option<alloc::sync::Arc<dyn openjd_sessions::session_user::SessionUser>>
+pub const openjd_sessions::session::DEFAULT_CANCEL_NOTIFY_PERIOD_SECS: u64
+pub type openjd_sessions::session::EnvironmentIdentifier = alloc::string::String
+pub type openjd_sessions::session::SessionCallbackType = alloc::boxed::Box<(dyn core::ops::function::Fn(&str, &openjd_sessions::action_status::ActionStatus) + core::marker::Send + core::marker::Sync)>
+pub mod openjd_sessions::session_user
+pub enum openjd_sessions::session_user::BadCredentialsError
+pub openjd_sessions::session_user::BadCredentialsError::LogonFailure
+pub openjd_sessions::session_user::BadCredentialsError::Other(alloc::string::String)
+impl core::error::Error for openjd_sessions::session_user::BadCredentialsError
+impl core::fmt::Debug for openjd_sessions::session_user::BadCredentialsError
+pub fn openjd_sessions::session_user::BadCredentialsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::session_user::BadCredentialsError
+pub fn openjd_sessions::session_user::BadCredentialsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_sessions::session_user::WindowsSessionUser
+impl openjd_sessions::session_user::WindowsSessionUser
+pub fn openjd_sessions::session_user::WindowsSessionUser::for_process_user() -> core::result::Result<Self, alloc::string::String>
+pub fn openjd_sessions::session_user::WindowsSessionUser::logon_token(&self) -> core::option::Option<windows::Win32::Foundation::HANDLE>
+pub fn openjd_sessions::session_user::WindowsSessionUser::password(&self) -> core::option::Option<&str>
+pub fn openjd_sessions::session_user::WindowsSessionUser::with_logon_token(&str, windows::Win32::Foundation::HANDLE) -> core::result::Result<Self, alloc::string::String>
+pub fn openjd_sessions::session_user::WindowsSessionUser::with_password(&str, &str) -> core::result::Result<Self, openjd_sessions::session_user::BadCredentialsError>
+impl core::fmt::Debug for openjd_sessions::session_user::WindowsSessionUser
+pub fn openjd_sessions::session_user::WindowsSessionUser::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Send for openjd_sessions::session_user::WindowsSessionUser
+impl core::marker::Sync for openjd_sessions::session_user::WindowsSessionUser
+impl openjd_sessions::session_user::SessionUser for openjd_sessions::session_user::WindowsSessionUser
+pub fn openjd_sessions::session_user::WindowsSessionUser::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_sessions::session_user::WindowsSessionUser::group(&self) -> &str
+pub fn openjd_sessions::session_user::WindowsSessionUser::is_process_user(&self) -> bool
+pub fn openjd_sessions::session_user::WindowsSessionUser::user(&self) -> &str
+pub trait openjd_sessions::session_user::SessionUser: core::marker::Send + core::marker::Sync + core::fmt::Debug
+pub fn openjd_sessions::session_user::SessionUser::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_sessions::session_user::SessionUser::group(&self) -> &str
+pub fn openjd_sessions::session_user::SessionUser::is_process_user(&self) -> bool
+pub fn openjd_sessions::session_user::SessionUser::user(&self) -> &str
+impl openjd_sessions::session_user::SessionUser for openjd_sessions::session_user::WindowsSessionUser
+pub fn openjd_sessions::session_user::WindowsSessionUser::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_sessions::session_user::WindowsSessionUser::group(&self) -> &str
+pub fn openjd_sessions::session_user::WindowsSessionUser::is_process_user(&self) -> bool
+pub fn openjd_sessions::session_user::WindowsSessionUser::user(&self) -> &str
+pub mod openjd_sessions::tempdir
+pub enum openjd_sessions::tempdir::StickyBitPolicy
+pub openjd_sessions::tempdir::StickyBitPolicy::Disabled
+pub openjd_sessions::tempdir::StickyBitPolicy::Strict
+pub openjd_sessions::tempdir::StickyBitPolicy::Warn
+impl core::clone::Clone for openjd_sessions::tempdir::StickyBitPolicy
+pub fn openjd_sessions::tempdir::StickyBitPolicy::clone(&self) -> openjd_sessions::tempdir::StickyBitPolicy
+impl core::cmp::Eq for openjd_sessions::tempdir::StickyBitPolicy
+impl core::cmp::PartialEq for openjd_sessions::tempdir::StickyBitPolicy
+pub fn openjd_sessions::tempdir::StickyBitPolicy::eq(&self, &openjd_sessions::tempdir::StickyBitPolicy) -> bool
+impl core::default::Default for openjd_sessions::tempdir::StickyBitPolicy
+pub fn openjd_sessions::tempdir::StickyBitPolicy::default() -> openjd_sessions::tempdir::StickyBitPolicy
+impl core::fmt::Debug for openjd_sessions::tempdir::StickyBitPolicy
+pub fn openjd_sessions::tempdir::StickyBitPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_sessions::tempdir::StickyBitPolicy
+impl core::marker::StructuralPartialEq for openjd_sessions::tempdir::StickyBitPolicy
+pub struct openjd_sessions::tempdir::TempDir
+impl openjd_sessions::tempdir::TempDir
+pub fn openjd_sessions::tempdir::TempDir::cleanup(&mut self) -> core::result::Result<(), openjd_sessions::error::SessionError>
+pub fn openjd_sessions::tempdir::TempDir::new(core::option::Option<&std::path::Path>, core::option::Option<&str>, core::option::Option<&dyn openjd_sessions::session_user::SessionUser>) -> core::result::Result<Self, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::tempdir::TempDir::path(&self) -> &std::path::Path
+impl core::convert::AsRef<std::path::Path> for openjd_sessions::tempdir::TempDir
+pub fn openjd_sessions::tempdir::TempDir::as_ref(&self) -> &std::path::Path
+impl core::fmt::Debug for openjd_sessions::tempdir::TempDir
+pub fn openjd_sessions::tempdir::TempDir::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for openjd_sessions::tempdir::TempDir
+pub fn openjd_sessions::tempdir::TempDir::drop(&mut self)
+pub fn openjd_sessions::tempdir::openjd_temp_dir(core::option::Option<&std::path::Path>) -> core::result::Result<std::path::PathBuf, openjd_sessions::error::SessionError>
+pub mod openjd_sessions::win32
+pub struct openjd_sessions::win32::LogonToken
+impl openjd_sessions::win32::LogonToken
+pub fn openjd_sessions::win32::LogonToken::as_handle(&self) -> windows::Win32::Foundation::HANDLE
+impl core::fmt::Debug for openjd_sessions::win32::LogonToken
+pub fn openjd_sessions::win32::LogonToken::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for openjd_sessions::win32::LogonToken
+pub fn openjd_sessions::win32::LogonToken::drop(&mut self)
+pub struct openjd_sessions::win32::SpawnedProcess
+pub openjd_sessions::win32::SpawnedProcess::pid: u32
+pub openjd_sessions::win32::SpawnedProcess::process_handle: windows::Win32::Foundation::HANDLE
+pub openjd_sessions::win32::SpawnedProcess::stdin_write: core::option::Option<std::os::windows::io::handle::OwnedHandle>
+pub openjd_sessions::win32::SpawnedProcess::stdout_read: std::os::windows::io::handle::OwnedHandle
+pub fn openjd_sessions::win32::environment_block_from_map(&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>) -> alloc::vec::Vec<u16>
+pub fn openjd_sessions::win32::environment_for_user(windows::Win32::Foundation::HANDLE) -> core::result::Result<std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>, windows_result::error::Error>
+pub fn openjd_sessions::win32::get_current_process_session_id() -> u32
+pub fn openjd_sessions::win32::get_process_user() -> core::result::Result<alloc::string::String, windows_result::error::Error>
+pub fn openjd_sessions::win32::is_session_zero() -> bool
+pub fn openjd_sessions::win32::logon_user(&str, &str) -> core::result::Result<openjd_sessions::win32::LogonToken, windows_result::error::Error>
+pub fn openjd_sessions::win32::spawn_as_user(&[alloc::string::String], &std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>, core::option::Option<&std::path::Path>, core::option::Option<&str>, &str, core::option::Option<windows::Win32::Foundation::HANDLE>) -> core::result::Result<openjd_sessions::win32::SpawnedProcess, alloc::string::String>
+pub fn openjd_sessions::win32::spawn_as_user_with_stdin(&[alloc::string::String], &std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>, core::option::Option<&std::path::Path>, core::option::Option<&str>, &str, core::option::Option<windows::Win32::Foundation::HANDLE>) -> core::result::Result<openjd_sessions::win32::SpawnedProcess, alloc::string::String>
+pub macro openjd_sessions::session_log!
+pub enum openjd_sessions::ActionMessage
+pub openjd_sessions::ActionMessage::CancelMarkFailed
+pub openjd_sessions::ActionMessage::CancelMarkFailed::fail_message: alloc::string::String
+pub openjd_sessions::ActionMessage::Fail(alloc::string::String)
+pub openjd_sessions::ActionMessage::Progress(f64)
+pub openjd_sessions::ActionMessage::RedactedEnv
+pub openjd_sessions::ActionMessage::RedactedEnv::name: alloc::string::String
+pub openjd_sessions::ActionMessage::RedactedEnv::value: alloc::string::String
+pub openjd_sessions::ActionMessage::SetEnv
+pub openjd_sessions::ActionMessage::SetEnv::name: alloc::string::String
+pub openjd_sessions::ActionMessage::SetEnv::value: alloc::string::String
+pub openjd_sessions::ActionMessage::Status(alloc::string::String)
+pub openjd_sessions::ActionMessage::UnsetEnv
+pub openjd_sessions::ActionMessage::UnsetEnv::name: alloc::string::String
+impl core::clone::Clone for openjd_sessions::action::ActionMessage
+pub fn openjd_sessions::action::ActionMessage::clone(&self) -> openjd_sessions::action::ActionMessage
+impl core::fmt::Debug for openjd_sessions::action::ActionMessage
+pub fn openjd_sessions::action::ActionMessage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::action::ActionMessage
+pub fn openjd_sessions::action::ActionMessage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum openjd_sessions::ActionState
+pub openjd_sessions::ActionState::Canceled
+pub openjd_sessions::ActionState::Failed
+pub openjd_sessions::ActionState::Running
+pub openjd_sessions::ActionState::Success
+pub openjd_sessions::ActionState::Timeout
+impl core::clone::Clone for openjd_sessions::action::ActionState
+pub fn openjd_sessions::action::ActionState::clone(&self) -> openjd_sessions::action::ActionState
+impl core::cmp::Eq for openjd_sessions::action::ActionState
+impl core::cmp::PartialEq for openjd_sessions::action::ActionState
+pub fn openjd_sessions::action::ActionState::eq(&self, &openjd_sessions::action::ActionState) -> bool
+impl core::fmt::Debug for openjd_sessions::action::ActionState
+pub fn openjd_sessions::action::ActionState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::action::ActionState
+pub fn openjd_sessions::action::ActionState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_sessions::action::ActionState
+impl core::marker::StructuralPartialEq for openjd_sessions::action::ActionState
+pub enum openjd_sessions::BadCredentialsError
+pub openjd_sessions::BadCredentialsError::LogonFailure
+pub openjd_sessions::BadCredentialsError::Other(alloc::string::String)
+impl core::error::Error for openjd_sessions::session_user::BadCredentialsError
+impl core::fmt::Debug for openjd_sessions::session_user::BadCredentialsError
+pub fn openjd_sessions::session_user::BadCredentialsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::session_user::BadCredentialsError
+pub fn openjd_sessions::session_user::BadCredentialsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum openjd_sessions::CancelMethod
+pub openjd_sessions::CancelMethod::NotifyThenTerminate
+pub openjd_sessions::CancelMethod::NotifyThenTerminate::terminate_delay: core::time::Duration
+pub openjd_sessions::CancelMethod::Terminate
+impl core::clone::Clone for openjd_sessions::runner::CancelMethod
+pub fn openjd_sessions::runner::CancelMethod::clone(&self) -> openjd_sessions::runner::CancelMethod
+impl core::fmt::Debug for openjd_sessions::runner::CancelMethod
+pub fn openjd_sessions::runner::CancelMethod::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::runner::CancelMethod
+pub fn openjd_sessions::runner::CancelMethod::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum openjd_sessions::ScriptRunnerState
+pub openjd_sessions::ScriptRunnerState::Canceled
+pub openjd_sessions::ScriptRunnerState::Canceling
+pub openjd_sessions::ScriptRunnerState::Failed
+pub openjd_sessions::ScriptRunnerState::Ready
+pub openjd_sessions::ScriptRunnerState::Running
+pub openjd_sessions::ScriptRunnerState::Success
+pub openjd_sessions::ScriptRunnerState::Timeout
+impl core::clone::Clone for openjd_sessions::runner::ScriptRunnerState
+pub fn openjd_sessions::runner::ScriptRunnerState::clone(&self) -> openjd_sessions::runner::ScriptRunnerState
+impl core::cmp::Eq for openjd_sessions::runner::ScriptRunnerState
+impl core::cmp::PartialEq for openjd_sessions::runner::ScriptRunnerState
+pub fn openjd_sessions::runner::ScriptRunnerState::eq(&self, &openjd_sessions::runner::ScriptRunnerState) -> bool
+impl core::fmt::Debug for openjd_sessions::runner::ScriptRunnerState
+pub fn openjd_sessions::runner::ScriptRunnerState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::runner::ScriptRunnerState
+pub fn openjd_sessions::runner::ScriptRunnerState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_sessions::runner::ScriptRunnerState
+impl core::marker::StructuralPartialEq for openjd_sessions::runner::ScriptRunnerState
+#[non_exhaustive] pub enum openjd_sessions::SessionError
+pub openjd_sessions::SessionError::DuplicateEnvironment
+pub openjd_sessions::SessionError::DuplicateEnvironment::id: alloc::string::String
+pub openjd_sessions::SessionError::EmbeddedFile
+pub openjd_sessions::SessionError::EmbeddedFile::name: alloc::string::String
+pub openjd_sessions::SessionError::EmbeddedFile::source: core::io::error::Error
+pub openjd_sessions::SessionError::EmbeddedFilePath
+pub openjd_sessions::SessionError::EmbeddedFilePath::filename: alloc::string::String
+pub openjd_sessions::SessionError::EmbeddedFilePath::name: alloc::string::String
+pub openjd_sessions::SessionError::EmbeddedFilePath::reason: alloc::string::String
+pub openjd_sessions::SessionError::EnvironmentScriptFailed
+pub openjd_sessions::SessionError::EnvironmentScriptFailed::action: alloc::string::String
+pub openjd_sessions::SessionError::EnvironmentScriptFailed::name: alloc::string::String
+pub openjd_sessions::SessionError::EnvironmentScriptFailed::reason: alloc::string::String
+pub openjd_sessions::SessionError::FormatString
+pub openjd_sessions::SessionError::FormatString::context: alloc::string::String
+pub openjd_sessions::SessionError::FormatString::reason: alloc::string::String
+pub openjd_sessions::SessionError::HelperCommunication(alloc::string::String)
+pub openjd_sessions::SessionError::InvalidState
+pub openjd_sessions::SessionError::InvalidState::current: openjd_sessions::session::SessionState
+pub openjd_sessions::SessionError::InvalidState::expected: alloc::vec::Vec<openjd_sessions::session::SessionState>
+pub openjd_sessions::SessionError::LifoViolation
+pub openjd_sessions::SessionError::LifoViolation::expected: alloc::string::String
+pub openjd_sessions::SessionError::LifoViolation::got: alloc::string::String
+pub openjd_sessions::SessionError::MultipleWrapEnvironments
+pub openjd_sessions::SessionError::MultipleWrapEnvironments::entering: alloc::string::String
+pub openjd_sessions::SessionError::MultipleWrapEnvironments::existing: alloc::string::String
+pub openjd_sessions::SessionError::PathPermissions
+pub openjd_sessions::SessionError::PathPermissions::path: alloc::string::String
+pub openjd_sessions::SessionError::PathPermissions::reason: alloc::string::String
+pub openjd_sessions::SessionError::Runtime(alloc::string::String)
+pub openjd_sessions::SessionError::SubprocessStart
+pub openjd_sessions::SessionError::SubprocessStart::command: alloc::string::String
+pub openjd_sessions::SessionError::SubprocessStart::source: core::io::error::Error
+pub openjd_sessions::SessionError::TempDir
+pub openjd_sessions::SessionError::TempDir::path: std::path::PathBuf
+pub openjd_sessions::SessionError::TempDir::source: core::io::error::Error
+pub openjd_sessions::SessionError::UnknownEnvironment
+pub openjd_sessions::SessionError::UnknownEnvironment::identifier: alloc::string::String
+pub openjd_sessions::SessionError::WorkingDirectory
+pub openjd_sessions::SessionError::WorkingDirectory::path: std::path::PathBuf
+pub openjd_sessions::SessionError::WorkingDirectory::source: core::io::error::Error
+impl core::error::Error for openjd_sessions::error::SessionError
+pub fn openjd_sessions::error::SessionError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for openjd_sessions::error::SessionError
+pub fn openjd_sessions::error::SessionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::error::SessionError
+pub fn openjd_sessions::error::SessionError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum openjd_sessions::SessionState
+pub openjd_sessions::SessionState::Canceling
+pub openjd_sessions::SessionState::Ended
+pub openjd_sessions::SessionState::Ready
+pub openjd_sessions::SessionState::ReadyEnding
+pub openjd_sessions::SessionState::Running
+impl core::clone::Clone for openjd_sessions::session::SessionState
+pub fn openjd_sessions::session::SessionState::clone(&self) -> openjd_sessions::session::SessionState
+impl core::cmp::Eq for openjd_sessions::session::SessionState
+impl core::cmp::PartialEq for openjd_sessions::session::SessionState
+pub fn openjd_sessions::session::SessionState::eq(&self, &openjd_sessions::session::SessionState) -> bool
+impl core::fmt::Debug for openjd_sessions::session::SessionState
+pub fn openjd_sessions::session::SessionState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_sessions::session::SessionState
+pub fn openjd_sessions::session::SessionState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_sessions::session::SessionState
+impl core::marker::StructuralPartialEq for openjd_sessions::session::SessionState
+pub enum openjd_sessions::StickyBitPolicy
+pub openjd_sessions::StickyBitPolicy::Disabled
+pub openjd_sessions::StickyBitPolicy::Strict
+pub openjd_sessions::StickyBitPolicy::Warn
+impl core::clone::Clone for openjd_sessions::tempdir::StickyBitPolicy
+pub fn openjd_sessions::tempdir::StickyBitPolicy::clone(&self) -> openjd_sessions::tempdir::StickyBitPolicy
+impl core::cmp::Eq for openjd_sessions::tempdir::StickyBitPolicy
+impl core::cmp::PartialEq for openjd_sessions::tempdir::StickyBitPolicy
+pub fn openjd_sessions::tempdir::StickyBitPolicy::eq(&self, &openjd_sessions::tempdir::StickyBitPolicy) -> bool
+impl core::default::Default for openjd_sessions::tempdir::StickyBitPolicy
+pub fn openjd_sessions::tempdir::StickyBitPolicy::default() -> openjd_sessions::tempdir::StickyBitPolicy
+impl core::fmt::Debug for openjd_sessions::tempdir::StickyBitPolicy
+pub fn openjd_sessions::tempdir::StickyBitPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_sessions::tempdir::StickyBitPolicy
+impl core::marker::StructuralPartialEq for openjd_sessions::tempdir::StickyBitPolicy
+pub struct openjd_sessions::ActionResult
+pub openjd_sessions::ActionResult::exit_code: core::option::Option<i32>
+pub openjd_sessions::ActionResult::state: openjd_sessions::action::ActionState
+pub openjd_sessions::ActionResult::stdout: alloc::string::String
+impl core::fmt::Debug for openjd_sessions::action::ActionResult
+pub fn openjd_sessions::action::ActionResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_sessions::ActionStatus
+pub openjd_sessions::ActionStatus::ended_at: core::option::Option<std::time::SystemTime>
+pub openjd_sessions::ActionStatus::exit_code: core::option::Option<i32>
+pub openjd_sessions::ActionStatus::fail_message: core::option::Option<alloc::string::String>
+pub openjd_sessions::ActionStatus::progress: core::option::Option<f64>
+pub openjd_sessions::ActionStatus::started_at: core::option::Option<std::time::SystemTime>
+pub openjd_sessions::ActionStatus::state: openjd_sessions::action::ActionState
+pub openjd_sessions::ActionStatus::status_message: core::option::Option<alloc::string::String>
+impl core::clone::Clone for openjd_sessions::action_status::ActionStatus
+pub fn openjd_sessions::action_status::ActionStatus::clone(&self) -> openjd_sessions::action_status::ActionStatus
+impl core::default::Default for openjd_sessions::action_status::ActionStatus
+pub fn openjd_sessions::action_status::ActionStatus::default() -> Self
+impl core::fmt::Debug for openjd_sessions::action_status::ActionStatus
+pub fn openjd_sessions::action_status::ActionStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_sessions::LogContent(_)
+impl openjd_sessions::logging::LogContent
+pub const openjd_sessions::logging::LogContent::BANNER: Self
+pub const openjd_sessions::logging::LogContent::COMMAND_OUTPUT: Self
+pub const openjd_sessions::logging::LogContent::EXCEPTION_INFO: Self
+pub const openjd_sessions::logging::LogContent::FILE_CONTENTS: Self
+pub const openjd_sessions::logging::LogContent::FILE_PATH: Self
+pub const openjd_sessions::logging::LogContent::HOST_INFO: Self
+pub const openjd_sessions::logging::LogContent::PARAMETER_INFO: Self
+pub const openjd_sessions::logging::LogContent::PROCESS_CONTROL: Self
+impl openjd_sessions::logging::LogContent
+pub const fn openjd_sessions::logging::LogContent::all() -> Self
+pub const fn openjd_sessions::logging::LogContent::bits(&self) -> u32
+pub const fn openjd_sessions::logging::LogContent::complement(self) -> Self
+pub const fn openjd_sessions::logging::LogContent::contains(&self, Self) -> bool
+pub const fn openjd_sessions::logging::LogContent::difference(self, Self) -> Self
+pub const fn openjd_sessions::logging::LogContent::empty() -> Self
+pub const fn openjd_sessions::logging::LogContent::from_bits(u32) -> core::option::Option<Self>
+pub const fn openjd_sessions::logging::LogContent::from_bits_retain(u32) -> Self
+pub const fn openjd_sessions::logging::LogContent::from_bits_truncate(u32) -> Self
+pub fn openjd_sessions::logging::LogContent::from_name(&str) -> core::option::Option<Self>
+pub fn openjd_sessions::logging::LogContent::insert(&mut self, Self)
+pub const fn openjd_sessions::logging::LogContent::intersection(self, Self) -> Self
+pub const fn openjd_sessions::logging::LogContent::intersects(&self, Self) -> bool
+pub const fn openjd_sessions::logging::LogContent::is_all(&self) -> bool
+pub const fn openjd_sessions::logging::LogContent::is_empty(&self) -> bool
+pub fn openjd_sessions::logging::LogContent::remove(&mut self, Self)
+pub fn openjd_sessions::logging::LogContent::set(&mut self, Self, bool)
+pub const fn openjd_sessions::logging::LogContent::symmetric_difference(self, Self) -> Self
+pub fn openjd_sessions::logging::LogContent::toggle(&mut self, Self)
+pub const fn openjd_sessions::logging::LogContent::union(self, Self) -> Self
+impl openjd_sessions::logging::LogContent
+pub const fn openjd_sessions::logging::LogContent::iter(&self) -> bitflags::iter::Iter<openjd_sessions::logging::LogContent>
+pub const fn openjd_sessions::logging::LogContent::iter_names(&self) -> bitflags::iter::IterNames<openjd_sessions::logging::LogContent>
+impl bitflags::traits::Flags for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Bits = u32
+pub const openjd_sessions::logging::LogContent::FLAGS: &'static [bitflags::traits::Flag<openjd_sessions::logging::LogContent>]
+pub fn openjd_sessions::logging::LogContent::all_named() -> openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bits(&self) -> u32
+pub fn openjd_sessions::logging::LogContent::from_bits_retain(u32) -> openjd_sessions::logging::LogContent
+impl bitflags::traits::PublicFlags for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Internal = InternalBitFlags
+pub type openjd_sessions::logging::LogContent::Primitive = u32
+impl core::clone::Clone for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::clone(&self) -> openjd_sessions::logging::LogContent
+impl core::cmp::Eq for openjd_sessions::logging::LogContent
+impl core::cmp::PartialEq for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::eq(&self, &openjd_sessions::logging::LogContent) -> bool
+impl core::fmt::Binary for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Debug for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::LowerHex for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Octal for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::UpperHex for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::iter::traits::collect::Extend<openjd_sessions::logging::LogContent> for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::extend<T: core::iter::traits::collect::IntoIterator<Item = Self>>(&mut self, T)
+impl core::iter::traits::collect::FromIterator<openjd_sessions::logging::LogContent> for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::from_iter<T: core::iter::traits::collect::IntoIterator<Item = Self>>(T) -> Self
+impl core::iter::traits::collect::IntoIterator for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::IntoIter = bitflags::iter::Iter<openjd_sessions::logging::LogContent>
+pub type openjd_sessions::logging::LogContent::Item = openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::into_iter(self) -> Self::IntoIter
+impl core::marker::Copy for openjd_sessions::logging::LogContent
+impl core::marker::StructuralPartialEq for openjd_sessions::logging::LogContent
+impl core::ops::arith::Sub for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Output = openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::sub(self, Self) -> Self
+impl core::ops::arith::SubAssign for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::sub_assign(&mut self, Self)
+impl core::ops::bit::BitAnd for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Output = openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bitand(self, Self) -> Self
+impl core::ops::bit::BitAndAssign for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bitand_assign(&mut self, Self)
+impl core::ops::bit::BitOr for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Output = openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bitor(self, openjd_sessions::logging::LogContent) -> Self
+impl core::ops::bit::BitOrAssign for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bitor_assign(&mut self, Self)
+impl core::ops::bit::BitXor for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Output = openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bitxor(self, Self) -> Self
+impl core::ops::bit::BitXorAssign for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::bitxor_assign(&mut self, Self)
+impl core::ops::bit::Not for openjd_sessions::logging::LogContent
+pub type openjd_sessions::logging::LogContent::Output = openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::not(self) -> Self
+impl log::kv::value::ToValue for openjd_sessions::logging::LogContent
+pub fn openjd_sessions::logging::LogContent::to_value(&self) -> log::kv::value::Value<'_>
+pub struct openjd_sessions::Session
+impl openjd_sessions::session::Session
+pub fn openjd_sessions::session::Session::action_status(&self) -> core::option::Option<openjd_sessions::action_status::ActionStatus>
+pub fn openjd_sessions::session::Session::build_symbol_table(&self, core::option::Option<&openjd_model::types::TaskParameterSet>, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>) -> core::result::Result<openjd_expr::symbol_table::SymbolTable, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::session::Session::cancel_action(&mut self, core::option::Option<core::time::Duration>, bool) -> core::result::Result<(), openjd_sessions::error::SessionError>
+pub fn openjd_sessions::session::Session::cancel_handle(&self) -> openjd_sessions::session::SessionCancelHandle
+pub fn openjd_sessions::session::Session::cleanup(&mut self)
+pub fn openjd_sessions::session::Session::clone_cancel_writer(&self) -> core::option::Option<std::fs::File>
+pub async fn openjd_sessions::session::Session::enter_environment(&mut self, &openjd_model::job::Environment, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, core::option::Option<&str>, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<alloc::string::String, openjd_sessions::error::SessionError>
+pub async fn openjd_sessions::session::Session::enter_environment_with_output(&mut self, &openjd_model::job::Environment, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, core::option::Option<&str>, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<(alloc::string::String, alloc::string::String), openjd_sessions::error::SessionError>
+pub fn openjd_sessions::session::Session::environments_entered(&self) -> &[openjd_sessions::session::EnvironmentIdentifier]
+pub fn openjd_sessions::session::Session::evaluate_env_vars(&self, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>
+pub async fn openjd_sessions::session::Session::exit_environment(&mut self, &openjd_sessions::session::EnvironmentIdentifier, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, bool, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<alloc::string::String, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::session::Session::extend_path_mapping_rules(&mut self, alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>)
+pub fn openjd_sessions::session::Session::files_directory(&self) -> &std::path::Path
+pub fn openjd_sessions::session::Session::get_enabled_extensions(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn openjd_sessions::session::Session::job_parameter_values(&self) -> &openjd_model::types::JobParameterValues
+pub fn openjd_sessions::session::Session::override_action_state(&mut self, openjd_sessions::action::ActionState)
+pub fn openjd_sessions::session::Session::path_mapping_rules(&self) -> &[openjd_expr::path_mapping::PathMappingRule]
+pub fn openjd_sessions::session::Session::redact(&self, &str) -> alloc::string::String
+pub async fn openjd_sessions::session::Session::run_subprocess(&mut self, &str, core::option::Option<&[alloc::string::String]>, core::option::Option<core::time::Duration>, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>, bool, core::option::Option<&str>) -> core::result::Result<openjd_sessions::SubprocessResult, openjd_sessions::error::SessionError>
+pub async fn openjd_sessions::session::Session::run_task(&mut self, &str, &openjd_model::job::StepScript, core::option::Option<&openjd_model::types::TaskParameterSet>, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<openjd_sessions::action::ActionResult, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::session::Session::session_id(&self) -> &str
+pub fn openjd_sessions::session::Session::state(&self) -> openjd_sessions::session::SessionState
+pub fn openjd_sessions::session::Session::with_config(openjd_sessions::session::SessionConfig) -> core::result::Result<Self, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::session::Session::with_path_mapping(self, alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> Self
+pub fn openjd_sessions::session::Session::with_profile(self, openjd_model::types::ModelProfile) -> Self
+pub fn openjd_sessions::session::Session::working_directory(&self) -> &std::path::Path
+impl core::ops::drop::Drop for openjd_sessions::session::Session
+pub fn openjd_sessions::session::Session::drop(&mut self)
+pub struct openjd_sessions::SessionCancelHandle
+impl openjd_sessions::session::SessionCancelHandle
+pub fn openjd_sessions::session::SessionCancelHandle::cancel(&self, core::option::Option<core::time::Duration>, bool) -> bool
+pub struct openjd_sessions::SessionConfig
+pub openjd_sessions::SessionConfig::callback: core::option::Option<openjd_sessions::session::SessionCallbackType>
+pub openjd_sessions::SessionConfig::cancel_token: core::option::Option<tokio_util::sync::cancellation_token::CancellationToken>
+pub openjd_sessions::SessionConfig::debug_collect_stdout: bool
+pub openjd_sessions::SessionConfig::echo_openjd_directives: bool
+pub openjd_sessions::SessionConfig::job_parameter_values: openjd_model::types::JobParameterValues
+pub openjd_sessions::SessionConfig::limits: openjd_sessions::limits::SessionLimits
+pub openjd_sessions::SessionConfig::os_env_vars: core::option::Option<std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>
+pub openjd_sessions::SessionConfig::path_mapping_rules: core::option::Option<alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>>
+pub openjd_sessions::SessionConfig::profile: core::option::Option<openjd_model::types::ModelProfile>
+pub openjd_sessions::SessionConfig::retain_working_dir: bool
+pub openjd_sessions::SessionConfig::session_id: alloc::string::String
+pub openjd_sessions::SessionConfig::session_root_directory: core::option::Option<std::path::PathBuf>
+pub openjd_sessions::SessionConfig::sticky_bit_policy: openjd_sessions::tempdir::StickyBitPolicy
+pub openjd_sessions::SessionConfig::user: core::option::Option<alloc::sync::Arc<dyn openjd_sessions::session_user::SessionUser>>
+pub struct openjd_sessions::SessionLimits
+pub openjd_sessions::SessionLimits::max_eval_memory_bytes: core::option::Option<usize>
+pub openjd_sessions::SessionLimits::max_eval_operations: core::option::Option<usize>
+pub openjd_sessions::SessionLimits::max_resolved_arg_len: core::option::Option<usize>
+pub openjd_sessions::SessionLimits::max_resolved_data_len: core::option::Option<usize>
+impl core::clone::Clone for openjd_sessions::limits::SessionLimits
+pub fn openjd_sessions::limits::SessionLimits::clone(&self) -> openjd_sessions::limits::SessionLimits
+impl core::cmp::Eq for openjd_sessions::limits::SessionLimits
+impl core::cmp::PartialEq for openjd_sessions::limits::SessionLimits
+pub fn openjd_sessions::limits::SessionLimits::eq(&self, &openjd_sessions::limits::SessionLimits) -> bool
+impl core::convert::From<&openjd_model::types::CallerLimits> for openjd_sessions::limits::SessionLimits
+pub fn openjd_sessions::limits::SessionLimits::from(&openjd_model::types::CallerLimits) -> Self
+impl core::default::Default for openjd_sessions::limits::SessionLimits
+pub fn openjd_sessions::limits::SessionLimits::default() -> openjd_sessions::limits::SessionLimits
+impl core::fmt::Debug for openjd_sessions::limits::SessionLimits
+pub fn openjd_sessions::limits::SessionLimits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_sessions::limits::SessionLimits
+impl core::marker::StructuralPartialEq for openjd_sessions::limits::SessionLimits
+pub struct openjd_sessions::SubprocessResult
+pub openjd_sessions::SubprocessResult::exit_code: core::option::Option<i32>
+pub openjd_sessions::SubprocessResult::state: openjd_sessions::action::ActionState
+pub openjd_sessions::SubprocessResult::stdout: alloc::string::String
+impl core::fmt::Debug for openjd_sessions::SubprocessResult
+pub fn openjd_sessions::SubprocessResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_sessions::TempDir
+impl openjd_sessions::tempdir::TempDir
+pub fn openjd_sessions::tempdir::TempDir::cleanup(&mut self) -> core::result::Result<(), openjd_sessions::error::SessionError>
+pub fn openjd_sessions::tempdir::TempDir::new(core::option::Option<&std::path::Path>, core::option::Option<&str>, core::option::Option<&dyn openjd_sessions::session_user::SessionUser>) -> core::result::Result<Self, openjd_sessions::error::SessionError>
+pub fn openjd_sessions::tempdir::TempDir::path(&self) -> &std::path::Path
+impl core::convert::AsRef<std::path::Path> for openjd_sessions::tempdir::TempDir
+pub fn openjd_sessions::tempdir::TempDir::as_ref(&self) -> &std::path::Path
+impl core::fmt::Debug for openjd_sessions::tempdir::TempDir
+pub fn openjd_sessions::tempdir::TempDir::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::ops::drop::Drop for openjd_sessions::tempdir::TempDir
+pub fn openjd_sessions::tempdir::TempDir::drop(&mut self)
+pub struct openjd_sessions::WindowsSessionUser
+impl openjd_sessions::session_user::WindowsSessionUser
+pub fn openjd_sessions::session_user::WindowsSessionUser::for_process_user() -> core::result::Result<Self, alloc::string::String>
+pub fn openjd_sessions::session_user::WindowsSessionUser::logon_token(&self) -> core::option::Option<windows::Win32::Foundation::HANDLE>
+pub fn openjd_sessions::session_user::WindowsSessionUser::password(&self) -> core::option::Option<&str>
+pub fn openjd_sessions::session_user::WindowsSessionUser::with_logon_token(&str, windows::Win32::Foundation::HANDLE) -> core::result::Result<Self, alloc::string::String>
+pub fn openjd_sessions::session_user::WindowsSessionUser::with_password(&str, &str) -> core::result::Result<Self, openjd_sessions::session_user::BadCredentialsError>
+impl core::fmt::Debug for openjd_sessions::session_user::WindowsSessionUser
+pub fn openjd_sessions::session_user::WindowsSessionUser::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Send for openjd_sessions::session_user::WindowsSessionUser
+impl core::marker::Sync for openjd_sessions::session_user::WindowsSessionUser
+impl openjd_sessions::session_user::SessionUser for openjd_sessions::session_user::WindowsSessionUser
+pub fn openjd_sessions::session_user::WindowsSessionUser::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_sessions::session_user::WindowsSessionUser::group(&self) -> &str
+pub fn openjd_sessions::session_user::WindowsSessionUser::is_process_user(&self) -> bool
+pub fn openjd_sessions::session_user::WindowsSessionUser::user(&self) -> &str
+pub trait openjd_sessions::SessionUser: core::marker::Send + core::marker::Sync + core::fmt::Debug
+pub fn openjd_sessions::SessionUser::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_sessions::SessionUser::group(&self) -> &str
+pub fn openjd_sessions::SessionUser::is_process_user(&self) -> bool
+pub fn openjd_sessions::SessionUser::user(&self) -> &str
+impl openjd_sessions::session_user::SessionUser for openjd_sessions::session_user::WindowsSessionUser
+pub fn openjd_sessions::session_user::WindowsSessionUser::as_any(&self) -> &dyn core::any::Any
+pub fn openjd_sessions::session_user::WindowsSessionUser::group(&self) -> &str
+pub fn openjd_sessions::session_user::WindowsSessionUser::is_process_user(&self) -> bool
+pub fn openjd_sessions::session_user::WindowsSessionUser::user(&self) -> &str
+pub type openjd_sessions::EnvironmentIdentifier = alloc::string::String

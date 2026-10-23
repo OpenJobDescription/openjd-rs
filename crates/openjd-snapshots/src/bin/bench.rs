@@ -2,6 +2,9 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
+//! `openjd-snapshots-bench`: benchmarks openjd-snapshots operations. Built
+//! only with the `bench` feature.
+
 #![cfg_attr(not(feature = "bench"), allow(unused))]
 
 use clap::Parser;

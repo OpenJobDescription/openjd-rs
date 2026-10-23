@@ -77,13 +77,22 @@
 //! | CACHE_SYNC | [`cache_sync_manifest`] | Copy data between caches (S3↔filesystem) |
 
 pub mod codec;
+/// Content-addressed data caches (local filesystem and S3) that operations
+/// read file data from and write it to.
 pub mod data_cache;
+/// The [`SnapshotError`] type returned by snapshot operations.
 pub mod error;
+/// xxHash3 hashing of files, file chunks, and in-memory data.
 pub mod hash;
+/// Local SQLite cache of previously computed file and chunk hashes, so files
+/// whose modification time is unchanged are not rehashed.
 pub mod hash_cache;
+/// Manifest and snapshot types, parameterized by path style and manifest kind.
 pub mod manifest;
+/// The snapshot operations listed in the crate-level Operations table.
 pub mod ops;
 mod path_util;
+/// Local cache of objects known to exist in S3, so uploads can skip them.
 pub mod s3_check_cache;
 
 pub use codec::{

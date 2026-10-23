@@ -12,6 +12,9 @@ description = "Open Job Description model library — parsing, validation, and j
 keywords = ["openjd", "openjobdescription", "job-template", "yaml", "validation"]
 categories = ["parser-implementations", "data-structures"]
 
+[lints]
+workspace = true
+
 [dependencies]
 openjd-expr = { path = "../openjd-expr", version = "0.12.0" }
 indexmap = { version = "2", features = ["serde"] }

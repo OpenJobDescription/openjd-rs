@@ -112,6 +112,10 @@ pub(crate) fn decode_backslashreplace(bytes: &[u8]) -> Cow<'_, str> {
 
 /// Result of running a subprocess action.
 #[derive(Debug)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct SubprocessResult {
     pub state: ActionState,
     pub exit_code: Option<i32>,

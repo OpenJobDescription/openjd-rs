@@ -1436,10 +1436,18 @@ impl StepParameterSpaceIterator {
         })
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn names(&self) -> &HashSet<String> {
         &self.names
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn len(&self) -> usize {
         if self.adaptive {
             0
@@ -1448,6 +1456,10 @@ impl StepParameterSpaceIterator {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn is_empty(&self) -> bool {
         if self.adaptive {
             false

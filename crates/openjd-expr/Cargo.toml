@@ -12,6 +12,9 @@ description = "Open Job Description expression language — types, evaluation, a
 keywords = ["openjd", "openjobdescription", "expression-language", "parser", "evaluator"]
 categories = ["parser-implementations", "template-engine"]
 
+[lints]
+workspace = true
+
 [dependencies]
 shlex = { workspace = true }
 thiserror = { workspace = true }

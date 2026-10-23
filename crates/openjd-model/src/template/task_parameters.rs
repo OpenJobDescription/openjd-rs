@@ -19,6 +19,10 @@ use serde::Deserialize;
 /// [`JobParameterDefinition`]: super::parameters::JobParameterDefinition
 #[derive(Debug, Clone)]
 #[allow(non_camel_case_types)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum TaskParameterDefinition {
     INT(IntTaskParameterDefinition),
     FLOAT(FloatTaskParameterDefinition),
@@ -59,6 +63,10 @@ impl<'de> serde::Deserialize<'de> for TaskParameterDefinition {
 }
 
 impl TaskParameterDefinition {
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn task_param_type(&self) -> crate::types::TaskParameterType {
         use crate::types::TaskParameterType;
         match self {
@@ -70,6 +78,10 @@ impl TaskParameterDefinition {
         }
     }
 
+    #[allow(
+        missing_docs,
+        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+    )]
     pub fn name(&self) -> &str {
         match self {
             Self::INT(p) => p.name.as_str(),
@@ -83,6 +95,10 @@ impl TaskParameterDefinition {
 
 /// Int range: either a list of values or a range expression string.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum IntRange {
     List(Vec<FlexInt>),
     Expression(FormatString),
@@ -113,6 +129,10 @@ impl<'de> Deserialize<'de> for IntRange {
 /// Concrete types to avoid derive conflicts with FormatString.
 
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum StringRange {
     List(Vec<FormatString>),
     Expression(FormatString),
@@ -139,6 +159,10 @@ impl<'de> Deserialize<'de> for StringRange {
 
 /// A float range list item: either a literal float or a format string.
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum FloatRangeItem {
     Float(f64),
     FormatString(FormatString),
@@ -166,6 +190,10 @@ impl<'de> Deserialize<'de> for FloatRangeItem {
 }
 
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum FloatRange {
     List(Vec<FloatRangeItem>),
     Expression(FormatString),
@@ -193,6 +221,10 @@ impl<'de> Deserialize<'de> for FloatRange {
 /// §3.4.1.1 IntTaskParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct IntTaskParameterDefinition {
     pub name: Identifier,
     pub range: IntRange,
@@ -201,6 +233,10 @@ pub struct IntTaskParameterDefinition {
 /// §3.4.1.2 FloatTaskParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct FloatTaskParameterDefinition {
     pub name: Identifier,
     pub range: FloatRange,
@@ -209,6 +245,10 @@ pub struct FloatTaskParameterDefinition {
 /// §3.4.1.3 StringTaskParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct StringTaskParameterDefinition {
     pub name: Identifier,
     pub range: StringRange,
@@ -217,6 +257,10 @@ pub struct StringTaskParameterDefinition {
 /// §3.4.1.4 PathTaskParameterDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct PathTaskParameterDefinition {
     pub name: Identifier,
     pub range: StringRange,
@@ -225,6 +269,10 @@ pub struct PathTaskParameterDefinition {
 /// §3.4.1.5 ChunkIntTaskParameterDefinition (TASK_CHUNKING extension)
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ChunkIntTaskParameterDefinition {
     pub name: Identifier,
     pub range: IntRange,
@@ -239,6 +287,10 @@ pub struct ChunkIntTaskParameterDefinition {
 /// - String containing `{{…}}` → `IntOrFormatString::FormatString(fs)`
 /// - Boolean/null → error
 #[derive(Debug, Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum IntOrFormatString {
     Int(i64),
     FormatString(FormatString),
@@ -298,6 +350,10 @@ impl<'de> Deserialize<'de> for IntOrFormatString {
 /// Chunks configuration for `CHUNK[INT]` parameters.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct ChunksDefinition {
     pub default_task_count: IntOrFormatString,
     pub target_runtime_seconds: Option<IntOrFormatString>,
@@ -306,6 +362,10 @@ pub struct ChunksDefinition {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, serde::Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub enum RangeConstraint {
     Contiguous,
     Noncontiguous,
@@ -314,6 +374,10 @@ pub enum RangeConstraint {
 /// §3.4 StepParameterSpaceDefinition
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct StepParameterSpaceDefinition {
     pub task_parameter_definitions: Vec<TaskParameterDefinition>,
     pub combination: Option<String>,

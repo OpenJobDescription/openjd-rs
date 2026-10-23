@@ -23,13 +23,24 @@ bitflags! {
     /// ```
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct LogContent: u32 {
+        /// Contains a banner, such as one that visually separates log sections.
         const BANNER = 1 << 0;
+        /// Contains a file path.
         const FILE_PATH = 1 << 1;
+        /// Contains the contents of a file.
         const FILE_CONTENTS = 1 << 2;
+        /// Contains output from a command that was run.
         const COMMAND_OUTPUT = 1 << 3;
+        /// Contains an error openjd encountered. It may include sensitive
+        /// information, such as file paths or host information.
         const EXCEPTION_INFO = 1 << 4;
+        /// Contains information about starting, killing, or signaling
+        /// processes.
         const PROCESS_CONTROL = 1 << 5;
+        /// Contains parameters, and their values, of the running action.
         const PARAMETER_INFO = 1 << 6;
+        /// Contains details of the system environment, such as dependency
+        /// versions, OS name, and CPU architecture.
         const HOST_INFO = 1 << 7;
     }
 }

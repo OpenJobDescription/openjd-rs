@@ -45,12 +45,20 @@ pub type FunctionImpl = Arc<
 
 /// A registered function overload.
 #[derive(Clone)]
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub struct FunctionEntry {
     pub signature: ExprType, // TypeCode::Signature
     pub implementation: FunctionImpl,
 }
 
 /// Trait for the evaluator context that function implementations can access.
+#[allow(
+    missing_docs,
+    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
+)]
 pub trait EvalContext {
     fn path_format(&self) -> crate::path_mapping::PathFormat;
     fn count_op(&mut self) -> Result<(), ExpressionError>;
