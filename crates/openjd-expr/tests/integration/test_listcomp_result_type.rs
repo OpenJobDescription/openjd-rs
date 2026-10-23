@@ -80,8 +80,8 @@ fn assert_stages(expr: &str, pass8: &str, gate2: &str, run: &str, run_value: &st
     assert_eq!(v.to_display_string(), run_value, "run time: {expr}");
 }
 
-/// Assert `expr` fails in `st` with exactly the message, expression line,
-/// and caret in `expected`.
+/// Assert `expr` fails in `st` with an error containing the message,
+/// expression line, and caret in `expected`, in that order and adjacent.
 fn assert_err_in(expr: &str, st: &SymbolTable, stage: &str, expected: &[&str]) {
     let e = match ParsedExpression::new(expr).and_then(|p| p.evaluate(st)) {
         Ok(v) => panic!("{stage}: {expr}: expected an error, got {v:?}"),
@@ -1975,4 +1975,68 @@ fn union_index_with_no_member_that_can_be_an_int_is_an_error() {
             ],
         );
     }
+}
+
+// ── Audit loop 3, round 2 ──
+
+#[test]
+fn list_literal_keeps_the_empty_form_of_a_union_element() {
+    // A-F1/A-F3/A-F7: a list literal or comprehension whose element is
+    // `list[string] | list[nulltype]` dropped the empty form, typing
+    // `[(LS if c else [])]` a `list[list[string]]`, so `sum` of its element
+    // was rejected, though a run that takes `[]` builds `[[]]`, whose
+    // element is the untyped empty list (§1.2.1).
+    for expr in [
+        "sum([(Param.LS if not Task.Param.C else [])][0])",
+        "sum(([(Param.LS if not Task.Param.C else [])] + [])[0])",
+        "sum([(Param.LS if not Task.Param.C else []) for x in Param.L][0])",
+    ] {
+        assert_stages(expr, "unresolved[int]", "unresolved[int]", "int", "0");
+    }
+    // A-F2: with the empty form dropped, every form of the comprehension's
+    // element was a list of lists, so it was always empty and indexing it
+    // was rejected.
+    assert_stages(
+        "[y for y in [([Param.L] if not Task.Param.C else [])]][0] + [1]",
+        "unresolved[list[int]]",
+        "unresolved[list[int]]",
+        "list[int]",
+        "[1]",
+    );
+}
+
+#[test]
+fn call_past_the_form_combination_cap_covers_every_member() {
+    // A-F4: past 64 combinations a call took the first signature a union
+    // matches (`max` of `int`s), while a run that takes the `0.5` member
+    // is a float. It is typed as `derive_return_type` types it, by every
+    // signature a member matches. Five members, three arguments: 125.
+    let p = "(Param.LS[0] if Task.Param.I == 0 else 1 if Task.Param.I == 1 \
+             else 0.5 if Task.Param.I == 2 else True if Task.Param.I == 3 else path('/a'))";
+    assert_stages(
+        &format!("max({p}, {p}, {p})"),
+        "unresolved[float | int]",
+        "unresolved[float | int]",
+        "float",
+        "0.5",
+    );
+}
+
+#[test]
+fn lone_list_element_with_a_member_of_unknown_type_is_any() {
+    // B-F1: a lone element whose type is a union with a type variable is
+    // `any`, as it is when it joins another element.
+    let mut p8 = SymbolTable::new();
+    p8.set("Param.A", ExprValue::unresolved(ExprType::ANY))
+        .unwrap();
+    p8.set("Task.Param.C", ExprValue::unresolved(ExprType::BOOL))
+        .unwrap();
+    assert_eq!(
+        eval("flatten([Param.A])[0] if Task.Param.C else 1", &p8).expr_type(),
+        tp("unresolved[T1 | int]")
+    );
+    assert_eq!(
+        eval("[flatten([Param.A])[0] if Task.Param.C else 1]", &p8).expr_type(),
+        tp("unresolved[list[any]]")
+    );
 }

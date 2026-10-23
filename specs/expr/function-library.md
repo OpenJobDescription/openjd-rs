@@ -257,9 +257,12 @@ that match, its list members merged into one list type
 `sum(list[float])`, `sum(list[int])`, and `sum(list[nulltype])`); `sorted` of
 it is `list[float | int | nulltype]`; `(LS if c else L)[0]` with
 `LS: list[string]`, `L: list[int]` is `int | string`, so `.upper()` of it is a
-`string`. Past 64 combinations the call is typed by the argument types as they
-are, without expanding their forms. `derive_return_type` expands forms the
-same way.
+`string`. Past 64 combinations the call is typed as `derive_return_type` types
+the arguments as they are, without expanding their forms: a top-level union
+argument by every signature one of its members matches (each member also
+standing for the type it coerces to), which covers the signature a run's value
+selects (`max` of three five-member unions is `float | int`, not the `int` of
+the first match). `derive_return_type` expands forms the same way under the cap.
 
 List concatenation's `(list[T1], list[T2]) -> list[T3]` (and the range overloads'
 `list[T2]`) leaves the element type unbound; with unresolved operands the call (and

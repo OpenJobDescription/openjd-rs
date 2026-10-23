@@ -153,8 +153,14 @@ impl FunctionLibrary {
     }
 
     /// Dispatch a function call: exact → coerced → generic. With an
-    /// unresolved argument the call is type-only: a list argument whose
-    /// element type is a union is typed by each of its forms.
+    /// unresolved argument the call is type-only (it is not evaluated): an
+    /// argument whose type is a union, or a list whose element type is one,
+    /// is typed by each of its forms, the result being the union of the
+    /// return types of the combinations that match (past 64 combinations,
+    /// as [`Self::derive_return_type`] types the arguments as they are);
+    /// a call with an argument of unknown type (`any`, a bare type
+    /// variable) is `any`, also when no signature but one of its arity
+    /// matches.
     pub fn call(
         &self,
         name: &str,
@@ -204,12 +210,23 @@ impl FunctionLibrary {
 
         // An unresolved argument makes the call type-only: its result is
         // the signature's return type. The phases are applied to the
-        // types, with list arguments whose element type is a union
-        // matched by their forms (`unresolved_return_type`).
+        // types, with arguments matched by their forms
+        // (`unresolved_return_type`). Past `MAX_FORM_COMBINATIONS` the call
+        // is typed as `derive_return_type` types the arguments as they
+        // are: a top-level union by every signature one of its members
+        // matches, which covers the one a run's value selects.
         if any_unresolved {
-            if let Some(ret) =
-                unresolved_return_type(name, entries, &arg_types, skip_receiver_coercion)
-            {
+            let ret = match form_combinations(&arg_types) {
+                Some(combinations) => unresolved_return_type(
+                    name,
+                    entries,
+                    &combinations,
+                    &arg_types,
+                    skip_receiver_coercion,
+                ),
+                None => self.derive_return_type(name, &arg_types),
+            };
+            if let Some(ret) = ret {
                 return Ok(ExprValue::unresolved(ret));
             }
             // An argument of unknown type (`any`, or a bare type variable
@@ -637,7 +654,7 @@ fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Expr
         return ExprType::list(ExprType::ANY);
     }
     match crate::types::join_list_element(&left, &right) {
-        Some(joined) => crate::types::simplify_joined_list_element(joined),
+        Some(joined) => joined,
         None => ret,
     }
 }
@@ -709,14 +726,15 @@ fn form_combinations(arg_types: &[ExprType]) -> Option<Vec<Vec<ExprType>>> {
 /// one, stands for one type per form (2026-02 Expression Language §1.2.1:
 /// `list[int | nulltype]` is a `list[int]` or the empty `list[nulltype]`,
 /// and `list[int] | list[string]` is a `list[int]` or a `list[string]`),
-/// so the call is typed for each combination of forms: the result is the
-/// union of the return types of the combinations that match, a union of
-/// list types read as one list type (`list[int] | list[nulltype]` is
-/// `list[int | nulltype]`). It is `None` when no combination matches.
-/// Past [`MAX_FORM_COMBINATIONS`] the arguments are typed as they are.
+/// so the call is typed for each of `combinations` ([`form_combinations`]
+/// of `arg_types`): the result is the union of the return types of the
+/// combinations that match, a union of list types read as one list type
+/// (`list[int] | list[nulltype]` is `list[int | nulltype]`). It is `None`
+/// when no combination matches.
 fn unresolved_return_type(
     name: &str,
     entries: &[FunctionEntry],
+    combinations: &[Vec<ExprType>],
     arg_types: &[ExprType],
     skip_receiver_coercion: bool,
 ) -> Option<ExprType> {
@@ -724,10 +742,7 @@ fn unresolved_return_type(
         phase_return_type(entries, args, skip_receiver_coercion)
             .map(|ret| refined_return_type(name, args, ret))
     };
-    let Some(combinations) = form_combinations(arg_types) else {
-        return form_return_type(arg_types);
-    };
-    if let [only] = combinations.as_slice() {
+    if let [only] = combinations {
         return form_return_type(only);
     }
     let returns: Vec<ExprType> = combinations

@@ -438,10 +438,12 @@ pub(crate) fn join_list_element(a: &ExprType, b: &ExprType) -> Option<ExprType> 
 ///   list. A union drops its `nulltype` member: `int | nulltype`
 ///   contributes `int`.
 ///
-/// A `list[nulltype]` union member is kept here: it still joins with any
+/// A `list[nulltype]` union member is kept: it still joins with any
 /// list (`[([] if c else [1]), ['a']]` builds when `c` holds), so
 /// dropping it before the join would reject a list that can be built.
-/// [`simplify_joined_list_element`] removes it from the joined result.
+/// Nor is it dropped from a joined union: `[([] if c else [1])]` is a
+/// `list[list[nulltype] | list[int]]`, since a run where `c` holds builds
+/// `[[]]`, whose element is the untyped empty list (§1.2.1).
 pub(crate) fn list_element_contribution(t: &ExprType) -> Option<ExprType> {
     let t = match (t.code, t.params.as_slice()) {
         (TypeCode::Unresolved, [inner]) => inner,
@@ -464,23 +466,6 @@ pub(crate) fn list_element_contribution(t: &ExprType) -> Option<ExprType> {
         }
         _ => Some(t.clone()),
     }
-}
-
-/// Simplify a joined list element type: a union holding a typed list
-/// member drops its `list[nulltype]` member. The empty list fits any list
-/// type (`[[], [1]]` is `list[list[int]]`), so `list[int] | list[nulltype]`
-/// as an element type is `list[int]`. Applied to the result of a join
-/// (never to its inputs, where the empty-list member must stay joinable).
-pub(crate) fn simplify_joined_list_element(t: ExprType) -> ExprType {
-    if t.code != TypeCode::Union {
-        return t;
-    }
-    let empty_list = ExprType::list(ExprType::NULLTYPE);
-    let has_typed_list = t.params.iter().any(|m| m.is_list() && *m != empty_list);
-    if !has_typed_list || !t.params.contains(&empty_list) {
-        return t;
-    }
-    ExprType::union(t.params.into_iter().filter(|m| *m != empty_list).collect())
 }
 
 fn is_unknown_element(t: &ExprType) -> bool {
@@ -563,8 +548,7 @@ fn join_union_members(members: &[ExprType], other: &ExprType, nested: bool) -> O
 /// lone one, is reduced to its [`list_element_contribution`]; a first
 /// element that contributes nothing (`nulltype`) fails as
 /// `Err((t, t))`, and a lone one of unknown type (a type variable, or a
-/// union with one) is `any`, as its join with another element is. The
-/// joined type is finished with [`simplify_joined_list_element`].
+/// union with one) is `any`, as its join with another element is.
 pub(crate) fn join_list_element_types<I>(types: I) -> Result<Option<ExprType>, (ExprType, ExprType)>
 where
     I: IntoIterator<Item = ExprType>,
@@ -584,7 +568,7 @@ where
             },
         });
     }
-    Ok(acc.map(simplify_joined_list_element))
+    Ok(acc)
 }
 
 // ── List comprehension types (2026-02 Expression Language §1.3.7) ──
@@ -2008,18 +1992,6 @@ mod tests {
     }
 
     #[test]
-    fn simplify_joined_list_element_drops_empty_list_beside_typed_list() {
-        let s = |t: &str| simplify_joined_list_element(ExprType::parse(t).unwrap()).to_string();
-        assert_eq!(s("list[int] | list[nulltype]"), "list[int]");
-        assert_eq!(
-            s("list[int] | list[nulltype] | list[string]"),
-            "list[int] | list[string]"
-        );
-        assert_eq!(s("list[nulltype]"), "list[nulltype]");
-        assert_eq!(s("int | list[nulltype]"), "int | list[nulltype]");
-    }
-
-    #[test]
     fn list_element_contribution_drops_unbuildable_members() {
         let c = |s: &str| {
             list_element_contribution(&ExprType::parse(s).unwrap()).map(|t| t.to_string())
@@ -2083,5 +2055,28 @@ mod tests {
             join_list_element_types(ts(&["nulltype"])),
             Err((ExprType::NULLTYPE, ExprType::NULLTYPE))
         );
+        // A lone union element keeps its empty-list form: the run that
+        // takes it builds `[[]]` (round 2 A-F1 of audit loop 3).
+        assert_eq!(
+            join_list_element_types(ts(&["list[string] | list[nulltype]"])),
+            Ok(Some(
+                ExprType::parse("list[string] | list[nulltype]").unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn merge_list_union_merges_at_every_depth() {
+        let m = |t: &str| merge_list_union(ExprType::parse(t).unwrap()).to_string();
+        assert_eq!(m("list[int] | list[string]"), "list[int | string]");
+        assert_eq!(
+            m("list[list[int] | list[string] | nulltype]"),
+            "list[list[int | string]?]"
+        );
+        assert_eq!(
+            m("int | list[int] | list[float]"),
+            "int | list[float | int]"
+        );
+        assert_eq!(m("int"), "int");
     }
 }

@@ -539,7 +539,6 @@ fn concat_common_type(
             name(right, range_side == Some(RangeSide::Right)),
         )));
     };
-    let joined = crate::types::simplify_joined_list_element(joined);
     let result_type = joined
         .list_element_type()
         .cloned()

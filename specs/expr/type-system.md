@@ -149,12 +149,16 @@ union with one) is `any`, as its join with another element would be:
 `[flatten([x])[0]]` with `x: any` is `list[any]`, not `list[T1]`. A union's `list[nulltype]` member is kept for the join — the
 empty list still joins with any list, so `[([] if H else [1]), ['a']]`
 (which builds `[[], ['a']]` when `H` holds) joins to `list[string]` even
-though `list[int]` and `list[string]` conflict. The **joined result** is then
-simplified (`types::simplify_joined_list_element`, crate-internal): a union
-holding a typed list drops its `list[nulltype]` member
-(`list[int] | list[nulltype]` becomes `list[int]`, as `[[], [1]]` is
-`list[list[int]]`). So `[Task.Param.I if H else None]` is
-`unresolved[list[int]]`, and `int?` against `string?` is the `int` / `string`
+though `list[int]` and `list[string]` conflict. Nor is it dropped from the
+joined result: `[([] if H else ['a'])]` is
+`list[list[nulltype] | list[string]]`, the forms `list[list[nulltype]]` and
+`list[list[string]]`, because the run where `H` holds builds `[[]]`, whose
+element is the untyped empty list: `sum` of that element is `0`, which a
+`list[list[string]]` type would reject. Two elements do join the empty list
+into the other's type — `[[], ['a']]` is `list[list[string]]`, the inner `[]`
+yielding inside a list — since both are in the list every run builds.
+Dropping a top-level `nulltype` makes `[Task.Param.I if H else None]`
+`unresolved[list[int]]`, and `int?` against `string?` the `int` / `string`
 conflict — every value of that literal fails at run time — rather than a
 member-wise join to `nulltype`. Concrete `make_list` reports a `null` element
 as "Cannot create list from null elements" before the join. The unresolved
@@ -192,7 +196,6 @@ Crate-internal helpers (`pub(crate)`, not part of the public API):
 | `erase_type_vars() -> ExprType` | Replace every type variable with `any` — the wildcard reading of unbound variables in coercion sources |
 | `types::list_element_contribution(&ExprType) -> Option<ExprType>` | The type an element contributes to a built list: unwraps `unresolved[T]`; drops a top-level `nulltype` (union member or bare; `None` if nothing is left); keeps `list[nulltype]` members |
 | `types::join_list_element(&ExprType, &ExprType) -> Option<ExprType>` | The list-element join above; `None` on a conflict |
-| `types::simplify_joined_list_element(ExprType) -> ExprType` | On a joined element type, drops `list[nulltype]` from a union that also holds a typed list |
 | `types::comprehension_var(&ExprType) -> ComprehensionVar` | A list comprehension's loop variable for an unresolved iterable of this type (§1.3.7): `Typed(E)` for `list[E]` (`int` for `range_expr`, the union of the members' element types for a union, `nulltype` elements and members contributing nothing, and `any` for `any`, a type variable, a list of one, or a type that cannot be iterated: it may come from typing an operation on values of unknown type), `EmptyOnly` when the iterable can only be `[]` or `null` |
 | `types::comprehension_list_type(&ExprType) -> ExprType` | The type of a comprehension over an unresolved iterable (or with an unresolved filter) from its body's type (§1.3.7): `T` is the body without `nulltype`, its unions of lists merged; `list[T \| nulltype]`, the run that keeps no element included; `list[nulltype]` if nothing is left, the body is `noreturn`, or `T` is a list of lists (`comprehension_too_deep`) |
 | `types::comprehension_too_deep(&ExprType) -> bool` | Is every form of a comprehension element type `T` (each union member's `list_forms`, `nulltype` aside) a list of lists, so the comprehension would nest three levels? |

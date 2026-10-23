@@ -429,9 +429,13 @@ impl FunctionLibrary {
     pub fn merge(self, other: FunctionLibrary) -> Self;
 
     /// Dispatch a function call — exact → coerced → generic phases.
-    /// With an unresolved argument the call is type-only, a list
-    /// argument whose element type is a union typed by each of its forms
-    /// (see function-library.md § Three-Phase Dispatch).
+    /// With an unresolved argument the call is type-only: an argument
+    /// whose type is a union, or a list whose element type is one, is
+    /// typed by each of its forms (past 64 combinations, as
+    /// `derive_return_type` types the arguments as they are), and a call
+    /// with an argument of unknown type (`any`, a bare type variable) is
+    /// `any`, also when no signature but one of its arity matches (see
+    /// function-library.md § Three-Phase Dispatch).
     pub fn call(
         &self, name: &str, args: &[ExprValue], ctx: &mut dyn EvalContext,
     ) -> Result<ExprValue, ExpressionError>;
