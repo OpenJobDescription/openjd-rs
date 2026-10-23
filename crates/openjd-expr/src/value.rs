@@ -514,7 +514,8 @@ impl ExprValue {
     ///
     /// Applies type promotion rules: int+float→float, path+string→string.
     /// Uses `hint_type` for empty lists to determine the element type.
-    /// Returns an error if any element is a `ListList`, which would create 3+ nesting levels.
+    /// Rejects an element that is a list of lists, which would create 3+
+    /// nesting levels (a list of `range_expr` values is a flat list).
     ///
     /// The element types must be mutually compatible under the
     /// list-literal join (RFC 0005 §"List Literal Type Inference"): identical
@@ -524,8 +525,10 @@ impl ExprValue {
     /// a list beside a list of a different, non-promotable element type,
     /// such as `list[int]` beside `list[string]` — is an error
     /// (`make_list expected list[int] element, got list[string]`). A
-    /// list-of-lists result carries the joined element type, so `[[], [1]]`
-    /// is `list[list[int]]`.
+    /// list-of-lists result carries the joined element type, and an empty
+    /// `[]` element is built as an empty list of it, also beside a typed
+    /// empty list: `[[], [1]]` is `list[list[int]]` with a `list[int]` first
+    /// element.
     ///
     /// A `Null` element is rejected (`Cannot create list from null
     /// elements`): a list cannot hold `null`.

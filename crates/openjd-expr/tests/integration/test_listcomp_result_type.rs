@@ -2132,3 +2132,59 @@ fn indexing_a_list_with_a_non_empty_form_is_not_always_empty() {
         tp("unresolved[noreturn]")
     );
 }
+
+// ── Audit loop 3, round 4 ──
+
+#[test]
+fn membership_in_a_list_of_unknown_elements_is_a_bool() {
+    // B-F1 (a regression) and A-F1: `flatten` of a `list[any]` is a
+    // `list[T1]`, and a concatenation of no common element type a
+    // `list[T3]`: lists of elements of unknown type. `__contains__(list[T],
+    // T)` captured the variable, so `1 in` such a list was rejected though
+    // a run succeeds; an operation on a value of unknown type that matches
+    // no signature of its arity is `any`, and a membership test a `bool`.
+    let mut p8 = SymbolTable::new();
+    let mut rt = SymbolTable::new();
+    p8.set("Task.Param.X", ExprValue::unresolved(ExprType::ANY))
+        .unwrap();
+    rt.set("Task.Param.X", ExprValue::Int(3)).unwrap();
+    p8.set("Param.N", ExprValue::unresolved(tp("list[list[int]]")))
+        .unwrap();
+    rt.set(
+        "Param.N",
+        ExprValue::make_list(vec![], ExprType::list(ExprType::INT)).unwrap(),
+    )
+    .unwrap();
+    p8.set("Param.S", ExprValue::unresolved(tp("list[string]")))
+        .unwrap();
+    rt.set(
+        "Param.S",
+        ExprValue::make_list(vec![ExprValue::String("a".into())], ExprType::STRING).unwrap(),
+    )
+    .unwrap();
+    for (expr, value) in [
+        ("1 in flatten([Task.Param.X])", "false"),
+        ("3 not in flatten([Task.Param.X])", "false"),
+        ("[1] in [flatten([Task.Param.X])]", "false"),
+        ("'a' in (flatten(Param.N) + Param.S)", "true"),
+    ] {
+        assert_eq!(
+            eval(expr, &p8).expr_type(),
+            tp("unresolved[bool]"),
+            "{expr}"
+        );
+        assert_eq!(eval(expr, &rt).to_display_string(), value, "{expr}");
+    }
+    // A wrong argument count is still an error.
+    let expr = "len(flatten([Task.Param.X]), 2)";
+    assert_err_in(
+        expr,
+        &p8,
+        "pass 8",
+        &[
+            "len() takes 1 argument(s), but 2 were given\n",
+            &format!("  {expr}\n"),
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}

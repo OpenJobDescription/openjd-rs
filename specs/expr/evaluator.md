@@ -343,31 +343,31 @@ chaining logic requires control flow that doesn't fit the simple dispatch model.
 
 #### Chained Comparison Memory Management
 
-Each comparison in the chain clones `left` and `right` to pass to `dispatch` (which
-releases its inputs), while retaining the originals for the chain. After dispatch
-returns, the boolean result is extracted and the dispatch return value is released.
-If the comparison is false, both `left` and `right` are released and `false` is returned
-immediately (short-circuit). If true, `left` is released and `right` becomes the new
-`left` for the next iteration — avoiding a redundant re-evaluation of the shared
-operand. After the final comparison, the surviving `left` is released and `true` is
-returned.
+Each link hands its `left` and `right` to `dispatch`, which releases its inputs.
+When the chain continues, `right` is cloned first and the clone is tracked as the
+next link's `left`, so the shared middle operand is not re-evaluated. After
+dispatch returns, the boolean result is extracted and the dispatch return value
+is released. If the comparison is false, `false` is returned immediately
+(short-circuit). A link absorbed after an unresolved one (see above) is undone by
+the speculation's footprint reset, and the carried `left` it took is released
+with it.
 
 ```
 a < b < c
   │
   ├── left = eval(a), right = eval(b)
-  ├── dispatch("__lt__", [left.clone(), right.clone()])
-  ├── result true → release(left), left = right
+  ├── carried = right.clone()
+  ├── dispatch("__lt__", [left, right])        # releases both
+  ├── result true → left = track(carried)
   │
   ├── right = eval(c)
-  ├── dispatch("__lt__", [left.clone(), right.clone()])
-  ├── result true → release(left), release(right)
+  ├── dispatch("__lt__", [left, right])        # last link: nothing carried
   └── return true
 ```
 
-The clone-and-release pattern is necessary because `dispatch` consumes (releases) its
-arguments for memory tracking, but the chained comparison needs to retain the shared
-middle operand for the next pair.
+The clone is necessary because `dispatch` consumes (releases) its arguments for
+memory tracking, but the chained comparison needs the shared middle operand for
+the next pair.
 
 ### BoolOp (`eval_boolop`)
 `and` and `or` are value-returning with null-coalescing semantics:

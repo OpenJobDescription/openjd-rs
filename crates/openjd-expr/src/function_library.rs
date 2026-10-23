@@ -157,10 +157,13 @@ impl FunctionLibrary {
     /// argument whose type is a union, or a list whose element type is one,
     /// is typed by each of its forms, the result being the union of the
     /// return types of the combinations that match (past 64 combinations,
-    /// as [`Self::derive_return_type`] types the arguments as they are);
-    /// a call with an argument of unknown type (`any`, a bare type
-    /// variable) is `any`, also when no signature but one of its arity
-    /// matches.
+    /// as [`Self::derive_return_type`] types the arguments as they are). A
+    /// call with an argument of unknown type (`any`, a bare type variable)
+    /// is `any`, except a list concatenation, which has the operands'
+    /// common element type or `list[any]`. A call that matches no
+    /// signature is `any` rather than an error when an argument is of
+    /// unknown type or holds a type variable (`list[T1]`) and a signature
+    /// takes as many arguments.
     pub fn call(
         &self,
         name: &str,
@@ -230,10 +233,14 @@ impl FunctionLibrary {
                 return Ok(ExprValue::unresolved(ret));
             }
             // An argument of unknown type (`any`, or a bare type variable
-            // the signatures' own variables capture) that matches no
-            // signature of its arity says nothing of the value a run
-            // passes. A wrong argument count is still an error.
-            if arg_types.iter().any(is_unknown_type)
+            // the signatures' own variables capture), or one holding a
+            // type variable at any depth (`list[T1]`, the `flatten` of a
+            // `list[any]`: a list of elements of unknown type), that
+            // matches no signature of its arity says nothing of the value
+            // a run passes. A wrong argument count is still an error.
+            if arg_types
+                .iter()
+                .any(|t| is_unknown_type(t) || t.is_symbolic())
                 && entries
                     .iter()
                     .any(|e| e.signature.sig_params().len() == arg_types.len())

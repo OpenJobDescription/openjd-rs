@@ -432,10 +432,13 @@ impl FunctionLibrary {
     /// With an unresolved argument the call is type-only: an argument
     /// whose type is a union, or a list whose element type is one, is
     /// typed by each of its forms (past 64 combinations, as
-    /// `derive_return_type` types the arguments as they are), and a call
-    /// with an argument of unknown type (`any`, a bare type variable) is
-    /// `any`, also when no signature but one of its arity matches (see
-    /// function-library.md § Three-Phase Dispatch).
+    /// `derive_return_type` types the arguments as they are). A call with
+    /// an argument of unknown type (`any`, a bare type variable) is `any`,
+    /// except a list concatenation, which has the operands' common element
+    /// type or `list[any]`. A call that matches no signature is `any`
+    /// rather than an error when an argument is of unknown type or holds a
+    /// type variable (`list[T1]`) and a signature takes as many arguments
+    /// (see function-library.md § Three-Phase Dispatch).
     pub fn call(
         &self, name: &str, args: &[ExprValue], ctx: &mut dyn EvalContext,
     ) -> Result<ExprValue, ExpressionError>;
