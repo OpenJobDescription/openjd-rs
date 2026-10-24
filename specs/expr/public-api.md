@@ -450,7 +450,9 @@ impl FunctionLibrary {
     ) -> Result<ExprValue, ExpressionError>;
 
     /// Static type-checking: derive the return type of a call from
-    /// argument types, without evaluating. An argument whose type is a
+    /// argument types, without evaluating. An argument's type variables,
+    /// at any depth, are typed as `any` (a type left unbound holds values
+    /// of unknown type). An argument whose type is a
     /// union, or a list whose element type is one, is typed by its forms
     /// (`int | string` as `int` and `string`, `list[int | nulltype]` as
     /// `list[int]` and `list[nulltype]`): the result is the union of the

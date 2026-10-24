@@ -2167,10 +2167,11 @@ fn indexing_a_list_with_a_non_empty_form_is_not_always_empty() {
 fn membership_in_a_list_of_unknown_elements_is_a_bool() {
     // B-F1 (a regression) and A-F1: `flatten` of a `list[any]` is a
     // `list[T1]`, and a concatenation of no common element type a
-    // `list[T3]`: lists of elements of unknown type. `__contains__(list[T],
-    // T)` captured the variable, so `1 in` such a list was rejected though
-    // a run succeeds; an operation on a value of unknown type that matches
-    // no signature of its arity is `any`, and a membership test a `bool`.
+    // `list[T3]`: lists of elements of unknown type. `1 in` such a list was
+    // rejected though a run succeeds. A call types an argument's type
+    // variables as `any` (round 5), and one that matches no signature of
+    // its arity with such an argument is `any`; a membership test is a
+    // `bool`.
     let mut p8 = SymbolTable::new();
     let mut rt = SymbolTable::new();
     p8.set("Task.Param.X", ExprValue::unresolved(ExprType::ANY))
@@ -2203,6 +2204,12 @@ fn membership_in_a_list_of_unknown_elements_is_a_bool() {
         );
         assert_eq!(eval(expr, &rt).to_display_string(), value, "{expr}");
     }
+    // A method no signature of which matches a list of unknown elements is
+    // `any` too (every run fails here, which validation may accept).
+    assert_eq!(
+        eval("flatten([Task.Param.X]).upper()", &p8).expr_type(),
+        tp("unresolved")
+    );
     // A wrong argument count is still an error.
     let expr = "len(flatten([Task.Param.X]), 2)";
     assert_err_in(

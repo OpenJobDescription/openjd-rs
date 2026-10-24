@@ -608,7 +608,8 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   value whose type can never be a boolean, on a concrete element is an
   error: that element reaches it on every run. A type that can be a
   boolean is `bool`, `any`, an unconstrained `unresolved`, a bare type
-  variable (`T3` of an operation on values of unknown type), `noreturn`
+  variable (a type static typing leaves unbound, such as that of a symbol
+  bound to one), `noreturn`
   (the filter itself fails the run), or a union with such a member.
 - Over a concrete iterable, the results build through `make_list`, which
   applies the shared list-element join; an incompatible pair fails with
@@ -668,7 +669,7 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     cannot be iterated binds `any`, as below). An iterable that can only be `[]` gives
     `list[nulltype]` with the body neither run nor type-checked
     (`[x * 2 for x in []]`). An iterable typed as a type variable (`T3`),
-    or a list of one (`list[T1]`, as `sorted` of an `any` is typed), binds
+    or a list of one (`list[T1]`, as `flatten` of a `list[any]` is typed), binds
     `any`, as `any` does. An unresolved iterable whose type cannot be
     iterated also binds `any`: its type may come from typing an operation on
     values of unknown type (a union member typed `int` from `x * 2` when `x`

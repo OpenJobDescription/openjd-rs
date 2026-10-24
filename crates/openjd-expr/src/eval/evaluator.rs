@@ -2277,8 +2277,9 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
 }
 
 /// Whether a comprehension filter of type `t` can be a boolean: `bool`,
-/// `any`, an unconstrained `unresolved`, a type variable (`T3` from an
-/// operation on values of unknown type), `noreturn` (a filter that never
+/// `any`, an unconstrained `unresolved`, a type variable (a type static
+/// typing leaves unbound, such as that of a symbol bound to one),
+/// `noreturn` (a filter that never
 /// gives a value fails the run itself), or a union with such a member
 /// (`unresolved[T]` is read as `T`).
 fn is_bool_compatible(t: &ExprType) -> bool {
@@ -2301,8 +2302,9 @@ fn is_bool_compatible(t: &ExprType) -> bool {
 }
 
 /// Whether `t` is a bare type variable (`T`, `T1`, `T2`, `T3`): a type left
-/// unbound by typing an operation on values of unknown type, which says
-/// nothing of the value a run has.
+/// unbound by static typing (a symbol bound to one; a call types its
+/// arguments' type variables as `any`), which says nothing of the value a
+/// run has.
 fn is_type_variable(t: &ExprType) -> bool {
     matches!(
         t.code(),

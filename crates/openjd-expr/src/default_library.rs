@@ -934,6 +934,16 @@ mod tests {
             lib.derive_return_type("__add__", &[tp("list[int]"), tp("list[list[T1]]")]),
             Some(tp("list[any]"))
         );
+        // An argument's type variable is typed as `any`, so `flatten`'s own
+        // `T1` does not capture it, as in `call`.
+        assert_eq!(
+            lib.derive_return_type("flatten", &[tp("list[T1]")]),
+            Some(tp("list[T1]"))
+        );
+        assert_eq!(
+            lib.derive_return_type("__getitem__", &[tp("list[T3]"), ExprType::INT]),
+            Some(ExprType::ANY)
+        );
     }
 
     #[test]

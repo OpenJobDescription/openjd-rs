@@ -278,29 +278,28 @@ operand that is a union of list types reads as the one list type it equals
 is refined for each combination and then for the operands as a whole, so a form with
 no common type, which no run builds, does not leave its type variable in the result:
 `L + (LS if c else [])` is `list[int]`, and `list[int | nulltype] + list[string]` is
-`list[string]`. A
-type variable operand on the right can still be captured by the signature's own
-variables (`list[int] + T1` finds no signature); that is part of the first-match
-dispatch limitation.
+`list[string]`.
 
-An argument whose type is not known (`any`, or a bare type variable such as the `T3`
-of an element of a `list[T3]`) matches the first signature in dispatch order (`any[0]`
+An argument's type variable, at any depth, is typed as `any` before a type-only call
+(or `derive_return_type`) is matched: it is a type static typing left unbound, whose
+values are of unknown type, and as `any` the signature's own variables cannot capture
+it (`flatten(list[list[T1]]) -> list[T1]` would otherwise bind its `T1` to an argument's
+`list[T1]` and type `flatten` of a `list[T1]` as `list[list[T1]]`; it is a `list[T1]`,
+and an element of it `any`). So `list[int] + T1` is `list[any]`.
+
+An argument whose type is not known (`any`, or a bare type variable, which reaches
+typing as `any`) matches the first signature in dispatch order (`any[0]`
 matches `__getitem__(string, int)`), which says nothing of the value a run passes, so a
 type-only call with one is `any` (`refined_return_type`, also applied by
-`derive_return_type`), unless it is a list concatenation, typed above. So is one with
+`derive_return_type`), unless it is a list concatenation, typed above. So is a call with
 such an argument, or with one holding a type variable at any depth (a `list[T1]`, such
 as `flatten` of a `list[any]`, or a `list[T3]`: a list of elements of unknown type),
-that matches no signature (the signature's own variables capture the type variable:
-`__contains__(list[T], T)` binds `T` to `T1` and then fails on `1 in` the list), when a
-signature of the call's arity exists; a wrong argument count is still an error. So
-`1 in flatten([x])` with `x: any` is a `bool`. The evaluator types a comparison or
+that matches no signature, when a signature of the call's arity exists:
+`flatten([x]).upper()` with `x: any` is `any`. A wrong argument count is still an
+error. `1 in flatten([x])` is a `bool`: the evaluator types a comparison or
 membership test with an unresolved operand as a `bool` whatever type dispatch returns
 (`Task.X == 1` with `X: any` is `unresolved[bool]`), while
-`derive_return_type("__eq__", [any, int])` is `any`. An argument's type
-variable, at any depth, is typed as `any` before a type-only call is matched, so the
-signature's own variables cannot capture it: `flatten(list[list[T1]]) -> list[T1]` would
-otherwise bind its `T1` to the argument's `list[T1]` and type `flatten` of a `list[T1]`
-as `list[list[T1]]`; it is a `list[T1]`, and an element of it `any`. An index of unknown type is accepted the same way.
+`derive_return_type("__eq__", [any, int])` is `any`. An index of unknown type is accepted the same way.
 
 Indexing has a `(list[nulltype], int) -> noreturn` overload, registered before
 the generic `(list[T1], int) -> T1`: the empty list has no element, so indexing

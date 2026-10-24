@@ -239,12 +239,12 @@ impl FunctionLibrary {
             if let Some(ret) = ret {
                 return Ok(ExprValue::unresolved(ret));
             }
-            // An argument of unknown type (`any`, or a bare type variable
-            // the signatures' own variables capture), or one holding a
-            // type variable at any depth (`list[T1]`, the `flatten` of a
-            // `list[any]`: a list of elements of unknown type), that
-            // matches no signature of its arity says nothing of the value
-            // a run passes. A wrong argument count is still an error.
+            // An argument of unknown type (`any`, or a type variable), or
+            // one holding a type variable at any depth (`list[T1]`, the
+            // `flatten` of a `list[any]`: a list of elements of unknown
+            // type), that matches no signature of its arity says nothing
+            // of the value a run passes: `flatten([x]).upper()` with
+            // `x: any` is `any`. A wrong argument count is still an error.
             if arg_types
                 .iter()
                 .any(|t| is_unknown_type(t) || t.is_symbolic())
@@ -385,6 +385,7 @@ impl FunctionLibrary {
     }
 
     /// Derive the return type without evaluation (for static type checking).
+    /// An argument's type variables, at any depth, are typed as `any`.
     /// An argument whose type is a union, or a list whose element type is
     /// one, is typed by its forms (`int | string` as `int` and `string`,
     /// `list[int | nulltype]` as `list[int]` and `list[nulltype]`): the
@@ -399,6 +400,11 @@ impl FunctionLibrary {
     /// signature is `any`; one that matches none is `None` here (`call`
     /// types it `any` when a signature has its arity).
     pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
+        // An argument's type variables are values of unknown type, typed
+        // as `any` so the signature's own variables cannot capture them,
+        // as `call` types them.
+        let arg_types: Vec<ExprType> = arg_types.iter().map(unbound_as_any).collect();
+        let arg_types = arg_types.as_slice();
         // Past `MAX_FORM_COMBINATIONS` the arguments are typed as they are.
         match form_combinations(arg_types) {
             Some(combinations) if combinations.len() > 1 => {
@@ -676,8 +682,8 @@ fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Expr
 /// The return type of a type-only call that matched a signature as `ret`,
 /// refined from the argument types: a list concatenation's element type
 /// ([`concat_return_type`]); otherwise `any` when an argument's type is not
-/// known (`any`, or a bare type variable such as the `T3` of an element of
-/// a `list[T3]`). Such an argument matches the first signature in the
+/// known (`any`, or a bare type variable, which arguments reach typing as
+/// `any`). Such an argument matches the first signature in the
 /// dispatch order (`any[0]` matches `__getitem__(string, int)`), which says
 /// nothing of the value a run passes, so the result may be any type.
 fn refined_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> ExprType {
@@ -693,7 +699,8 @@ fn refined_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Exp
 }
 
 /// Whether an argument's type is not known: `any`, or a bare type variable
-/// such as the `T3` of an element of a `list[T3]`.
+/// (a type static typing leaves unbound, such as that of a symbol bound to
+/// one).
 fn is_unknown_type(t: &ExprType) -> bool {
     matches!(
         t.code(),

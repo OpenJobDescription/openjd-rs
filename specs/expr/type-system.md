@@ -146,7 +146,7 @@ contributes nothing (a `null` element always fails), so a union drops its
 `nulltype` member (`int?` contributes `int`) and a bare `nulltype` element is
 a conflict. A lone element of unknown type (an unbound type variable, or a
 union with one) is `any`, as its join with another element would be:
-`[flatten([x])[0]]` with `x: any` is `list[any]`, not `list[T1]`. A union's `list[nulltype]` member is kept for the join — the
+`[v]` with `v` a symbol of type `T1` is `list[any]`, not `list[T1]`. A union's `list[nulltype]` member is kept for the join — the
 empty list still joins with any list, so `[([] if H else [1]), ['a']]`
 (which builds `[[], ['a']]` when `H` holds) joins to `list[string]` even
 though `list[int]` and `list[string]` conflict. Nor is it dropped from the
