@@ -40,7 +40,10 @@ fn union_iterable_binds_the_union_of_element_types() {
 fn type_variable_iterable_binds_any() {
     // F1 of audit round 7: an iterable typed `T3` (an element of a
     // concatenation with a `list[any]`) was taken as never iterable, so
-    // validation rejected comprehensions that run.
+    // validation rejected comprehensions that run. Since a call types its
+    // arguments' type variables as `any` (loop 3 round 5), that element is
+    // `any`; a symbol bound to a type variable (last case) still reaches
+    // the loop as one.
     let [p8, g2, rt] =
         states_with_any_list(ExprValue::make_list(vec![], ExprType::NULLTYPE).unwrap());
     let expr = "[y + 1 for y in (Task.Param.A + [[5, 6]])[0]]";
@@ -52,6 +55,13 @@ fn type_variable_iterable_binds_any() {
         );
     }
     assert_eq!(eval(expr, &rt).to_display_string(), "[6, 7]");
+    let mut p8v = p8.clone();
+    p8v.set("Task.Param.V", ExprValue::unresolved(tp("T3")))
+        .unwrap();
+    assert_eq!(
+        eval("[y + 1 for y in Task.Param.V]", &p8v).expr_type(),
+        tp("unresolved[list[any]]")
+    );
 }
 
 #[test]
@@ -69,8 +79,9 @@ fn any_iterable_binds_any() {
 #[test]
 fn every_type_variable_iterable_binds_any() {
     // F2 of audit round 9: a `T1`-typed iterable element (`sorted` of an
-    // `any` is a `list[T1]`), not only `T3`, binds `any`; every type
-    // variable code is covered by the unit tests of `comprehension_var`.
+    // `any` was a `list[T1]`), not only `T3`, binds `any`. `sorted` of an
+    // `any` is now `any` (loop 3 round 5); every type variable code is
+    // covered by the unit tests of `comprehension_var`.
     let [mut p8, _, mut rt] = states();
     p8.set("U", ExprValue::unresolved(ExprType::ANY)).unwrap();
     rt.set("U", ExprValue::ListInt(vec![2, 1])).unwrap();

@@ -361,7 +361,10 @@ fn type_variable_filter_can_be_a_boolean() {
     // F1 of audit round 6: a filter typed `T3` (an element of a
     // concatenation with a `list[any]`) was taken as never a boolean. Over
     // an unresolved iterable the comprehension was `list[nulltype]` and its
-    // index an error; over a concrete one the filter was an error.
+    // index an error; over a concrete one the filter was an error. Since a
+    // call types its arguments' type variables as `any` (loop 3 round 5),
+    // such elements are `any`; a symbol bound to a type variable (last
+    // case) still reaches the filter as one.
     let [p8, g2, rt] =
         states_with_any_list(ExprValue::make_list(vec![], ExprType::NULLTYPE).unwrap());
     // (Its loop variable is `any`, round 10.)
@@ -379,7 +382,7 @@ fn type_variable_filter_can_be_a_boolean() {
         );
     }
     assert_eq!(eval(expr, &rt).to_display_string(), "[1, 2]");
-    // A `T1` filter (`flatten` of a `list[T3]`).
+    // A filter from `flatten` of a list of unknown elements.
     let expr = "[x for x in Param.L if flatten(Task.Param.A + [[Task.Param.C]])[0]]";
     for st in [&p8, &g2] {
         assert_eq!(
@@ -388,6 +391,14 @@ fn type_variable_filter_can_be_a_boolean() {
             "{expr}"
         );
     }
+    // A filter typed as a type variable, from a symbol bound to one.
+    let mut p8v = p8.clone();
+    p8v.set("Task.Param.V", ExprValue::unresolved(tp("T3")))
+        .unwrap();
+    assert_eq!(
+        eval("[x for x in Param.L if Task.Param.V]", &p8v).expr_type(),
+        tp("unresolved[list[int | nulltype]]")
+    );
 }
 
 #[test]

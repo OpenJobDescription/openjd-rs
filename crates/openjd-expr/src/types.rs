@@ -955,6 +955,9 @@ impl ExprType {
     /// re-normalize, so `int | T1` collapses to `any` (a union with an
     /// `any` member accepts everything).
     pub(crate) fn erase_type_vars(&self) -> ExprType {
+        if !self.is_symbolic() {
+            return self.clone();
+        }
         let bindings = HashMap::from([
             (TypeCode::TypeVarT, ExprType::ANY),
             (TypeCode::TypeVarT1, ExprType::ANY),

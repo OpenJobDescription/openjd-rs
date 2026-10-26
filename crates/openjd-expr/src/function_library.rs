@@ -225,7 +225,8 @@ impl FunctionLibrary {
             // capture it (`flatten(list[list[T1]]) -> list[T1]` would bind
             // its `T1` to an argument's `list[T1]`, typing `flatten` of a
             // `list[T1]` as `list[list[T1]]`).
-            let typing_args: Vec<ExprType> = arg_types.iter().map(unbound_as_any).collect();
+            let typing_args: Vec<ExprType> =
+                arg_types.iter().map(ExprType::erase_type_vars).collect();
             let ret = match form_combinations(&typing_args) {
                 Some(combinations) => unresolved_return_type(
                     name,
@@ -403,7 +404,7 @@ impl FunctionLibrary {
         // An argument's type variables are values of unknown type, typed
         // as `any` so the signature's own variables cannot capture them,
         // as `call` types them.
-        let arg_types: Vec<ExprType> = arg_types.iter().map(unbound_as_any).collect();
+        let arg_types: Vec<ExprType> = arg_types.iter().map(ExprType::erase_type_vars).collect();
         let arg_types = arg_types.as_slice();
         // Past `MAX_FORM_COMBINATIONS` the arguments are typed as they are.
         match form_combinations(arg_types) {
@@ -644,12 +645,9 @@ fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Expr
         match t.code() {
             crate::types::TypeCode::RangeExpr => ExprType::list(ExprType::INT),
             // An operand of unknown type, which a run that succeeds has as
-            // a list of unknown elements.
-            crate::types::TypeCode::Any
-            | crate::types::TypeCode::TypeVarT
-            | crate::types::TypeCode::TypeVarT1
-            | crate::types::TypeCode::TypeVarT2
-            | crate::types::TypeCode::TypeVarT3 => ExprType::list(ExprType::ANY),
+            // a list of unknown elements. (Arguments' type variables reach
+            // here as `any`.)
+            crate::types::TypeCode::Any => ExprType::list(ExprType::ANY),
             crate::types::TypeCode::Union => crate::types::merge_list_union(t),
             _ => t,
         }
@@ -661,14 +659,13 @@ fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Expr
     if name != "__add__" || !ret.is_symbolic() || !left.is_list() || !right.is_list() {
         return ret;
     }
-    // `any` and type variables join as `any`, and `unresolved` reads as
-    // its constraint: an operand of unknown elements gives `list[any]`.
+    // `any` joins as `any`, and `unresolved` reads as its constraint: an
+    // operand of unknown elements gives `list[any]`.
     fn unknown(t: &ExprType) -> bool {
         matches!(
             t.code(),
             crate::types::TypeCode::Any | crate::types::TypeCode::Unresolved
-        ) || t.is_symbolic()
-            || t.params().iter().any(unknown)
+        ) || t.params().iter().any(unknown)
     }
     if unknown(&left) || unknown(&right) {
         return ExprType::list(ExprType::ANY);
@@ -682,8 +679,8 @@ fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Expr
 /// The return type of a type-only call that matched a signature as `ret`,
 /// refined from the argument types: a list concatenation's element type
 /// ([`concat_return_type`]); otherwise `any` when an argument's type is not
-/// known (`any`, or a bare type variable, which arguments reach typing as
-/// `any`). Such an argument matches the first signature in the
+/// known (`any`; a type variable in an argument reaches typing as `any`).
+/// Such an argument matches the first signature in the
 /// dispatch order (`any[0]` matches `__getitem__(string, int)`), which says
 /// nothing of the value a run passes, so the result may be any type.
 fn refined_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> ExprType {
@@ -698,38 +695,13 @@ fn refined_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Exp
     }
 }
 
-/// Whether an argument's type is not known: `any`, or a bare type variable
-/// (a type static typing leaves unbound, such as that of a symbol bound to
-/// one).
+/// Whether an argument's type is not known: `any` (a type variable in an
+/// argument reaches typing as `any`, [`ExprType::erase_type_vars`]).
 fn is_unknown_type(t: &ExprType) -> bool {
-    matches!(
-        t.code(),
-        crate::types::TypeCode::Any
-            | crate::types::TypeCode::TypeVarT
-            | crate::types::TypeCode::TypeVarT1
-            | crate::types::TypeCode::TypeVarT2
-            | crate::types::TypeCode::TypeVarT3
-    )
+    t.code() == crate::types::TypeCode::Any
 }
 
-/// `t` with every type variable in it, at any depth, as `any`: the type of
-/// a value whose parts static typing left unbound (`list[T1]` is a
-/// `list[any]`). A union is renormalized, so `T1 | int` is `any`.
-fn unbound_as_any(t: &ExprType) -> ExprType {
-    use crate::types::TypeCode;
-    match (t.code(), t.params()) {
-        (
-            TypeCode::TypeVarT | TypeCode::TypeVarT1 | TypeCode::TypeVarT2 | TypeCode::TypeVarT3,
-            _,
-        ) => ExprType::ANY,
-        (_, []) => t.clone(),
-        _ if !t.is_symbolic() => t.clone(),
-        (TypeCode::Union, members) => ExprType::union(members.iter().map(unbound_as_any).collect()),
-        (TypeCode::List, [elem]) => ExprType::list(unbound_as_any(elem)),
-        (TypeCode::Unresolved, [inner]) => ExprType::unresolved(unbound_as_any(inner)),
-        (code, params) => ExprType::new(code, params.iter().map(unbound_as_any).collect()),
-    }
-}
+/// The combinations of the arguments' list forms
 /// ([`crate::types::list_forms`]): one argument list per way of picking a
 /// form for each argument. `None` past [`MAX_FORM_COMBINATIONS`].
 fn form_combinations(arg_types: &[ExprType]) -> Option<Vec<Vec<ExprType>>> {
@@ -1273,6 +1245,30 @@ mod tests {
                 ]
             ),
             Some(ExprType::parse("list[T3]").unwrap())
+        );
+    }
+
+    #[test]
+    fn derive_return_type_past_the_form_cap_coerces_union_members() {
+        // Past 64 combinations of forms, a union argument is typed by every
+        // signature one of its members matches, each member also standing
+        // for the type it coerces to (`int` as `float`, `path` as
+        // `string`). Five members, three arguments: 125 combinations.
+        let tp = |s: &str| ExprType::parse(s).unwrap();
+        let mut lib = FunctionLibrary::new();
+        lib.register_sig("f", "(float, float, float) -> float", dummy_impl)
+            .unwrap();
+        lib.register_sig("g", "(string, string, string) -> string", dummy_impl)
+            .unwrap();
+        let u = tp("int | bool | list[int] | range_expr | list[string]");
+        assert_eq!(
+            lib.derive_return_type("f", &[u.clone(), u.clone(), u]),
+            Some(ExprType::FLOAT)
+        );
+        let p = tp("path | bool | list[int] | range_expr | list[string]");
+        assert_eq!(
+            lib.derive_return_type("g", &[p.clone(), p.clone(), p]),
+            Some(ExprType::STRING)
         );
     }
 
