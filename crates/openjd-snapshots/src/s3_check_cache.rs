@@ -131,6 +131,20 @@ mod tests {
         assert!(cache.get_entry("nonexistent").is_none());
     }
 
+    /// The spec (snapshot_hash_cache.md, "S3 Check Cache" properties)
+    /// requires WAL journaling. WAL mode is persistent in the database file,
+    /// so check it through an independent connection rather than the cache's.
+    #[test]
+    fn new_enables_wal_journaling() {
+        let tmp = TempDir::new().unwrap();
+        let _cache = S3CheckCache::new(tmp.path()).unwrap();
+        let conn = rusqlite::Connection::open(tmp.path().join("s3_check_cache.db")).unwrap();
+        let mode: String = conn
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+    }
+
     #[test]
     fn expired_entry_returns_none() {
         let tmp = TempDir::new().unwrap();

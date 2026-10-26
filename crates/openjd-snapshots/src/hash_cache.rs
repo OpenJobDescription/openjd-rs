@@ -218,6 +218,19 @@ mod tests {
             .is_none());
     }
 
+    /// The spec (snapshot_hash_cache.md, "Properties") requires WAL
+    /// journaling. WAL mode is persistent in the database file, so check it
+    /// through an independent connection rather than the cache's own.
+    #[test]
+    fn new_enables_wal_journaling() {
+        let (tmp, _cache) = make_cache();
+        let conn = rusqlite::Connection::open(tmp.path().join("hash_cache.db")).unwrap();
+        let mode: String = conn
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+    }
+
     #[test]
     fn whole_file_and_range_coexist() {
         let (_tmp, cache) = make_cache();
