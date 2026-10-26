@@ -3,9 +3,9 @@
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Conditional tests, indices, and chained comparisons whose operands are
-//! unresolved (2026-02 Expression Language §1.3.6, Static Type Checking): a
-//! type a run's value may make a `bool` or an `int` is accepted, and a
-//! chain is its links joined by `and`.
+//! unresolved (2026-02 Expression Language §1.3.5, §1.3.6, §2.1.7, and Static
+//! Type Checking via Unresolved Values): a type a run's value may make a
+//! `bool` or an `int` is accepted, and a chain is its links joined by `and`.
 
 use super::common::*;
 use openjd_expr::*;

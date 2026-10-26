@@ -4,7 +4,8 @@
 
 //! List literal joins and list concatenation at every stage (2026-02
 //! Expression Language §1.2.6, §2.1.3): the common element type, the empty
-//! list beside a typed one, and `range_expr` operands.
+//! list beside a typed one, and `range_expr` operands; with the nesting depth
+//! of a list of ranges (§1.2.1) and `sum` of a typed empty list.
 
 use super::common::*;
 use openjd_expr::*;
@@ -101,6 +102,8 @@ fn empty_lists_keep_their_element_type() {
         );
     }
 }
+
+// ── Nesting depth ──
 
 #[test]
 fn list_of_range_lists_is_two_levels_deep() {
@@ -353,6 +356,8 @@ fn concatenation_of_a_list_and_a_range_names_the_range() {
         );
     }
 }
+
+// ── Sum of a typed empty list ──
 
 #[test]
 fn sum_of_an_empty_float_list_is_a_float() {

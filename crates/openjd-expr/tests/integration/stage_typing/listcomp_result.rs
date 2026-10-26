@@ -78,6 +78,67 @@ fn empty_result_dispatches_as_the_empty_list() {
     );
 }
 
+#[test]
+fn empty_literal_iterable_gives_the_untyped_empty_list() {
+    // The body never runs and is not type-checked: `x * 2` with `x` of no
+    // type is never evaluated.
+    for expr in ["[x for x in []]", "[x * 2 for x in []]"] {
+        assert_stages(
+            expr,
+            "list[nulltype]",
+            "list[nulltype]",
+            "list[nulltype]",
+            "[]",
+        );
+    }
+}
+
+#[test]
+fn unresolved_iterable_that_can_only_be_empty() {
+    // F2 of audit rounds 5 and 6: the body of a comprehension whose
+    // iterable can only be `[]` is neither run nor type-checked, whatever
+    // the stage: `1` does not make it a `list[int | nulltype]`, nor
+    // `x.upper()` an error.
+    for expr in [
+        "[1 for x in ([] if Task.Param.C else [])]",
+        "[x.upper() for x in ([] if Task.Param.C else [])]",
+    ] {
+        assert_stages(
+            expr,
+            "unresolved[list[nulltype]]",
+            "unresolved[list[nulltype]]",
+            "list[nulltype]",
+            "[]",
+        );
+    }
+    // So indexing it fails on every run.
+    let expr = "[1 for x in ([] if Task.Param.C else [])][0]";
+    let [p8, g2, rt] = states();
+    let caret = "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~";
+    for (stage, st) in [("pass 8", &p8), ("gate 2", &g2)] {
+        assert_err_in(
+            expr,
+            st,
+            stage,
+            &[
+                "Index out of bounds: the list is always empty\n",
+                &format!("  {expr}\n"),
+                caret,
+            ],
+        );
+    }
+    assert_err_in(
+        expr,
+        &rt,
+        "run time",
+        &[
+            "Index 0 out of bounds for list of length 0\n",
+            &format!("  {expr}\n"),
+            caret,
+        ],
+    );
+}
+
 // ── A filter or body that fails to type ──
 
 #[test]
