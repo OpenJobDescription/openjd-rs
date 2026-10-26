@@ -19,11 +19,11 @@ use tracing::warn;
 /// (it does not check the result). A warning naming `db_path` and the mode
 /// in effect is logged so the fallback is visible. Errors from the PRAGMA
 /// itself, such as `database is locked`, are returned as
-/// [`crate::SnapshotError::Cache`].
+/// [`crate::SnapshotError::Cache`] with `db_path` prepended.
 pub(crate) fn enable_wal(conn: &rusqlite::Connection, db_path: &Path) -> crate::Result<String> {
     let mode: String = conn
         .pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))
-        .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
+        .map_err(|e| crate::SnapshotError::cache_db(db_path, e))?;
     let mode = mode.to_ascii_lowercase();
     if mode != "wal" {
         warn!(
@@ -111,7 +111,7 @@ mod tests {
         let (result, events) = capture(|| enable_wal(&conn, &db_path));
         assert_eq!(
             result.unwrap_err().to_string(),
-            "Cache error: database is locked"
+            format!("Cache error: {}: database is locked", db_path.display())
         );
         assert_eq!(events, Vec::<String>::new());
     }

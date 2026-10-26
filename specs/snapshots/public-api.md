@@ -512,7 +512,8 @@ impl HashCache {
 the database, and request WAL journaling. If SQLite cannot use WAL they still
 succeed and log a warning. They fail with `SnapshotError::Io` if `cache_dir`
 cannot be created, and with `SnapshotError::Cache` on SQLite errors,
-including a failed WAL PRAGMA. See
+including a failed WAL PRAGMA. A `Cache` error names the database file, for
+example `Cache error: <cache_dir>/hash_cache.db: database is locked`. See
 [snapshot_hash_cache.md § Journal Mode](snapshot_hash_cache.md#journal-mode).
 
 ## S3 Check Cache

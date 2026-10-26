@@ -26,7 +26,7 @@ impl S3CheckCache {
         std::fs::create_dir_all(dir)?;
         let db_path = dir.join("s3_check_cache.db");
         let conn = rusqlite::Connection::open(&db_path)
-            .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
+            .map_err(|e| crate::SnapshotError::cache_db(&db_path, e))?;
         crate::sqlite_wal::enable_wal(&conn, &db_path)?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS s3checkV1(
@@ -34,7 +34,7 @@ impl S3CheckCache {
                 last_seen_time timestamp
             );",
         )
-        .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
+        .map_err(|e| crate::SnapshotError::cache_db(&db_path, e))?;
 
         // Prune expired entries (older than 30 days) on open
         let cutoff = SystemTime::now()
@@ -46,7 +46,7 @@ impl S3CheckCache {
             "DELETE FROM s3checkV1 WHERE CAST(last_seen_time AS REAL) < ?1",
             rusqlite::params![cutoff],
         )
-        .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
+        .map_err(|e| crate::SnapshotError::cache_db(&db_path, e))?;
 
         Ok(Self {
             conn: Mutex::new(conn),
@@ -128,6 +128,78 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cache = S3CheckCache::new(tmp.path()).unwrap();
         assert!(cache.get_entry("nonexistent").is_none());
+    }
+
+    /// Errors opening the database name the database file.
+    #[test]
+    fn new_open_error_names_the_file() {
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("s3_check_cache.db");
+        std::fs::create_dir(&db_path).unwrap();
+        match S3CheckCache::new(tmp.path()) {
+            Ok(_) => panic!("S3CheckCache::new succeeded with a directory as its database"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                format!(
+                    "Cache error: {}: unable to open database file",
+                    db_path.display()
+                )
+            ),
+        }
+    }
+
+    /// Hold a write transaction on a WAL-mode `s3_check_cache.db`, optionally
+    /// with the cache table already created, so that the first statement of
+    /// `S3CheckCache::new` that needs a write lock waits out the 5-second
+    /// busy timeout and fails.
+    fn lock_for_writing(dir: &Path, with_table: bool) -> rusqlite::Connection {
+        let writer = rusqlite::Connection::open(dir.join("s3_check_cache.db")).unwrap();
+        writer.pragma_update(None, "journal_mode", "WAL").unwrap();
+        if with_table {
+            writer
+                .execute_batch(
+                    "CREATE TABLE s3checkV1(s3_key text primary key, last_seen_time timestamp);",
+                )
+                .unwrap();
+        }
+        writer.execute_batch("BEGIN IMMEDIATE;").unwrap();
+        writer
+    }
+
+    /// Errors creating the table name the database file.
+    #[test]
+    fn new_create_table_error_names_the_file() {
+        let tmp = TempDir::new().unwrap();
+        let _writer = lock_for_writing(tmp.path(), false);
+        match S3CheckCache::new(tmp.path()) {
+            Ok(_) => panic!("S3CheckCache::new succeeded while CREATE TABLE was blocked"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                format!(
+                    "Cache error: {}: database is locked",
+                    tmp.path().join("s3_check_cache.db").display()
+                )
+            ),
+        }
+    }
+
+    /// Errors pruning expired entries name the database file. The table
+    /// already exists, so `CREATE TABLE IF NOT EXISTS` needs no write lock
+    /// and the prune `DELETE` is the statement that fails.
+    #[test]
+    fn new_prune_error_names_the_file() {
+        let tmp = TempDir::new().unwrap();
+        let _writer = lock_for_writing(tmp.path(), true);
+        match S3CheckCache::new(tmp.path()) {
+            Ok(_) => panic!("S3CheckCache::new succeeded while the prune was blocked"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                format!(
+                    "Cache error: {}: database is locked",
+                    tmp.path().join("s3_check_cache.db").display()
+                )
+            ),
+        }
     }
 
     /// The spec (snapshot_hash_cache.md, "S3 Check Cache" properties)

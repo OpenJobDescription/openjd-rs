@@ -48,7 +48,7 @@ All other error sources are converted to string representations via `.map_err(|e
 
 | Source | Target Variant | Conversion |
 |--------|---------------|------------|
-| `rusqlite::Error` | `Cache(String)` | `.map_err(\|e\| SnapshotError::Cache(e.to_string()))` |
+| `rusqlite::Error` | `Cache(String)` | `.map_err(\|e\| SnapshotError::Cache(e.to_string()))`, or `SnapshotError::cache_db(&db_path, e)` when opening or setting up a cache database (see below) |
 | AWS SDK S3/STS errors | `S3(String)` | `.map_err(\|e\| SnapshotError::S3(format!(...)))` |
 | `tokio::task::JoinError` | `Task(String)` | `.map_err(\|e\| SnapshotError::Task(e.to_string()))` |
 | `tokio::runtime::Builder` errors | `Task(String)` | `.map_err(\|e\| SnapshotError::Task(e.to_string()))` |
@@ -85,6 +85,17 @@ std::fs::File::open(&path).map_err(|e| {
 ```
 
 This produces messages like: `IO error: /tmp/missing.txt: No such file or directory`
+
+### Cache errors include the database path
+
+SQLite errors from opening or setting up a cache database in `HashCache::new` or `S3CheckCache::new` name the database file, using the same `<path>: <message>` shape as I/O errors. The crate-private `SnapshotError::cache_db(db_path, err)` builds them. This covers the open, the WAL PRAGMA, `CREATE TABLE`, and the S3 check cache's prune of expired entries:
+
+```
+Cache error: /home/user/.deadline/job_attachments/hash_cache.db: database is locked
+Cache error: /home/user/.deadline/job_attachments/s3_check_cache.db: unable to open database file
+```
+
+rusqlite already appends `: <path>` to errors from opening a database. `cache_db` drops that trailing copy, so the path appears exactly once. Errors from `HashCache::put` and `S3CheckCache::put_entry` are not prefixed. Their callers discard them, because a failed cache write only costs a cache miss.
 
 ### S3 errors include the key
 

@@ -42,3 +42,20 @@ pub enum SnapshotError {
     reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
 )]
 pub type Result<T> = std::result::Result<T, SnapshotError>;
+
+impl SnapshotError {
+    /// Wrap an SQLite error from opening or setting up the cache database at
+    /// `db_path` as [`SnapshotError::Cache`], with the path prepended in the
+    /// same way I/O errors are (`Cache error: <path>: <sqlite message>`).
+    pub(crate) fn cache_db(db_path: &std::path::Path, err: rusqlite::Error) -> Self {
+        let path = db_path.display().to_string();
+        let msg = err.to_string();
+        // rusqlite appends ": <path>" to errors from opening the database
+        // (SQLITE_CANTOPEN). Drop that copy so the path appears once.
+        let msg = msg
+            .strip_suffix(path.as_str())
+            .and_then(|m| m.strip_suffix(": "))
+            .unwrap_or(&msg);
+        SnapshotError::Cache(format!("{path}: {msg}"))
+    }
+}
