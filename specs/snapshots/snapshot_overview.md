@@ -231,6 +231,7 @@ openjd-snapshots/src/
 ├── data_cache.rs       # AsyncDataCache, MultipartDataCache, RangeReadDataCache, FileSystemDataCache, S3DataCache
 ├── hash_cache.rs       # Local SQLite hash cache
 ├── s3_check_cache.rs   # Local SQLite S3 check cache
+├── sqlite_wal.rs       # WAL journaling setup shared by both SQLite caches
 ├── hash.rs             # HashAlgorithm, hash_data(), hash_file(), hash_file_chunked()
 ├── path_util.rs        # normalize_path(), is_absolute_path()
 ├── codec.rs            # Encode/decode v2023 and v2025 JSON formats

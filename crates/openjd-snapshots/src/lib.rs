@@ -94,6 +94,7 @@ pub mod ops;
 mod path_util;
 /// Local cache of objects known to exist in S3, so uploads can skip them.
 pub mod s3_check_cache;
+mod sqlite_wal;
 
 pub use codec::{
     decode_manifest, decode_v2023, decode_v2023_as_diff, decode_v2025,

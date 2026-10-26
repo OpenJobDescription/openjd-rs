@@ -43,8 +43,7 @@ impl HashCache {
         let db_path = dir.join("hash_cache.db");
         let conn = rusqlite::Connection::open(&db_path)
             .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
+        crate::sqlite_wal::enable_wal(&conn, &db_path)?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS hashesV4(
                 file_path blob,

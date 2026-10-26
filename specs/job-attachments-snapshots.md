@@ -224,7 +224,7 @@ SQLite database at `~/.deadline/job_attachments/hash_cache.db`.
 
 ```rust
 pub struct HashCache {
-    conn: rusqlite::Connection,  // Single connection; use a pool for concurrent access
+    conn: Mutex<rusqlite::Connection>,  // One connection; the Mutex serializes access
 }
 ```
 
@@ -232,8 +232,10 @@ Schema matches the Python implementation:
 - Primary key: `(file_path BLOB, hash_algorithm TEXT, range_start INTEGER, range_end INTEGER)`
 - `file_hash TEXT`, `last_modified_time TIMESTAMP`
 
-For concurrent access from async tasks, wrap in `tokio::sync::Mutex` or use `r2d2-sqlite`
-connection pool. WAL mode is enabled for concurrent readers.
+A `std::sync::Mutex` around the single connection serializes access from the `rayon`
+workers and async pipeline tasks that share the cache through `Arc<HashCache>`. WAL
+journaling is requested for concurrent readers, falling back to SQLite's reported mode
+with a warning when it is unavailable. See [snapshots/snapshot_hash_cache.md](snapshots/snapshot_hash_cache.md#journal-mode).
 
 ## S3 Check Cache
 

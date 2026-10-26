@@ -2,7 +2,7 @@
 
 [README](README.md) · Hash Cache
 
-**Location:** `hash_cache.rs`, `s3_check_cache.rs`
+**Location:** `hash_cache.rs`, `s3_check_cache.rs`, `sqlite_wal.rs`
 
 ## Hash Cache
 
@@ -13,7 +13,7 @@ The hash cache is a local SQLite database that stores file hashes keyed by path,
 | Property | Value |
 |----------|-------|
 | Location | `~/.deadline/job_attachments/hash_cache.db` |
-| Format | SQLite with WAL journaling |
+| Format | SQLite with WAL journaling (see [Journal Mode](#journal-mode)) |
 | Thread safety | `Mutex<rusqlite::Connection>` |
 
 ### Schema
@@ -95,6 +95,12 @@ Byte-range support enables efficient caching for file chunked files. Different c
 
 The `Mutex<rusqlite::Connection>` serializes all database access. WAL journaling allows concurrent readers during writes. For the HASH operation, `rayon` parallel workers share the single `HashCache` via `Arc<HashCache>`.
 
+### Journal Mode
+
+`HashCache::new` and `S3CheckCache::new` both ask SQLite to switch to WAL journaling (`PRAGMA journal_mode=WAL`, in `sqlite_wal.rs`). WAL mode persists in the database file, so other processes that open it, including the Python `deadline-cloud` cache, use it too.
+
+SQLite does not report an error when it cannot enter WAL mode. This happens, for example, on a filesystem without the shared-memory support WAL needs. Instead it keeps the previous journal mode and returns that mode from the PRAGMA. In that case `new()` still succeeds, because the caches are an optimization and work correctly in any journal mode. It logs a `tracing` warning that names the database path and the journal mode in effect. Concurrent readers then block during writes, which costs throughput but not correctness. This matches the Python `deadline-cloud` cache, which also runs `PRAGMA journal_mode=WAL` without checking the result. Only an error from the PRAGMA itself makes `new()` fail, with `SnapshotError::Cache`.
+
 ## S3 Check Cache
 
 **Location:** `s3_check_cache.rs`
@@ -106,7 +112,7 @@ Local SQLite database tracking which hashes are known to exist in S3, avoiding r
 | Property | Value |
 |----------|-------|
 | Location | `~/.deadline/job_attachments/s3_check_cache.db` |
-| Format | SQLite with WAL journaling |
+| Format | SQLite with WAL journaling (see [Journal Mode](#journal-mode)) |
 | Expiry | 30 days |
 
 ### Schema
