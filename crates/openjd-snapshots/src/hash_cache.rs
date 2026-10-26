@@ -218,7 +218,7 @@ mod tests {
             .is_none());
     }
 
-    /// The spec (snapshot_hash_cache.md, "Properties") requires WAL
+    /// The spec (snapshot_hash_cache.md, "Hash Cache" properties) requires WAL
     /// journaling. WAL mode is persistent in the database file, so check it
     /// through an independent connection rather than the cache's own.
     #[test]
