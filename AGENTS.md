@@ -127,7 +127,7 @@ Job attachments: content-addressed file tree snapshots with xxHash3 hashing, man
 
 - **Manifest** (`src/manifest.rs`) — Manifest types, serialization (v2023 and v2025 formats), validation.
 - **Operations** (`src/ops/`) — collect, hash, filter, subtree, partition, join, compose, diff, hash_upload, download.
-- **Caching** (`src/hash_cache.rs`, `src/data_cache.rs`, `src/s3_check_cache.rs`) — Local hash cache, S3 data cache, upload deduplication.
+- **Caching** (`src/hash_cache.rs`, `src/data_cache.rs`, `src/s3_check_cache.rs`, `src/sqlite_wal.rs`) — Local hash cache, S3 data cache, upload deduplication.
 - **Codec** (`src/codec.rs`) — Binary encoding/decoding for manifest formats.
 
 Spec entry point: `specs/snapshots/README.md`

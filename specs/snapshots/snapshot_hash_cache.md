@@ -2,7 +2,7 @@
 
 [README](README.md) · Hash Cache
 
-**Location:** `hash_cache.rs`, `s3_check_cache.rs`
+**Location:** `hash_cache.rs`, `s3_check_cache.rs`, `sqlite_wal.rs`
 
 ## Hash Cache
 
@@ -13,7 +13,7 @@ The hash cache is a local SQLite database that stores file hashes keyed by path,
 | Property | Value |
 |----------|-------|
 | Location | `~/.deadline/job_attachments/hash_cache.db` |
-| Format | SQLite with WAL journaling |
+| Format | SQLite with WAL journaling (see [Journal Mode](#journal-mode)) |
 | Thread safety | `Mutex<rusqlite::Connection>` |
 
 ### Schema
@@ -95,6 +95,16 @@ Byte-range support enables efficient caching for file chunked files. Different c
 
 The `Mutex<rusqlite::Connection>` serializes all database access. WAL journaling allows concurrent readers during writes. For the HASH operation, `rayon` parallel workers share the single `HashCache` via `Arc<HashCache>`.
 
+### Journal Mode
+
+`HashCache::new` and `S3CheckCache::new` both ask SQLite to switch to WAL journaling (`PRAGMA journal_mode=WAL`, in `sqlite_wal.rs`). WAL mode persists in the database file, so other processes that open it, including the Python `deadline-cloud` cache, use it too.
+
+SQLite does not report an error when it cannot enter WAL mode, which happens for a temporary or in-memory database or when the VFS lacks the shared-memory support WAL needs. Instead it keeps the previous journal mode and returns that mode from the PRAGMA. In that case `new()` still succeeds, because the caches are an optimization and work correctly in any journal mode. It logs a `tracing` warning that names the database path and the journal mode in effect. Concurrent readers then block during writes, which costs throughput but not correctness. The Python `deadline-cloud` cache also keeps working without WAL: it runs `PRAGMA journal_mode=WAL` without checking the result, so unlike this implementation it logs nothing.
+
+Within journal-mode setup, only an error from the PRAGMA itself makes `new()` fail, with `SnapshotError::Cache`. For example, when another connection holds a read transaction on a database that is not yet in WAL mode, `new()` fails with `Cache error: <path to the .db file>: database is locked` once SQLite's busy timeout (5 seconds) expires. (`new()` can also fail for other reasons: `SnapshotError::Io` when `cache_dir` cannot be created, and `SnapshotError::Cache` when the database cannot be opened, the table cannot be created, or, for the S3 check cache, expired entries cannot be pruned. Every `SnapshotError::Cache` from `new()` names the database file, as described in [snapshot_error_handling.md § Cache errors include the database path](snapshot_error_handling.md#cache-errors-include-the-database-path).)
+
+This is an intentional divergence from Python on a locked database. The Python cache makes up to 3 attempts at connection setup, including the PRAGMA. Between attempts it sleeps for a random 0.5–1.5 s delay, chosen once per call. It then raises `JobAttachmentsError: Could not access cache file after 3 retry attempts: <path>`. Rust makes one attempt, bounded by the busy timeout. Like Python's, its error names the file. A cache file that stays locked for 5 seconds means another process holds a long transaction, and callers can retry `new()` themselves.
+
 ## S3 Check Cache
 
 **Location:** `s3_check_cache.rs`
@@ -106,7 +116,7 @@ Local SQLite database tracking which hashes are known to exist in S3, avoiding r
 | Property | Value |
 |----------|-------|
 | Location | `~/.deadline/job_attachments/s3_check_cache.db` |
-| Format | SQLite with WAL journaling |
+| Format | SQLite with WAL journaling (see [Journal Mode](#journal-mode)) |
 | Expiry | 30 days |
 
 ### Schema

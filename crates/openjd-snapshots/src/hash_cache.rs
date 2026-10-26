@@ -42,9 +42,8 @@ impl HashCache {
         std::fs::create_dir_all(dir)?;
         let db_path = dir.join("hash_cache.db");
         let conn = rusqlite::Connection::open(&db_path)
-            .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
-        conn.pragma_update(None, "journal_mode", "WAL")
-            .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
+            .map_err(|e| crate::SnapshotError::cache_db(&db_path, e))?;
+        crate::sqlite_wal::enable_wal(&conn, &db_path)?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS hashesV4(
                 file_path blob,
@@ -56,7 +55,7 @@ impl HashCache {
                 PRIMARY KEY (file_path, hash_algorithm, range_start, range_end)
             );",
         )
-        .map_err(|e| crate::SnapshotError::Cache(e.to_string()))?;
+        .map_err(|e| crate::SnapshotError::cache_db(&db_path, e))?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -216,6 +215,89 @@ mod tests {
                 WHOLE_FILE_RANGE_END
             )
             .is_none());
+    }
+
+    /// The spec (snapshot_hash_cache.md, "Hash Cache" properties) requires WAL
+    /// journaling. WAL mode is persistent in the database file, so check it
+    /// through an independent connection rather than the cache's own.
+    #[test]
+    fn new_enables_wal_journaling() {
+        let (tmp, _cache) = make_cache();
+        let conn = rusqlite::Connection::open(tmp.path().join("hash_cache.db")).unwrap();
+        let mode: String = conn
+            .pragma_query_value(None, "journal_mode", |row| row.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+    }
+
+    /// A failed WAL PRAGMA makes `new()` fail (snapshot_hash_cache.md,
+    /// "Journal Mode"). The database already has the cache table but is in
+    /// rollback-journal mode, and another connection holds a read
+    /// transaction, so only the PRAGMA needs a lock that it cannot get. This
+    /// waits out the connection's 5-second busy timeout.
+    #[test]
+    fn new_fails_when_wal_pragma_fails() {
+        let tmp = TempDir::new().unwrap();
+        drop(HashCache::new(tmp.path()).unwrap());
+        let reader = rusqlite::Connection::open(tmp.path().join("hash_cache.db")).unwrap();
+        reader
+            .pragma_update(None, "journal_mode", "DELETE")
+            .unwrap();
+        reader.execute_batch("BEGIN;").unwrap();
+        let _: i64 = reader
+            .query_row("SELECT count(*) FROM hashesV4", [], |row| row.get(0))
+            .unwrap();
+
+        match HashCache::new(tmp.path()) {
+            Ok(_) => panic!("HashCache::new succeeded while the WAL PRAGMA was blocked"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                format!(
+                    "Cache error: {}: database is locked",
+                    tmp.path().join("hash_cache.db").display()
+                )
+            ),
+        }
+    }
+
+    /// Errors opening the database name the database file.
+    #[test]
+    fn new_open_error_names_the_file() {
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("hash_cache.db");
+        std::fs::create_dir(&db_path).unwrap();
+        match HashCache::new(tmp.path()) {
+            Ok(_) => panic!("HashCache::new succeeded with a directory as its database"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                format!(
+                    "Cache error: {}: unable to open database file",
+                    db_path.display()
+                )
+            ),
+        }
+    }
+
+    /// Errors creating the table name the database file. The database is
+    /// already in WAL mode, so the PRAGMA succeeds, and another connection
+    /// holds a write transaction, so `CREATE TABLE` waits out the 5-second
+    /// busy timeout and fails.
+    #[test]
+    fn new_create_table_error_names_the_file() {
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("hash_cache.db");
+        let writer = rusqlite::Connection::open(&db_path).unwrap();
+        writer.pragma_update(None, "journal_mode", "WAL").unwrap();
+        writer
+            .execute_batch("CREATE TABLE other(x); BEGIN IMMEDIATE;")
+            .unwrap();
+        match HashCache::new(tmp.path()) {
+            Ok(_) => panic!("HashCache::new succeeded while CREATE TABLE was blocked"),
+            Err(e) => assert_eq!(
+                e.to_string(),
+                format!("Cache error: {}: database is locked", db_path.display())
+            ),
+        }
     }
 
     #[test]
