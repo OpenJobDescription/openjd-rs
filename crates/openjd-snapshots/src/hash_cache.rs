@@ -230,6 +230,30 @@ mod tests {
         assert_eq!(mode, "wal");
     }
 
+    /// A failed WAL PRAGMA makes `new()` fail (snapshot_hash_cache.md,
+    /// "Journal Mode"). The database already has the cache table but is in
+    /// rollback-journal mode, and another connection holds a read
+    /// transaction, so only the PRAGMA needs a lock that it cannot get. This
+    /// waits out the connection's 5-second busy timeout.
+    #[test]
+    fn new_fails_when_wal_pragma_fails() {
+        let tmp = TempDir::new().unwrap();
+        drop(HashCache::new(tmp.path()).unwrap());
+        let reader = rusqlite::Connection::open(tmp.path().join("hash_cache.db")).unwrap();
+        reader
+            .pragma_update(None, "journal_mode", "DELETE")
+            .unwrap();
+        reader.execute_batch("BEGIN;").unwrap();
+        let _: i64 = reader
+            .query_row("SELECT count(*) FROM hashesV4", [], |row| row.get(0))
+            .unwrap();
+
+        match HashCache::new(tmp.path()) {
+            Ok(_) => panic!("HashCache::new succeeded while the WAL PRAGMA was blocked"),
+            Err(e) => assert_eq!(e.to_string(), "Cache error: database is locked"),
+        }
+    }
+
     #[test]
     fn whole_file_and_range_coexist() {
         let (_tmp, cache) = make_cache();

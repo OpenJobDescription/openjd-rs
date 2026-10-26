@@ -508,6 +508,12 @@ impl HashCache {
 }
 ```
 
+`HashCache::new` and `S3CheckCache::new` create `cache_dir` if needed, open
+the database, and request WAL journaling. If SQLite cannot use WAL they still
+succeed and log a warning. They fail with `SnapshotError::Cache` on SQLite
+errors, including a failed WAL PRAGMA. See
+[snapshot_hash_cache.md § Journal Mode](snapshot_hash_cache.md#journal-mode).
+
 ## S3 Check Cache
 
 ```rust

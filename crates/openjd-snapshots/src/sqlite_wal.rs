@@ -11,14 +11,15 @@ use tracing::warn;
 /// Ask SQLite to switch `conn` to WAL journaling, and return the journal
 /// mode it reports afterwards (lowercase, e.g. `"wal"`).
 ///
-/// SQLite does not fail when it cannot enter WAL mode (for example on a
-/// filesystem without the shared-memory support WAL needs, or for an
-/// in-memory database). It keeps the previous mode and reports that mode
-/// instead. The caches are an optimization, so that is not an error here
-/// either: the cache stays usable without WAL, as the Python `deadline-cloud`
-/// cache does (it does not check the result). A warning naming `db_path` and the mode in effect
-/// is logged so the fallback is visible. Errors from the PRAGMA itself are
-/// returned as [`crate::SnapshotError::Cache`].
+/// SQLite does not fail when it cannot enter WAL mode (for a temporary or
+/// in-memory database, or when the VFS lacks the shared-memory support WAL
+/// needs). It keeps the previous mode and reports that mode instead. The
+/// caches are an optimization, so that is not an error here either: the
+/// cache stays usable without WAL, as the Python `deadline-cloud` cache does
+/// (it does not check the result). A warning naming `db_path` and the mode
+/// in effect is logged so the fallback is visible. Errors from the PRAGMA
+/// itself, such as `database is locked`, are returned as
+/// [`crate::SnapshotError::Cache`].
 pub(crate) fn enable_wal(conn: &rusqlite::Connection, db_path: &Path) -> crate::Result<String> {
     let mode: String = conn
         .pragma_update_and_check(None, "journal_mode", "WAL", |row| row.get(0))
@@ -89,6 +90,29 @@ mod tests {
         let conn = rusqlite::Connection::open(&db_path).unwrap();
         let (mode, events) = capture(|| enable_wal(&conn, &db_path).unwrap());
         assert_eq!(mode, "wal");
+        assert_eq!(events, Vec::<String>::new());
+    }
+
+    /// Errors from the PRAGMA itself are not a fallback: they are returned as
+    /// `SnapshotError::Cache`. A read transaction on another connection
+    /// keeps a database that is not in WAL mode from switching to it.
+    #[test]
+    fn pragma_error_is_returned_as_cache_error() {
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("test.db");
+        let reader = rusqlite::Connection::open(&db_path).unwrap();
+        reader.execute_batch("CREATE TABLE t(x); BEGIN;").unwrap();
+        let _: i64 = reader
+            .query_row("SELECT count(*) FROM t", [], |row| row.get(0))
+            .unwrap();
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.busy_timeout(std::time::Duration::ZERO).unwrap();
+        let (result, events) = capture(|| enable_wal(&conn, &db_path));
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Cache error: database is locked"
+        );
         assert_eq!(events, Vec::<String>::new());
     }
 
