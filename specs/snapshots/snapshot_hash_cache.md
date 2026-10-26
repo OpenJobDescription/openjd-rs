@@ -103,7 +103,7 @@ SQLite does not report an error when it cannot enter WAL mode, which happens for
 
 Within journal-mode setup, only an error from the PRAGMA itself makes `new()` fail, with `SnapshotError::Cache`. For example, when another connection holds a read transaction on a database that is not yet in WAL mode, `new()` fails with `Cache error: database is locked` once SQLite's busy timeout (5 seconds) expires. (`new()` can also fail for other reasons: `SnapshotError::Io` when `cache_dir` cannot be created, and `SnapshotError::Cache` when the database cannot be opened, the table cannot be created, or, for the S3 check cache, expired entries cannot be pruned.)
 
-This is an intentional divergence from Python on a locked database. The Python cache retries the connection setup, including the PRAGMA, up to 3 times with 0.5–1.5 s of jitter between attempts. It then raises `JobAttachmentsError: Could not access cache file after 3 retry attempts: <path>`. Rust makes one attempt, bounded by the busy timeout, and its error does not name the path. A cache file that stays locked for 5 seconds usually means another process is in a long write, and callers can retry `new()` themselves.
+This is an intentional divergence from Python on a locked database. The Python cache makes up to 3 attempts at connection setup, including the PRAGMA. Between attempts it sleeps for a random 0.5–1.5 s delay, chosen once per call. It then raises `JobAttachmentsError: Could not access cache file after 3 retry attempts: <path>`. Rust makes one attempt, bounded by the busy timeout, and its error does not name the path. A cache file that stays locked for 5 seconds means another process holds a long transaction, and callers can retry `new()` themselves.
 
 ## S3 Check Cache
 
