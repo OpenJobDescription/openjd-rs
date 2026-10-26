@@ -95,7 +95,7 @@ Cache error: /home/user/.deadline/job_attachments/hash_cache.db: database is loc
 Cache error: /home/user/.deadline/job_attachments/s3_check_cache.db: unable to open database file
 ```
 
-rusqlite already appends `: <path>` to errors from opening a database. `cache_db` drops that trailing copy, so the path appears exactly once. Errors from `HashCache::put` and `S3CheckCache::put_entry` are not prefixed. Their callers discard them, because a failed cache write only costs a cache miss.
+rusqlite already appends `: <path>` to `SQLITE_CANTOPEN` errors from opening a database. `cache_db` drops that trailing copy, so the path appears exactly once. Errors from `HashCache::put` and `S3CheckCache::put_entry` are not prefixed. Their callers discard them, because a failed cache write only costs a cache miss.
 
 ### S3 errors include the key
 
