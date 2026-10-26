@@ -1954,7 +1954,6 @@ mod tests {
         );
         assert_eq!(join("list[int]", "list[string]"), None);
         assert_eq!(join("list[int]", "list[bool]"), None);
-        // Unbound type variables join as `any`.
         // An unbound type variable says nothing of its values: `any`.
         assert_eq!(join("list[int]", "list[T3]").as_deref(), Some("list[any]"));
     }
