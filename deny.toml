@@ -33,6 +33,17 @@ multiple-versions = "allow"
 
 [advisories]
 version = 2
+ignore = [
+    # crypto-bigint 0.5.5: timing side channels in operations intended to be
+    # constant-time. The only fix is crypto-bigint >= 0.7.6, with no patched
+    # 0.5.x release. 0.5.5 comes in only through aws-sigv4 (1.6.3, the latest
+    # as of 2026-10-26) and its `sigv4a` feature (SigV4a signing, e.g. for S3
+    # Multi-Region Access Points), which openjd-snapshots enables on
+    # aws-sdk-s3/aws-sdk-sts.
+    # Exploiting it requires observing timing on the signing client. Remove
+    # this ignore once aws-sigv4 depends on crypto-bigint >= 0.7.6.
+    { id = "RUSTSEC-2026-0387", reason = "no patched crypto-bigint 0.5.x; pulled in by aws-sigv4 sigv4a, awaiting upstream smithy-rs upgrade" },
+]
 
 [sources]
 unknown-registry = "deny"
