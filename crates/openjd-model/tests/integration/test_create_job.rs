@@ -5594,10 +5594,10 @@ fn path_default_sibling_escape_rejected_windows() {
 
 #[test]
 fn chunk_int_list_value_beyond_range_bound_rejected() {
-    // CHUNK[INT] regroups values into generated RangeExpr chunks, whose
-    // values are bounded to |v| < 2^62. A list range accepts full i64,
-    // so an out-of-bound value must be a clean job-creation error, not
-    // a panic when the chunk is built during iteration.
+    // CHUNK[INT] chunking bounds values to |v| < 2^62. A list range
+    // accepts full i64, so an out-of-bound value must be a clean
+    // job-creation error, not an overflow when the chunk is built during
+    // iteration.
     let err = parse_and_create_err(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -5623,6 +5623,73 @@ fn chunk_int_list_value_beyond_range_bound_rejected() {
         "Validation error: Task parameter 'Frame': value 4611686018427387904 \
          exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)"
     );
+}
+
+#[test]
+fn chunk_int_range_expr_value_beyond_range_bound_rejected() {
+    // A range expression accepts nearly all of i64, so the CHUNK[INT]
+    // bound applies to a range-expression range too, at either end.
+    for (range, value) in [
+        ("1-3,4611686018427387904", "4611686018427387904"),
+        ("-4611686018427387904,1-3", "-4611686018427387904"),
+    ] {
+        let template = format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["TASK_CHUNKING"],
+            "name": "Test",
+            "steps": [{{
+                "name": "S",
+                "parameterSpace": {{
+                    "taskParameterDefinitions": [{{
+                        "name": "Frame",
+                        "type": "CHUNK[INT]",
+                        "range": "{range}",
+                        "chunks": {{"defaultTaskCount": 2, "rangeConstraint": "CONTIGUOUS"}}
+                    }}]
+                }},
+                "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+            }}]
+        }}"#
+        );
+        let err = parse_and_create_err(&template, &[]);
+        assert_eq!(
+            err,
+            format!(
+                "Validation error: Task parameter 'Frame': value {value} \
+                 exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)"
+            )
+        );
+    }
+}
+
+#[test]
+fn int_range_expr_reaches_the_i64_edges() {
+    // A plain INT range expression accepts every i64 except i64::MIN.
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [{
+                    "name": "Frame",
+                    "type": "INT",
+                    "range": "-9223372036854775807,9223372036854775807"
+                }]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    let values: Vec<String> = openjd_model::StepParameterSpaceIterator::new(ps)
+        .unwrap()
+        .map(|set| set["Frame"].value.to_display_string())
+        .collect();
+    assert_eq!(values, vec!["-9223372036854775807", "9223372036854775807"]);
 }
 
 #[test]

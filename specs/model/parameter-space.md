@@ -123,6 +123,17 @@ are combined:
 ## Chunking
 
 Chunking divides a parameter's range into groups (chunks) for batch processing.
+
+`CHUNK[INT]` values are bounded to magnitudes below 2^62 (`CHUNK_INT_VALUE_BOUND`), a
+narrower domain than a range expression accepts (every `i64` except `i64::MIN`; see
+[expr range-expr.md](../expr/range-expr.md#value-bounds)). The chunking arithmetic
+(`last - first + 1`, `value + 1` adjacency) is plain i64, which is exact inside that bound.
+`check_chunk_int_value_bound` rejects a list or range-expression range with a value at or
+beyond it, at job creation and again in `StepParameterSpaceIterator::new` (a
+`StepParameterSpace` is publicly constructible), with the error
+`Task parameter '<name>': value <v> exceeds the CHUNK[INT] range value bound (magnitude
+must be below 2^62)`. A range expression's values are sorted, so only its first and last
+values are checked.
 The node type used depends on the `rangeConstraint` and whether adaptive chunking
 is active:
 
@@ -179,12 +190,23 @@ remainder count (`leftovers = total % num_chunks`). Both `StaticChunkNode` and
 `StaticChunkIterator` delegate to a shared `build_chunk_range_expr()` function.
 
 On `get(i)`, the node slices into the underlying range at the computed offset and builds
-a `RangeExpr` on the fly. `chunk_values_to_range_expr()` groups the slice via
-`RangeExpr::from_values`, which mirrors the Python reference's `IntRangeExpr.from_list`
-(e.g., `[1,3,5]` → `"1-5:2"`, `[1,2,3,5,7,8,9]` → `"1-3,5,7,8,9"`), so NONCONTIGUOUS
-chunk strings are byte-identical across the two implementations. The reference's grouping
-is greedy on the first gap: a consecutive pair is consumed atomically (`[1,2,4,6]` →
-`"1,2,4,6"`, never `"1,2-6:2"`), and a 2-element sub-range renders in comma form.
+a `RangeExpr` on the fly. `chunk_values_to_range_expr()` builds it with
+`RangeExpr::from_values`, so a NONCONTIGUOUS chunk is written in the canonical form of
+Template Schemas §3.4.1.1.1, as §3.4.1.5 (`rangeConstraint`) requires: for example
+`[1,3,5]` → `"1-5:2"`, `[1,2,4,6]` → `"1,2-6:2"`, `[1,2,3,5,7,8,9]` → `"1-3,5,7-9"`.
+
+**Divergence from the Python reference:** `IntRangeExpr.from_list` consumes a value that
+cannot start a run of three together with the value after it, so it writes `[1,2,4,6]` as
+`"1,2,4,6"`, `[1,3,4,5]` as `"1,3,4,5"`, and `[1,2,3,5,7,8,9]` as `"1-3,5,7,8,9"`. The
+canonical form writes the first value alone and lets the second start a run. The two agree
+whenever no such pair occurs.
+
+A CONTIGUOUS chunk is built from the string `"<N>-<M>"` and flagged with
+`RangeExpr::with_contiguous(true)`, so it is written `<N>-<M>` even with one or two values
+(`"3-3"`, `"7-8"`), the one exception §3.4.1.5 makes to the canonical form. Values
+computed from a chunk (slices, `range_expr(list(...))`) do not carry the flag and are
+written canonically. Containment checks compare chunks with `RangeExpr` equality, which
+compares values, so a chunk string handed back by a caller matches however it is spelled.
 
 ### Adaptive Chunking
 
@@ -200,10 +222,10 @@ because chunk boundaries aren't known in advance.
 `AdaptiveChunkNode::validate_containment()` uses a `HashSet` for O(N) lookup.
 
 `StaticChunkNode::validate_containment()` compares a candidate against each generated
-chunk by value sequence, not by `RangeExpr` structural equality. The two differ for a
-stepped pair: `from_values` groups `[6,9]` as one stepped range, while parsing its
-rendered form `"6,9"` yields two singletons. Value comparison keeps the invariant that
-a chunk string printed by the iterator passes validation when handed back (e.g. via the
+chunk with `RangeExpr` equality, which compares values (Expression Language §1.2.5)
+because every `RangeExpr` stores the runs of its canonical form: `from_values([6,9])` and
+the parse of its rendered form `"6,9"` are the same value. This keeps the invariant that a
+chunk string printed by the iterator passes validation when handed back (e.g. via the
 CLI's `--task-params`).
 
 ### Chunk Override

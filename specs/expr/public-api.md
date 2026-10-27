@@ -235,7 +235,7 @@ Additional per-module caps (see each module section below):
 - `format_string::MAX_FORMAT_STRING_SEGMENTS` (1,000)
 - `format_string::MAX_STATIC_RESOLVED_VALUE_LEN` (10 MiB — caps the concatenated `resolved_value` returned by `validate_expressions`; not an error)
 - `range_expr::MAX_RANGE_EXPR_CHUNKS` (10,000)
-- `range_expr::MAX_RANGE_VALUE_MAGNITUDE` (2^62 — value-domain bound, not a heap cap)
+- `range_expr::MAX_RANGE_EXPR_LEN` (`i64::MAX` — bound on the number of values, not a heap cap)
 - `symbol_table::MAX_SYMBOL_TABLE_ENTRIES` (100,000 — transport-only)
 
 All caps are orders of magnitude above any legitimate usage and exist to
@@ -1259,24 +1259,35 @@ impl IntRange {
 }
 ```
 
-`new` errors on a zero step, a direction/step mismatch, or any
-endpoint/step whose magnitude is at or beyond `MAX_RANGE_VALUE_MAGNITUDE`
-(integer overflow error). With values bounded, all derived arithmetic —
-counts, index products, normalization — is exactly representable in
-i64/u64 on every target; see `range-expr.md` (Value Bounds).
+An `IntRange` is one arithmetic progression. `new` normalizes a
+descending range to ascending form and replaces an end the step does not
+reach with the last value reached (`new(1, 10, 4)` has `end()` 9). It
+errors on a zero step, a direction/step mismatch, an endpoint or step of
+`i64::MIN` (integer overflow error), or more than `MAX_RANGE_EXPR_LEN`
+values. Spans between values can exceed i64 (up to 2^64 - 2) and are
+computed exactly; see `range-expr.md` (Value Bounds).
 
 Fields are private so the construction invariants (`start <= end`,
-`step > 0`, bounded magnitudes) hold for every live value: read access
-is via `start()`/`end()`/`step()`, `Deserialize` re-validates through
+`step > 0`, `end` on the progression, no `i64::MIN`, at most
+`MAX_RANGE_EXPR_LEN` values) hold for every live value: read access is
+via `start()`/`end()`/`step()`, `Deserialize` re-validates through
 `new`, and `RangeExpr::from_ranges` re-normalizes its inputs the same
-way.
+way. `Display` writes one progression as `x`, `x,y`, `x-y`, or `x-y:s`.
 
 ```rust
-/// A sorted set of non-overlapping integer ranges. Represents the
-/// expanded form of a range expression.
+/// A set of integers, stored as the runs of its canonical form.
 #[derive(Debug, Clone, Eq, serde::Serialize)]
 pub struct RangeExpr { /* private fields */ }
 ```
+
+The value of a `RangeExpr` is its list of values in increasing order
+(Template Schemas §3.4.1.1.1). Every constructor normalizes the stored
+`IntRange`s to the runs of the canonical form (each one value, or three
+or more with a constant step), so the representation depends on the
+values alone. As a result `==` and `Hash` compare values
+(`"1,3,5,7,9"` equals `"1-9:2"`), and `Display` writes the canonical
+form (`"1-9:2"`), in time proportional to the number of runs and never
+to the number of values. See `range-expr.md` (Canonical runs).
 
 Maximum chunk count:
 
@@ -1286,24 +1297,28 @@ Maximum chunk count:
 /// shot-list submission.
 pub const range_expr::MAX_RANGE_EXPR_CHUNKS: usize = 10_000;
 
-/// Exclusive bound on range endpoint/step magnitudes (2^62). Values at
-/// or beyond this raise an integer overflow error at construction; the
-/// bounded domain keeps all derived arithmetic exactly representable in
-/// 64 bits (see range-expr.md, Value Bounds). Re-exported at the crate
-/// root (downstream crates validate against it, e.g. openjd-model's
-/// CHUNK[INT] list checks).
-pub const range_expr::MAX_RANGE_VALUE_MAGNITUDE: i64;
+/// Maximum number of values in a range expression: i64::MAX, so that
+/// len() and every index fit an int. Values may be any i64 except
+/// i64::MIN. Re-exported at the crate root.
+pub const range_expr::MAX_RANGE_EXPR_LEN: u64 = i64::MAX as u64;
 ```
 
 Construction + inspection:
 
 ```rust
 impl RangeExpr {
+    /// Any order, duplicates allowed. Errors only on i64::MIN.
     pub fn from_values(values: Vec<i64>) -> Result<Self, ExpressionError>;
+    /// Any order. Errors on no ranges, more than MAX_RANGE_EXPR_CHUNKS,
+    /// overlapping intervals, more than MAX_RANGE_EXPR_LEN values in
+    /// total, or an invalid IntRange.
     pub fn from_ranges(ranges: Vec<IntRange>) -> Result<Self, ExpressionError>;
 
-    /// Display mode: when true, single-element ranges render as
-    /// `"5-5"` rather than `"5"`. Useful for contiguous chunk emissions.
+    /// Contiguous display flag: when true and the values are contiguous,
+    /// Display writes `"<N>-<M>"` even for one or two values (`"5-5"`,
+    /// `"5-6"`), the form of a CONTIGUOUS chunk (Template Schemas
+    /// §3.4.1.5). Not part of the value; not inherited by values computed
+    /// from this one.
     #[must_use]
     pub fn with_contiguous(self, contiguous: bool) -> Self;
 
@@ -1311,12 +1326,14 @@ impl RangeExpr {
     pub fn is_empty(&self) -> bool;
     pub fn contains(&self, value: i64) -> bool;
     pub fn get(&self, index: i64) -> Option<i64>;
+    /// The runs of the canonical form, in increasing order.
     pub fn ranges(&self) -> &[IntRange];
     pub fn cumulative_lengths(&self) -> &[u64];
     pub fn iter(&self) -> impl Iterator<Item = i64> + '_;
     pub fn to_vec(&self) -> Vec<i64>;
 
-    /// Slice with Python-style start/stop/step. Returns a new `RangeExpr`.
+    /// Slice with already-normalized start/stop and a positive step.
+    /// Returns a new `RangeExpr` in canonical form, in O(runs).
     pub fn slice(
         &self, start: i64, stop: i64, step: i64,
     ) -> Result<RangeExpr, ExpressionError>;
@@ -1331,7 +1348,8 @@ impl std::str::FromStr for RangeExpr {
     /// Parse spec-form strings like "1-10", "1-100:10", "1,5,10-20".
 }
 
-impl PartialEq for RangeExpr;  // compares ranges only, ignores display bit
+impl std::fmt::Display for RangeExpr; // canonical form, or <N>-<M> with the flag
+impl PartialEq for RangeExpr;  // value equality (canonical runs); ignores display bit
 impl Hash for RangeExpr;       // consistent with PartialEq
 impl<'de> serde::Deserialize<'de> for RangeExpr;
 ```
@@ -1592,7 +1610,7 @@ pub use format_string::{
 pub use function_library::{EvalContext, FunctionLibrary};
 pub use path_mapping::{PathFormat, PathMappingRule};
 pub use profile::{ExprExtension, ExprProfile, ExprRevision, HostContext};
-pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS, MAX_RANGE_VALUE_MAGNITUDE};
+pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS, MAX_RANGE_EXPR_LEN};
 pub use symbol_table::{
     SerializedSymbolTable, SymbolTable, SymbolTableError, MAX_SYMBOL_TABLE_ENTRIES,
 };

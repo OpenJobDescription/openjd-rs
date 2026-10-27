@@ -149,8 +149,10 @@ The following function families use this pattern:
   `Float64`'s text is numeric; `Float64::with_str` does not enforce that, so the
   assumption is a caller contract rather than an invariant. See
   [issue 328](https://github.com/OpenJobDescription/openjd-rs/issues/328).
-  `RangeExpr` is quoted through the shared writer, and its `Display` emits only
-  digits and `-`, `:`, `,`, so nothing there can need escaping.
+  `RangeExpr` is quoted through the shared writer, and its `Display` (the
+  canonical form of Template Schemas §3.4.1.1.1, or a `CONTIGUOUS` chunk's
+  `<N>-<M>`) emits only digits and `-`, `:`, `,`, so nothing there can need
+  escaping.
 
   `py_escape::write_py_string_literal` is the single implementation. `repr_py`
   and `ExprValue::repr_python` both call it, so the two cannot disagree about how

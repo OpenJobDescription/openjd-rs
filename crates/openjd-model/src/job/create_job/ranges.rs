@@ -161,24 +161,12 @@ fn resolve_task_parameter(
         }
         template::TaskParameterDefinition::CHUNK_INT(p) => {
             let range = resolve_int_range(&p.range, symtab, p.name.as_str(), limits, budgets)?;
-            // CHUNK[INT] regroups values into generated RangeExpr chunks,
-            // which bound values to |v| < 2^62. List ranges accept full
-            // i64, so reject out-of-bound values here — at job creation,
-            // with a path-annotated error — rather than panicking when a
-            // chunk is built during iteration.
-            if let job::TaskParamRange::List(values) = &range {
-                if let Some(v) = values
-                    .iter()
-                    .find(|v| v.unsigned_abs() >= openjd_expr::MAX_RANGE_VALUE_MAGNITUDE as u64)
-                {
-                    return Err(ModelError::DecodeValidation(format!(
-                        "Task parameter '{}': value {} exceeds the CHUNK[INT] \
-                         range value bound (magnitude must be below 2^62)",
-                        p.name.as_str(),
-                        v
-                    )));
-                }
-            }
+            // CHUNK[INT] chunking bounds values to |v| < 2^62, below what
+            // list and range-expression ranges accept, so reject
+            // out-of-bound values here — at job creation, with a
+            // path-annotated error — rather than overflowing when a chunk
+            // is built during iteration.
+            crate::job::step_param_space::check_chunk_int_value_bound(p.name.as_str(), &range)?;
             // Chunks fields are `<integer> | <intstring>`: a single
             // whole-field expression resolves with target type `int`
             // (Expression Language §1.2.3 — every field gives its

@@ -582,7 +582,7 @@ pub fn openjd_expr::range_expr::RangeExprError::fmt(&self, &mut core::fmt::Forma
 impl core::fmt::Display for openjd_expr::range_expr::RangeExprError
 pub fn openjd_expr::range_expr::RangeExprError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub const openjd_expr::range_expr::MAX_RANGE_EXPR_CHUNKS: usize
-pub const openjd_expr::range_expr::MAX_RANGE_VALUE_MAGNITUDE: i64
+pub const openjd_expr::range_expr::MAX_RANGE_EXPR_LEN: u64
 pub mod openjd_expr::symbol_table
 pub enum openjd_expr::symbol_table::SymbolTableEntry
 pub openjd_expr::symbol_table::SymbolTableEntry::Table(openjd_expr::symbol_table::SymbolTable)
@@ -1435,7 +1435,7 @@ pub const openjd_expr::DEFAULT_OPERATION_LIMIT: usize
 pub const openjd_expr::MAX_EXPRESSION_DEPTH: usize
 pub const openjd_expr::MAX_PARSE_INPUT_LEN: usize
 pub const openjd_expr::MAX_RANGE_EXPR_CHUNKS: usize
-pub const openjd_expr::MAX_RANGE_VALUE_MAGNITUDE: i64
+pub const openjd_expr::MAX_RANGE_EXPR_LEN: u64
 pub const openjd_expr::MAX_SYMBOL_TABLE_ENTRIES: usize
 pub trait openjd_expr::EvalContext
 pub fn openjd_expr::EvalContext::check_memory(&self, usize) -> core::result::Result<(), openjd_expr::error::ExpressionError>

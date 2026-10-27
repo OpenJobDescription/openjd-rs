@@ -44,7 +44,7 @@ pub use format_string::StaticResolution;
 pub use function_library::{EvalContext, FunctionLibrary};
 pub use path_mapping::{PathFormat, PathMappingRule};
 pub use profile::{ExprExtension, ExprProfile, ExprRevision, HostContext};
-pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS, MAX_RANGE_VALUE_MAGNITUDE};
+pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS, MAX_RANGE_EXPR_LEN};
 pub use symbol_table::{
     SerializedSymbolTable, SymbolTable, SymbolTableError, MAX_SYMBOL_TABLE_ENTRIES,
 };

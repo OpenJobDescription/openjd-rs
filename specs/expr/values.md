@@ -242,6 +242,9 @@ Only one display implementation exists — the duplicate that once lived in
 
 Scalars render as themselves: `null`, `true`/`false`, decimal integers, the
 float's preserved or shortest representation, and strings and paths unquoted.
+A `range_expr` renders as its canonical form (Template Schemas §3.4.1.1.1),
+like `"1-9:2"` for `range_expr("1,3,5,7,9")`, or as `<N>-<M>` for a
+`CONTIGUOUS` chunk; see [range-expr.md](range-expr.md#canonical-form-display).
 
 ### List display strings
 
@@ -346,9 +349,12 @@ on length mismatch without iterating.
 explicitly: Int↔Float compares exactly in the integer domain (see below),
 String↔Path compares the string values, same-variant typed lists compare their
 primitive elements directly (charged per comparison performed, like the generic
-arm), and mixed list↔list comparison iterates element-wise recursively. List↔RangeExpr
+arm), and mixed list↔list comparison iterates element-wise recursively.
+RangeExpr↔RangeExpr compares values (Expression Language §1.2.5), in O(runs) with no
+expansion, because both are stored as their canonical runs; see
+[range-expr.md](range-expr.md#equality-and-hashing). List↔RangeExpr
 comparison decides length mismatches in O(1) with no charge (range lengths are
-exact arithmetic under the bounded value domain), then walks the range's lazy
+exact, at most `MAX_RANGE_EXPR_LEN`), then walks the range's lazy
 iterator against the list — never materializing the range — charged per element
 comparison performed.
 
@@ -430,7 +436,8 @@ non-destructive conversions, matching RFC 0005 §"Implicit Type Coercion"
 [Destinations](#destinations)):
 
 - `bool`/`int`/`float`/`path`/`range_expr` → `string` (a `range_expr`
-  produces its canonical form, like `"1-5"`)
+  produces its canonical form, like `"1-5"` for `range_expr("1,2,3,4,5")`, or a
+  `CONTIGUOUS` chunk's `<N>-<M>`)
 - `string` → `path` (every string is a valid path)
 - `float`/`string` → `int` (error if the value cannot be represented
   exactly, e.g. `3.75`, `""`, `"3.1"`)
