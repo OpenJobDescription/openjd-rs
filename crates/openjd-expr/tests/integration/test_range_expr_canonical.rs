@@ -328,6 +328,10 @@ fn hash_agrees_with_value_equality() {
 
 #[test]
 fn a_value_keeps_memory_for_its_runs_only() {
+    within_deadline(Duration::from_secs(10), a_value_keeps_memory_body);
+}
+
+fn a_value_keeps_memory_body() {
     // A million consecutive values are one run, however they were built.
     let built = RangeExpr::from_values((0..1_000_000).collect()).unwrap();
     let parsed: RangeExpr = "0-999999".parse().unwrap();
@@ -356,9 +360,15 @@ fn contiguous_flag_writes_n_dash_m() {
     assert_eq!(r("5").to_string(), "5-5");
     assert_eq!(r("5-6").to_string(), "5-6");
     assert_eq!(r("1-10").to_string(), "1-10");
-    // Written in canonical form when the values are not contiguous.
+    // Written in canonical form when the values are not contiguous,
+    // including when the first or last run has several values.
     assert_eq!(r("1,3,5").to_string(), "1-5:2");
     assert_eq!(r("1,2,4").to_string(), "1,2,4");
+    assert_eq!(r("0-2,5").to_string(), "0-2,5");
+    assert_eq!(r("0,3-5").to_string(), "0,3-5");
+    assert_eq!(r("0-2,4-6").to_string(), "0-2,4-6");
+    // Contiguous values stored as several runs are still <N>-<M>.
+    assert_eq!(r("0,1").to_string(), "0-1");
     // Clearing the flag restores the canonical form.
     assert_eq!(r("5").with_contiguous(false).to_string(), "5");
     // An empty value is written empty, flag or not.

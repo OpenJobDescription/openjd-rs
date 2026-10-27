@@ -1052,6 +1052,26 @@ fn noncontiguous_chunk_string_round_trips_through_validate_containment() {
         seen += 1;
     }
     assert_eq!(seen, 3);
+    // A value with the values of no chunk is rejected, however it is
+    // spelled: "4,6,9" mixes two chunks, and "6-9:3" is the chunk "6,9"
+    // spelled differently (accepted).
+    let with_p = |text: &str| {
+        let mut set = StepParameterSpaceIterator::new(ps).unwrap().next().unwrap();
+        let param_type = set["P"].param_type;
+        set.insert(
+            "P".to_string(),
+            openjd_model::types::TaskParameterValue {
+                param_type,
+                value: openjd_expr::ExprValue::RangeExpr(text.parse().unwrap()),
+            },
+        );
+        set
+    };
+    assert_eq!(
+        iter.validate_containment(&with_p("4,6,9")).unwrap_err(),
+        "Parameter 'P' value '4,6,9' is not a valid chunk in the parameter space."
+    );
+    iter.validate_containment(&with_p("6-9:3")).unwrap();
 }
 
 /// Random access must render identically to sequential iteration: the

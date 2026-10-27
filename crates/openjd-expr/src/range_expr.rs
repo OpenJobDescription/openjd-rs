@@ -1236,13 +1236,11 @@ mod tests {
     }
 
     #[test]
-    fn length_uses_saturating_sum() {
-        // `from_ranges` uses `saturating_add` when summing per-chunk lengths,
-        // so a multi-chunk range whose combined logical length would exceed
-        // `usize::MAX` cannot wrap to a small value that would corrupt
-        // `len()` / `is_empty()`. This test confirms the happy-path summation
-        // matches the expected total; the saturating behavior is exercised
-        // only in the arithmetic failure mode and is a defensive guard.
+    fn length_sums_the_ranges() {
+        // `from_ranges` sums per-range lengths with `checked_add`, rejecting
+        // a total above MAX_RANGE_EXPR_LEN (tested by
+        // `values_at_i64_bounds_accepted`). This test confirms the
+        // happy-path total.
         let ranges = vec![
             IntRange::new(0, 1_000_000, 1).unwrap(),
             IntRange::new(2_000_000, 3_000_000, 1).unwrap(),
