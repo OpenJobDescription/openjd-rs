@@ -102,7 +102,7 @@ pub(crate) fn check_chunk_int_value_bound(
 /// CONTIGUOUS chunks span `first-last` and carry the contiguous display flag.
 /// NONCONTIGUOUS chunks are built with `RangeExpr::from_values`, so they are
 /// written in the canonical form of Template Schemas §3.4.1.1.1 (e.g.
-/// `[1,2,4,6]` → `"1,2,4,6"`, `[1,2,3,5,7,8,9]` → `"1-3,5,7-9"`).
+/// `[1,2,4,6]` → `"1,2-6:2"`, `[1,2,3,5,7,8,9]` → `"1-3,5,7-9"`).
 fn chunk_values_to_range_expr(vals: &[i64], constraint: &RangeConstraint) -> RangeExpr {
     match constraint {
         RangeConstraint::Contiguous => {

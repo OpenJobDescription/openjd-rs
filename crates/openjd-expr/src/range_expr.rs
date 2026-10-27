@@ -14,8 +14,14 @@ use std::fmt;
 
 /// Maximum number of comma-separated sub-ranges in a single range expression.
 ///
-/// Each sub-range is one `IntRange` before canonicalization, which stores
-/// at most two runs per sub-range in the resulting `RangeExpr`.
+/// Parsing, [`RangeExpr::from_ranges`], and deserialization reject both an
+/// input with more sub-ranges than this and a value whose canonical form
+/// has more runs than this. The canonical form can have up to two runs per
+/// input sub-range (`"0-1,3-4"` is `"0,1,3,4"`), so the second check is what
+/// guarantees that the canonical form of every accepted value parses (and
+/// deserializes) back. Values computed by [`RangeExpr::from_values`] and
+/// [`RangeExpr::slice`] are not capped; their size is bounded by the
+/// evaluator's memory limit instead.
 /// Real-world range expressions (frame ranges, task chunks) contain at most
 /// a few dozen sub-ranges; 10,000 is two orders of magnitude above any
 /// plausible legitimate use. Rejecting larger inputs at parse time prevents
@@ -535,8 +541,9 @@ impl RangeExpr {
     /// validates that they do not overlap, and normalizes to the runs of
     /// the canonical form.
     ///
-    /// Returns an error if the number of input ranges exceeds
-    /// [`MAX_RANGE_EXPR_CHUNKS`], if two ranges overlap (their intervals
+    /// Returns an error if the number of input ranges, or of runs in the
+    /// canonical form, exceeds [`MAX_RANGE_EXPR_CHUNKS`], if two ranges
+    /// overlap (their intervals
     /// from first to last value intersect), if the total number of values
     /// exceeds [`MAX_RANGE_EXPR_LEN`], or if any range violates the
     /// `IntRange::new` invariants. Each input is re-normalized through
@@ -577,7 +584,18 @@ impl RangeExpr {
                 .filter(|&t| t <= MAX_RANGE_EXPR_LEN)
                 .ok_or_else(too_many_values)?;
         }
-        Ok(Self::from_increasing(&ranges))
+        let result = Self::from_increasing(&ranges);
+        // The canonical form can have up to two runs per input range, so
+        // cap it as well: then the canonical form of every value accepted
+        // here is itself accepted here, by `parse` and by `Deserialize`.
+        if result.ranges.len() > MAX_RANGE_EXPR_CHUNKS {
+            return Err(ExpressionError::parse_error(format!(
+                "Range expression has too many sub-ranges in canonical form ({}); maximum is {}",
+                result.ranges.len(),
+                MAX_RANGE_EXPR_CHUNKS,
+            )));
+        }
+        Ok(result)
     }
 
     /// Total number of integers across all sub-ranges.

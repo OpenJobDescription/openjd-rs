@@ -113,7 +113,7 @@ expression value as a string goes through it: `string(r)`, `+` with a string,
 format-string interpolation, `repr_py`/`repr_json`/`repr_pwsh`, the JSON and display forms
 of a list containing a range, and the model, sessions, and CLI layers that print task
 parameter values. The canonical form parses back to the same value and prints the same
-string again. The only other form is the contiguous chunk form (see Contiguous Display
+string again (for a value within the run cap of Defensive Caps). The only other form is the contiguous chunk form (see Contiguous Display
 Mode).
 
 `IntRange` also implements `Display`, writing one progression as `x`, `x,y` (two values),
@@ -129,6 +129,13 @@ expansion) and `Hash` hashes them, which keeps `Hash` consistent with `Eq`. The
 contiguous display flag is not part of the value. `ExprValue` equality and hashing for
 `range_expr` delegate to these, and so do the model's `TaskParamRange` equality and chunk
 containment checks.
+
+**Divergence from the Python reference:** openjd-model-for-python's `IntRangeExpr`
+(0.13.0) predates the canonical form: `str()` writes the elements it stored
+(`str(IntRangeExpr.from_str("1,3,5,7,9"))` is `"1,3,5,7,9"`, and `"19-23:5,13-18"` is
+`"13-18,19"`), and `==` compares those elements, so `"1,3,5,7,9"` and `"1-9:2"` are
+unequal. openjd-rs follows the specification (Template Schemas §3.4.1.1.1, Expression
+Language §1.2.5), which defines both by value.
 
 ## Parsing
 
@@ -165,8 +172,17 @@ large parameter spaces (millions of frames, billions of iterations) without
 materialization. Downstream conversion (`list(range_expr)`, comprehensions
 over the range) is already bounded by the evaluator's per-element operation
 charge and memory limit. (The count is bounded only by `MAX_RANGE_EXPR_LEN`; see Value
-Bounds.) Canonicalization can split an element into at most two runs, so a range that
-passes the cap stores at most 20,000 runs.
+Bounds.)
+
+Canonicalization can split an element into two runs (`"0-1,3-4"` is `"0,1,3,4"`), so
+`from_ranges` (and so `from_str` and deserialization) also rejects a value whose canonical
+form has more than `MAX_RANGE_EXPR_CHUNKS` runs, with `Range expression has too many
+sub-ranges in canonical form (20000); maximum is 10000`. Every value these constructors
+accept therefore has a canonical form, and a serialized form, that they accept again. Values
+computed by `from_values` (`range_expr(list)`) and `slice` are not capped this way: their
+size is bounded by the evaluator's memory limit, and a computed value with more than
+`MAX_RANGE_EXPR_CHUNKS` runs (for example `range_expr([i*i for i in range(15000)])`) has a
+canonical form that `from_str` rejects.
 
 This cap is orders of magnitude above any realistic render-farm frame
 range: real multi-chunk inputs select frames from a handful of shots, well
@@ -301,7 +317,8 @@ r.to_string()  // → "1-10" (unchanged)
 
 When the flag is set and the values are contiguous (`last - first + 1 == len`), `Display`
 writes `"{first}-{last}"`; otherwise it writes the canonical form. The model layer sets
-the flag on every `CONTIGUOUS` chunk it builds, and every string path (`Task.Param`,
+the flag on every `CONTIGUOUS` chunk it builds, the CLI sets it on a `--task-param` or
+`--tasks` value for a `CONTIGUOUS` `CHUNK[INT]` parameter, and every string path (`Task.Param`,
 `Task.RawParam`, `string()`, `repr_*`, `+`) goes through `Display`, so the chunk form
 reaches all of them.
 
@@ -321,7 +338,7 @@ In the expression language, `RangeExpr` values support:
 |-----------|--------|
 | `len(r)` | Element count |
 | `r[i]` | Index access |
-| `r[i:j]` / `r[i:j:k]` | Slice → `list[int]` |
+| `r[i:j]` / `r[i:j:k]` | Slice → `range_expr` (in canonical form) for a positive step, `list[int]` for a negative step |
 | `x in r` | Containment check |
 | `min(r)` / `max(r)` / `sum(r)` | Aggregate operations |
 | `list(r)` | Convert to `list[int]` |

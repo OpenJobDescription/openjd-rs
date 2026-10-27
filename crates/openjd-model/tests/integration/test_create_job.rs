@@ -5664,6 +5664,59 @@ fn chunk_int_range_expr_value_beyond_range_bound_rejected() {
 }
 
 #[test]
+fn chunk_int_values_just_inside_range_bound_accepted() {
+    // The bound is exclusive: magnitudes up to 2^62 - 1 are accepted, as a
+    // list and as a range expression, and chunk normally.
+    for (range, constraint, want) in [
+        (
+            r#"[-4611686018427387903, 1, 4611686018427387903]"#,
+            "NONCONTIGUOUS",
+            vec!["-4611686018427387903,1", "4611686018427387903"],
+        ),
+        (
+            r#""-4611686018427387903,1,4611686018427387903""#,
+            "NONCONTIGUOUS",
+            vec!["-4611686018427387903,1", "4611686018427387903"],
+        ),
+        (
+            r#""-4611686018427387903,4611686018427387902-4611686018427387903""#,
+            "CONTIGUOUS",
+            vec![
+                "-4611686018427387903--4611686018427387903",
+                "4611686018427387902-4611686018427387903",
+            ],
+        ),
+    ] {
+        let template = format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["TASK_CHUNKING"],
+            "name": "Test",
+            "steps": [{{
+                "name": "S",
+                "parameterSpace": {{
+                    "taskParameterDefinitions": [{{
+                        "name": "Frame",
+                        "type": "CHUNK[INT]",
+                        "range": {range},
+                        "chunks": {{"defaultTaskCount": 2, "rangeConstraint": "{constraint}"}}
+                    }}]
+                }},
+                "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+            }}]
+        }}"#
+        );
+        let job = parse_and_create(&template, &[]);
+        let ps = job.steps[0].parameter_space.as_ref().unwrap();
+        let chunks: Vec<String> = openjd_model::StepParameterSpaceIterator::new(ps)
+            .unwrap()
+            .map(|set| set["Frame"].value.to_display_string())
+            .collect();
+        assert_eq!(chunks, want, "{range} {constraint}");
+    }
+}
+
+#[test]
 fn int_range_expr_reaches_the_i64_edges() {
     // A plain INT range expression accepts every i64 except i64::MIN.
     let job = parse_and_create(

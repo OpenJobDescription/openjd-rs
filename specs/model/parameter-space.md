@@ -134,6 +134,13 @@ beyond it, at job creation and again in `StepParameterSpaceIterator::new` (a
 `Task parameter '<name>': value <v> exceeds the CHUNK[INT] range value bound (magnitude
 must be below 2^62)`. A range expression's values are sorted, so only its first and last
 values are checked.
+
+**Divergence from the Python reference:** openjd-model-for-python has no such bound: with
+range `"1-3,4611686018427387904"` and `NONCONTIGUOUS`, its CLI runs a chunk
+`1-3,4611686018427387904`, while openjd-rs rejects the job with the error above. The bound
+is far beyond any frame range, and it keeps the chunking arithmetic exact without
+widening it.
+
 The node type used depends on the `rangeConstraint` and whether adaptive chunking
 is active:
 

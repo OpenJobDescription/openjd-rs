@@ -1782,6 +1782,59 @@ mod chunked_job {
     }
 
     #[test]
+    fn test_contiguous_chunk_task_param_written_n_dash_m() {
+        // A CONTIGUOUS chunk is always written <N>-<M> (Template Schemas
+        // §3.4.1.5), including one given with --task-param; a
+        // NONCONTIGUOUS one is written in canonical form.
+        let dir = tempfile::TempDir::new().unwrap();
+        for (constraint, value, want) in [
+            ("CONTIGUOUS", "5-6", "P:[5-6] R:[5-6]"),
+            ("NONCONTIGUOUS", "5-6", "P:[5,6] R:[5,6]"),
+        ] {
+            let template = dir.path().join(format!("{constraint}.yaml"));
+            std::fs::write(
+                &template,
+                format!(
+                    r#"specificationVersion: 'jobtemplate-2023-09'
+extensions: [TASK_CHUNKING]
+name: Chunk Form
+steps:
+- name: S
+  parameterSpace:
+    taskParameterDefinitions:
+    - name: Frame
+      type: CHUNK[INT]
+      range: "1-10"
+      chunks:
+        defaultTaskCount: 2
+        rangeConstraint: {constraint}
+  script:
+    actions:
+      onRun:
+        command: python
+        args: ["-c", "print('P:[{{{{Task.Param.Frame}}}}] R:[{{{{Task.RawParam.Frame}}}}]')"]
+"#
+                ),
+            )
+            .unwrap();
+            let task_param = format!("Frame={value}");
+            let (code, stdout, stderr) = run_cli(&[
+                "run",
+                template.to_str().unwrap(),
+                "--step",
+                "S",
+                "-t",
+                &task_param,
+            ]);
+            assert_eq!(code, 0, "{constraint} {value} stderr: {stderr}");
+            assert!(
+                stdout.contains(want),
+                "{constraint} {value}: want {want}, stdout: {stdout}"
+            );
+        }
+    }
+
+    #[test]
     fn test_chunked_job_bad_task_param_out_of_range() {
         // Item=0 is outside the 1-40 range — the CLI now validates task param
         // values against the parameter space range.

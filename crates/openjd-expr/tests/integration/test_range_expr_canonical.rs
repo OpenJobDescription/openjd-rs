@@ -31,6 +31,29 @@ fn canonical(text: &str) -> String {
         .to_string()
 }
 
+/// Run `f` on its own thread and fail if it does not finish within
+/// `limit`. An implementation that lists the values of a range with more
+/// than 10^18 of them never finishes, and one that streams them allocates
+/// nothing, so neither a time check after the work nor the memory limit
+/// would stop it; this does. (The abandoned thread ends with the process.)
+fn within_deadline<F: FnOnce() + Send + 'static>(limit: Duration, f: F) {
+    let (done, finished) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        f();
+        let _ = done.send(());
+    });
+    match finished.recv_timeout(limit) {
+        Ok(()) => worker.join().unwrap(),
+        // `f` panicked: report its panic.
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            std::panic::resume_unwind(worker.join().unwrap_err())
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            panic!("did not finish within {limit:?}: is it expanding the values?")
+        }
+    }
+}
+
 fn hash_of<T: Hash>(v: &T) -> u64 {
     let mut h = DefaultHasher::new();
     v.hash(&mut h);
@@ -316,6 +339,14 @@ fn contiguous_flag_writes_n_dash_m() {
     assert_eq!(r("1,2,4").to_string(), "1,2,4");
     // Clearing the flag restores the canonical form.
     assert_eq!(r("5").with_contiguous(false).to_string(), "5");
+    // An empty value is written empty, flag or not.
+    assert_eq!(
+        RangeExpr::from_values(vec![])
+            .unwrap()
+            .with_contiguous(true)
+            .to_string(),
+        ""
+    );
 }
 
 #[test]
@@ -347,10 +378,13 @@ fn values_computed_from_a_contiguous_value_are_canonical() {
 #[test]
 fn huge_ranges_are_canonicalized_without_expanding() {
     // Each has more than 10^18 values. Expanding any of them would hang
-    // or exhaust memory, so the time bound catches an implementation that
+    // or exhaust memory, so the deadline catches an implementation that
     // lists the values. These are the conformance cases of
     // expr1.2.3--range-expr-canonical-form-large.
-    let started = Instant::now();
+    within_deadline(Duration::from_secs(10), huge_range_cases);
+}
+
+fn huge_range_cases() {
     let cases = [
         (
             "0-4000000000000000000:2,4000000000000000001",
@@ -391,11 +425,6 @@ fn huge_ranges_are_canonicalized_without_expanding() {
         eval("range_expr('1-3000000000000000000,3000000000000000001-6000000000000000000') == range_expr('1-6000000000000000000')"),
         "true"
     );
-    assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "took {:?}",
-        started.elapsed()
-    );
 }
 
 #[test]
@@ -431,6 +460,39 @@ fn i64_endpoints_whose_difference_overflows_i64() {
 }
 
 #[test]
+fn slice_of_one_value_whose_spacing_overflows_i64() {
+    // Three values -i64::MAX, 0, i64::MAX; slice step 2 spaces the selected
+    // values 2 * i64::MAX apart, beyond i64. Selecting one value of them
+    // must give that value alone.
+    let r: RangeExpr = "-9223372036854775807-9223372036854775807:9223372036854775807"
+        .parse()
+        .unwrap();
+    let one = r.slice(0, 1, 2).unwrap();
+    assert_eq!(one.to_vec(), vec![-i64::MAX]);
+    assert_eq!(one.to_string(), "-9223372036854775807");
+    let two = r.slice(0, 3, 2).unwrap();
+    assert_eq!(two.to_vec(), vec![-i64::MAX, i64::MAX]);
+    assert_eq!(two.to_string(), "-9223372036854775807,9223372036854775807");
+}
+
+#[test]
+fn int_range_with_more_than_max_len_values_rejected() {
+    // i64::MAX values is the largest count; one more is too many.
+    assert_eq!(
+        IntRange::new(1, i64::MAX, 1).unwrap().len() as u64,
+        openjd_expr::MAX_RANGE_EXPR_LEN
+    );
+    assert_eq!(
+        IntRange::new(0, i64::MAX, 1).unwrap_err().to_string(),
+        "Range expression has too many values; the maximum is 9223372036854775807"
+    );
+    assert_eq!(
+        IntRange::new(i64::MAX, 0, -1).unwrap_err().to_string(),
+        "Range expression has too many values; the maximum is 9223372036854775807"
+    );
+}
+
+#[test]
 fn many_elements_canonicalize_in_linear_time() {
     // 10,000 elements (the element cap) forming one run: the work is
     // proportional to the number of elements.
@@ -444,14 +506,72 @@ fn many_elements_canonicalize_in_linear_time() {
         })
         .collect::<Vec<_>>()
         .join(",");
-    let started = Instant::now();
+    within_deadline(Duration::from_secs(10), move || {
+        let started = Instant::now();
+        let r: RangeExpr = text.parse().unwrap();
+        assert_eq!(r.to_string(), "0-9999999999999999");
+        assert_eq!(r.ranges().len(), 1);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "took {:?}",
+            started.elapsed()
+        );
+    });
+}
+
+// ── The element cap applies to the canonical form too ──
+
+#[test]
+fn canonical_form_within_the_element_cap_round_trips() {
+    // 5,000 two-value elements are 10,000 runs in canonical form: the cap.
+    let text = (0..5_000i64)
+        .map(|i| format!("{}-{}", 3 * i, 3 * i + 1))
+        .collect::<Vec<_>>()
+        .join(",");
     let r: RangeExpr = text.parse().unwrap();
-    assert_eq!(r.to_string(), "0-9999999999999999");
-    assert_eq!(r.ranges().len(), 1);
-    assert!(
-        started.elapsed() < Duration::from_secs(2),
-        "took {:?}",
-        started.elapsed()
+    assert_eq!(r.ranges().len(), openjd_expr::MAX_RANGE_EXPR_CHUNKS);
+    let printed = r.to_string();
+    assert!(printed.starts_with("0,1,3,4,6,7,"), "{}", &printed[..40]);
+    let reparsed: RangeExpr = printed.parse().unwrap();
+    assert_eq!(reparsed, r);
+    assert_eq!(reparsed.to_string(), printed);
+    let json = serde_json::to_string(&r).unwrap();
+    let deserialized: RangeExpr = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized, r);
+}
+
+#[test]
+fn canonical_form_beyond_the_element_cap_is_rejected() {
+    // 5,001 two-value elements are within the element cap, but their
+    // canonical form has 10,002 runs, which would not parse back.
+    let text = (0..5_001i64)
+        .map(|i| format!("{}-{}", 3 * i, 3 * i + 1))
+        .collect::<Vec<_>>()
+        .join(",");
+    let err = text.parse::<RangeExpr>().unwrap_err().to_string();
+    assert_eq!(
+        err,
+        "Range expression has too many sub-ranges in canonical form (10002); maximum is 10000"
+    );
+    let ranges = (0..5_001i64)
+        .map(|i| IntRange::new(3 * i, 3 * i + 1, 1).unwrap())
+        .collect();
+    assert_eq!(
+        RangeExpr::from_ranges(ranges).unwrap_err().to_string(),
+        "Range expression has too many sub-ranges in canonical form (10002); maximum is 10000"
+    );
+    // So is the serialized form of such a value (built here from values,
+    // which are not capped).
+    let values = (0..5_001i64).flat_map(|i| [3 * i, 3 * i + 1]).collect();
+    let computed = RangeExpr::from_values(values).unwrap();
+    assert_eq!(computed.ranges().len(), 10_002);
+    let json = serde_json::to_string(&computed).unwrap();
+    let err = serde_json::from_str::<RangeExpr>(&json)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "Range expression has too many sub-ranges (10002); maximum is 10000"
     );
 }
 

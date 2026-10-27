@@ -1242,9 +1242,11 @@ impl std::error::Error for RangeExprError;
 ```
 
 ```rust
-/// A single contiguous integer range with step.
-#[derive(Debug, Clone)]
+/// An arithmetic progression of integers: start, start + step, ..., end.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct IntRange { /* start, end, step: private */ }
+// Also: impl Display (the element form: x, "x,y", x-y, or x-y:s) and
+// impl Deserialize (re-validates through IntRange::new).
 
 impl IntRange {
     pub fn new(start: i64, end: i64, step: i64) -> Result<Self, ExpressionError>;
@@ -1292,9 +1294,12 @@ to the number of values. See `range-expr.md` (Canonical runs).
 Maximum chunk count:
 
 ```rust
-/// Defensive cap on the number of disjoint ranges a single `RangeExpr`
-/// may contain. 10,000 is two orders of magnitude above any realistic
-/// shot-list submission.
+/// Defensive cap on the number of sub-ranges parsed or passed to
+/// from_ranges, and on the number of runs in the canonical form of the
+/// value they build (so the canonical form of every accepted value is
+/// accepted again). Values from from_values and slice are not capped.
+/// 10,000 is two orders of magnitude above any realistic shot-list
+/// submission.
 pub const range_expr::MAX_RANGE_EXPR_CHUNKS: usize = 10_000;
 
 /// Maximum number of values in a range expression: i64::MAX, so that
@@ -1309,8 +1314,8 @@ Construction + inspection:
 impl RangeExpr {
     /// Any order, duplicates allowed. Errors only on i64::MIN.
     pub fn from_values(values: Vec<i64>) -> Result<Self, ExpressionError>;
-    /// Any order. Errors on no ranges, more than MAX_RANGE_EXPR_CHUNKS,
-    /// overlapping intervals, more than MAX_RANGE_EXPR_LEN values in
+    /// Any order. Errors on no ranges, more than MAX_RANGE_EXPR_CHUNKS
+    /// ranges or canonical runs, overlapping intervals, more than MAX_RANGE_EXPR_LEN values in
     /// total, or an invalid IntRange.
     pub fn from_ranges(ranges: Vec<IntRange>) -> Result<Self, ExpressionError>;
 
