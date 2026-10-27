@@ -1453,6 +1453,12 @@ tooling that needs to reproduce expression-semantics on URI strings
 pub enum ExpressionErrorKind {
     UndefinedVariable { name: String, suggestion: String },
     UnknownFunction { name: String },
+    /// A method or property name that no type has: a property called as
+    /// a method (`x.name()`), a method used as a property (`x.upper`), or
+    /// a property of no type (`x.nam`). Like `UnknownFunction`, it does
+    /// not depend on any value, so static checking reports it even in a
+    /// part a run may skip.
+    UnknownMember { message: String },
     TypeError { message: String },
     IntegerOverflow,
     DivisionByZero { op: &'static str },

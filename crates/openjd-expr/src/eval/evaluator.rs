@@ -60,8 +60,9 @@ fn contains_budget_error(err: &ExpressionError) -> bool {
 }
 
 /// Whether an error is (or contains, through compound sub-errors) a name
-/// that resolves nowhere: an undefined symbol or an unknown function or
-/// method. Whether a name exists does not depend on any value, so every
+/// that resolves nowhere: an undefined symbol, an unknown function, or a
+/// method or property that no type has. Whether a name exists does not
+/// depend on any value, so every
 /// run that evaluates the sub-expression fails on it; `eval_speculative`
 /// reports it rather than absorbing it, as it does a budget error.
 fn contains_name_error(err: &ExpressionError) -> bool {
@@ -69,6 +70,7 @@ fn contains_name_error(err: &ExpressionError) -> bool {
         err.kind(),
         crate::error::ExpressionErrorKind::UndefinedVariable { .. }
             | crate::error::ExpressionErrorKind::UnknownFunction { .. }
+            | crate::error::ExpressionErrorKind::UnknownMember { .. }
     ) || err.sub_errors().iter().any(contains_name_error)
 }
 
@@ -828,11 +830,14 @@ impl<'a> Evaluator<'a> {
         // friendlier one. A budget error is never replaced: the rewritten
         // error would be a value error that an enclosing
         // `eval_speculative` could absorb, and the memory and operations
-        // were spent regardless.
+        // were spent regardless. The dotted path is reported as undefined
+        // only when the base failed to resolve a name; a base that fails
+        // on its value's type (`x.parent.name` with `x: int`) keeps its
+        // error, which depends on the value.
         let value = match self.eval_node(&a.value, None) {
             Ok(v) => v,
             Err(e) if contains_budget_error(&e) => return Err(e),
-            Err(_) if dotted_path.is_some() => {
+            Err(e) if dotted_path.is_some() && contains_name_error(&e) => {
                 let path = dotted_path.as_ref().unwrap();
                 let available = self.collect_symbol_names();
                 let suggestion = crate::edit_distance::suggest_closest(
@@ -868,14 +873,22 @@ impl<'a> Evaluator<'a> {
                     val_type.to_string()
                 };
 
-                // Check if attr is a known method (not a property)
+                // Check if attr is a known method (not a property). With no
+                // type having the property, the name is misused whatever
+                // the value.
                 {
                     let lib = self.library;
                     if !lib.get_signatures(attr).is_empty() {
-                        return Err(ExpressionError::new(format!(
-                            "'{attr}' is a method, not a property. Did you mean {attr}()?"
-                        ))
-                        .with_node(src, &attr_node));
+                        let message =
+                            format!("'{attr}' is a method, not a property. Did you mean {attr}()?");
+                        let err = if lib.get_signatures(&prop_name).is_empty() {
+                            ExpressionError::from_kind(ExpressionErrorKind::UnknownMember {
+                                message,
+                            })
+                        } else {
+                            ExpressionError::new(message)
+                        };
+                        return Err(err.with_node(src, &attr_node));
                     }
                 }
 
@@ -899,10 +912,13 @@ impl<'a> Evaluator<'a> {
                     }
                 }
 
-                Err(ExpressionError::new(format!(
-                    "Cannot access attribute '{attr}' on {val_type_str}"
-                ))
-                .with_node(src, &attr_node))
+                // No type has the property or a method of that name.
+                Err(
+                    ExpressionError::from_kind(ExpressionErrorKind::UnknownMember {
+                        message: format!("Cannot access attribute '{attr}' on {val_type_str}"),
+                    })
+                    .with_node(src, &attr_node),
+                )
             }
         }
     }
@@ -1542,10 +1558,20 @@ impl<'a> Evaluator<'a> {
                             .get_signatures(&format!("__property_{name}__"))
                             .is_empty()
                     {
-                        return ExpressionError::new(format!(
+                        let message = format!(
                             "'{name}' is a property, not a method. Use .{name} instead of .{name}()"
-                        ))
-                        .with_node(src, &call_node);
+                        );
+                        // No type has a method of that name: misused
+                        // whatever the value.
+                        let err = if matches!(e.kind(), ExpressionErrorKind::UnknownFunction { .. })
+                        {
+                            ExpressionError::from_kind(ExpressionErrorKind::UnknownMember {
+                                message,
+                            })
+                        } else {
+                            ExpressionError::new(message)
+                        };
+                        return err.with_node(src, &call_node);
                     }
                     e.with_node(src, &call_node)
                 })?;

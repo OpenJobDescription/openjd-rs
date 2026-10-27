@@ -281,6 +281,52 @@ fn undefined_symbol_in_a_body_is_an_error_at_every_stage() {
 }
 
 #[test]
+fn member_that_no_type_has_is_an_error_but_a_type_dependent_one_is_absorbed() {
+    // Audit B-F2: a property called as a method, a method used as a
+    // property, and a property of no type are misused names whatever the
+    // values, so they are reported, at every stage. A property some other
+    // type has (`name` of a `path`) fails on the value's type, and is
+    // absorbed as `x.upper()` with `x: int` is.
+    for (expr, msg, caret) in [
+        (
+            "[x.name() for x in Param.L]",
+            "'name' is a property, not a method. Use .name instead of .name()",
+            "   ~~^~~~~~",
+        ),
+        (
+            "[x.upper for x in Param.L]",
+            "'upper' is a method, not a property. Did you mean upper()?",
+            "   ~~^~~~~",
+        ),
+        (
+            "[x.nam for x in Param.L]",
+            "Cannot access attribute 'nam' on int",
+            "   ~~^~~",
+        ),
+    ] {
+        assert_err_all(expr, &[&format!("{msg}\n"), &format!("  {expr}\n"), caret]);
+    }
+    for (expr, msg, caret) in [
+        (
+            "[x.name for x in Param.L]",
+            "'name' property is not available for int. Available for: path",
+            "   ~~^~~~",
+        ),
+        (
+            "[x.parent.name for x in Param.L]",
+            "'parent' property is not available for int. Available for: path",
+            "   ~~^~~~~~",
+        ),
+    ] {
+        assert_fails_once_run(
+            expr,
+            "unresolved[list[nulltype]]",
+            &[&format!("{msg}\n"), &format!("  {expr}\n"), caret],
+        );
+    }
+}
+
+#[test]
 fn body_value_error_on_concrete_values() {
     // A body that fails on operands whose values are known fails every run
     // that keeps an element; template validation does not know whether one

@@ -187,4 +187,23 @@ fn name_that_resolves_nowhere_in_a_part_a_run_may_skip_is_an_error() {
         eval("1 if Task.Param.C else 'a' + 1", &p8).expr_type(),
         tp("unresolved[int]")
     );
+    // Audit A-F1/B-F1: a dotted attribute whose base fails on its value's
+    // type (`int` has no `parent`) is type-dependent, not an undefined
+    // name, and is absorbed too; a dotted path rooted at an undefined
+    // name is still reported.
+    assert_eq!(
+        eval("1 if Task.Param.C else Task.Param.I.parent.name", &p8).expr_type(),
+        tp("unresolved[int]")
+    );
+    let expr = "1 if Task.Param.C else Param.Typo.Deep";
+    assert_err_in(
+        expr,
+        &p8,
+        "pass 8",
+        &[
+            "Undefined variable: 'Param.Typo.Deep'.\n",
+            &format!("  {expr}\n"),
+            "                         ~~~~~~~~~~~^~~~",
+        ],
+    );
 }

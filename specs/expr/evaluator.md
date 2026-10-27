@@ -235,8 +235,10 @@ This dual-purpose resolution is why `Param.Frame` works as a variable lookup and
 
 Steps 2 and 3 replace the original error with a friendlier one: a failed base
 evaluation with a dotted path becomes "Undefined variable 'Param.Frame'" with
-a suggestion, and a failed property dispatch becomes "'name' property is not
-available for string" (or "is a method, not a property"). Budget errors are
+a suggestion when the base failed to resolve a name (a base that fails on its
+value's type keeps its own error), and a failed property dispatch becomes "'name' property is not
+available for string" (or "is a method, not a property", or "Cannot access
+attribute"; the last two, when no type has the property, are `UnknownMember`). Budget errors are
 not replaced; they propagate unchanged. A replaced budget error would be a
 value error that an enclosing construct may absorb (see
 [Speculative evaluation](#speculative-evaluation)), and the memory and
@@ -483,15 +485,17 @@ typed over an unresolved iterable or filter. All use one helper, `speculate`
   operations were spent regardless of what a runtime would skip. It propagates
   immediately: a conditional whose if-branch exceeds the budget does not evaluate
   the else-branch.
-- A name that resolves nowhere (`UndefinedVariable` or `UnknownFunction`,
-  directly or inside a compound error's sub-errors: an undefined symbol, or an
-  unknown function or method) is never absorbed either. Whether a name exists
+- A name that resolves nowhere (`UndefinedVariable`, `UnknownFunction` or
+  `UnknownMember`, directly or inside a compound error's sub-errors: an
+  undefined symbol, an unknown function, or a method or property that no type
+  has) is never absorbed either. Whether a name exists
   does not depend on any value, so every run that evaluates the sub-expression
   fails on it; reporting it at template validation loses only templates that
-  succeed solely when that sub-expression is skipped. `1 if Task.Param.C else
-  strr(1)`, `Task.Param.C or 'a'.uper()`, and `[Param.Typo for x in Param.L]`
-  fail `check`, with the field path and "Did you mean" suggestion of any other
-  undefined name.
+  succeed solely when that sub-expression is skipped. `1 if Param.C else
+  strr(1)`, `Param.C or 'a'.uper()`, `[Param.Typo for x in Param.L]` and
+  `[x.name() for x in Param.L]` fail `check` (with `Param.C` a `BOOL` and
+  `Param.L` a `LIST[INT]` parameter), with the field path and any "Did you
+  mean" suggestion of the name.
 - Any other value error is absorbed and the live footprint (`current_memory`) is reset to
   what it was before the attempt, because the failed sub-expression's values are
   gone. Peak memory and the operation count keep what the attempt consumed.
@@ -510,9 +514,14 @@ the absorbing one passes the error through unchanged. Two places replace
 errors with friendlier ones: [`eval_attribute`](#attribute-eval_attribute)'s
 fallbacks and [`eval_call`](#call-eval_call)'s "is a property, not a method"
 error for a failed method call. Both leave budget errors as they are. The
-first `eval_attribute` fallback reports an undefined dotted path as
-`UndefinedVariable`, which propagates; a property name used as a method
-(`x.name()`) becomes the "is a property" value error, which is absorbed.
+first `eval_attribute` fallback reports a dotted path as `UndefinedVariable`
+only when its base failed to resolve a name (`Param.Typo.Deep`), which
+propagates; a base that fails on its value's type (`x.parent.name` with
+`x: int`) keeps that error, which is absorbed. A property name called as a
+method (`x.name()` when no type has a `name` method), a method used as a
+property (`x.upper`), and a property no type has (`x.nam`) are
+`UnknownMember`, which propagates; a property some other type has (`x.name`
+with `x: int`) fails on the value's type and is absorbed.
 
 ### IfExp (`eval_ifexp`)
 Ternary: `x if condition else y`. Evaluates the condition unconstrained
@@ -670,10 +679,10 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     stage whose values reach it. `[x.upper() for x in Param.L]` passes
     template validation and fails at job creation unless `Param.L` is
     empty. A reference to a name that resolves nowhere — an undefined
-    symbol, or an unknown function or method — is reported, at template
-    validation: whether it exists does not depend on any value
-    (`[Param.Typo for x in Param.L]` and `[strr(x) for x in Task.Param.L]`
-    fail `check`). The typing runs under `speculate`
+    symbol, an unknown function, or a method or property that no type has —
+    is reported, at template validation: whether it exists does not depend
+    on any value (`[Param.Typo for x in Param.L]` and
+    `[strr(s) for s in Task.Param.Names.split(',')]` fail `check`). The typing runs under `speculate`
     ([Speculative evaluation](#speculative-evaluation)), so a budget
     exceedance and a name error still propagate, and its spend is absorbed and its
     footprint reset like an iteration's.
