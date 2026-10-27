@@ -476,14 +476,23 @@ than propagate: the branches of an unresolved-test conditional, the operands of 
 boolop after an unresolved one, the links of a chained comparison after an
 unresolved one, and the filter and body of a list comprehension
 typed over an unresolved iterable or filter. All use one helper, `speculate`
-(`eval_speculative` for a single node), which applies two rules:
+(`eval_speculative` for a single node), which applies three rules:
 
 - A budget error (`MemoryLimitExceeded` / `OperationLimitExceeded`, directly or
   inside a compound error's sub-errors) is never absorbed. The memory and
   operations were spent regardless of what a runtime would skip. It propagates
   immediately: a conditional whose if-branch exceeds the budget does not evaluate
   the else-branch.
-- A value error is absorbed and the live footprint (`current_memory`) is reset to
+- A name that resolves nowhere (`UndefinedVariable` or `UnknownFunction`,
+  directly or inside a compound error's sub-errors: an undefined symbol, or an
+  unknown function or method) is never absorbed either. Whether a name exists
+  does not depend on any value, so every run that evaluates the sub-expression
+  fails on it; reporting it at template validation loses only templates that
+  succeed solely when that sub-expression is skipped. `1 if Task.Param.C else
+  strr(1)`, `Task.Param.C or 'a'.uper()`, and `[Param.Typo for x in Param.L]`
+  fail `check`, with the field path and "Did you mean" suggestion of any other
+  undefined name.
+- Any other value error is absorbed and the live footprint (`current_memory`) is reset to
   what it was before the attempt, because the failed sub-expression's values are
   gone. Peak memory and the operation count keep what the attempt consumed.
   Dispatch also releases a failed call's operands (see
@@ -496,11 +505,14 @@ chained comparison that is an unknown `bool` (a run may stop at an earlier
 `false` link), or a comprehension that only a run keeping no element survives
 (`list[nulltype]`).
 
-The first rule requires that every construct between the budget failure and
+The first two rules require that every construct between the failure and
 the absorbing one passes the error through unchanged. Two places replace
 errors with friendlier ones: [`eval_attribute`](#attribute-eval_attribute)'s
 fallbacks and [`eval_call`](#call-eval_call)'s "is a property, not a method"
-error for a failed method call. Both leave budget errors as they are.
+error for a failed method call. Both leave budget errors as they are. The
+first `eval_attribute` fallback reports an undefined dotted path as
+`UndefinedVariable`, which propagates; a property name used as a method
+(`x.name()`) becomes the "is a property" value error, which is absorbed.
 
 ### IfExp (`eval_ifexp`)
 Ternary: `x if condition else y`. Evaluates the condition unconstrained
@@ -512,7 +524,8 @@ carrying only a type: the union of both branch types when both succeed;
 the other branch's type when exactly one fails with a value error (a
 runtime with the condition resolved may never take the failing branch);
 a compound error carrying both as sub-errors when both fail. A budget
-error in either branch propagates immediately. Because the result
+error or a name that resolves nowhere in either branch propagates
+immediately. Because the result
 carries no value, every branch value is released.
 
 ### Call (`eval_call`)
@@ -651,15 +664,18 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
     no value can, 2026-02 §1.2.1; a form holding a type variable, such as a
     `list[list[T1]]` from a signature that leaves `T1` unbound, does not say what
     its values are and does not count), or the filter or body fails to type —
-    a type error, a value error on concrete operands, a filter that can
-    never be a boolean, or a reference to an undefined symbol or unknown
-    function, as in a conditional branch that may not run. The failure is
+    a type error, a value error on concrete operands, or a filter that can
+    never be a boolean. The failure is
     not reported: it surfaces at the
     stage whose values reach it. `[x.upper() for x in Param.L]` passes
     template validation and fails at job creation unless `Param.L` is
-    empty. The typing runs under `speculate`
+    empty. A reference to a name that resolves nowhere — an undefined
+    symbol, or an unknown function or method — is reported, at template
+    validation: whether it exists does not depend on any value
+    (`[Param.Typo for x in Param.L]` and `[strr(x) for x in Task.Param.L]`
+    fail `check`). The typing runs under `speculate`
     ([Speculative evaluation](#speculative-evaluation)), so a budget
-    exceedance still propagates, and its spend is absorbed and its
+    exceedance and a name error still propagate, and its spend is absorbed and its
     footprint reset like an iteration's.
   - The loop variable's type is `types::comprehension_var` of the
     iterable's type: `E` for `list[E]`, `int` for `range_expr`, `any` for

@@ -234,19 +234,50 @@ fn body_failure_on_an_element_before_an_unresolved_filter() {
 }
 
 #[test]
-fn undefined_symbol_in_a_body_surfaces_when_an_element_reaches_it() {
-    // As in a conditional branch that may not run, a name the body cannot
-    // resolve fails only a run that evaluates the body.
+fn undefined_symbol_in_a_body_is_an_error_at_every_stage() {
+    // PR #462 review: a name the body cannot resolve fails every run that
+    // evaluates the body, whatever the values, so it is reported at
+    // template validation, not first at job creation (§1.3.7). A
+    // type-dependent failure (`x.upper()` with `x: int`) is still
+    // suppressed (above).
     let expr = "[Param.Typo for x in Param.L]";
-    assert_fails_once_run(
+    assert_err_all(
         expr,
-        "unresolved[list[nulltype]]",
         &[
             "Undefined variable: 'Param.Typo'. Did you mean one of: Param.EL, Param.L, Param.LS, Param.R, Param.Z\n",
             &format!("  {expr}\n"),
             "   ~~~~~~^~~~",
         ],
     );
+    // An unknown function and an unknown method, in the body and in the
+    // filter, over an iterable known only at run time.
+    for (expr, msg, caret) in [
+        (
+            "[strr(x) for x in Task.Param.L]",
+            "Unknown function: 'strr'",
+            "   ^~~~~~~",
+        ),
+        (
+            "[x.uper() for x in Task.Param.L]",
+            "Unknown function: 'uper'",
+            "   ~~^~~~~~",
+        ),
+        (
+            "[x for x in Task.Param.L if strr(x)]",
+            "Unknown function: 'strr'",
+            "                              ^~~~~~~",
+        ),
+    ] {
+        let [mut p8, _, _] = states();
+        p8.set("Task.Param.L", ExprValue::unresolved(tp("list[string]")))
+            .unwrap();
+        assert_err_in(
+            expr,
+            &p8,
+            "pass 8",
+            &[&format!("{msg}\n"), &format!("  {expr}\n"), caret],
+        );
+    }
 }
 
 #[test]

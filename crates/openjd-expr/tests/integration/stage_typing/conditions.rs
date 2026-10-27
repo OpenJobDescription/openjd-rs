@@ -139,3 +139,52 @@ fn chained_comparison_past_an_unresolved_link_absorbs_a_failing_link() {
         ],
     );
 }
+
+// ── Names that resolve nowhere ──
+
+#[test]
+fn name_that_resolves_nowhere_in_a_part_a_run_may_skip_is_an_error() {
+    // PR #462 review: whether a symbol, function or method exists does not
+    // depend on any value, so a sub-expression that names one that does
+    // not exist fails every run that evaluates it. Static checking reports
+    // it even where a run may not evaluate it: the branch of a conditional
+    // with an unresolved test, an `and`/`or` operand after an unresolved
+    // one, and a chained comparison's link after an unresolved one.
+    let [p8, g2, _] = states();
+    for (expr, msg, caret) in [
+        (
+            "1 if Task.Param.C else strr(1)",
+            "Unknown function: 'strr'",
+            "                         ^~~~~~~",
+        ),
+        (
+            "Param.Typo if Task.Param.C else 1",
+            "Undefined variable: 'Param.Typo'. Did you mean one of: Param.EL, Param.L, Param.LS, Param.R, Param.Z",
+            "  ~~~~~~^~~~",
+        ),
+        (
+            "Task.Param.C or 'a'.uper()",
+            "Unknown function: 'uper'",
+            "                  ~~~~^~~~~~",
+        ),
+        (
+            "Task.Param.I == 5 == strr(1)",
+            "Unknown function: 'strr'",
+            "                       ^~~~~~~",
+        ),
+    ] {
+        for (stage, st) in [("pass 8", &p8), ("gate 2", &g2)] {
+            assert_err_in(
+                expr,
+                st,
+                stage,
+                &[&format!("{msg}\n"), &format!("  {expr}\n"), caret],
+            );
+        }
+    }
+    // A failure that depends on types is still absorbed there.
+    assert_eq!(
+        eval("1 if Task.Param.C else 'a' + 1", &p8).expr_type(),
+        tp("unresolved[int]")
+    );
+}

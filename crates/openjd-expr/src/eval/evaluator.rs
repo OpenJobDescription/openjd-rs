@@ -59,6 +59,19 @@ fn contains_budget_error(err: &ExpressionError) -> bool {
     ) || err.sub_errors().iter().any(contains_budget_error)
 }
 
+/// Whether an error is (or contains, through compound sub-errors) a name
+/// that resolves nowhere: an undefined symbol or an unknown function or
+/// method. Whether a name exists does not depend on any value, so every
+/// run that evaluates the sub-expression fails on it; `eval_speculative`
+/// reports it rather than absorbing it, as it does a budget error.
+fn contains_name_error(err: &ExpressionError) -> bool {
+    matches!(
+        err.kind(),
+        crate::error::ExpressionErrorKind::UndefinedVariable { .. }
+            | crate::error::ExpressionErrorKind::UnknownFunction { .. }
+    ) || err.sub_errors().iter().any(contains_name_error)
+}
+
 /// Outcome of evaluating a sub-expression whose failure an enclosing
 /// construct may absorb (see [`Evaluator::eval_speculative`]).
 enum Speculative<T = ExprValue> {
@@ -1828,7 +1841,11 @@ impl<'a> Evaluator<'a> {
     ///   directly or inside a compound error's sub-errors) is returned as
     ///   `Err`. The memory and operations were spent regardless of what
     ///   a runtime would skip.
-    /// - A value error is returned as `Absorbed`, and the live footprint
+    /// - A name that resolves nowhere (an undefined symbol, an unknown
+    ///   function or method; [`contains_name_error`]) is returned as `Err`
+    ///   too: it does not depend on any value, so every run that evaluates
+    ///   the sub-expression fails on it.
+    /// - Any other value error is returned as `Absorbed`, and the live footprint
     ///   is reset to what it was before the attempt. The failed
     ///   sub-expression's values are gone. Peak memory and the operation
     ///   count keep what the attempt consumed.
@@ -1847,7 +1864,7 @@ impl<'a> Evaluator<'a> {
     /// [`Self::eval_speculative`] for an arbitrary evaluation `f` (a
     /// nested `and`/`or` evaluated to its outcomes, a chained comparison's
     /// link, or a comprehension's filter and body typed once), with the
-    /// same two absorption rules.
+    /// same absorption rules.
     fn speculate<T>(
         &mut self,
         f: impl FnOnce(&mut Self) -> Result<T, ExpressionError>,
@@ -1855,7 +1872,7 @@ impl<'a> Evaluator<'a> {
         let baseline = self.current_memory;
         match f(self) {
             Ok(v) => Ok(Speculative::Value(v)),
-            Err(e) if contains_budget_error(&e) => Err(e),
+            Err(e) if contains_budget_error(&e) || contains_name_error(&e) => Err(e),
             Err(e) => {
                 self.current_memory = baseline;
                 Ok(Speculative::Absorbed(e))
@@ -1875,11 +1892,12 @@ impl<'a> Evaluator<'a> {
     /// `unresolved(list[T | nulltype])` for a body of type `T`
     /// ([`crate::types::comprehension_list_type`]). A filter or body that
     /// fails to type — a type error, a value error on concrete operands, a
-    /// non-boolean filter, an undefined symbol or unknown function — fails
-    /// on every run that evaluates it, so the
+    /// non-boolean filter — fails on every run that evaluates it, so the
     /// only run that can succeed keeps no element: the result is
     /// `unresolved(list[nulltype])`, not an error. The failure surfaces at
-    /// the stage whose values reach it. Budget exceedances propagate.
+    /// the stage whose values reach it. Budget exceedances, and names that
+    /// resolve nowhere (an undefined symbol, an unknown function or
+    /// method), propagate: neither depends on the values.
     fn eval_listcomp_unresolved(
         &mut self,
         lc: &ast::ExprListComp,
