@@ -169,9 +169,9 @@ async fn test_path_mapping_multiple_rules() {
         .iter()
         .map(|r| r["destination_path"].as_str().unwrap())
         .collect();
-    // In precedence order: most components first ("/mnt/a/b" has four),
-    // then, among the three-component rules "/mnt/a/" and "/mnt/a", the
-    // one given last first; "C:\\share" has two.
+    // In precedence order: most names first ("/mnt/a/b" has three), then,
+    // among the two-name rules "/mnt/a/", "/mnt/a" and "C:\\share" (the
+    // drive counts as one name), the one given last first.
     assert_eq!(
         destinations,
         ["/local/b", "/last", "/first", "/local/share"]

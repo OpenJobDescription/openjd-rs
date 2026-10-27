@@ -80,7 +80,7 @@ impl FunctionLibrary {
     ///
     /// Libraries are cached keyed on the profile's
     /// (revision, extensions, host-kind) triple. Profiles that differ
-    /// only in the specific `Arc<Vec<PathMappingRule>>` they carry share
+    /// only in the specific `Arc<PathMapper>` they carry share
     /// a cached skeleton; the rules are applied as a cheap clone-and-
     /// register on top for each call.
     ///

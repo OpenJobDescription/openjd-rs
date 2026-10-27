@@ -466,7 +466,7 @@ impl ExprProfile {
     /// The cache key for the *rules-independent* portion of this profile.
     ///
     /// Libraries are cached on this key — profiles that differ only in
-    /// which `Arc<Vec<PathMappingRule>>` they carry share a single cached
+    /// which `Arc<PathMapper>` they carry share a single cached
     /// skeleton, and `with_host_context(rules)` is applied on top when
     /// needed.
     pub(crate) fn cache_key(&self) -> ProfileKey {

@@ -1036,10 +1036,10 @@ pub use openjd_expr::path_mapping::PathMappingRule;
 ```
 
 `PathFormat` and `PathMappingRule` are the types used on
-`SessionConfig.path_mapping_rules`. `PathMapper` and
+`SessionConfig.path_mapping_rules`, re-exported so downstream callers
+don't need to depend on `openjd-expr` directly. `PathMapper` and
 `InvalidPathMappingRule` are reachable through the re-exported
-`path_mapping` module. They are re-exported here so
-downstream callers don't need to depend on `openjd-expr` directly.
+`path_mapping` module.
 
 ## Cross-User Execution
 

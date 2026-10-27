@@ -1425,7 +1425,7 @@ impl std::error::Error for InvalidPathMappingRule;
 
 ```rust
 /// Applies a validated set of rules through one trie per source format.
-/// The rule with the most source path components wins; between rules for
+/// The rule whose source path has the most names wins; between rules for
 /// the same location, the one given last.
 #[derive(Debug, Clone, Default)]
 pub struct PathMapper { /* private fields */ }

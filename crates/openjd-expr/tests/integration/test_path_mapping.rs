@@ -1030,32 +1030,27 @@ mod apply_unit {
 
     #[test]
     fn cross_format_deepest_then_last_wins() {
-        // `//srv/share/x` is a POSIX path and a Windows UNC path. A UNC
-        // share counts as two components, its server and share.
-        let posix = posix_rule("/srv", "/posix");
-        let unc_deep = windows_rule("\\\\srv\\share\\x", "/unc");
-        let unc_shallow = windows_rule("\\\\srv\\share", "/unc");
+        // `//srv/share/x` is a POSIX path and a Windows UNC path. Rules are
+        // ranked by names: the POSIX root counts as none, a UNC share as
+        // two (server and share).
         let path = "//srv/share/x/f";
-        // `\\srv\share\x` has three components, `/srv` two.
-        for rules in [
-            vec![posix.clone(), unc_deep.clone()],
-            vec![unc_deep.clone(), posix.clone()],
-        ] {
-            assert_eq!(
-                mapper(rules).map_with_format(path, PathFormat::Posix),
-                "/unc/f"
-            );
-        }
-        // `\\srv\share` and `/srv` have two each: the rule given last wins.
-        let m = mapper(vec![posix.clone(), unc_shallow.clone()]);
-        assert_eq!(m.map_with_format(path, PathFormat::Posix), "/unc/x/f");
-        let m = mapper(vec![unc_shallow, posix]);
-        assert_eq!(
-            m.map_with_format(path, PathFormat::Posix),
-            "/posix/share/x/f"
-        );
-        // `/srv/share/x/f` has five components, `\\srv\share\x` three.
-        let m = mapper(vec![posix_rule("/srv/share/x/f", "/deep"), unc_deep]);
+        let posix_srv = posix_rule("/srv", "/posix");
+        let posix_share = posix_rule("/srv/share", "/posix");
+        let unc = windows_rule("\\\\srv\\share", "/unc");
+        let unc_x = windows_rule("\\\\srv\\share\\x", "/unc");
+        let both_orders = |a: &PathMappingRule, b: &PathMappingRule| {
+            [vec![a.clone(), b.clone()], vec![b.clone(), a.clone()]]
+                .map(|rules| mapper(rules).map_with_format(path, PathFormat::Posix))
+        };
+        // `\\srv\share` (two names) beats `/srv` (one), in either order.
+        assert_eq!(both_orders(&posix_srv, &unc), ["/unc/x/f", "/unc/x/f"]);
+        // `\\srv\share\x` (three) beats `/srv/share` (two).
+        assert_eq!(both_orders(&posix_share, &unc_x), ["/unc/f", "/unc/f"]);
+        // `/srv/share` and `\\srv\share` name the same two names: the rule
+        // given last wins.
+        assert_eq!(both_orders(&posix_share, &unc), ["/unc/x/f", "/posix/x/f"]);
+        // `/srv/share/x/f` (four) beats `\\srv\share\x` (three).
+        let m = mapper(vec![posix_rule("/srv/share/x/f", "/deep"), unc_x]);
         assert_eq!(m.map_with_format(path, PathFormat::Posix), "/deep");
         let order: Vec<&str> = m
             .rules_by_precedence()
@@ -1105,8 +1100,10 @@ mod apply_unit {
             .rules_by_precedence()
             .map(|r| r.destination_path.as_str())
             .collect();
-        // Depth 4, then depth 3 (later first), then depth 2 (later first).
-        assert_eq!(order, ["/2", "/5", "/4", "/3", "/1"]);
+        // Names: `/a/b/c` 3, `C:\\a\\b` 3 (the drive counts as one),
+        // `s3://b/x` 2 (the authority counts as one), `/a` 1. Later first
+        // among equals.
+        assert_eq!(order, ["/5", "/2", "/3", "/4", "/1"]);
         let given: Vec<&str> = m
             .rules()
             .iter()

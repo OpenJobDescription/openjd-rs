@@ -635,6 +635,11 @@ impl Session {
 
     /// Full constructor from SessionConfig.
     pub fn with_config(mut config: SessionConfig) -> Result<Self, SessionError> {
+        // Validate the rules before creating any directory for a session
+        // that would be rejected.
+        let path_mapper = Arc::new(PathMapper::new(
+            config.path_mapping_rules.take().unwrap_or_default(),
+        )?);
         let root_dir = match &config.session_root_directory {
             // Absolutize a caller-supplied root so every path derived from it
             // (working directory, embedded-files directory) is rooted. The
@@ -698,9 +703,6 @@ impl Session {
         let working_directory = working_dir.path().to_path_buf();
         let files_directory = files_dir.path().to_path_buf();
 
-        let path_mapper = Arc::new(PathMapper::new(
-            config.path_mapping_rules.unwrap_or_default(),
-        )?);
         let profile = config.profile.take();
         let library = derive_library(profile.as_ref(), &path_mapper);
         let process_env = config.os_env_vars.unwrap_or_default();

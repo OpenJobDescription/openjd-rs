@@ -172,7 +172,7 @@ The JSON document must:
    where `<i>` is the rule's position in `path_mapping_rules`.
 
 The rules keep the order given. The session's `PathMapper` decides which rule
-applies to a path: the one with the most source path components, and between
+applies to a path: the one whose source path has the most names, and between
 rules for the same location, the one given last.
 
 ### Why JSON Only

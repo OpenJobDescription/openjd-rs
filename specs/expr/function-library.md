@@ -522,8 +522,8 @@ assert!(!lib.get_signatures("apply_path_mapping").is_empty());
 `Arc`. It returns `InvalidPathMappingRule` when a rule's source path is not
 absolute for its format. Callers that already have an
 `Arc<PathMapper>` can construct `HostContext::WithRules(arc)`
-directly. The `apply_path_mapping` closure captures the `Arc` by reference,
-so many libraries built from the same rules share a single allocation.
+directly. The `apply_path_mapping` closure owns a clone of the `Arc`, so
+many libraries built from the same mapper share a single allocation.
 
 For template validation at job creation time (when path mapping rules aren't
 available yet), use `HostContext::Unresolved`. This registers the

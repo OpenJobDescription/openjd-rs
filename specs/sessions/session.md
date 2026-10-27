@@ -297,7 +297,7 @@ pub fn extend_path_mapping_rules(&mut self, additional: Vec<PathMappingRule>)
 
 Appends additional path mapping rules after the session's existing rules and
 rebuilds the session's `PathMapper` and function library. Rules keep the order
-given. The rule with the most source path components wins, and between rules for
+given. The rule whose source path has the most names wins, and between rules for
 the same location the one given last wins (see
 [expr path-mapping.md § Which rule wins](../expr/path-mapping.md#which-rule-wins)),
 so an added rule replaces an existing rule for the same source path.
@@ -366,7 +366,7 @@ rules applied.
 directory using the `pathmapping-1.0` format. This file is referenced by
 `Session.PathMappingRulesFile` in the symbol table, allowing actions to read and apply
 path mapping rules themselves. The rules are written in precedence order
-(`PathMapper::rules_by_precedence`): most source path components first, and between
+(`PathMapper::rules_by_precedence`): most source path names first, and between
 rules with the same number, the one given last first. A reader that applies the first
 matching rule therefore gets the same result as the session.
 

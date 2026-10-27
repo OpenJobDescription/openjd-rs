@@ -8,7 +8,7 @@
 //! keyed by path component, one trie per source format. Mapping a path walks
 //! its components down the tries once, so the cost depends on the length of
 //! the path and not on the number of rules. The rule whose source path has
-//! the most components wins; between rules naming the same location, the
+//! the most names wins; between rules naming the same location, the
 //! one given last wins. See `specs/expr/path-mapping.md`.
 
 use std::borrow::Cow;
@@ -153,8 +153,11 @@ struct SplitPath<'a> {
     /// (`C:`) or UNC share (`\\SERVER\SHARE`) for Windows; the
     /// ASCII-lowercased `scheme://authority` for URI.
     anchor: String,
-    /// How many components the anchor counts as when rules of different
-    /// formats compete: 2 for a UNC share (server and share), 1 otherwise.
+    /// How many names the anchor counts as when ranking rules: none for
+    /// the POSIX root, one for a drive or a URI's `scheme://authority`, two
+    /// for a UNC share (its server and share). Within one format this only
+    /// shifts every rule by the same amount; across formats it makes
+    /// `/srv/share` and `\\srv\share`, which name the same two names, tie.
     anchor_depth: usize,
     /// The components after the anchor, as written.
     parts: Vec<&'a str>,
@@ -187,7 +190,7 @@ fn split_path(path: &str, format: PathFormat) -> Option<SplitPath<'_>> {
             let rest = path.strip_prefix('/')?;
             Some(SplitPath {
                 anchor: "/".to_string(),
-                anchor_depth: 1,
+                anchor_depth: 0,
                 parts: filesystem_parts(rest, false),
             })
         }
@@ -273,8 +276,8 @@ struct TrieNode {
 struct Match<'a> {
     /// Index of the rule in [`PathMapper::rules`].
     rule: usize,
-    /// Number of components in the rule's source path, counting the anchor
-    /// as [`SplitPath::anchor_depth`] components.
+    /// Number of names in the rule's source path, counting the anchor as
+    /// [`SplitPath::anchor_depth`] names.
     depth: usize,
     /// The source format of the trie that matched.
     format: PathFormat,
@@ -301,11 +304,11 @@ struct Match<'a> {
 /// For POSIX and WINDOWS, empty components and `.` are ignored, as `pathlib`
 /// does, and a path that is not absolute matches no rule.
 ///
-/// When several rules match, the one whose source path has the most
-/// components wins. Rules with the same components name the same location,
-/// and the one given last wins. When rules of different formats match the
-/// same path (`//srv/share/x` is a POSIX path and a UNC path), a UNC share
-/// counts as two components, its server and share.
+/// When several rules match, the one whose source path has the most names
+/// wins: a POSIX root counts as none, a drive or a URI's
+/// `scheme://authority` as one, and a UNC share as two (its server and
+/// share), so `/srv/share` and `\\srv\share` have two each. Rules with the
+/// same components name the same location, and the one given last wins.
 #[derive(Debug, Clone, Default)]
 pub struct PathMapper {
     rules: Vec<PathMappingRule>,
@@ -359,8 +362,9 @@ impl PathMapper {
         &self.rules
     }
 
-    /// The rules in precedence order: most source path components first,
-    /// and among rules with the same number, the one given last first.
+    /// The rules in precedence order: most source path names first (see
+    /// [`PathMapper`]), and among rules with the same number, the one given
+    /// last first.
     /// Applying the first rule in this order that matches a path gives the
     /// same result as [`apply`](PathMapper::apply).
     pub fn rules_by_precedence(&self) -> impl Iterator<Item = &PathMappingRule> + '_ {
@@ -449,9 +453,7 @@ impl PathMapper {
             let depth = split.anchor_depth + consumed;
             // A path can be absolute in more than one format (`//srv/share`
             // is a POSIX path and a Windows UNC share). The deeper match
-            // wins, and between equally deep ones, the rule given last. A
-            // UNC share counts as two components so that `\\srv\share`
-            // is as deep as `/srv/share`, which names the same two names.
+            // wins, and between equally deep ones, the rule given last.
             if best
                 .as_ref()
                 .is_none_or(|b| (depth, rule) > (b.depth, b.rule))

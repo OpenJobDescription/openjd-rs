@@ -147,19 +147,22 @@ formats.
 
 ### Which rule wins
 
-The matching rule whose source path has the most components wins, counting
-the anchor as one component, except a UNC share, which counts as two (its
-server and share). Rules whose source paths have the same components name the
-same location (`/mnt/p`, `/mnt/p/` and `/mnt//p` are one location; so are
-`C:\Data` and `c:/data`), and the rule given last wins.
+The matching rule whose source path has the most names wins. The anchor
+counts as no names for the POSIX root `/`, one for a drive (`C:`) or a URI's
+`scheme://authority`, and two for a UNC share (its server and share); every
+component after the anchor counts as one. Rules whose source paths have the
+same components name the same location (`/mnt/p`, `/mnt/p/` and `/mnt//p`
+are one location; so are `C:\Data` and `c:/data`), and the rule given last
+wins.
 
-The UNC count matters only when a path matches rules of more than one format.
-`//srv/share/x` is a POSIX path and a UNC path, so the POSIX rule `/srv` (two
-components: `/` and `srv`) and the WINDOWS rule `\\srv\share` (two: `srv`
-and `share`) tie, and the rule given last wins, while `\\srv\share\x`
-(three) wins over `/srv`. Counting the share as one component would let the
-less specific `/srv` win. Within one format the UNC count changes nothing,
-because a path cannot match both a drive rule and a UNC rule.
+How an anchor counts matters only when a path matches rules of more than one
+format. Within one format it adds the same amount to every rule that can
+match a path (a path cannot match both a drive rule and a UNC rule). Across
+formats, the only overlap is a path like `//srv/share/x`, which is a POSIX
+path and a UNC path. The POSIX rule `/srv/share` and the WINDOWS rule
+`\\srv\share` name the same two names, so they tie and the rule given last
+wins; `\\srv\share` beats `/srv`; and `\\srv\share\x` beats
+`/srv/share`.
 
 This replaces the earlier order, "decreasing length of the source path" as a
 string (How-Jobs-Are-Run, "Applying Path Mapping Rules"). For rules spelled
@@ -170,7 +173,7 @@ the same rule. They differ for redundant spellings: string length prefers
 longer spelling instead of the rule given last.
 
 `rules()` returns the rules in the order given. `rules_by_precedence()`
-returns them with the most components first and, among rules with the same
+returns them with the most names first and, among rules with the same
 number, the one given last first. Applying the first rule in that order that
 matches a path gives the same result as `apply`. A consumer that reads the
 rules and applies the first match (such as a job script reading
@@ -417,6 +420,12 @@ The Python openjd-sessions `PathMappingRule.apply` uses `PurePosixPath` /
 paths itself and walks a trie. They agree on how input paths split into
 components (`.` and empty components dropped, `..` kept, the POSIX backslash
 rule, UNC anchors), with these differences:
+
+- **Device paths.** Rust has no special case for the Windows device
+  namespace: `\\?\C:\x` is a UNC path with server `?` and share `C:`, and
+  `\\?\UNC\srv\share` is the share `\\?\UNC` followed by `srv` and
+  `share`. `PureWindowsPath` treats both prefixes as part of the drive. Both
+  keep such paths apart from `C:\x` and `\\srv\share`.
 
 - **Windows case.** Rust uses the Windows uppercase table. Python
   openjd-sessions uses an ASCII-only fold, chosen to match the earlier Rust

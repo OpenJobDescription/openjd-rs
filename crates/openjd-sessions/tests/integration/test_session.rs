@@ -2678,6 +2678,115 @@ async fn test_with_path_mapping_rejects_relative_source() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// Path mapping: function library rebuild and LIST[PATH] mapping
+// ══════════════════════════════════════════════════════════════
+
+/// Run `echo` with one argument through the session and return stdout.
+async fn echo_arg(s: &mut Session, arg: &str) -> String {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::{Action, StepActions, StepScript};
+    let script = StepScript {
+        let_bindings: None,
+        actions: StepActions {
+            on_run: Action {
+                command: FormatString::new("python").unwrap(),
+                args: Some(vec![
+                    FormatString::new("-c").unwrap(),
+                    FormatString::new("import sys; print(sys.argv[1])").unwrap(),
+                    FormatString::new(arg).unwrap(),
+                ]),
+                timeout: None,
+                cancelation: None,
+            },
+        },
+        embedded_files: None,
+    };
+    let result = s.run_task("step", &script, None, None, None).await.unwrap();
+    result.stdout.trim().to_string()
+}
+
+fn expr_profile() -> openjd_model::ModelProfile {
+    openjd_model::ModelProfile::new(openjd_model::types::SpecificationRevision::V2023_09)
+        .with_extensions(
+            [openjd_model::types::ModelExtension::Expr]
+                .into_iter()
+                .collect(),
+        )
+}
+
+/// A `/`-separated path as a host-format path value displays: with `\`
+/// separators on Windows.
+fn host(path: &str) -> String {
+    if cfg!(windows) {
+        path.replace('/', "\\")
+    } else {
+        path.to_string()
+    }
+}
+
+#[tokio::test]
+async fn test_path_mapping_changes_rebuild_apply_path_mapping() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+
+    let posix = |src: &str, dst: &str| PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: src.into(),
+        destination_path: dst.into(),
+    };
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf())
+        .with_profile(expr_profile())
+        .with_path_mapping(vec![posix("/src", "/first")])
+        .unwrap();
+    let expr = "{{ apply_path_mapping('/src/a/f') }}";
+    assert_eq!(echo_arg(&mut s, expr).await, host("/first/a/f"));
+
+    // A deeper rule added later is used by `apply_path_mapping`.
+    s.extend_path_mapping_rules(vec![posix("/src/a", "/second")])
+        .unwrap();
+    assert_eq!(echo_arg(&mut s, expr).await, host("/second/f"));
+
+    // Replacing the rules replaces what `apply_path_mapping` uses.
+    let mut s = s.with_path_mapping(vec![posix("/src", "/third")]).unwrap();
+    assert_eq!(echo_arg(&mut s, expr).await, host("/third/a/f"));
+}
+
+#[tokio::test]
+async fn test_list_path_parameter_value_is_path_mapped() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+    use openjd_expr::ExprValue;
+    use openjd_model::types::{JobParameterType, JobParameterValue};
+
+    let tmp = TempDir::new().unwrap();
+    let mut config = config_in_root(tmp.path(), "test-list-path");
+    let mut params = openjd_model::types::JobParameterValues::new();
+    params.insert(
+        "Files".into(),
+        JobParameterValue {
+            param_type: JobParameterType::ListPath,
+            value: ExprValue::make_list(
+                vec![
+                    ExprValue::new_path("C:\\src\\a", PathFormat::Windows),
+                    ExprValue::new_path("C:\\other\\b", PathFormat::Windows),
+                ],
+                openjd_expr::ExprType::PATH,
+            )
+            .unwrap(),
+        },
+    );
+    config.job_parameter_values = params;
+    config.profile = Some(expr_profile());
+    config.path_mapping_rules = Some(vec![PathMappingRule {
+        source_path_format: PathFormat::Windows,
+        source_path: "C:\\src".into(),
+        destination_path: "/dst".into(),
+    }]);
+    let mut s = Session::with_config(config).unwrap();
+    let out = echo_arg(&mut s, "{{ Param.Files[0] }}|{{ Param.Files[1] }}").await;
+    assert_eq!(out, format!("{}|C:\\other\\b", host("/dst/a")));
+}
+
+// ══════════════════════════════════════════════════════════════
 // cancel_action via Session API
 // ══════════════════════════════════════════════════════════════
 
