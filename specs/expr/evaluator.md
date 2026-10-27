@@ -201,7 +201,13 @@ the same constraint: `IfExp.test` uses `None` rather than `{BOOL}`
 instead of a generic coercion failure), subscript indices use `None`
 rather than `{INT}` ("Index must be an integer"), and list
 comprehension conditions use `None` rather than `{BOOL}` ("List
-comprehension filter must be a boolean, got X").
+comprehension filter must be a boolean, got X"). An unresolved test or index of
+unknown type (`any`, a type variable) is accepted: a run's value may be one. So
+is a union with a member that can be one: for a test, a `bool` (or a member of
+unknown type); for an index, an `int` (or a member of unknown type). A
+conditional's test of type `noreturn` is rejected ("Condition must be a boolean,
+got noreturn"), as it fails every run; a comprehension filter of type `noreturn`
+is accepted (see [ListComp](#listcomp-eval_listcomp)).
 
 ## AST Node Evaluation
 
@@ -229,8 +235,11 @@ This dual-purpose resolution is why `Param.Frame` works as a variable lookup and
 
 Steps 2 and 3 replace the original error with a friendlier one: a failed base
 evaluation with a dotted path becomes "Undefined variable 'Param.Frame'" with
-a suggestion, and a failed property dispatch becomes "'name' property is not
-available for string" (or "is a method, not a property"). Budget errors are
+a suggestion when the base failed on an undefined symbol (a base that fails on
+its value's type, or on a misused member, keeps its own error), and a failed property dispatch becomes "'name' property is not
+available for string" (or "is a method, not a property", or "Cannot access
+attribute"; the last two, when no type has the property, are `UnknownMember`, and
+"Cannot access attribute" for a property only a generic receiver has stays a plain error). Budget errors are
 not replaced; they propagate unchanged. A replaced budget error would be a
 value error that an enclosing construct may absorb (see
 [Speculative evaluation](#speculative-evaluation)), and the memory and
@@ -310,6 +319,18 @@ validation time. Only the value is deferred, not the type check. A chain with
 any unresolved link evaluates to `Unresolved(BOOL)` unless an earlier link is
 statically `false`.
 
+A chain is its links joined by `and` (2026-02 Expression Language §1.3.6), so
+the links after one whose result is unresolved are evaluated speculatively, as
+`and` operands after an unresolved one are (see [Speculative
+evaluation](#speculative-evaluation)): a run may stop at that link's `false`
+before reaching them. A later link that fails with a value error — its operand
+fails, or its operands match no signature — is absorbed, and the chain is
+`Unresolved(BOOL)` (a name that resolves nowhere is reported instead, as
+`Task.Param.I == 5 == strr(1)` is): `Task.Param.I == 5 == len(1)` type-checks, as
+`Task.Param.I == 5 and 5 == len(1)` does, and fails only on a run where
+`Task.Param.I` is 5. The first link always runs, so its failure is an error. The
+carried operand the absorbed link took is released with it.
+
 Chained comparisons short-circuit: `a < b < c` evaluates `a < b`, and only if true,
 evaluates `b < c`. The intermediate value `b` is reused. All comparison operands
 are evaluated unconstrained (see [Target Type
@@ -326,31 +347,31 @@ chaining logic requires control flow that doesn't fit the simple dispatch model.
 
 #### Chained Comparison Memory Management
 
-Each comparison in the chain clones `left` and `right` to pass to `dispatch` (which
-releases its inputs), while retaining the originals for the chain. After dispatch
-returns, the boolean result is extracted and the dispatch return value is released.
-If the comparison is false, both `left` and `right` are released and `false` is returned
-immediately (short-circuit). If true, `left` is released and `right` becomes the new
-`left` for the next iteration — avoiding a redundant re-evaluation of the shared
-operand. After the final comparison, the surviving `left` is released and `true` is
-returned.
+Each link hands its `left` and `right` to `dispatch`, which releases its inputs.
+When the chain continues, `right` is cloned first and the clone is tracked as the
+next link's `left`, so the shared middle operand is not re-evaluated. After
+dispatch returns, the boolean result is extracted and the dispatch return value
+is released. If the comparison is false, `false` is returned immediately
+(short-circuit). A link absorbed after an unresolved one (see above) is undone by
+the speculation's footprint reset, and the carried `left` it took is released
+with it.
 
 ```
 a < b < c
   │
   ├── left = eval(a), right = eval(b)
-  ├── dispatch("__lt__", [left.clone(), right.clone()])
-  ├── result true → release(left), left = right
+  ├── carried = right.clone()
+  ├── dispatch("__lt__", [left, right])        # releases both
+  ├── result true → left = track(carried)
   │
   ├── right = eval(c)
-  ├── dispatch("__lt__", [left.clone(), right.clone()])
-  ├── result true → release(left), release(right)
+  ├── dispatch("__lt__", [left, right])        # last link: nothing carried
   └── return true
 ```
 
-The clone-and-release pattern is necessary because `dispatch` consumes (releases) its
-arguments for memory tracking, but the chained comparison needs to retain the shared
-middle operand for the next pair.
+The clone is necessary because `dispatch` consumes (releases) its arguments for
+memory tracking, but the chained comparison needs the shared middle operand for
+the next pair.
 
 ### BoolOp (`eval_boolop`)
 `and` and `or` are value-returning with null-coalescing semantics:
@@ -443,7 +464,8 @@ keeps the members that have a rule toward the target
 Operands after the first unresolved one are evaluated speculatively (see
 [Speculative evaluation](#speculative-evaluation)): a value error is absorbed —
 run time may never reach the operand, and if it does the evaluation fails there,
-so the operand contributes no outcome — and a budget error propagates. Every
+so the operand contributes no outcome — and a budget error, or a name that
+resolves nowhere, propagates. Every
 operand value the result does not carry is released: unresolved placeholders (the
 result carries only types), a concrete operand that did not decide, and a decided
 concrete operand folded into an `unresolved` union. A nested `and`/`or` that
@@ -454,17 +476,30 @@ other operand.
 
 ### Speculative evaluation
 
-Two constructs evaluate sub-expressions whose failure they may absorb rather than
-propagate: the branches of an unresolved-test conditional, and the operands of a
-boolop after an unresolved one. Both use one helper, `eval_speculative`, which
-applies two rules:
+Four constructs evaluate sub-expressions whose failure they may absorb rather
+than propagate: the branches of an unresolved-test conditional, the operands of a
+boolop after an unresolved one, the links of a chained comparison after an
+unresolved one, and the filter and body of a list comprehension
+typed over an unresolved iterable or filter. All use one helper, `speculate`
+(`eval_speculative` for a single node), which applies three rules:
 
 - A budget error (`MemoryLimitExceeded` / `OperationLimitExceeded`, directly or
   inside a compound error's sub-errors) is never absorbed. The memory and
   operations were spent regardless of what a runtime would skip. It propagates
   immediately: a conditional whose if-branch exceeds the budget does not evaluate
   the else-branch.
-- A value error is absorbed and the live footprint (`current_memory`) is reset to
+- A name that resolves nowhere (`UndefinedVariable`, `UnknownFunction` or
+  `UnknownMember`, directly or inside a compound error's sub-errors: an
+  undefined symbol, an unknown function, or a method or property that no type
+  has) is never absorbed either. Whether a name exists
+  does not depend on any value, so every run that evaluates the sub-expression
+  fails on it; reporting it at template validation loses only templates that
+  succeed solely when that sub-expression is skipped. `1 if Param.C else
+  strr(1)`, `Param.C or 'a'.uper()`, `[Param.Typo for x in Param.L]` and
+  `[x.name() for x in Param.L]` fail `check` (with `Param.C` a `BOOL` and
+  `Param.L` a `LIST[INT]` parameter), with the field path and any "Did you
+  mean" suggestion of the name.
+- Any other value error is absorbed and the live footprint (`current_memory`) is reset to
   what it was before the attempt, because the failed sub-expression's values are
   gone. Peak memory and the operation count keep what the attempt consumed.
   Dispatch also releases a failed call's operands (see
@@ -472,13 +507,26 @@ applies two rules:
   sub-expression failed.
 
 The caller decides what an absorbed failure means: an `Unresolved` of the other
-branch's type, a runtime short-circuit, or a compound "both branches fail" error.
+branch's type, a runtime short-circuit, a compound "both branches fail" error, a
+chained comparison that is an unknown `bool` (a run may stop at an earlier
+`false` link), or a comprehension that only a run keeping no element survives
+(`list[nulltype]`).
 
-The first rule requires that every construct between the budget failure and
+The first two rules require that every construct between the failure and
 the absorbing one passes the error through unchanged. Two places replace
 errors with friendlier ones: [`eval_attribute`](#attribute-eval_attribute)'s
 fallbacks and [`eval_call`](#call-eval_call)'s "is a property, not a method"
-error for a failed method call. Both leave budget errors as they are.
+error for a failed method call. Both leave budget errors as they are. The
+first `eval_attribute` fallback reports a dotted path as `UndefinedVariable`
+only when its base failed on an undefined symbol (`Param.Typo.Deep`), which
+propagates; a base that fails on its value's type (`x.parent.name` with
+`x: int`) keeps that error, which is absorbed, and a base that fails on a
+misused member (`x.nam.name`) keeps its `UnknownMember`, which propagates.
+A property name called as a
+method (`x.name()` when no type has a `name` method), a method used as a
+property (`x.upper`), and a property no type has (`x.nam`) are
+`UnknownMember`, which propagates; a property some other type has (`x.name`
+with `x: int`) fails on the value's type and is absorbed.
 
 ### IfExp (`eval_ifexp`)
 Ternary: `x if condition else y`. Evaluates the condition unconstrained
@@ -490,7 +538,8 @@ carrying only a type: the union of both branch types when both succeed;
 the other branch's type when exactly one fails with a value error (a
 runtime with the condition resolved may never take the failing branch);
 a compound error carrying both as sub-errors when both fail. A budget
-error in either branch propagates immediately. Because the result
+error or a name that resolves nowhere in either branch propagates
+immediately. Because the result
 carries no value, every branch value is released.
 
 ### Call (`eval_call`)
@@ -510,11 +559,13 @@ Rejects:
 - Direct dunder calls (`__add__(1, 2)` — use `1 + 2` instead)
 - Calling properties as methods (`path.name()` — use `path.name` instead).
   When a method call fails and a property of the same name exists, the
-  original error is replaced with "is a property, not a method". Budget
-  errors are not replaced (see
-  [Speculative evaluation](#speculative-evaluation)). No method in the
-  default library shares a name with a property, so this only applies to
-  custom libraries.
+  original error is replaced with "is a property, not a method". When no
+  method of that name exists (as for every property in the default
+  library), the replacement is `UnknownMember`, a name error that static
+  checking reports even in a part a run may skip; when a method of that
+  name exists for other types, the call failed on the value's type and the
+  replacement is a plain error. Budget errors are not replaced (see
+  [Speculative evaluation](#speculative-evaluation)).
 
 ### List (`eval_list`)
 Evaluates list literals. Validates max 2 nesting levels. Coerces elements when mixed
@@ -569,15 +620,26 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
 - A filter condition that evaluates to an *unresolved* value on a
   concrete element concludes the same way: per-element inclusion is
   undecidable, so any accumulated elements are abandoned and the
-  comprehension returns `unresolved(list[body_type])`, with the body's
-  type derived under an unresolved loop variable (evaluating the body
-  on a concrete element the runtime filter may exclude could raise a
-  spurious value error). This state — iterable concrete, filter
+  comprehension concludes as over an unresolved iterable (below), with
+  the body's type derived under an unresolved loop variable (evaluating
+  the body on a concrete element the runtime filter may exclude could
+  raise a spurious value error). The elements before it were evaluated in
+  order, and one whose filter is concretely true is kept by every run, so
+  a failure of its body is an error (`[x.upper() for x in [1, 2] if x == 1`
+  `or Task.Param.C]` fails at every stage). The elements after it are not
+  evaluated (`[x.upper() for x in [2, 1] if ...]` fails only at run time):
+  evaluating them would cost, at a stage that cannot short-circuit the
+  filter, what the run does not. This state — iterable concrete, filter
   unresolved — is exactly what job creation evaluates under when the
   iterable depends on `Param.*` and the filter on `Task.*`/`Session.*`;
   a hard error here would reject templates that both validate and run.
-  A filter whose *type* can never be a boolean is still an error on
-  both paths.
+  A filter that evaluates to a concrete non-boolean, or to an unresolved
+  value whose type can never be a boolean, on a concrete element is an
+  error: that element reaches it on every run. A type that can be a
+  boolean is `bool`, `any`, an unconstrained `unresolved`, a bare type
+  variable (a type static typing leaves unbound, such as that of a symbol
+  bound to one), `noreturn`
+  (the filter itself fails the run), or a union with such a member.
 - Over a concrete iterable, the results build through `make_list`, which
   applies the shared list-element join; an incompatible pair fails with
   "make_list expected `T` element, got `U`" (`T` the join of the elements
@@ -590,15 +652,62 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
   builds. `[[x] if x > 2 else [Task.Param.S] for x in Param.L]` fails at
   job creation as it does at run time (`list[int]` beside `list[string]`),
   though template validation, typing the body once as a union, accepts it.
-- Over an unresolved iterable (or an unresolved filter), the result is
-  `unresolved(list[T])` with `T` the body type's list-element contribution
-  (see [type-system.md § List element join](type-system.md#list-element-join)):
-  a `null` member is dropped (`int?` gives `list[int]`) and the result is
-  simplified as a join result, so `list[nulltype]` yields to a typed list
-  member and `[[] if x > 2 else [Task.Param.S] for x
-  in Param.L]` is `unresolved[list[list[string]]]` at template validation as
-  at job creation. A body that can only be `null` keeps its type (the
-  comprehension still succeeds over an empty iterable).
+- **Result type** (2026-02 Expression Language §1.3.7). A run that keeps
+  no element never evaluates the element expression, so nothing types its
+  elements: it is the untyped empty list. Every stage follows from that,
+  and none rejects a comprehension that a later stage's values let
+  succeed:
+  - Over a concrete iterable, a run that keeps elements builds from their
+    values through `make_list`, as above (`[x if x > 1 else 2.5 for x in
+    L]` is `list[int]` or `list[float]`); one that keeps none is
+    `list[nulltype]`, with the body neither run nor type-checked
+    (`[x for x in [1, 2] if x > 5] + ['a']` is `['a']`).
+  - Over an unresolved iterable (or an unresolved filter), the filter and
+    body are typed once, under an unresolved loop variable, and the result
+    is `unresolved(types::comprehension_list_type(body_type))`:
+    `list[T | nulltype]`, where `T` is the body's type without a
+    `nulltype` member and a union of list types reads as one list type.
+    The list type with a union element type stands for each list a run can
+    build, the empty one included (type-system.md § Lists with union
+    element types): `[x for x in Param.L]` is
+    `unresolved[list[int | nulltype]]`, indexing it gives `int`, and
+    `[[] if x > 2 else [Task.Param.S] for x in Param.L]` is
+    `unresolved[list[list[string | nulltype] | nulltype]]`.
+  - The result is `unresolved[list[nulltype]]`, the only run that can
+    succeed, when no run that keeps an element can: nothing is left of
+    `T` (the body can only be `null`), `T` is `noreturn`, every form of `T`
+    is a list of lists (the comprehension would nest three levels, which
+    no value can, 2026-02 §1.2.1; a form holding a type variable, such as a
+    `list[list[T1]]` from a signature that leaves `T1` unbound, does not say what
+    its values are and does not count), or the filter or body fails to type —
+    a type error, a value error on concrete operands, or a filter that can
+    never be a boolean. The failure is
+    not reported: it surfaces at the
+    stage whose values reach it. `[x.upper() for x in Param.L]` passes
+    template validation and fails at job creation unless `Param.L` is
+    empty. A reference to a name that resolves nowhere — an undefined
+    symbol, an unknown function, or a method or property that no type has —
+    is reported, at template validation: whether it exists does not depend
+    on any value (`[Param.Typo for x in Param.L]` and
+    `[strr(s) for s in Task.Param.Names.split(',')]` fail `check`). The typing runs under `speculate`
+    ([Speculative evaluation](#speculative-evaluation)), so a budget
+    exceedance and a name error still propagate, and its spend is absorbed and its
+    footprint reset like an iteration's.
+  - The loop variable's type is `types::comprehension_var` of the
+    iterable's type: `E` for `list[E]`, `int` for `range_expr`, `any` for
+    `any`, and for a union the union of its members' element types (a
+    `nulltype` element or member contributes nothing, as does a `null`
+    iterable, which is typed like an iterable that can only be `[]`; a member whose type
+    cannot be iterated binds `any`, as below). An iterable that can only be `[]` gives
+    `list[nulltype]` with the body neither run nor type-checked
+    (`[x * 2 for x in []]`). An iterable typed as a type variable (`T3`),
+    or a list of one (`list[T1]`, as `flatten` of a `list[any]` is typed), binds
+    `any`, as `any` does. An unresolved iterable whose type cannot be
+    iterated also binds `any`: its type may come from typing an operation on
+    values of unknown type (a union member typed `int` from `x * 2` when `x`
+    is `any` but its other branches are lists), so only a run can tell,
+    and a concrete one fails with "Cannot iterate over `T`". Other errors in
+    the iterable are not absorbed.
 - Operation count: +1 per iteration
 - Each iteration's child evaluator hands its *spend* — memory
   high-water mark and operation count — back to the parent on **every**
@@ -636,6 +745,18 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 - Negative indices wrap around (Python semantics)
 - Slices return the same type as the input (string→string, list→list)
 - Out-of-bounds index raises an error; out-of-bounds slice clamps silently
+- Indexing a receiver every form of which is the empty list
+  (`list[nulltype]`, e.g. `[None for x in L]`, or `[]` with an unresolved
+  index), typed `noreturn` by `__getitem__(list[nulltype], int)`, fails on
+  every run that evaluates it, and is reported at the index: "Index out of bounds: the list
+  is always empty". Indexing a comprehension whose typing absorbed a failure
+  (see ListComp) adds it: `[x.upper() for x in Param.L][0]` at template
+  validation fails with "..., since a run that keeps an element fails: upper()
+  is not available for int ...". A `noreturn` element of a list that is not
+  always empty (`[fail(m)][0]`) is not reported so. In a comprehension body typed over an unresolved
+  iterable or filter, the failure is absorbed like any other, and the
+  comprehension is `list[nulltype]` (see ListComp): the index may never be
+  evaluated.
 - The receiver and the index/slice bounds are evaluated unconstrained (see
   [Target Type Propagation](#target-type-propagation)): the caller's
   target describes the subscript's *result*, so `[10, 20, 30][0]` with
@@ -724,3 +845,13 @@ Key differences:
    between evaluation control flow and function logic.
 4. **Typed list variants** — The evaluator constructs typed list variants directly,
    avoiding the overhead of wrapping each element in a tagged `ExprValue`.
+5. **List comprehension result type** — The Python `expr` branch of
+   `openjd-model-for-python` takes a comprehension's element type from its first
+   result and makes an empty result `list[nulltype]`. The Rust evaluator also makes an
+   empty result `list[nulltype]`, but types a non-empty one by the list-literal join
+   of all its results (`[x if x > 1 else 2.5 for x in [2, 1]]` is `list[float]`). It
+   follows the 2026-02 Expression Language §1.3.7 rule above
+   where Python does not: over an unresolved iterable the result is
+   `list[T | nulltype]` rather than `list[T]`, and a filter or body that fails to
+   type gives `list[nulltype]` rather than an error. The Python mainline is moving
+   to these Rust bindings rather than being changed.

@@ -25,6 +25,16 @@ pub enum ExpressionErrorKind {
     #[error("Unknown function: '{name}'")]
     UnknownFunction { name: String },
 
+    /// A method or property name that no type has: a property called as a
+    /// method (`x.name()`), a method used as a property (`x.upper`), or a
+    /// property of no type (`x.nam`). Like [`Self::UnknownFunction`], it
+    /// does not depend on any value.
+    #[error("{message}")]
+    UnknownMember {
+        /// The diagnostic, naming the member and how it was misused.
+        message: String,
+    },
+
     /// Argument types did not match any overload signature.
     #[error("{message}")]
     TypeError { message: String },

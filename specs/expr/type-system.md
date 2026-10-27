@@ -130,13 +130,13 @@ concrete) accepting the same combinations.
 
 | Element types | Join |
 |---|---|
-| identical types | that type |
+| identical types, other than `any` or a type variable | that type |
 | `int` and `float` | `float` |
 | `path` and `string` | `string` |
 | `list[A]` and `list[B]` | `list[join(A, B)]`, where inside a list a `nulltype` element (the empty list `[]`) yields to the other |
 | a union and a type | the union of the joins of the members that join; a conflict if none does |
 | `unresolved[T]` and a type | as `T` |
-| `any` and a type | the other type |
+| `any` or an unbound type variable, and a type (itself included) | `any` |
 | anything else | conflict |
 
 Before joining, each element type — including a lone element's — is reduced
@@ -144,15 +144,24 @@ to what it contributes to a built list (`types::list_element_contribution`,
 crate-internal): `unresolved[T]` contributes `T`; a top-level `nulltype`
 contributes nothing (a `null` element always fails), so a union drops its
 `nulltype` member (`int?` contributes `int`) and a bare `nulltype` element is
-a conflict. A union's `list[nulltype]` member is kept for the join — the
+a conflict. A lone element of unknown type (an unbound type variable, or a
+union with one) is `any`, as its join with another element would be:
+`[v]` with `v` a symbol of type `T1` is `list[any]`, not `list[T1]`. A union's `list[nulltype]` member is kept for the join — the
 empty list still joins with any list, so `[([] if H else [1]), ['a']]`
 (which builds `[[], ['a']]` when `H` holds) joins to `list[string]` even
-though `list[int]` and `list[string]` conflict. The **joined result** is then
-simplified (`types::simplify_joined_list_element`, crate-internal): a union
-holding a typed list drops its `list[nulltype]` member
-(`list[int] | list[nulltype]` becomes `list[int]`, as `[[], [1]]` is
-`list[list[int]]`). So `[Task.Param.I if H else None]` is
-`unresolved[list[int]]`, and `int?` against `string?` is the `int` / `string`
+though `list[int]` and `list[string]` conflict. Nor is it dropped from the
+joined result: `[([] if H else ['a'])]` is
+`list[list[nulltype] | list[string]]`, the forms `list[list[nulltype]]` and
+`list[list[string]]`, because the run where `H` holds builds `[[]]`, whose
+element is the untyped empty list: `sum` of that element is `0`, which a
+`list[list[string]]` type would reject. Two elements do join the empty list
+into the other's type — `[[], ['a']]` is `list[list[string]]`, the inner `[]`
+yielding inside a list — since both are in the list every run builds. A run
+builds the `[]` as an empty list of that type (`ExprValue::make_list`),
+beside a typed empty list too, so `[B, []][1]` with `B` an empty
+`list[string]` is a `list[string]`, as it is with a non-empty `B`.
+Dropping a top-level `nulltype` makes `[Task.Param.I if H else None]`
+`unresolved[list[int]]`, and `int?` against `string?` the `int` / `string`
 conflict — every value of that literal fails at run time — rather than a
 member-wise join to `nulltype`. Concrete `make_list` reports a `null` element
 as "Cannot create list from null elements" before the join. The unresolved
@@ -162,10 +171,14 @@ nothing (`unresolved[nulltype]`, e.g. `None if H else None`) — reporting the
 construct's run-time error: "null is not allowed in list literals" for a list
 literal, "Cannot create list from null elements" for a comprehension.
 
+An element of unknown type (`any`, or an unbound type variable such as the `T1`
+of `flatten` of a `list[any]`) joins with any element as `any`: its value
+need not have the other element's type (`[s, path('/b')]` with `s` a string is a
+`list[string]`), so the values decide.
+
 Conflicts include `bool` against `int`, a scalar against a list,
 `range_expr` against `list[int]` (unlike `unify_binding`), `list[int]` against
-`list[string]`, a top-level `nulltype` (a list literal cannot hold `null`), and
-an unbound type variable against anything but itself. The fold is pairwise, so
+`list[string]`, and a top-level `nulltype` (a list literal cannot hold `null`). The fold is pairwise, so
 `[1, 2.0, 'a', path('b')]` is a conflict: the int/float and path/string pairs
 do not make all four types compatible.
 
@@ -186,9 +199,42 @@ Crate-internal helpers (`pub(crate)`, not part of the public API):
 | `erase_type_vars() -> ExprType` | Replace every type variable with `any` — the wildcard reading of unbound variables in coercion sources |
 | `types::list_element_contribution(&ExprType) -> Option<ExprType>` | The type an element contributes to a built list: unwraps `unresolved[T]`; drops a top-level `nulltype` (union member or bare; `None` if nothing is left); keeps `list[nulltype]` members |
 | `types::join_list_element(&ExprType, &ExprType) -> Option<ExprType>` | The list-element join above; `None` on a conflict |
-| `types::simplify_joined_list_element(ExprType) -> ExprType` | On a joined element type, drops `list[nulltype]` from a union that also holds a typed list |
+| `types::comprehension_var(&ExprType) -> ComprehensionVar` | A list comprehension's loop variable for an unresolved iterable of this type (§1.3.7): `Typed(E)` for `list[E]` (`int` for `range_expr`, the union of the members' element types for a union, `nulltype` elements and members contributing nothing, and `any` for `any`, a type variable, a list of one, or a type that cannot be iterated: it may come from typing an operation on values of unknown type), `EmptyOnly` when the iterable can only be `[]` or `null` |
+| `types::comprehension_list_type(&ExprType) -> ExprType` | The type of a comprehension over an unresolved iterable (or with an unresolved filter) from its body's type (§1.3.7): `T` is the body without `nulltype`, its unions of lists merged; `list[T \| nulltype]`, the run that keeps no element included; `list[nulltype]` if nothing is left, the body is `noreturn`, or `T` is a list of lists (`comprehension_too_deep`) |
+| `types::comprehension_too_deep(&ExprType) -> bool` | Is every form of a comprehension element type `T` (each union member's `list_forms`, `nulltype` aside) a list of lists, so the comprehension would nest three levels? |
+| `types::merge_list_union(ExprType) -> ExprType` | A union's list members as the one list type they equal (`list[A] \| list[B]` is `list[A \| B]`), at every depth |
+| `types::list_forms(&ExprType) -> Vec<ExprType>` | The types a type with unions in it stands for (`list[int \| nulltype]` gives `list[int]` and `list[nulltype]`, at every depth); a top-level union has its members' forms (`list[int] \| list[string]` the same as `list[int \| string]`, `int \| string` gives `int` and `string`) |
+
+### Lists with union element types
+
+A list value holds elements of one type, so a list type whose element type
+is a union stands for one list type per member (2026-02 Expression Language
+§1.2.1): `list[int | string]` is a `list[int]` or a `list[string]`, and
+`list[int | float | nulltype]` is a `list[int]`, a `list[float]`, or the
+empty `list[nulltype]` — a `nulltype` element member means "may be empty",
+since a list value never holds `null`. `list[A] | list[B]` and
+`list[A | B]` therefore stand for the same values, and where a result is
+built from several list types (a comprehension's body, a call typed by
+forms) it is written as the second (`types::merge_list_union`). Only
+unresolved values have such types; a concrete list's type never does.
+
+They arise from comprehensions over an unresolved iterable, whose result
+`list[T | nulltype]` includes the run that keeps no element ([evaluator.md §
+ListComp](evaluator.md#listcomp-eval_listcomp)), and from
+hoisted list literals with union-typed elements. Operations treat them by
+their forms ([function-library.md § Three-Phase
+Dispatch](function-library.md#three-phase-dispatch)), and treat a union of
+list types (as a conditional gives) the same way, since it stands for the
+same values: indexing `list[int | nulltype]` gives `int` (the empty form's
+`__getitem__` is `noreturn`), indexing `list[int] | list[string]` gives
+`int | string`, and `sum` of a `list[float | int | nulltype]` is
+`float | int`.
 
 ## Union Normalization
+
+A bare `unresolved` (`ExprType::new(TypeCode::Unresolved, vec![])`, which `parse` never
+builds: it gives `unresolved[any]`) is read as `unresolved[any]` by union normalization and
+by `match_type`.
 
 Union types are normalized on construction (matching the Python implementation):
 

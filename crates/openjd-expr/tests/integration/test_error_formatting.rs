@@ -1310,9 +1310,9 @@ fn format_string_validation_carries_expression_error_with_sub_errors() {
     st.set("X", ExprValue::unresolved(ExprType::INT)).unwrap();
     st.set("Y", ExprValue::unresolved(ExprType::PATH)).unwrap();
     let fs = FormatString::new("{{X + 'a' if cond else Y * 'b'}}").unwrap();
-    let lib = FunctionLibrary::default();
+    let lib = FunctionLibrary::for_profile(&ExprProfile::current());
     let err = fs
-        .validate_expressions(&st, &FormatStringOptions::new().with_library(&lib))
+        .validate_expressions(&st, &FormatStringOptions::new().with_library(&*lib))
         .unwrap_err();
     assert_eq!(err.start, 0);
     assert_eq!(err.end, 32);

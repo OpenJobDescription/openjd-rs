@@ -412,16 +412,16 @@ fn unify_inner(a: &ExprType, b: &ExprType, as_list_element: bool) -> Option<Expr
 ///   of the members' joins. A value of the union type that is an
 ///   incompatible member fails at run time, so only the compatible members
 ///   describe a list that is actually built.
-/// - `unresolved[T]` joins as `T`; `any` (a failed binding's placeholder)
-///   yields to the other type.
+/// - `unresolved[T]` joins as `T`; `any` or an unbound type variable
+///   joins with anything as `any` (its values need not have the other's
+///   type).
 /// - Each side is first reduced to its [`list_element_contribution`]: a
 ///   top-level `nulltype` union member is dropped (a `null` element always
 ///   fails), so `int?` joins as `int` and `int?` against `string?` is a
 ///   conflict.
 /// - Everything else is a conflict — notably `bool` against `int`, a scalar
 ///   against a list, `range_expr` against `list[int]`, a top-level
-///   `nulltype` (a list literal cannot hold `null`), and an unbound type
-///   variable against anything but itself.
+///   `nulltype` (a list literal cannot hold `null`).
 pub(crate) fn join_list_element(a: &ExprType, b: &ExprType) -> Option<ExprType> {
     let a = list_element_contribution(a)?;
     let b = list_element_contribution(b)?;
@@ -438,10 +438,12 @@ pub(crate) fn join_list_element(a: &ExprType, b: &ExprType) -> Option<ExprType> 
 ///   list. A union drops its `nulltype` member: `int | nulltype`
 ///   contributes `int`.
 ///
-/// A `list[nulltype]` union member is kept here: it still joins with any
+/// A `list[nulltype]` union member is kept: it still joins with any
 /// list (`[([] if c else [1]), ['a']]` builds when `c` holds), so
 /// dropping it before the join would reject a list that can be built.
-/// [`simplify_joined_list_element`] removes it from the joined result.
+/// Nor is it dropped from a joined union: `[([] if c else [1])]` is a
+/// `list[list[nulltype] | list[int]]`, since a run where `c` holds builds
+/// `[[]]`, whose element is the untyped empty list (§1.2.1).
 pub(crate) fn list_element_contribution(t: &ExprType) -> Option<ExprType> {
     let t = match (t.code, t.params.as_slice()) {
         (TypeCode::Unresolved, [inner]) => inner,
@@ -466,21 +468,27 @@ pub(crate) fn list_element_contribution(t: &ExprType) -> Option<ExprType> {
     }
 }
 
-/// Simplify a joined list element type: a union holding a typed list
-/// member drops its `list[nulltype]` member. The empty list fits any list
-/// type (`[[], [1]]` is `list[list[int]]`), so `list[int] | list[nulltype]`
-/// as an element type is `list[int]`. Applied to the result of a join
-/// (never to its inputs, where the empty-list member must stay joinable).
-pub(crate) fn simplify_joined_list_element(t: ExprType) -> ExprType {
-    if t.code != TypeCode::Union {
-        return t;
+fn is_unknown_element(t: &ExprType) -> bool {
+    matches!(
+        t.code,
+        TypeCode::Any
+            | TypeCode::TypeVarT
+            | TypeCode::TypeVarT1
+            | TypeCode::TypeVarT2
+            | TypeCode::TypeVarT3
+    )
+}
+
+/// `t` with an element of unknown type ([`is_unknown_element`]), or a
+/// union member of one, as `any` (which absorbs the union).
+fn unknown_element_as_any(t: ExprType) -> ExprType {
+    if is_unknown_element(&t)
+        || (t.code == TypeCode::Union && t.params.iter().any(is_unknown_element))
+    {
+        ExprType::ANY
+    } else {
+        t
     }
-    let empty_list = ExprType::list(ExprType::NULLTYPE);
-    let has_typed_list = t.params.iter().any(|m| m.is_list() && *m != empty_list);
-    if !has_typed_list || !t.params.contains(&empty_list) {
-        return t;
-    }
-    ExprType::union(t.params.into_iter().filter(|m| *m != empty_list).collect())
 }
 
 fn join_element_inner(a: &ExprType, b: &ExprType, nested: bool) -> Option<ExprType> {
@@ -490,12 +498,16 @@ fn join_element_inner(a: &ExprType, b: &ExprType, nested: bool) -> Option<ExprTy
     if let (TypeCode::Unresolved, [inner]) = (b.code, b.params.as_slice()) {
         return join_element_inner(a, inner, nested);
     }
-    if a == b {
+    if a == b && !is_unknown_element(a) {
         return Some(a.clone());
     }
     match (a.code, b.code) {
-        (TypeCode::Any, _) => Some(b.clone()),
-        (_, TypeCode::Any) => Some(a.clone()),
+        // An element of unknown type (`any`, or a type variable left
+        // unbound, such as the `T1` of `flatten` of a `list[any]`) need not
+        // have the other's type (`[s, path('/b')]` with `s` a string is a
+        // `list[string]`), nor does another one (two `T1` elements may be
+        // an int and a float): the values decide.
+        _ if is_unknown_element(a) || is_unknown_element(b) => Some(ExprType::ANY),
         (TypeCode::NullType, _) if nested => Some(b.clone()),
         (_, TypeCode::NullType) if nested => Some(a.clone()),
         (TypeCode::Union, _) => join_union_members(&a.params, b, nested),
@@ -535,8 +547,8 @@ fn join_union_members(members: &[ExprType], other: &ExprType, nested: bool) -> O
 /// that cannot join the elements before it. Every element, including a
 /// lone one, is reduced to its [`list_element_contribution`]; a first
 /// element that contributes nothing (`nulltype`) fails as
-/// `Err((t, t))`. The joined type is finished with
-/// [`simplify_joined_list_element`].
+/// `Err((t, t))`, and a lone one of unknown type (a type variable, or a
+/// union with one) is `any`, as its join with another element is.
 pub(crate) fn join_list_element_types<I>(types: I) -> Result<Option<ExprType>, (ExprType, ExprType)>
 where
     I: IntoIterator<Item = ExprType>,
@@ -544,8 +556,10 @@ where
     let mut acc: Option<ExprType> = None;
     for t in types {
         acc = Some(match acc {
+            // A lone element of unknown type (a type variable) is `any`,
+            // as it is when it joins another element.
             None => match list_element_contribution(&t) {
-                Some(c) => c,
+                Some(c) => unknown_element_as_any(c),
                 None => return Err((t.clone(), t)),
             },
             Some(prev) => match join_list_element(&prev, &t) {
@@ -554,7 +568,201 @@ where
             },
         });
     }
-    Ok(acc.map(simplify_joined_list_element))
+    Ok(acc)
+}
+
+// ── List comprehension types (2026-02 Expression Language §1.3.7) ──
+
+/// What the loop variable of a comprehension over a value of type `t`
+/// is bound to.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ComprehensionVar {
+    /// The loop variable has this type.
+    Typed(ExprType),
+    /// The iterable can only be the empty list, or `null` (which fails
+    /// every run): the body never runs.
+    EmptyOnly,
+}
+
+/// The loop variable's type for a comprehension over an unresolved
+/// iterable of type `t` (§1.3.7): `E` for `list[E]`, `int` for
+/// `range_expr`, the union of the members' element types for a union, and
+/// `any` for `any`, a type variable, a list whose element is one (or a bare
+/// `unresolved`), or a type that cannot be iterated (it may come from
+/// typing an operation on values of unknown type; a run reports it). A
+/// `nulltype` list element contributes nothing (§1.2.1: it marks the
+/// list as possibly empty), nor does a `nulltype` iterable or union member
+/// (a `null` iterable fails every run). `unresolved[T]` is read as `T`.
+pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
+    let t = match (t.code, t.params.as_slice()) {
+        (TypeCode::Unresolved, [inner]) => inner,
+        _ => t,
+    };
+    let members: &[ExprType] = if t.code == TypeCode::Union {
+        &t.params
+    } else {
+        std::slice::from_ref(t)
+    };
+    let mut elems = Vec::new();
+    for m in members {
+        match (m.code, m.params.as_slice()) {
+            (TypeCode::List, [elem]) => {
+                if let Some(e) = list_element_contribution(elem) {
+                    // A bare `unresolved` element (any type), or a type
+                    // variable left unbound (`list[T3]`), binds `any`.
+                    let e = if (e.code == TypeCode::Unresolved && e.params.is_empty())
+                        || matches!(
+                            e.code,
+                            TypeCode::TypeVarT
+                                | TypeCode::TypeVarT1
+                                | TypeCode::TypeVarT2
+                                | TypeCode::TypeVarT3
+                        ) {
+                        ExprType::ANY
+                    } else {
+                        e
+                    };
+                    elems.push(e);
+                }
+            }
+            (TypeCode::RangeExpr, _) => elems.push(ExprType::INT),
+            // A `null` iterable fails every run: it contributes nothing.
+            (TypeCode::NullType, _) => {}
+            // `any`, an unconstrained `unresolved`, a type variable, or a
+            // type that cannot be iterated: the type of an unresolved value
+            // may come from typing an operation on values of unknown type
+            // (a `string` member from a branch the run never takes), so
+            // only a run, which has the value, can tell.
+            _ => elems.push(ExprType::ANY),
+        }
+    }
+    if elems.is_empty() {
+        ComprehensionVar::EmptyOnly
+    } else {
+        ComprehensionVar::Typed(ExprType::union(elems))
+    }
+}
+
+/// The type of a comprehension over an unresolved iterable (or with an
+/// unresolved filter) whose element expression has type `body` (§1.3.7).
+/// `T` is `body` without a `nulltype` member (a list cannot hold `null`),
+/// with a union of list types read as one list of the union of their
+/// elements ([`merge_list_union`]). The run may keep no element, so the
+/// type covers the untyped empty list too:
+///
+/// - `list[T | nulltype]`: a run that keeps elements takes its type from
+///   them, and one that keeps none is `list[nulltype]`.
+/// - nothing is left of `T`, `T` is `noreturn`, or every form of `T` is a
+///   list of lists ([`comprehension_too_deep`], a run that keeps an
+///   element fails): `list[nulltype]`, the only run that can succeed.
+pub(crate) fn comprehension_list_type(body: &ExprType) -> ExprType {
+    let body = match (body.code, body.params.as_slice()) {
+        (TypeCode::Unresolved, [inner]) => inner,
+        _ => body,
+    };
+    let empty = ExprType::list(ExprType::NULLTYPE);
+    let Some(t) = list_element_contribution(body) else {
+        return empty;
+    };
+    // `noreturn` (a body that never produces a value) needs no case: the
+    // union below drops it, leaving `list[nulltype]`.
+    let t = merge_list_union(t);
+    if comprehension_too_deep(&t) {
+        return empty;
+    }
+    ExprType::list(ExprType::union(vec![t, ExprType::NULLTYPE]))
+}
+
+/// Whether `t`, as a comprehension's element type `T` (§1.3.7), makes the
+/// comprehension nest lists more than two levels deep (§1.2.1): every
+/// form of `T` (each member of a union `T`, each of their
+/// [`list_forms`], `nulltype` aside) is a list of lists. A form that is
+/// not leaves a run that builds a valid list, which validation must not
+/// reject; with no form left there is nothing to nest. A form holding a
+/// type variable (`list[list[T1]]`, from typing an operation on an
+/// element of unknown type) does not say what its values are, so it does
+/// not count.
+pub(crate) fn comprehension_too_deep(t: &ExprType) -> bool {
+    fn depth(t: &ExprType) -> usize {
+        match (t.code, t.params.as_slice()) {
+            (TypeCode::List, [elem]) => 1 + depth(elem),
+            _ => 0,
+        }
+    }
+    let members: &[ExprType] = if t.code == TypeCode::Union {
+        &t.params
+    } else {
+        std::slice::from_ref(t)
+    };
+    let mut forms = members
+        .iter()
+        .filter(|m| m.code != TypeCode::NullType)
+        .flat_map(list_forms)
+        .peekable();
+    forms.peek().is_some() && forms.all(|f| depth(&f) >= 2 && !f.is_symbolic())
+}
+
+/// A union of list types as the single list type it equals (§1.2.1: a
+/// list type with a union element type is one list type per member):
+/// `list[A] | list[B]` is `list[A | B]`, applied at every depth. Any
+/// other type is returned unchanged (a union with a non-list member, or
+/// none at all, has its list members merged in place).
+pub(crate) fn merge_list_union(t: ExprType) -> ExprType {
+    match t.code {
+        TypeCode::List => match t.params.as_slice() {
+            [elem] => ExprType::list(merge_list_union(elem.clone())),
+            _ => t,
+        },
+        TypeCode::Union => {
+            let (lists, others): (Vec<ExprType>, Vec<ExprType>) =
+                t.params.into_iter().partition(ExprType::is_list);
+            let mut members = others;
+            if !lists.is_empty() {
+                let elems: Vec<ExprType> = lists
+                    .into_iter()
+                    .filter_map(|l| l.params.into_iter().next())
+                    .collect();
+                members.push(ExprType::list(merge_list_union(ExprType::union(elems))));
+            }
+            ExprType::union(members)
+        }
+        _ => t,
+    }
+}
+
+/// The forms of a type whose list element types may be unions (§1.2.1):
+/// `list[int | float | nulltype]` has the forms `list[int]`,
+/// `list[float]`, and `list[nulltype]`, at every depth. A top-level union
+/// has its members' forms, since a value of the union is a value of one
+/// member: `list[int] | list[string]` has the same forms as
+/// `list[int | string]`, and `int | string` has `int` and `string`. A
+/// type with no union in it is its own single form.
+pub(crate) fn list_forms(t: &ExprType) -> Vec<ExprType> {
+    match (t.code, t.params.as_slice()) {
+        (TypeCode::List, [elem]) => element_forms(elem)
+            .into_iter()
+            .map(ExprType::list)
+            .collect(),
+        (TypeCode::Union, _) => element_forms(t),
+        _ => vec![t.clone()],
+    }
+}
+
+fn element_forms(elem: &ExprType) -> Vec<ExprType> {
+    let members: &[ExprType] = if elem.code == TypeCode::Union {
+        &elem.params
+    } else {
+        std::slice::from_ref(elem)
+    };
+    let mut forms = Vec::new();
+    for m in members {
+        for f in list_forms(m) {
+            if !forms.contains(&f) {
+                forms.push(f);
+            }
+        }
+    }
+    forms
 }
 
 // ── Normalization ──
@@ -574,7 +782,8 @@ fn normalize_union(types: Vec<ExprType>) -> ExprType {
     let mut non_unresolved = Vec::new();
     for m in &members {
         if m.code == TypeCode::Unresolved {
-            unresolved_constraints.push(m.params[0].clone());
+            // A bare `unresolved` (any type) is `unresolved[any]`.
+            unresolved_constraints.push(m.params.first().cloned().unwrap_or(ExprType::ANY));
         } else {
             non_unresolved.push(m.clone());
         }
@@ -746,6 +955,9 @@ impl ExprType {
     /// re-normalize, so `int | T1` collapses to `any` (a union with an
     /// `any` member accepts everything).
     pub(crate) fn erase_type_vars(&self) -> ExprType {
+        if !self.is_symbolic() {
+            return self.clone();
+        }
         let bindings = HashMap::from([
             (TypeCode::TypeVarT, ExprType::ANY),
             (TypeCode::TypeVarT1, ExprType::ANY),
@@ -792,12 +1004,16 @@ impl ExprType {
         if self.code == TypeCode::Any || other.code == TypeCode::Any {
             return Some(HashMap::new());
         }
-        // UNRESOLVED delegates to constraint
+        // UNRESOLVED delegates to constraint (a bare `unresolved` is any type)
         if self.code == TypeCode::Unresolved {
-            return self.params[0].match_type(other);
+            return self
+                .params
+                .first()
+                .unwrap_or(&ExprType::ANY)
+                .match_type(other);
         }
         if other.code == TypeCode::Unresolved {
-            return self.match_type(&other.params[0]);
+            return self.match_type(other.params.first().unwrap_or(&ExprType::ANY));
         }
         // UNION: matches if any member matches
         if self.code == TypeCode::Union && other.code == TypeCode::Union {
@@ -1684,6 +1900,24 @@ mod tests {
     }
 
     #[test]
+    fn comprehension_var_binds_any_for_every_type_variable() {
+        let any = ComprehensionVar::Typed(ExprType::ANY);
+        for v in ["T", "T1", "T2", "T3"] {
+            let t = ExprType::parse(v).unwrap();
+            assert_eq!(comprehension_var(&t), any, "{v}");
+            assert_eq!(comprehension_var(&ExprType::list(t)), any, "list[{v}]");
+        }
+    }
+
+    #[test]
+    fn comprehension_too_deep_ignores_type_variable_forms() {
+        let tp = |s: &str| ExprType::parse(s).unwrap();
+        assert!(comprehension_too_deep(&tp("list[list[int]]")));
+        assert!(!comprehension_too_deep(&tp("list[list[T1]]")));
+        assert!(!comprehension_too_deep(&tp("list[int]")));
+    }
+
+    #[test]
     fn join_list_element_scalars() {
         assert_eq!(join("int", "int").as_deref(), Some("int"));
         assert_eq!(join("int", "float").as_deref(), Some("float"));
@@ -1720,8 +1954,8 @@ mod tests {
         );
         assert_eq!(join("list[int]", "list[string]"), None);
         assert_eq!(join("list[int]", "list[bool]"), None);
-        // Unbound type variables are not joined (item 26 binds them).
-        assert_eq!(join("list[int]", "list[T3]"), None);
+        // An unbound type variable says nothing of its values: `any`.
+        assert_eq!(join("list[int]", "list[T3]").as_deref(), Some("list[any]"));
     }
 
     #[test]
@@ -1760,18 +1994,6 @@ mod tests {
     }
 
     #[test]
-    fn simplify_joined_list_element_drops_empty_list_beside_typed_list() {
-        let s = |t: &str| simplify_joined_list_element(ExprType::parse(t).unwrap()).to_string();
-        assert_eq!(s("list[int] | list[nulltype]"), "list[int]");
-        assert_eq!(
-            s("list[int] | list[nulltype] | list[string]"),
-            "list[int] | list[string]"
-        );
-        assert_eq!(s("list[nulltype]"), "list[nulltype]");
-        assert_eq!(s("int | list[nulltype]"), "int | list[nulltype]");
-    }
-
-    #[test]
     fn list_element_contribution_drops_unbuildable_members() {
         let c = |s: &str| {
             list_element_contribution(&ExprType::parse(s).unwrap()).map(|t| t.to_string())
@@ -1803,7 +2025,8 @@ mod tests {
             join("unresolved[list[nulltype]]", "list[int]").as_deref(),
             Some("list[int]")
         );
-        assert_eq!(join("any", "list[int]").as_deref(), Some("list[int]"));
+        assert_eq!(join("any", "list[int]").as_deref(), Some("any"));
+        assert_eq!(join("path", "any").as_deref(), Some("any"));
     }
 
     #[test]
@@ -1834,5 +2057,37 @@ mod tests {
             join_list_element_types(ts(&["nulltype"])),
             Err((ExprType::NULLTYPE, ExprType::NULLTYPE))
         );
+        // A lone union element keeps its empty-list form: the run that
+        // takes it builds `[[]]` (round 2 A-F1 of audit loop 3).
+        assert_eq!(
+            join_list_element_types(ts(&["list[string] | list[nulltype]"])),
+            Ok(Some(
+                ExprType::parse("list[string] | list[nulltype]").unwrap()
+            ))
+        );
+    }
+
+    #[test]
+    fn bare_unresolved_matches_as_unresolved_any() {
+        // A bare `unresolved` (never built by `parse`) is read as
+        // `unresolved[any]` by `match_type` as the receiver.
+        let bare = ExprType::new(TypeCode::Unresolved, vec![]);
+        assert!(bare.match_type(&ExprType::STRING).is_some());
+        assert!(bare.match_type(&ExprType::list(ExprType::INT)).is_some());
+    }
+
+    #[test]
+    fn merge_list_union_merges_at_every_depth() {
+        let m = |t: &str| merge_list_union(ExprType::parse(t).unwrap()).to_string();
+        assert_eq!(m("list[int] | list[string]"), "list[int | string]");
+        assert_eq!(
+            m("list[list[int] | list[string] | nulltype]"),
+            "list[list[int | string]?]"
+        );
+        assert_eq!(
+            m("int | list[int] | list[float]"),
+            "int | list[float | int]"
+        );
+        assert_eq!(m("int"), "int");
     }
 }

@@ -78,6 +78,7 @@ error kind is self-describing and its message format is enforced at the type lev
 pub enum ExpressionErrorKind {
     UndefinedVariable { name: String, suggestion: String },
     UnknownFunction   { name: String },
+    UnknownMember     { message: String },
     TypeError         { message: String },
     IntegerOverflow,
     DivisionByZero    { op: &'static str },  // "Division" or "Modulo"
@@ -97,6 +98,7 @@ pub enum ExpressionErrorKind {
 |---|---|
 | `UndefinedVariable` | Symbol table lookup finds no matching variable |
 | `UnknownFunction` | No function with the given name in the library |
+| `UnknownMember` | A method or property name that no type has: a property called as a method, a method used as a property, or a property of no type |
 | `TypeError` | Type mismatch in operation or function call |
 | `IntegerOverflow` | i64 arithmetic exceeds bounds |
 | `DivisionByZero` | Division or modulo by zero |
@@ -127,10 +129,10 @@ ExpressionError::parse_error("Syntax error: ...")
 ExpressionError::expression_too_deep(depth, MAX_EXPRESSION_DEPTH)
 ```
 
-`UndefinedVariable` and `UnknownFunction` carry structured fields that no
-convenience constructor shortcut wraps today — build them via
+`UndefinedVariable`, `UnknownFunction` and `UnknownMember` carry structured
+fields that no convenience constructor shortcut wraps today — build them via
 `ExpressionError::from_kind(ExpressionErrorKind::UndefinedVariable { name, suggestion })`
-or the equivalent `UnknownFunction` form.
+or the equivalent `UnknownFunction` / `UnknownMember { message }` form.
 
 ## Smart Caret Positioning
 

@@ -30,6 +30,8 @@ pub openjd_expr::error::ExpressionErrorKind::UndefinedVariable::name: alloc::str
 pub openjd_expr::error::ExpressionErrorKind::UndefinedVariable::suggestion: alloc::string::String
 pub openjd_expr::error::ExpressionErrorKind::UnknownFunction
 pub openjd_expr::error::ExpressionErrorKind::UnknownFunction::name: alloc::string::String
+pub openjd_expr::error::ExpressionErrorKind::UnknownMember
+pub openjd_expr::error::ExpressionErrorKind::UnknownMember::message: alloc::string::String
 pub openjd_expr::error::ExpressionErrorKind::UnsupportedSyntax
 pub openjd_expr::error::ExpressionErrorKind::UnsupportedSyntax::feature: alloc::string::String
 impl core::clone::Clone for openjd_expr::error::ExpressionErrorKind
@@ -998,6 +1000,8 @@ pub openjd_expr::ExpressionErrorKind::UndefinedVariable::name: alloc::string::St
 pub openjd_expr::ExpressionErrorKind::UndefinedVariable::suggestion: alloc::string::String
 pub openjd_expr::ExpressionErrorKind::UnknownFunction
 pub openjd_expr::ExpressionErrorKind::UnknownFunction::name: alloc::string::String
+pub openjd_expr::ExpressionErrorKind::UnknownMember
+pub openjd_expr::ExpressionErrorKind::UnknownMember::message: alloc::string::String
 pub openjd_expr::ExpressionErrorKind::UnsupportedSyntax
 pub openjd_expr::ExpressionErrorKind::UnsupportedSyntax::feature: alloc::string::String
 impl core::clone::Clone for openjd_expr::error::ExpressionErrorKind

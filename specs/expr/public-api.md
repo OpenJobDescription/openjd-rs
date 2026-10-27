@@ -429,6 +429,16 @@ impl FunctionLibrary {
     pub fn merge(self, other: FunctionLibrary) -> Self;
 
     /// Dispatch a function call — exact → coerced → generic phases.
+    /// With an unresolved argument the call is type-only: an argument
+    /// whose type is a union, or a list whose element type is one, is
+    /// typed by each of its forms (past 64 combinations, as
+    /// `derive_return_type` types the arguments as they are). A call with
+    /// an argument of unknown type (`any`, a bare type variable) is `any`,
+    /// except a list concatenation, which has the operands' common element
+    /// type or `list[any]`. A call that matches no signature is `any`
+    /// rather than an error when an argument is of unknown type or holds a
+    /// type variable (`list[T1]`) and a signature takes as many arguments
+    /// (see function-library.md § Three-Phase Dispatch).
     pub fn call(
         &self, name: &str, args: &[ExprValue], ctx: &mut dyn EvalContext,
     ) -> Result<ExprValue, ExpressionError>;
@@ -440,8 +450,20 @@ impl FunctionLibrary {
     ) -> Result<ExprValue, ExpressionError>;
 
     /// Static type-checking: derive the return type of a call from
-    /// argument types, without evaluating. Accepts union types in
-    /// `arg_types` and returns a union of possible return types.
+    /// argument types, without evaluating. An argument's type variables,
+    /// at any depth, are typed as `any` (a type left unbound holds values
+    /// of unknown type). An argument whose type is a
+    /// union, or a list whose element type is one, is typed by its forms
+    /// (`int | string` as `int` and `string`, `list[int | nulltype]` as
+    /// `list[int]` and `list[nulltype]`): the result is the union of the
+    /// return types of the combinations that match. A list
+    /// concatenation of known element types (a `range_expr` counting as a
+    /// `list[int]`) has their common element type, of unknown ones (or an
+    /// operand of unknown type) `list[any]`, and of no common type the
+    /// signature's type (`list[T3]`, or `list[T2]` for the range overloads).
+    /// Any other call with an argument of unknown type (`any`, a bare type
+    /// variable) that matches a signature is `any`; one that matches none
+    /// is `None`.
     pub fn derive_return_type(
         &self, name: &str, arg_types: &[ExprType],
     ) -> Option<ExprType>;
@@ -1431,6 +1453,12 @@ tooling that needs to reproduce expression-semantics on URI strings
 pub enum ExpressionErrorKind {
     UndefinedVariable { name: String, suggestion: String },
     UnknownFunction { name: String },
+    /// A method or property name that no type has: a property called as
+    /// a method (`x.name()`), a method used as a property (`x.upper`), or
+    /// a property of no type (`x.nam`). Like `UnknownFunction`, it does
+    /// not depend on any value, so static checking reports it even in a
+    /// part a run may skip.
+    UnknownMember { message: String },
     TypeError { message: String },
     IntegerOverflow,
     DivisionByZero { op: &'static str },

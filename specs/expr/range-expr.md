@@ -248,4 +248,4 @@ In the expression language, `RangeExpr` values support:
 | `list(r)` | Convert to `list[int]` |
 | `string(r)` | Canonical string form |
 | `r + r2` | Concatenate → `list[int]` |
-| `r + list` / `list + r` | Concatenate → `list[int]` |
+| `r + list` / `list + r` | Concatenate as `list[int]` with the list → the common element type (`list[float]` with a `list[float]`, empty or not); an incompatible list fails, naming the operands in order ("Cannot concatenate range_expr and list[string]", "Cannot concatenate list[string] and range_expr") |

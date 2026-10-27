@@ -213,7 +213,12 @@ Empty list variant selection by `hint_type`:
 | PATH | `ListPath([], host_format)` |
 | STRING | `ListString([])` |
 | LIST[T] | `ListList([], LIST[T])` |
+| RANGE_EXPR | `ListList([], RANGE_EXPR)` |
 | anything else | `ListList([], NULLTYPE)` (canonical empty list, `list[nulltype]`) |
+
+The nesting check counts only `ListList` elements whose element
+type is a list: a list of `range_expr` values is a flat list, so `[[r]]` is
+two levels deep (2026-02 §1.2.1).
 
 ## Display Strings
 
@@ -717,7 +722,8 @@ rejected during validation.
 A source constraint may contain unbound type variables. Generic return
 types can leave one unbound when an argument is unresolved — list
 concatenation's signature is `(list[T1], list[T2]) -> list[T3]`, and no
-parameter binds `T3` — and callers of the public API can construct such
+parameter binds `T3`; its type is `list[T3]` when the operands have no common
+element type — and callers of the public API can construct such
 constraints directly. A concrete value can never have a type variable in
 its type, so on the source side an unbound variable reads as a
 **wildcard**: it is erased to `any` before the rules apply. The shape

@@ -497,22 +497,76 @@ pub fn add_list_list(ctx: Ctx, a: &[ExprValue]) -> R {
         .into_list()
         .ok_or_else(|| ExpressionError::type_error("type error"))?;
     ctx.count_ops(l.len() + r.len())?;
-    if lt != rt
-        && lt != ExprType::NULLTYPE
-        && rt != ExprType::NULLTYPE
-        && !((lt == ExprType::INT && rt == ExprType::FLOAT)
-            || (lt == ExprType::FLOAT && rt == ExprType::INT))
-        && !((lt == ExprType::PATH && rt == ExprType::STRING)
-            || (lt == ExprType::STRING && rt == ExprType::PATH))
-    {
-        return Err(ExpressionError::type_error(format!(
-            "Cannot concatenate list[{lt}] and list[{rt}]"
-        )));
-    }
     let mut combined = l;
     combined.extend(r);
-    let result_type = if lt == ExprType::NULLTYPE { rt } else { lt };
+    concat_common_type(
+        ctx,
+        combined,
+        &ExprType::list(lt),
+        &ExprType::list(rt),
+        None,
+    )
+}
+
+/// Build a concatenation's list with the common element type of operands
+/// typed `left` and `right` (list types; a `range_expr` operand is passed as
+/// `list[int]`, with `range_side` naming it in the error). The common type
+/// is the join a list literal holding both lists uses
+/// (`types::join_list_element`, 2026-02 §2.1.3): an empty inner list
+/// yields at any depth (`[[]] + [[1]]` is `list[list[int]]`) and lists
+/// promote (`[[1]] + [[2.5]]` is `list[list[float]]`). Each element of
+/// another type is coerced to it first: `make_list` takes its element type
+/// from the elements when there are any, so an empty side's type would be
+/// lost (an empty `list[float]` plus `[1]` must be `list[float]`).
+fn concat_common_type(
+    ctx: Ctx,
+    combined: Vec<ExprValue>,
+    left: &ExprType,
+    right: &ExprType,
+    range_side: Option<RangeSide>,
+) -> R {
+    let Some(joined) = crate::types::join_list_element(left, right) else {
+        let name = |t: &ExprType, is_range: bool| {
+            if is_range {
+                "range_expr".to_string()
+            } else {
+                t.to_string()
+            }
+        };
+        return Err(ExpressionError::type_error(format!(
+            "Cannot concatenate {} and {}",
+            name(left, range_side == Some(RangeSide::Left)),
+            name(right, range_side == Some(RangeSide::Right)),
+        )));
+    };
+    let result_type = joined
+        .list_element_type()
+        .cloned()
+        .unwrap_or(ExprType::NULLTYPE);
+    let combined = if result_type == ExprType::NULLTYPE {
+        combined
+    } else {
+        let path_format = ctx.path_format();
+        combined
+            .into_iter()
+            .map(|e| {
+                if e.expr_type() == result_type {
+                    Ok(e)
+                } else {
+                    e.coerce(&result_type, path_format)
+                        .map_err(ExpressionError::type_error)
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    };
     ExprValue::make_list_checked(ctx, combined, result_type)
+}
+
+/// Which operand of a concatenation is a `range_expr`, for the error.
+#[derive(Clone, Copy, PartialEq)]
+enum RangeSide {
+    Left,
+    Right,
 }
 
 #[allow(
@@ -530,7 +584,13 @@ pub fn add_list_range(ctx: Ctx, a: &[ExprValue]) -> R {
     };
     ctx.count_ops(l.len() + r.len())?;
     l.extend(r.iter().map(ExprValue::Int));
-    ExprValue::make_list_checked(ctx, l, et)
+    concat_common_type(
+        ctx,
+        l,
+        &ExprType::list(et),
+        &ExprType::list(ExprType::INT),
+        Some(RangeSide::Right),
+    )
 }
 
 #[allow(
@@ -549,7 +609,13 @@ pub fn add_range_list(ctx: Ctx, a: &[ExprValue]) -> R {
     ctx.count_ops(r.len() + l.len())?;
     let mut combined: Vec<ExprValue> = r.iter().map(ExprValue::Int).collect();
     combined.extend(l);
-    ExprValue::make_list_checked(ctx, combined, et)
+    concat_common_type(
+        ctx,
+        combined,
+        &ExprType::list(ExprType::INT),
+        &ExprType::list(et),
+        Some(RangeSide::Left),
+    )
 }
 
 // ── Comparison operators ──

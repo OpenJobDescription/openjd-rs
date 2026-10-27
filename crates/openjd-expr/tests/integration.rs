@@ -9,6 +9,8 @@
 //! This substantially cuts test link time, especially on Windows where every
 //! test binary linked the full workspace + AWS SDK graph.
 
+#[path = "integration/stage_typing/mod.rs"]
+mod stage_typing;
 #[path = "integration/test_arithmetic.rs"]
 mod test_arithmetic;
 #[path = "integration/test_ast_validation.rs"]

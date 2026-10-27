@@ -1383,6 +1383,30 @@ fn ifexp_with_unresolved_test_releases_both_branch_values() {
         .unwrap_or_else(|e| panic!("{expr}: discarded branch values must not stay charged: {e}"));
 }
 
+/// A chained comparison past an unresolved link absorbs a failing later
+/// link (2026-02 §1.3.6: the chain is its links joined by `and`). The
+/// operand the chain carried into that link (the 1 MB string) is gone
+/// with it, so it must not stay charged against the later 600 KB
+/// allocation.
+#[test]
+fn chained_comparison_absorbing_a_failed_link_releases_its_carried_operand() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.S",
+        ExprValue::unresolved(openjd_expr::ExprType::STRING),
+    )
+    .unwrap();
+    let expr = "[Session.S < 'A' * 1000000 < len(1), len('B' * 600000) > 0][1]";
+    let result = ParsedExpression::new(expr)
+        .and_then(|p| p.with_memory_limit(1_500_000).evaluate_with_metrics(&[&st]))
+        .unwrap_or_else(|e| panic!("{expr}: the dropped footprint must not be charged: {e}"));
+    assert!(
+        result.peak_memory >= 1_000_000,
+        "{expr}: peak must include the carried operand; got {}",
+        result.peak_memory
+    );
+}
+
 /// `'A' * 1000000 - 1` fails inside the binop while the 1 MB string is a
 /// live operand. Absorbed by a boolop after an unresolved operand, the
 /// string must be released.

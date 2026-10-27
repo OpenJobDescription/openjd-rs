@@ -514,7 +514,8 @@ impl ExprValue {
     ///
     /// Applies type promotion rules: int+float→float, path+string→string.
     /// Uses `hint_type` for empty lists to determine the element type.
-    /// Returns an error if any element is a `ListList`, which would create 3+ nesting levels.
+    /// Rejects an element that is a list of lists, which would create 3+
+    /// nesting levels (a list of `range_expr` values is a flat list).
     ///
     /// The element types must be mutually compatible under the
     /// list-literal join (RFC 0005 §"List Literal Type Inference"): identical
@@ -524,8 +525,10 @@ impl ExprValue {
     /// a list beside a list of a different, non-promotable element type,
     /// such as `list[int]` beside `list[string]` — is an error
     /// (`make_list expected list[int] element, got list[string]`). A
-    /// list-of-lists result carries the joined element type, so `[[], [1]]`
-    /// is `list[list[int]]`.
+    /// list-of-lists result carries the joined element type, and an empty
+    /// `[]` element is built as an empty list of it, also beside a typed
+    /// empty list: `[[], [1]]` is `list[list[int]]` with a `list[int]` first
+    /// element.
     ///
     /// A `Null` element is rejected (`Cannot create list from null
     /// elements`): a list cannot hold `null`.
@@ -547,12 +550,14 @@ impl ExprValue {
         mut elements: Vec<ExprValue>,
         hint_type: ExprType,
     ) -> Result<Self, crate::error::ExpressionError> {
-        // Reject 3+ nesting levels: if any element is itself a ListList with a
-        // non-nulltype element type, that's too deep. Empty lists (ListList with
-        // NULLTYPE) represent `list[nulltype]` — a flat empty list, not a nested one.
+        // Reject 3+ nesting levels: if any element is itself a ListList
+        // whose elements are lists, that's too deep. Empty lists (ListList
+        // with NULLTYPE) represent `list[nulltype]` — a flat empty list,
+        // not a nested one — and a ListList of `range_expr` values is a
+        // flat list of ranges.
         if elements
             .iter()
-            .any(|e| matches!(e, Self::ListList(_, et, _) if *et != ExprType::NULLTYPE))
+            .any(|e| matches!(e, Self::ListList(_, et, _) if et.is_list()))
         {
             return Err(crate::error::ExpressionError::new(
                 "Lists may be nested at most 2 levels deep",
@@ -591,21 +596,18 @@ impl ExprValue {
                     )))
                 }
             };
-        // Convert empty ListList([], NULLTYPE) elements to match typed list siblings.
-        // e.g. in [[], [1]], the empty [] should become ListInt([]) not ListList([], NULLTYPE).
+        // Convert empty ListList([], NULLTYPE) elements to the joined list
+        // element type: in [[], [1]] the empty [] becomes ListInt([]), and
+        // beside a typed empty list[string] it becomes ListString([]), so
+        // every element of a list value has its element type (§1.2.1).
         let has_empty_listlist = elements.iter().any(
             |e| matches!(e, Self::ListList(v, et, _) if v.is_empty() && *et == ExprType::NULLTYPE),
         );
         if has_empty_listlist {
-            // Find the first typed list sibling to determine the target variant
-            let sibling_code = elements.iter().find_map(|e| match e {
-                Self::ListBool(v) if !v.is_empty() => Some(crate::types::TypeCode::Bool),
-                Self::ListInt(v) if !v.is_empty() => Some(crate::types::TypeCode::Int),
-                Self::ListFloat(_) => Some(crate::types::TypeCode::Float),
-                Self::ListString(v, _) if !v.is_empty() => Some(crate::types::TypeCode::String),
-                Self::ListPath(v, _, _) if !v.is_empty() => Some(crate::types::TypeCode::Path),
+            let sibling_code = match joined.as_ref().map(|t| (t.code(), t.params())) {
+                Some((crate::types::TypeCode::List, [elem])) => Some(elem.code()),
                 _ => None,
-            });
+            };
             if let Some(code) = sibling_code {
                 for e in &mut elements {
                     if matches!(e, Self::ListList(v, et, _) if v.is_empty() && *et == ExprType::NULLTYPE)
@@ -638,6 +640,9 @@ impl ExprValue {
                     Self::make_list_path(Vec::new(), PathFormat::host())
                 }
                 crate::types::TypeCode::List => Self::make_list_list(Vec::new(), hint_type),
+                crate::types::TypeCode::RangeExpr => {
+                    Self::ListList(Vec::new(), ExprType::RANGE_EXPR, 0)
+                }
                 crate::types::TypeCode::String => Self::ListString(Vec::new(), 0),
                 crate::types::TypeCode::NullType => {
                     Self::ListList(Vec::new(), ExprType::NULLTYPE, 0)
@@ -1215,7 +1220,8 @@ impl ExprValue {
         // still a list, so only list rules apply — and the rules below need
         // no case for variables at all. Such constraints arise from generic
         // return types whose variable no parameter binds, e.g. list
-        // concatenation's `(list[T1], list[T2]) -> list[T3]`.
+        // concatenation's `(list[T1], list[T2]) -> list[T3]` with operands
+        // of no common element type.
         let erased;
         let source = if source.is_symbolic() {
             erased = source.erase_type_vars();

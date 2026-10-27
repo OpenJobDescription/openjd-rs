@@ -59,6 +59,21 @@ fn contains_budget_error(err: &ExpressionError) -> bool {
     ) || err.sub_errors().iter().any(contains_budget_error)
 }
 
+/// Whether an error is (or contains, through compound sub-errors) a name
+/// that resolves nowhere: an undefined symbol, an unknown function, or a
+/// method or property that no type has. Whether a name exists does not
+/// depend on any value, so every
+/// run that evaluates the sub-expression fails on it; `eval_speculative`
+/// reports it rather than absorbing it, as it does a budget error.
+fn contains_name_error(err: &ExpressionError) -> bool {
+    matches!(
+        err.kind(),
+        crate::error::ExpressionErrorKind::UndefinedVariable { .. }
+            | crate::error::ExpressionErrorKind::UnknownFunction { .. }
+            | crate::error::ExpressionErrorKind::UnknownMember { .. }
+    ) || err.sub_errors().iter().any(contains_name_error)
+}
+
 /// Outcome of evaluating a sub-expression whose failure an enclosing
 /// construct may absorb (see [`Evaluator::eval_speculative`]).
 enum Speculative<T = ExprValue> {
@@ -250,6 +265,11 @@ pub struct Evaluator<'a> {
     /// leak into operand evaluation (RFC 0005 propagation rules).
     target_type: Option<crate::types::ExprType>,
     regex_cache: std::collections::HashMap<String, regex::Regex>,
+    /// The failure typing the last comprehension over unknown elements
+    /// absorbed (2026-02 §1.3.7), keyed by the comprehension node's
+    /// address. Indexing that comprehension directly names it as the
+    /// reason the list is always empty.
+    absorbed_listcomp_failure: Option<(usize, ExpressionError)>,
 }
 
 static EMPTY_KEYWORD_RENAMES: std::sync::LazyLock<std::collections::HashMap<String, String>> =
@@ -282,6 +302,7 @@ impl<'a> Evaluator<'a> {
             library: &crate::default_library::DEFAULT_LIBRARY,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
+            absorbed_listcomp_failure: None,
         }
     }
 
@@ -809,11 +830,17 @@ impl<'a> Evaluator<'a> {
         // friendlier one. A budget error is never replaced: the rewritten
         // error would be a value error that an enclosing
         // `eval_speculative` could absorb, and the memory and operations
-        // were spent regardless.
+        // were spent regardless. The dotted path is reported as undefined
+        // only when the base failed on an undefined symbol; a base that
+        // fails on its value's type (`x.parent.name` with `x: int`) or on
+        // a misused member (`x.nam.name`) keeps its own error.
         let value = match self.eval_node(&a.value, None) {
             Ok(v) => v,
             Err(e) if contains_budget_error(&e) => return Err(e),
-            Err(_) if dotted_path.is_some() => {
+            Err(e)
+                if dotted_path.is_some()
+                    && matches!(e.kind(), ExpressionErrorKind::UndefinedVariable { .. }) =>
+            {
                 let path = dotted_path.as_ref().unwrap();
                 let available = self.collect_symbol_names();
                 let suggestion = crate::edit_distance::suggest_closest(
@@ -849,14 +876,22 @@ impl<'a> Evaluator<'a> {
                     val_type.to_string()
                 };
 
-                // Check if attr is a known method (not a property)
+                // Check if attr is a known method (not a property). With no
+                // type having the property, the name is misused whatever
+                // the value.
                 {
                     let lib = self.library;
                     if !lib.get_signatures(attr).is_empty() {
-                        return Err(ExpressionError::new(format!(
-                            "'{attr}' is a method, not a property. Did you mean {attr}()?"
-                        ))
-                        .with_node(src, &attr_node));
+                        let message =
+                            format!("'{attr}' is a method, not a property. Did you mean {attr}()?");
+                        let err = if lib.get_signatures(&prop_name).is_empty() {
+                            ExpressionError::from_kind(ExpressionErrorKind::UnknownMember {
+                                message,
+                            })
+                        } else {
+                            ExpressionError::new(message)
+                        };
+                        return Err(err.with_node(src, &attr_node));
                     }
                 }
 
@@ -880,10 +915,16 @@ impl<'a> Evaluator<'a> {
                     }
                 }
 
-                Err(ExpressionError::new(format!(
-                    "Cannot access attribute '{attr}' on {val_type_str}"
-                ))
-                .with_node(src, &attr_node))
+                // No type has the property or a method of that name; a
+                // property of a generic receiver (`list[T]`), which the
+                // listing above leaves out, fails on the value.
+                let message = format!("Cannot access attribute '{attr}' on {val_type_str}");
+                let err = if self.library.get_signatures(&prop_name).is_empty() {
+                    ExpressionError::from_kind(ExpressionErrorKind::UnknownMember { message })
+                } else {
+                    ExpressionError::new(message)
+                };
+                Err(err.with_node(src, &attr_node))
             }
         }
     }
@@ -998,8 +1039,8 @@ impl<'a> Evaluator<'a> {
     ///
     /// Operands after an unresolved one are evaluated speculatively: a
     /// value error is absorbed (run time may never reach the operand, and
-    /// one that is reached fails, returning nothing), a budget error
-    /// propagates. Evaluation stops at an unresolved operand whose type
+    /// one that is reached fails, returning nothing); a budget error, or a
+    /// name that resolves nowhere, propagates. Evaluation stops at an unresolved operand whose type
     /// always decides (`Task.Param.I or …`: an `int` is never falsy), since
     /// run time never evaluates anything after it.
     fn eval_boolop_outcomes(&mut self, b: &ast::ExprBoolOp) -> Result<BoolOpEval, ExpressionError> {
@@ -1174,28 +1215,54 @@ impl<'a> Evaluator<'a> {
         let mut seen_unresolved = false;
         let last_index = c.ops.len().saturating_sub(1);
         for (index, (op, right_node)) in c.ops.iter().zip(comparators.iter()).enumerate() {
-            let right = self.eval_node(right_node, None)?;
             let dispatch = table.cmpop(*op)?;
             let op_name = dispatch.dunder;
-
-            // Dispatch consumes and releases both operands. When the
-            // chain continues, `right` is also the next link's `left`,
-            // so it is cloned first and the clone is tracked below as
-            // the value the chain carries. Each operand is therefore
-            // charged once and released by the link that consumes it.
             let is_last = index == last_index;
-            let carried = if is_last { None } else { Some(right.clone()) };
-            // For 'in'/'not in', container is first arg (right), item is second (left)
-            let args = if dispatch.container_first {
-                vec![right, left]
-            } else {
-                vec![left, right]
+            // One link: evaluate its right operand and dispatch. Dispatch
+            // consumes and releases both operands. When the chain
+            // continues, `right` is also the next link's `left`, so it is
+            // cloned first and the clone is tracked below as the value the
+            // chain carries. Each operand is therefore charged once and
+            // released by the link that consumes it.
+            let link = |s: &mut Self,
+                        left: ExprValue|
+             -> Result<(ExprValue, Option<ExprValue>), ExpressionError> {
+                let right = s.eval_node(right_node, None)?;
+                let carried = if is_last { None } else { Some(right.clone()) };
+                // For 'in'/'not in', container is first arg (right), item is second (left)
+                let args = if dispatch.container_first {
+                    vec![right, left]
+                } else {
+                    vec![left, right]
+                };
+                // Use the compare expression's range for error caret
+                // positioning without cloning the entire ExprCompare node.
+                use ruff_text_size::Ranged;
+                let result_val = s.dispatch_with_span(op_name, args, c.range())?;
+                Ok((result_val, carried))
             };
-
-            // Use the compare expression's range for error caret positioning
-            // without cloning the entire ExprCompare node.
-            use ruff_text_size::Ranged;
-            let result_val = self.dispatch_with_span(op_name, args, c.range())?;
+            // A chain is its links joined by `and` (2026-02 §1.3.6): after
+            // a link whose result is unresolved, a run may stop at a
+            // `false` before reaching the next one, so a later link is
+            // evaluated speculatively, as an `and` operand after an
+            // unresolved one is. A value error is absorbed: the run that
+            // reaches it fails, and one that stops before it is `false`,
+            // so the chain is a `bool` not known here. A budget error, or a
+            // name that resolves nowhere, propagates.
+            let (result_val, carried) = if seen_unresolved {
+                let left_size = left.memory_size();
+                match self.speculate(|s| link(s, left))? {
+                    Speculative::Value(v) => v,
+                    Speculative::Absorbed(_) => {
+                        // The footprint is reset to before the link, which
+                        // still counts the carried `left` the link took.
+                        self.current_memory = self.current_memory.saturating_sub(left_size);
+                        return self.track(ExprValue::unresolved(ExprType::BOOL));
+                    }
+                }
+            } else {
+                link(self, left)?
+            };
             let result = match &result_val {
                 ExprValue::Bool(b) => *b,
                 other => {
@@ -1234,14 +1301,12 @@ impl<'a> Evaluator<'a> {
         // inherit the parent target.
         let test = self.eval_node(&i.test, None)?;
         if test.is_unresolved() {
-            // Check that the unresolved type is compatible with bool
+            // Check that the unresolved type is compatible with bool (the
+            // comprehension filter's rule: a type variable or `any` may be
+            // one). A `noreturn` test, which the filter accepts, is
+            // rejected here: it fails every run.
             let inner = unwrap_unresolved(&test.expr_type());
-            let is_bool_compatible = inner == ExprType::BOOL
-                || inner.code() == crate::types::TypeCode::Unresolved
-                || inner.code() == crate::types::TypeCode::Any
-                || (inner.code() == crate::types::TypeCode::Union
-                    && inner.params().contains(&ExprType::BOOL));
-            if !is_bool_compatible {
+            if inner == ExprType::NORETURN || !is_bool_compatible(&inner) {
                 let err =
                     ExpressionError::new(format!("Condition must be a boolean, got {}", inner));
                 self.release(&test);
@@ -1499,10 +1564,20 @@ impl<'a> Evaluator<'a> {
                             .get_signatures(&format!("__property_{name}__"))
                             .is_empty()
                     {
-                        return ExpressionError::new(format!(
+                        let message = format!(
                             "'{name}' is a property, not a method. Use .{name} instead of .{name}()"
-                        ))
-                        .with_node(src, &call_node);
+                        );
+                        // No type has a method of that name: misused
+                        // whatever the value.
+                        let err = if matches!(e.kind(), ExpressionErrorKind::UnknownFunction { .. })
+                        {
+                            ExpressionError::from_kind(ExpressionErrorKind::UnknownMember {
+                                message,
+                            })
+                        } else {
+                            ExpressionError::new(message)
+                        };
+                        return err.with_node(src, &call_node);
                     }
                     e.with_node(src, &call_node)
                 })?;
@@ -1679,10 +1754,18 @@ impl<'a> Evaluator<'a> {
         // Check index type for unresolved values
         if slice.is_unresolved() {
             let inner = unwrap_unresolved(&slice.expr_type());
-            if inner != ExprType::INT
-                && inner.code() != crate::types::TypeCode::Unresolved
-                && inner.code() != crate::types::TypeCode::Any
-            {
+            // An integer, or a type a run's value may make one: `any`, a
+            // type variable, or a union with such a member.
+            let can_be_int = |t: &ExprType| {
+                *t == ExprType::INT
+                    || t.code() == crate::types::TypeCode::Unresolved
+                    || t.code() == crate::types::TypeCode::Any
+                    || is_type_variable(t)
+            };
+            let index_ok = can_be_int(&inner)
+                || (inner.code() == crate::types::TypeCode::Union
+                    && inner.params().iter().any(can_be_int));
+            if !index_ok {
                 let mut err = ExpressionError::new("Index must be an integer");
                 if let Some(src) = self.expr_source {
                     use ruff_text_size::Ranged;
@@ -1696,11 +1779,40 @@ impl<'a> Evaluator<'a> {
         }
 
         // Single-index access: dispatch through library
-        self.dispatch_with_node(
+        let receiver_always_empty =
+            crate::types::list_forms(&unwrap_unresolved(&value.expr_type()))
+                .iter()
+                .all(|f| *f == ExprType::list(ExprType::NULLTYPE));
+        let result = self.dispatch_with_node(
             "__getitem__",
             vec![value, slice],
             Some(&ast::Expr::Subscript(s.clone())),
-        )
+        )?;
+        // Typed `noreturn` with a receiver every form of which is the empty
+        // list (`__getitem__(list[nulltype], int)`): indexing it fails on
+        // every run. Report it here, where it happens, rather than as a
+        // `noreturn` operand of whatever uses the element. (A concrete index
+        // into a concrete empty list fails in dispatch with the list's
+        // length.) A comprehension that is always empty because a run that
+        // keeps an element fails says how.
+        if receiver_always_empty && result.expr_type() == ExprType::unresolved(ExprType::NORETURN) {
+            let cause = match (s.value.as_ref(), &self.absorbed_listcomp_failure) {
+                (ast::Expr::ListComp(lc), Some((id, e)))
+                    if *id == std::ptr::from_ref(lc) as usize =>
+                {
+                    format!(", since a run that keeps an element fails: {}", e.message())
+                }
+                _ => String::new(),
+            };
+            let err = ExpressionError::index_out_of_bounds(format!(
+                "Index out of bounds: the list is always empty{cause}"
+            ));
+            return Err(match self.expr_source {
+                Some(src) => err.with_node(src, &ast::Expr::Subscript(s.clone())),
+                None => err,
+            });
+        }
+        Ok(result)
     }
 
     /// Create a child evaluator with an extra symbol table for local scope.
@@ -1724,6 +1836,7 @@ impl<'a> Evaluator<'a> {
             library: self.library,
             target_type: None,
             regex_cache: std::collections::HashMap::new(),
+            absorbed_listcomp_failure: None,
         }
     }
 
@@ -1749,21 +1862,30 @@ impl<'a> Evaluator<'a> {
     }
 
     /// Evaluate `node` where the caller may absorb a failure: the
-    /// branches of an unresolved-test conditional, or the operands of a
-    /// boolop after an unresolved one. Both absorption rules live here so
-    /// that every absorbing construct applies both:
+    /// branches of an unresolved-test conditional, the operands of a
+    /// boolop after an unresolved one, the links of a chained comparison
+    /// after an unresolved one, or a comprehension's filter and body typed
+    /// over an unresolved iterable or filter (through [`Self::speculate`]).
+    /// All three absorption rules live here so that every absorbing
+    /// construct applies them:
     ///
     /// - A budget error (`MemoryLimitExceeded` / `OperationLimitExceeded`,
     ///   directly or inside a compound error's sub-errors) is returned as
     ///   `Err`. The memory and operations were spent regardless of what
     ///   a runtime would skip.
-    /// - A value error is returned as `Absorbed`, and the live footprint
+    /// - A name that resolves nowhere (an undefined symbol, an unknown
+    ///   function, or a method or property that no type has;
+    ///   [`contains_name_error`]) is returned as `Err`
+    ///   too: it does not depend on any value, so every run that evaluates
+    ///   the sub-expression fails on it.
+    /// - Any other value error is returned as `Absorbed`, and the live footprint
     ///   is reset to what it was before the attempt. The failed
     ///   sub-expression's values are gone. Peak memory and the operation
     ///   count keep what the attempt consumed.
     ///
     /// The caller decides what an absorbed failure means: an `Unresolved`
-    /// result, a short-circuit, or a compound error.
+    /// result, a short-circuit, a compound error, an unknown `bool` (a
+    /// chained comparison), or a comprehension of type `list[nulltype]`.
     fn eval_speculative(
         &mut self,
         node: &ast::Expr,
@@ -1773,8 +1895,9 @@ impl<'a> Evaluator<'a> {
     }
 
     /// [`Self::eval_speculative`] for an arbitrary evaluation `f` (a
-    /// nested `and`/`or` evaluated to its outcomes), with the same two
-    /// absorption rules.
+    /// nested `and`/`or` evaluated to its outcomes, a chained comparison's
+    /// link, or a comprehension's filter and body typed once), with the
+    /// same absorption rules.
     fn speculate<T>(
         &mut self,
         f: impl FnOnce(&mut Self) -> Result<T, ExpressionError>,
@@ -1782,7 +1905,7 @@ impl<'a> Evaluator<'a> {
         let baseline = self.current_memory;
         match f(self) {
             Ok(v) => Ok(Speculative::Value(v)),
-            Err(e) if contains_budget_error(&e) => Err(e),
+            Err(e) if contains_budget_error(&e) || contains_name_error(&e) => Err(e),
             Err(e) => {
                 self.current_memory = baseline;
                 Ok(Speculative::Absorbed(e))
@@ -1795,10 +1918,20 @@ impl<'a> Evaluator<'a> {
     /// filter evaluated to an unresolved condition on a concrete
     /// element (per-element inclusion is undecidable, so the whole
     /// comprehension is unknown). Binds the loop variable to
-    /// `Unresolved(elem_type)`, type-checks the filter (it must be
-    /// bool-compatible), evaluates the body once for its type, and
-    /// returns `unresolved(list[body_type])`. Evaluation errors in the
-    /// filter or body — including budget exceedances — propagate.
+    /// `Unresolved(elem_type)` and types the filter and body once
+    /// (2026-02 Expression Language §1.3.7).
+    ///
+    /// The run may keep no element, so the result covers both outcomes:
+    /// `unresolved(list[T | nulltype])` for a body of type `T`
+    /// ([`crate::types::comprehension_list_type`]). A filter or body that
+    /// fails to type — a type error, a value error on concrete operands, a
+    /// non-boolean filter — fails on every run that evaluates it, so the
+    /// only run that can succeed keeps no element: the result is
+    /// `unresolved(list[nulltype])`, not an error. The failure surfaces at
+    /// the stage whose values reach it. Budget exceedances, and names that
+    /// resolve nowhere (an undefined symbol, an unknown function, or a
+    /// method or property that no type has), propagate: neither depends on
+    /// the values.
     fn eval_listcomp_unresolved(
         &mut self,
         lc: &ast::ExprListComp,
@@ -1816,49 +1949,43 @@ impl<'a> Evaluator<'a> {
         let mut combined: Vec<&SymbolTable> = self.symtabs.to_vec();
         combined.push(&tmp);
         let mut child = self.child_evaluator(&combined);
-        // Check filter clause type if present
+        let body_type = child.speculate(|c| c.listcomp_body_type(lc, if_clause));
+        self.absorb_spend_and_reset(&child, memory_baseline);
+        let list_type = match body_type? {
+            Speculative::Value(t) => crate::types::comprehension_list_type(&t),
+            Speculative::Absorbed(e) => {
+                self.absorbed_listcomp_failure = Some((std::ptr::from_ref(lc) as usize, e));
+                ExprType::list(ExprType::NULLTYPE)
+            }
+        };
+        self.track(ExprValue::unresolved(list_type))
+    }
+
+    /// Type a comprehension's filter (it must be bool-compatible) and then
+    /// its body, with the loop variable already bound; the body's type.
+    fn listcomp_body_type(
+        &mut self,
+        lc: &ast::ExprListComp,
+        if_clause: Option<&ast::Expr>,
+    ) -> Result<ExprType, ExpressionError> {
         if let Some(if_clause) = if_clause {
-            let cond = child.evaluate(if_clause);
-            let cond = match cond {
-                Ok(c) => c,
-                Err(e) => {
-                    self.absorb_spend_and_reset(&child, memory_baseline);
-                    return Err(e);
-                }
-            };
-            let cond_inner = unwrap_unresolved(&cond.expr_type());
-            let is_bool_compatible = cond_inner == ExprType::BOOL
-                || cond_inner.code() == crate::types::TypeCode::Unresolved
-                || cond_inner.code() == crate::types::TypeCode::Any
-                || (cond_inner.code() == crate::types::TypeCode::Union
-                    && cond_inner.params().contains(&ExprType::BOOL));
-            if !is_bool_compatible {
-                self.absorb_spend_and_reset(&child, memory_baseline);
-                let err = ExpressionError::new(format!(
+            let cond = self.evaluate(if_clause)?;
+            if !is_bool_compatible(&cond.expr_type()) {
+                return Err(ExpressionError::new(format!(
                     "List comprehension filter must be a boolean, got {}",
-                    cond_inner
-                ));
-                return Err(if let Some(src) = self.expr_source {
-                    err.with_node(src, if_clause)
-                } else {
-                    err
-                });
+                    unwrap_unresolved(&cond.expr_type())
+                )));
             }
         }
-        let body_val = child.evaluate(&lc.elt);
-        self.absorb_spend_and_reset(&child, memory_baseline);
-        let body_val = body_val?;
-        // The body's type as a list element: the members that can be part
-        // of a built list (`int?` gives `list[int]`; `list[T] |
-        // list[nulltype]` gives `list[list[T]]`). A body that can only be
-        // `null` keeps its type — the comprehension still succeeds when
-        // the iterable is empty.
-        let body_type = unwrap_unresolved(&body_val.expr_type());
-        let body_type = match crate::types::list_element_contribution(&body_type) {
-            Some(t) => crate::types::simplify_joined_list_element(t),
-            None => body_type,
-        };
-        self.track(ExprValue::unresolved(ExprType::list(body_type)))
+        Ok(self.evaluate(&lc.elt)?.expr_type())
+    }
+
+    /// The loop variable for a comprehension over the unresolved (or
+    /// filter-unresolved) `iterable` ([`crate::types::comprehension_var`]).
+    /// A type that cannot be iterated binds `any` there (2026-02 §1.3.7); a
+    /// concrete iterable that cannot be iterated fails in `eval_listcomp`.
+    fn comprehension_var_of(&self, iterable: &ExprValue) -> crate::types::ComprehensionVar {
+        crate::types::comprehension_var(&iterable.expr_type())
     }
 
     fn eval_listcomp(
@@ -1922,10 +2049,15 @@ impl<'a> Evaluator<'a> {
         // the comprehension as a whole is unknown. The iterable is
         // consumed here like everywhere else below.
         if iterable.is_unresolved() {
-            let inner = unwrap_unresolved(&iterable.expr_type());
-            let elem_type = inner.list_element_type().cloned().unwrap_or(ExprType::INT);
             self.current_memory = comprehension_baseline;
-            return self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type);
+            return match self.comprehension_var_of(&iterable) {
+                crate::types::ComprehensionVar::Typed(elem_type) => {
+                    self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type)
+                }
+                // The iterable can only be `[]`: the body never runs and
+                // is not type-checked (§1.3.7).
+                _ => self.track(ExprValue::unresolved(ExprType::list(ExprType::NULLTYPE))),
+            };
         }
 
         // Iterate the iterable in place — lists via a borrowing ListIter
@@ -1959,9 +2091,10 @@ impl<'a> Evaluator<'a> {
         let mut result = crate::budgeted_vec::BudgetedVec::new();
         let base_symtabs: Vec<&SymbolTable> = self.symtabs.to_vec();
         // Set when a filter condition evaluates to an unresolved value:
-        // per-element inclusion is undecidable, so the loop is abandoned
-        // and the comprehension concludes unresolved (below, after the
-        // borrowing iterator is dropped).
+        // per-element inclusion is undecidable, so the loop stops and the
+        // comprehension concludes unresolved (below, after the borrowing
+        // iterator is dropped). The elements before it were evaluated in
+        // order, and a failure among them was already an error.
         let mut filter_unresolved = false;
         for item in iter {
             self.count_op()?;
@@ -1990,13 +2123,17 @@ impl<'a> Evaluator<'a> {
                 };
                 if let ExprValue::Bool(b) = cond {
                     include = b;
-                } else if cond.is_unresolved() {
+                } else if cond.is_unresolved() && is_bool_compatible(&cond.expr_type()) {
                     // E.g. `Param.*` bound but the filter references
                     // `Task.*`/`Session.*` at job creation. The
                     // accumulated elements are abandoned — BudgetedVec
                     // only pre-checks the budget; the finished list
                     // would be tracked by make_list_checked, which is
-                    // never reached.
+                    // never reached. The remaining elements are not
+                    // evaluated (§1.3.7): typing the comprehension as a
+                    // whole decides its result, and evaluating them would
+                    // cost what a run that short-circuits the filter does
+                    // not.
                     self.absorb_spend_and_reset(&child, memory_baseline);
                     self.regex_cache = child.regex_cache;
                     filter_unresolved = true;
@@ -2006,7 +2143,7 @@ impl<'a> Evaluator<'a> {
                     self.regex_cache = child.regex_cache;
                     let err = ExpressionError::new(format!(
                         "List comprehension filter must be a boolean, got {}",
-                        cond.expr_type()
+                        unwrap_unresolved(&cond.expr_type())
                     ));
                     return Err(if let Some(src) = self.expr_source {
                         err.with_node(src, if_clause)
@@ -2062,14 +2199,24 @@ impl<'a> Evaluator<'a> {
             // runtime filter may exclude could raise a spurious value
             // error (e.g. `[1 // f for f in [0, 1] if f > Task.Param.N]`
             // must not divide by zero here).
-            let elem_type = iterable
-                .expr_type()
-                .list_element_type()
-                .cloned()
-                .unwrap_or(ExprType::INT);
-            return self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type);
+            return match self.comprehension_var_of(&iterable) {
+                crate::types::ComprehensionVar::Typed(elem_type) => {
+                    self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type)
+                }
+                // `EmptyOnly` cannot happen here: an element reached the
+                // filter, so the iterable is not empty-only. The arm keeps
+                // the match total without a panic.
+                _ => self.track(ExprValue::unresolved(ExprType::list(ExprType::NULLTYPE))),
+            };
         }
         let result = result.into_vec();
+        // A filter that kept nothing (or an empty iterable): the body
+        // never ran, so nothing types the elements — the untyped empty
+        // list (§1.3.7).
+        if result.is_empty() {
+            let empty = ExprValue::make_list_checked(self, result, ExprType::NULLTYPE)?;
+            return self.track(empty);
+        }
 
         // Check nesting depth
         for e in &result {
@@ -2093,11 +2240,7 @@ impl<'a> Evaluator<'a> {
             })?;
             return self.track(val);
         }
-        let elem_type = if result.is_empty() {
-            ExprType::NULLTYPE
-        } else {
-            result[0].expr_type()
-        };
+        let elem_type = result[0].expr_type();
         let list = ExprValue::make_list_checked(self, result, elem_type)?;
         self.track(list)
     }
@@ -2183,6 +2326,45 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
         self.regex_cache.insert(pattern.to_string(), re.clone());
         Ok(re)
     }
+}
+
+/// Whether a comprehension filter of type `t` can be a boolean: `bool`,
+/// `any`, an unconstrained `unresolved`, a type variable (a type static
+/// typing leaves unbound, such as that of a symbol bound to one),
+/// `noreturn` (a filter that never
+/// gives a value fails the run itself), or a union with such a member
+/// (`unresolved[T]` is read as `T`).
+fn is_bool_compatible(t: &ExprType) -> bool {
+    let t = unwrap_unresolved(t);
+    let can_be_bool = |m: &ExprType| {
+        *m == ExprType::BOOL
+            || matches!(
+                m.code(),
+                crate::types::TypeCode::Unresolved
+                    | crate::types::TypeCode::Any
+                    | crate::types::TypeCode::NoReturn
+                    | crate::types::TypeCode::TypeVarT
+                    | crate::types::TypeCode::TypeVarT1
+                    | crate::types::TypeCode::TypeVarT2
+                    | crate::types::TypeCode::TypeVarT3
+            )
+    };
+    can_be_bool(&t)
+        || (t.code() == crate::types::TypeCode::Union && t.params().iter().any(can_be_bool))
+}
+
+/// Whether `t` is a bare type variable (`T`, `T1`, `T2`, `T3`): a type left
+/// unbound by static typing (a symbol bound to one; a call types its
+/// arguments' type variables as `any`), which says nothing of the value a
+/// run has.
+fn is_type_variable(t: &ExprType) -> bool {
+    matches!(
+        t.code(),
+        crate::types::TypeCode::TypeVarT
+            | crate::types::TypeCode::TypeVarT1
+            | crate::types::TypeCode::TypeVarT2
+            | crate::types::TypeCode::TypeVarT3
+    )
 }
 
 /// Unwrap unresolved[T] to T, or return the type as-is if not unresolved.
@@ -2308,3 +2490,44 @@ fn resolve_keyword_renames(
 }
 
 use crate::types::ExprType;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tp(s: &str) -> ExprType {
+        ExprType::parse(s).unwrap()
+    }
+
+    #[test]
+    fn comprehension_filter_types_that_can_be_a_boolean() {
+        for t in [
+            "bool",
+            "any",
+            "unresolved",
+            "unresolved[bool]",
+            "noreturn",
+            "T",
+            "T1",
+            "T2",
+            "T3",
+            "bool | int",
+            "int | T1",
+        ] {
+            assert!(is_bool_compatible(&tp(t)), "{t}");
+        }
+        for t in [
+            "int",
+            "string",
+            "list[bool]",
+            "list[T1]",
+            "unresolved[int]",
+            "int | string",
+        ] {
+            assert!(!is_bool_compatible(&tp(t)), "{t}");
+        }
+        // A bare `unresolved` (any type), as `ExprType::new` builds it.
+        let bare = ExprType::new(crate::types::TypeCode::Unresolved, vec![]);
+        assert!(is_bool_compatible(&bare));
+    }
+}

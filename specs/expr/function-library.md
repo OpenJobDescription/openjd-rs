@@ -240,6 +240,82 @@ library.call(name, &args, ctx)
    parameter matched by `list[nulltype]` (the empty list) binds only weakly, so a
    sibling parameter's binding wins and a lone one still yields `nulltype`
 
+**With an unresolved argument** the call is type-only (`unresolved_return_type`):
+the same phases are applied to the argument types, and the result is
+`unresolved` of the matched signature's return type. An argument whose type is
+a union, or a list whose element type is one, stands for one type per form
+([type-system.md § Lists with union element
+types](type-system.md#lists-with-union-element-types)): `int | string` is an
+`int` or a `string`, `list[int | string]` and `list[int] | list[string]` are
+each a `list[int]` or a `list[string]`. So the call is typed for every
+combination of the arguments' forms (`types::list_forms`), each typed by the
+phases on its own (the first signature a `string` matches, not the one an `int`
+matches): the result is the union of the return types of the combinations
+that match, its list members merged into one list type
+(`types::merge_list_union`), and the call fails as usual when none matches.
+`sum` of a `list[float | int | nulltype]` is `float | int` (from
+`sum(list[float])`, `sum(list[int])`, and `sum(list[nulltype])`); `sorted` of
+it is `list[float | int | nulltype]`; `(LS if c else L)[0]` with
+`LS: list[string]`, `L: list[int]` is `int | string`, so `.upper()` of it is a
+`string`. Past 64 combinations the call is typed as `derive_return_type` types
+the arguments as they are, without expanding their forms: a top-level union
+argument by every signature one of its members matches (each member also
+standing for the type it coerces to), which covers the signature a run's value
+selects (`max` of three five-member unions is `float | int`, not the `int` of
+the first match). `derive_return_type` expands forms the same way under the cap.
+
+List concatenation's `(list[T1], list[T2]) -> list[T3]` (and the range overloads'
+`list[T2]`) leaves the element type unbound; with unresolved operands the call (and
+`derive_return_type`) gives the common element type instead, by the join
+concatenating the values uses, a `range_expr` operand counting as a `list[int]`
+(`list[list[int]] + list[list[float]]` is `list[list[float]]`, `range_expr + list[int]`
+is `list[int]`; see List concatenation below). An operand whose element type is not
+known (it holds `any` or a type variable at any depth, or is itself of unknown type)
+gives `list[any]`; operands with no common
+type keep the signature's type (`list[T3]`, or `list[T2]` for the range overloads). An
+operand that is a union of list types reads as the one list type it equals
+(`list[string] | list[nulltype]` as `list[string | nulltype]`). A call typed by forms
+is refined for each combination and then for the operands as a whole, so a form with
+no common type, which no run builds, does not leave its type variable in the result:
+`L + (LS if c else [])` is `list[int]`, and `list[int | nulltype] + list[string]` is
+`list[string]`.
+
+An argument's type variable, at any depth, is typed as `any` before a type-only call
+(or `derive_return_type`) is matched: it is a type static typing left unbound, whose
+values are of unknown type, and as `any` the signature's own variables cannot capture
+it (`flatten(list[list[T1]]) -> list[T1]` would otherwise bind its `T1` to an argument's
+`list[T1]` and type `flatten` of a `list[T1]` as `list[list[T1]]`; it is a `list[T1]`,
+and an element of it `any`). So `list[int] + T1` is `list[any]`.
+
+An argument whose type is not known (`any`, or a bare type variable, which reaches
+typing as `any`) matches the first signature in dispatch order (`any[0]`
+matches `__getitem__(string, int)`), which says nothing of the value a run passes, so a
+type-only call with one is `any` (`refined_return_type`, also applied by
+`derive_return_type`), unless it is a list concatenation, typed above. So is a call with
+such an argument, or with one holding a type variable at any depth (a `list[T1]`, such
+as `flatten` of a `list[any]`, or a `list[T3]`: a list of elements of unknown type),
+that matches no signature, when a signature of the call's arity exists:
+`flatten([x]).upper()` with `x: any` is `any`. A wrong argument count is still an
+error. `1 in flatten([x])` is a `bool`: the evaluator types a comparison or
+membership test with an unresolved operand as a `bool` whatever type dispatch returns
+(`Task.X == 1` with `X: any` is `unresolved[bool]`), while
+`derive_return_type("__eq__", [any, int])` is `any`. An index of unknown type is accepted the same way.
+
+Indexing has a `(list[nulltype], int) -> noreturn` overload, registered before
+the generic `(list[T1], int) -> T1`: the empty list has no element, so indexing
+it is always out of bounds, and the empty form of `list[int | nulltype]` adds
+nothing to `int`.
+
+An overload with a `list[nulltype]` parameter (this one, `sum(list[nulltype])`,
+`min`/`max(list[nulltype])`, `flatten(list[nulltype])`, `join(list[nulltype],
+string)`, …) specializes a general overload for the empty list. Signature
+matching lets an argument of unknown element type (`list[T3]`, `list[any]`,
+`any`) match it, but at run time only an empty list selects it, so for the
+type-only dispatch above (and `derive_return_type`) it applies only to an
+argument whose type is exactly `list[nulltype]`; any other argument may be
+non-empty and takes the general overload (`(Param.L + Param.L)[0]` takes
+`(list[T1], int) -> T1`, not the `noreturn` overload).
+
 The method-vs-function distinction is made by the evaluator before dispatch:
 `eval_call` transforms `obj.method(args)` into `method(obj, args)` via UFCS and sets
 a per-call flag on the dispatch indicating that position 0 is a receiver. The library
@@ -274,7 +350,7 @@ Operators are registered as dunder-named functions:
 | `<=` | `__le__` | `(T1, T2) -> bool` |
 | `>` | `__gt__` | `(T1, T2) -> bool` |
 | `>=` | `__ge__` | `(T1, T2) -> bool` |
-| `x[i]` | `__getitem__` | `(list[T1], int) -> T1`, `(string, int) -> string`, `(range_expr, int) -> int`, plus slice overloads |
+| `x[i]` | `__getitem__` | `(list[T1], int) -> T1`, `(list[nulltype], int) -> noreturn`, `(string, int) -> string`, `(range_expr, int) -> int`, plus slice overloads |
 | `in` | `__contains__` | `(list[T], T) -> bool`, `(string, string) -> bool`, `(range_expr, int \| float) -> bool` |
 | `not in` | `__not_contains__` | Same as `__contains__` |
 
@@ -646,3 +722,21 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   `s3://bucket/a//b`.
 - **Slicing a `range_expr`** returns `range_expr` for positive step, `list[int]` for
   negative step (§2.1.8)
+- **`sum` of an empty `list[float]`** is the float `0.0`, as its
+  `sum(list[float]) -> float` signature says; an empty `list[int]` (or
+  `list[nulltype]`) sums to the int `0`.
+- **List concatenation** (`__add__` over two lists) gives the common element
+  type (2026-02 Expression Language §2.1.3) by the join a list literal holding
+  both lists uses (`types::join_list_element`; see [type-system.md § List
+  element join](type-system.md#list-element-join)): `[1] + [2.5]` is
+  `list[float]`, an empty inner list takes the other side's type
+  (`[[]] + [[1]]` is `list[list[int]]`), inner lists promote (`[[1]] + [[2.5]]`
+  is `list[list[float]]`), and incompatible operands fail with "Cannot
+  concatenate list[list[int]] and list[list[string]]". The built list has
+  the common element type even when one side is empty: each element of
+  another type is coerced to it (an empty `list[float]` plus `[1]` is
+  `[1.0]`), since `make_list` would otherwise take the type from the
+  elements alone. A `range_expr` operand concatenates as a `list[int]`, by
+  the same rule (`range_expr('1-2')` plus an empty `list[float]` is
+  `[1.0, 2.0]`; plus a `list[string]`, empty or not, is "Cannot concatenate
+  range_expr and list[string]").
