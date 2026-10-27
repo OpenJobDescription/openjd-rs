@@ -5,6 +5,9 @@
 //! Tests ported from Python test_range_expr.py
 
 use openjd_expr::{ExprValue, ParsedExpression, RangeExpr, SymbolTable};
+use std::time::Duration;
+
+use crate::test_range_expr_canonical::within_deadline;
 
 fn eval(expr: &str) -> ExprValue {
     ParsedExpression::new(expr)
@@ -495,6 +498,14 @@ fn more_than_max_len_values_rejected() {
 
 #[test]
 fn widest_legal_range_exact_everywhere() {
+    // i64::MAX values: an implementation that lists them never finishes.
+    within_deadline(
+        Duration::from_secs(10),
+        widest_legal_range_exact_everywhere_body,
+    );
+}
+
+fn widest_legal_range_exact_everywhere_body() {
     // The most values a range can hold, i64::MAX, spread over the whole
     // domain with step 2 (span 2^64 - 4, beyond i64). Every derived
     // quantity is exact — len, tail indexing, membership, min/max,
@@ -537,6 +548,11 @@ fn widest_legal_range_exact_everywhere() {
 
 #[test]
 fn widest_legal_range_slice_exact() {
+    // i64::MAX values: an implementation that lists them never finishes.
+    within_deadline(Duration::from_secs(10), widest_legal_range_slice_exact_body);
+}
+
+fn widest_legal_range_slice_exact_body() {
     // i64::MAX values ending at i64::MAX.
     let max = i64::MAX;
     let mut st = SymbolTable::new();

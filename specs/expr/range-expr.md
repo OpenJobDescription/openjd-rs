@@ -113,7 +113,9 @@ expression value as a string goes through it: `string(r)`, `+` with a string,
 format-string interpolation, `repr_py`/`repr_json`/`repr_pwsh`, the JSON and display forms
 of a list containing a range, and the model, sessions, and CLI layers that print task
 parameter values. The canonical form parses back to the same value and prints the same
-string again (for a value within the run cap of Defensive Caps). The only other form is the contiguous chunk form (see Contiguous Display
+string again, for a nonempty value within the run cap of Defensive Caps. (The empty value,
+from an empty list or an empty slice, writes `""`, which does not parse: the canonical
+form is defined for one or more values, and a range expression cannot be empty.) The only other form is the contiguous chunk form (see Contiguous Display
 Mode).
 
 `IntRange` also implements `Display`, writing one progression as `x`, `x,y` (two values),
@@ -218,6 +220,15 @@ every index into `r` must fit one. With it, counts and cumulative lengths are ex
 length field's high bit. Spans between values, however, can reach 2^64 - 2, so
 `IntRange` computes them with `abs_diff` (u64) and applies offsets with
 `wrapping_add_unsigned`, which is exact because each result is a value of the range.
+
+**Deviation from Template Schemas §3.4.1.1.1:** the specification does not constrain the
+number of values a range expression expands to, and expects an implementation that bounds
+Tasks to limit the Task count instead. openjd-rs rejects a range expression with more than
+`i64::MAX` values at construction, because the Expression Language's `int` is 64-bit
+(§1.2.1) and `len(r)` and every index into `r` must be an `int`. No 64-bit implementation
+can report the length of such a range, and every range of practical size is far below the
+bound. (Accepting such a range and failing only in `len()` and indexing would remove the
+deviation at the cost of making those operations partial.)
 
 **Divergence from the Python reference:** Python's implementation uses arbitrary-precision
 integers and accepts any endpoint and any count. Values beyond `i64` cannot occur in an

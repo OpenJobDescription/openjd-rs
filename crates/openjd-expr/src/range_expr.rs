@@ -476,6 +476,8 @@ fn canonical_runs(progressions: &[IntRange]) -> Vec<IntRange> {
             position = Some(second);
         }
     }
+    // The capacity is one per progression; a value keeps only its runs.
+    runs.shrink_to_fit();
     runs
 }
 
@@ -1282,6 +1284,17 @@ mod tests {
         );
         assert_eq!(
             IntRange::new(0, 0, i64::MIN).unwrap_err().to_string(),
+            overflow
+        );
+        // An end of i64::MIN, even one the step would not reach.
+        assert_eq!(
+            IntRange::new(0, i64::MIN, -2).unwrap_err().to_string(),
+            overflow
+        );
+        assert_eq!(
+            IntRange::new(i64::MIN + 2, i64::MIN, -2)
+                .unwrap_err()
+                .to_string(),
             overflow
         );
         assert_eq!(

@@ -36,7 +36,7 @@ fn canonical(text: &str) -> String {
 /// than 10^18 of them never finishes, and one that streams them allocates
 /// nothing, so neither a time check after the work nor the memory limit
 /// would stop it; this does. (The abandoned thread ends with the process.)
-fn within_deadline<F: FnOnce() + Send + 'static>(limit: Duration, f: F) {
+pub(crate) fn within_deadline<F: FnOnce() + Send + 'static>(limit: Duration, f: F) {
     let (done, finished) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
         f();
@@ -324,6 +324,28 @@ fn hash_agrees_with_value_equality() {
     assert_eq!(plain.to_string(), "5,6");
     assert_eq!(flagged, plain);
     assert_eq!(hash_of(&flagged), hash_of(&plain));
+}
+
+#[test]
+fn a_value_keeps_memory_for_its_runs_only() {
+    // A million consecutive values are one run, however they were built.
+    let built = RangeExpr::from_values((0..1_000_000).collect()).unwrap();
+    let parsed: RangeExpr = "0-999999".parse().unwrap();
+    assert_eq!(built, parsed);
+    assert_eq!(built.heap_size(), parsed.heap_size());
+}
+
+#[test]
+fn hash_distinguishes_different_values() {
+    // Hash covers the runs, so different values (almost always) hash
+    // differently: a constant hash would agree with == but make hashed
+    // collections of range expressions degrade.
+    let values: Vec<RangeExpr> = (1..=200)
+        .map(|n| format!("1-{n}").parse().unwrap())
+        .chain((2..=100).map(|s| format!("1-1000:{s}").parse().unwrap()))
+        .collect();
+    let hashes: std::collections::HashSet<u64> = values.iter().map(hash_of).collect();
+    assert_eq!(hashes.len(), values.len());
 }
 
 // ── The CONTIGUOUS chunk form ──

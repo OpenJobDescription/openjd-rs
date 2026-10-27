@@ -180,6 +180,14 @@ the value carries the contiguous display flag, so it is written `<N>-<M>` even w
 two values (`-t Frame=5-6` is written `5-6`, not `5,6`), as Template Schemas §3.4.1.5
 requires and as the chunks the CLI computes itself are.
 
+The value is accepted when it has the same values as one of the step's chunks
+(`RangeExpr` equality is by value), however it is spelled, and the parameter-space error
+quotes it in the form the chunk is written. **Divergence from openjd-cli (Python):** for a
+`CONTIGUOUS` parameter, Python rejects a value not spelled `<N>-<M>` (`-t Frame=5,6` gives
+`... is not a contiguous interval like '1-5' as required by the chunk range constraint`),
+while openjd-rs accepts it when `5-6` is a chunk and writes it `5-6`; and for `-t Frame=5`
+when `5` is not a chunk, openjd-rs's error quotes the value as `'5-5'`.
+
 ### Lazy Parameter Space Iteration
 
 The default mode iterates the step's parameter space lazily via
