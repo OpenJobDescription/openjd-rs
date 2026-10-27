@@ -1039,8 +1039,8 @@ impl<'a> Evaluator<'a> {
     ///
     /// Operands after an unresolved one are evaluated speculatively: a
     /// value error is absorbed (run time may never reach the operand, and
-    /// one that is reached fails, returning nothing), a budget error
-    /// propagates. Evaluation stops at an unresolved operand whose type
+    /// one that is reached fails, returning nothing); a budget error, or a
+    /// name that resolves nowhere, propagates. Evaluation stops at an unresolved operand whose type
     /// always decides (`Task.Param.I or …`: an `int` is never falsy), since
     /// run time never evaluates anything after it.
     fn eval_boolop_outcomes(&mut self, b: &ast::ExprBoolOp) -> Result<BoolOpEval, ExpressionError> {
@@ -1247,8 +1247,8 @@ impl<'a> Evaluator<'a> {
             // evaluated speculatively, as an `and` operand after an
             // unresolved one is. A value error is absorbed: the run that
             // reaches it fails, and one that stops before it is `false`,
-            // so the chain is a `bool` not known here. A budget error
-            // propagates.
+            // so the chain is a `bool` not known here. A budget error, or a
+            // name that resolves nowhere, propagates.
             let (result_val, carried) = if seen_unresolved {
                 let left_size = left.memory_size();
                 match self.speculate(|s| link(s, left))? {

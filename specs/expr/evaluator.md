@@ -325,7 +325,8 @@ the links after one whose result is unresolved are evaluated speculatively, as
 evaluation](#speculative-evaluation)): a run may stop at that link's `false`
 before reaching them. A later link that fails with a value error — its operand
 fails, or its operands match no signature — is absorbed, and the chain is
-`Unresolved(BOOL)`: `Task.Param.I == 5 == len(1)` type-checks, as
+`Unresolved(BOOL)` (a name that resolves nowhere is reported instead, as
+`Task.Param.I == 5 == strr(1)` is): `Task.Param.I == 5 == len(1)` type-checks, as
 `Task.Param.I == 5 and 5 == len(1)` does, and fails only on a run where
 `Task.Param.I` is 5. The first link always runs, so its failure is an error. The
 carried operand the absorbed link took is released with it.
@@ -463,7 +464,8 @@ keeps the members that have a rule toward the target
 Operands after the first unresolved one are evaluated speculatively (see
 [Speculative evaluation](#speculative-evaluation)): a value error is absorbed —
 run time may never reach the operand, and if it does the evaluation fails there,
-so the operand contributes no outcome — and a budget error propagates. Every
+so the operand contributes no outcome — and a budget error, or a name that
+resolves nowhere, propagates. Every
 operand value the result does not carry is released: unresolved placeholders (the
 result carries only types), a concrete operand that did not decide, and a decided
 concrete operand folded into an `unresolved` union. A nested `and`/`or` that
