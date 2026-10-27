@@ -5628,31 +5628,32 @@ fn chunk_int_list_value_beyond_range_bound_rejected() {
 #[test]
 fn chunk_int_range_expr_value_beyond_range_bound_rejected() {
     // A range expression accepts nearly all of i64, so the CHUNK[INT]
-    // bound applies to a range-expression range too, at either end.
+    // bound applies to a range-expression range too, at either end. The
+    // range comes from a job parameter, so job creation (not template
+    // validation, which checks literal ranges) is what rejects it.
     for (range, value) in [
         ("1-3,4611686018427387904", "4611686018427387904"),
         ("-4611686018427387904,1-3", "-4611686018427387904"),
     ] {
-        let template = format!(
-            r#"{{
+        let template = r#"{
             "specificationVersion": "jobtemplate-2023-09",
             "extensions": ["TASK_CHUNKING"],
             "name": "Test",
-            "steps": [{{
+            "parameterDefinitions": [{"name": "R", "type": "STRING"}],
+            "steps": [{
                 "name": "S",
-                "parameterSpace": {{
-                    "taskParameterDefinitions": [{{
+                "parameterSpace": {
+                    "taskParameterDefinitions": [{
                         "name": "Frame",
                         "type": "CHUNK[INT]",
-                        "range": "{range}",
-                        "chunks": {{"defaultTaskCount": 2, "rangeConstraint": "CONTIGUOUS"}}
-                    }}]
-                }},
-                "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
-            }}]
-        }}"#
-        );
-        let err = parse_and_create_err(&template, &[]);
+                        "range": "{{Param.R}}",
+                        "chunks": {"defaultTaskCount": 2, "rangeConstraint": "CONTIGUOUS"}
+                    }]
+                },
+                "script": {"actions": {"onRun": {"command": "echo"}}}
+            }]
+        }"#;
+        let err = parse_and_create_err(template, &[("R", range)]);
         assert_eq!(
             err,
             format!(

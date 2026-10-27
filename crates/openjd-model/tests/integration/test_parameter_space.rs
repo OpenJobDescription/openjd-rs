@@ -793,3 +793,45 @@ fn string_range_list_is_still_capped() {
         &["range exceeds 1024 elements"],
     );
 }
+
+#[test]
+fn chunk_int_literal_range_expr_value_bound() {
+    // A literal CHUNK[INT] range is checked against the 2^62 value bound
+    // during template validation, with the template path, at either end.
+    let template = |range: &str| {
+        format!(
+            r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}},
+            "parameterSpace": {{"taskParameterDefinitions": [{{"name": "Frame",
+                "type": "CHUNK[INT]", "range": "{range}",
+                "chunks": {{"defaultTaskCount": 2, "rangeConstraint": "CONTIGUOUS"}}}}]}}}}]
+    }}"#
+        )
+    };
+    let decode = |range: &str| {
+        decode_job_template(
+            yaml_val(&template(range)),
+            Some(&["TASK_CHUNKING"]),
+            &CallerLimits::default(),
+        )
+    };
+    for (range, value) in [
+        ("1-3,4611686018427387904", "4611686018427387904"),
+        ("-4611686018427387904,1-3", "-4611686018427387904"),
+    ] {
+        assert_eq!(
+            decode(range).unwrap_err().to_string(),
+            format!(
+                "Model validation error: 1 validation error for JobTemplate\n\
+                 steps[0] -> parameterSpace -> taskParameterDefinitions[0]:\n\
+                 \tCHUNK[INT] parameter 'Frame' range expression error: value {value} \
+                 exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)"
+            )
+        );
+    }
+    // Magnitudes up to 2^62 - 1 are accepted.
+    decode("-4611686018427387903,4611686018427387903").unwrap();
+}

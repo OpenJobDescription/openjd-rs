@@ -135,6 +135,16 @@ beyond it, at job creation and again in `StepParameterSpaceIterator::new` (a
 must be below 2^62)`. A range expression's values are sorted, so only its first and last
 values are checked.
 
+A literal (`{{`-free) range expression is also checked during template validation, so
+`openjd check` reports it with the template path:
+`steps[0] -> parameterSpace -> taskParameterDefinitions[0]: CHUNK[INT] parameter '<name>'
+range expression error: value <v> exceeds the CHUNK[INT] range value bound (magnitude must be
+below 2^62)`.
+
+**Deviation from Template Schemas §3.4.1.5:** a `CHUNK[INT]` range is an `<IntRangeExpr>` or
+a list of `<Int>`, and `<Int>` is any integer value (§3.4.1.1.1), so the bound is a limit of
+this implementation, not of the specification.
+
 **Divergence from the Python reference:** openjd-model-for-python has no such bound: with
 range `"1-3,4611686018427387904"` and `NONCONTIGUOUS`, its CLI runs a chunk
 `1-3,4611686018427387904`, while openjd-rs rejects the job with the error above. The bound

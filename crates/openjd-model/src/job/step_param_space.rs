@@ -80,21 +80,37 @@ pub(crate) fn check_chunk_int_value_bound(
     name: &str,
     range: &job::TaskParamRange<i64>,
 ) -> Result<(), ModelError> {
-    let out_of_bound = |v: &i64| v.unsigned_abs() >= CHUNK_INT_VALUE_BOUND as u64;
     let found = match range {
-        job::TaskParamRange::List(values) => values.iter().copied().find(|v| out_of_bound(v)),
-        job::TaskParamRange::RangeExpr(r) => [r.get(0), r.get(-1)]
-            .into_iter()
-            .flatten()
-            .find(|v| out_of_bound(v)),
+        job::TaskParamRange::List(values) => {
+            values.iter().copied().find(|v| beyond_chunk_int_bound(*v))
+        }
+        job::TaskParamRange::RangeExpr(r) => chunk_int_range_expr_value_beyond_bound(r),
     };
     match found {
         Some(v) => Err(ModelError::DecodeValidation(format!(
-            "Task parameter '{name}': value {v} exceeds the CHUNK[INT] \
-             range value bound (magnitude must be below 2^62)",
+            "Task parameter '{name}': {}",
+            chunk_int_value_bound_message(v)
         ))),
         None => Ok(()),
     }
+}
+
+fn beyond_chunk_int_bound(v: i64) -> bool {
+    v.unsigned_abs() >= CHUNK_INT_VALUE_BOUND as u64
+}
+
+/// The first or last value of `r` if it is at or beyond
+/// [`CHUNK_INT_VALUE_BOUND`] (the values are sorted, so these suffice).
+pub(crate) fn chunk_int_range_expr_value_beyond_bound(r: &RangeExpr) -> Option<i64> {
+    [r.get(0), r.get(-1)]
+        .into_iter()
+        .flatten()
+        .find(|v| beyond_chunk_int_bound(*v))
+}
+
+/// The error text for a `CHUNK[INT]` value beyond [`CHUNK_INT_VALUE_BOUND`].
+pub(crate) fn chunk_int_value_bound_message(v: i64) -> String {
+    format!("value {v} exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)")
 }
 
 /// Render a chunk's values as a `RangeExpr`.

@@ -1247,14 +1247,31 @@ fn validate_task_param_range(
             }
             IntRange::Expression(expr) => {
                 if !expr.raw().contains("{{") {
-                    if let Err(e) = expr.raw().parse::<openjd_expr::RangeExpr>() {
-                        errors.add(
+                    match expr.raw().parse::<openjd_expr::RangeExpr>() {
+                        Err(e) => errors.add(
                             path,
                             format!(
                                 "CHUNK[INT] parameter '{}' range expression error: {e}",
                                 tp.name
                             ),
-                        );
+                        ),
+                        // A literal range is checked against the CHUNK[INT]
+                        // value bound here, with the template path, as well
+                        // as at job creation (which covers resolved ranges).
+                        Ok(r) => {
+                            if let Some(v) =
+                                crate::job::step_param_space::chunk_int_range_expr_value_beyond_bound(&r)
+                            {
+                                errors.add(
+                                    path,
+                                    format!(
+                                        "CHUNK[INT] parameter '{}' range expression error: {}",
+                                        tp.name,
+                                        crate::job::step_param_space::chunk_int_value_bound_message(v)
+                                    ),
+                                );
+                            }
+                        }
                     }
                 }
             }

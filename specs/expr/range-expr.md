@@ -24,8 +24,9 @@ Examples:
 - `"1-10"` → [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 - `"1-10:2"` → [1, 3, 5, 7, 9]
 - `"1-5,10-15"` → [1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15]
-- `"10-1:-1"` → [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] (descending, requires negative step)
-- `"10-1:-3"` → [10, 7, 4, 1] (descending with step)
+- `"10-1:-1"` → [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] (written descending, which requires a
+  negative step; the value is in increasing order)
+- `"10-1:-3"` → [1, 4, 7, 10] (written descending with step)
 
 Note: Descending ranges (where start > end) require a negative step. `"10-1"` without
 a step is invalid. Use `"10-1:-1"` for step -1, or `"10-1:-N"` for larger steps.
@@ -184,7 +185,16 @@ accept therefore has a canonical form, and a serialized form, that they accept a
 computed by `from_values` (`range_expr(list)`) and `slice` are not capped this way: their
 size is bounded by the evaluator's memory limit, and a computed value with more than
 `MAX_RANGE_EXPR_CHUNKS` runs (for example `range_expr([i*i for i in range(15000)])`) has a
-canonical form that `from_str` rejects.
+canonical form that `from_str` rejects. Its serialized form is likewise rejected by
+`Deserialize`, so such a value does not survive serde transport (a serialized
+`StepParameterSpace`, or `SerializedSymbolTable::to_symtab`, which re-parses the canonical
+string).
+
+**Divergence from the Python reference and the specification:** both caps are
+implementation limits. Template Schemas §3.4.1.1.1 places no limit on the number of
+elements of a range expression, and openjd-model-for-python's `IntRangeExpr.from_str`
+(0.13.0) has none: it accepts 10,001 elements, and 6,000 two-value elements
+(`"0-1,4-5,..."`, 12,000 runs in canonical form), both of which openjd-rs rejects.
 
 This cap is orders of magnitude above any realistic render-farm frame
 range: real multi-chunk inputs select frames from a handful of shots, well
@@ -331,7 +341,11 @@ writes `"{first}-{last}"`; otherwise it writes the canonical form. The model lay
 the flag on every `CONTIGUOUS` chunk it builds, the CLI sets it on a `--task-param` or
 `--tasks` value for a `CONTIGUOUS` `CHUNK[INT]` parameter, and every string path (`Task.Param`,
 `Task.RawParam`, `string()`, `repr_*`, `+`) goes through `Display`, so the chunk form
-reaches all of them.
+reaches all of them. The flag is not transported: `Serialize` writes only the runs, and
+`SerializedSymbolTable` carries the value as its string (`"5-5"`), which `to_symtab`
+parses back without the flag, so `string()` of the received value is `"5"`. No path in
+openjd-rs transports a chunk value this way; sessions receives the `TaskParameterSet`
+in-process.
 
 The flag is packed into the high bit of the `length` field to avoid increasing the
 struct size. The packing matters because `RangeExpr` is instantiated **once per task**
