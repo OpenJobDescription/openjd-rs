@@ -132,17 +132,17 @@ async fn test_has_path_mapping_rules_false() {
 #[tokio::test]
 async fn test_path_mapping_multiple_rules() {
     let tmp = TempDir::new().unwrap();
+    let rule = |format: PathFormat, src: &str, dst: &str| PathMappingRule {
+        source_path_format: format,
+        source_path: src.into(),
+        destination_path: dst.into(),
+    };
+    // Given in an order that is not the precedence order.
     let rules = vec![
-        PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/mnt/a".into(),
-            destination_path: "/local/a".into(),
-        },
-        PathMappingRule {
-            source_path_format: PathFormat::Windows,
-            source_path: "C:\\share".into(),
-            destination_path: "/local/share".into(),
-        },
+        rule(PathFormat::Windows, "C:\\share", "/local/share"),
+        rule(PathFormat::Posix, "/mnt/a", "/first"),
+        rule(PathFormat::Posix, "/mnt/a/b", "/local/b"),
+        rule(PathFormat::Posix, "/mnt/a/", "/last"),
     ];
     let mut session = Session::new_for_test(tmp.path().to_path_buf())
         .with_path_mapping(rules)
@@ -165,9 +165,17 @@ async fn test_path_mapping_multiple_rules() {
         .unwrap();
     let json: serde_json::Value = serde_json::from_str(result.stdout.trim()).unwrap();
     let rules = json["path_mapping_rules"].as_array().unwrap();
-    assert_eq!(rules.len(), 2);
-    // In precedence order: "/mnt/a" has three components ("/", "mnt", "a"),
-    // "C:\\share" two ("C:", "share").
-    assert_eq!(rules[0]["source_path_format"], "POSIX");
-    assert_eq!(rules[1]["source_path_format"], "WINDOWS");
+    let destinations: Vec<&str> = rules
+        .iter()
+        .map(|r| r["destination_path"].as_str().unwrap())
+        .collect();
+    // In precedence order: most components first ("/mnt/a/b" has four),
+    // then, among the three-component rules "/mnt/a/" and "/mnt/a", the
+    // one given last first; "C:\\share" has two.
+    assert_eq!(
+        destinations,
+        ["/local/b", "/last", "/first", "/local/share"]
+    );
+    assert_eq!(rules[3]["source_path_format"], "WINDOWS");
+    assert_eq!(rules[3]["source_path"], "C:\\share");
 }

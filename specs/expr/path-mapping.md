@@ -15,7 +15,7 @@ InvalidPathMappingRule), `windows_upcase.rs` (the Windows uppercase table) and
 ```rust
 pub enum PathFormat {
     Posix,    // Forward slashes, case-sensitive
-    Windows,  // Backslashes (normalized to forward), case-insensitive matching
+    Windows,  // `\` and `/` separators (`/` normalized to `\`), case-insensitive matching
     Uri,      // scheme://authority/path — no normalization
 }
 ```
@@ -148,18 +148,35 @@ formats.
 ### Which rule wins
 
 The matching rule whose source path has the most components wins, counting
-the anchor as one. Rules whose source paths have the same components name the
+the anchor as one component, except a UNC share, which counts as two (its
+server and share). Rules whose source paths have the same components name the
 same location (`/mnt/p`, `/mnt/p/` and `/mnt//p` are one location; so are
-`C:\Data` and `c:/data`), and the rule given last wins. The same tie-break
-applies across formats when a path matches rules of two formats with the same
-number of components.
+`C:\Data` and `c:/data`), and the rule given last wins.
+
+The UNC count matters only when a path matches rules of more than one format.
+`//srv/share/x` is a POSIX path and a UNC path, so the POSIX rule `/srv` (two
+components: `/` and `srv`) and the WINDOWS rule `\\srv\share` (two: `srv`
+and `share`) tie, and the rule given last wins, while `\\srv\share\x`
+(three) wins over `/srv`. Counting the share as one component would let the
+less specific `/srv` win. Within one format the UNC count changes nothing,
+because a path cannot match both a drive rule and a UNC rule.
+
+This replaces the earlier order, "decreasing length of the source path" as a
+string (How-Jobs-Are-Run, "Applying Path Mapping Rules"). For rules spelled
+without redundant separators or `.` components, a rule with more components
+that matches the same path is also the longer string, so the two orders pick
+the same rule. They differ for redundant spellings: string length prefers
+`/aaaa///` over `/aaaa/b`, and between `/mnt/p` and `/mnt/p/` it prefers the
+longer spelling instead of the rule given last.
 
 `rules()` returns the rules in the order given. `rules_by_precedence()`
 returns them with the most components first and, among rules with the same
 number, the one given last first. Applying the first rule in that order that
-matches a path gives the same result as `apply`, so a consumer that reads the
+matches a path gives the same result as `apply`. A consumer that reads the
 rules and applies the first match (such as a job script reading
-`Session.PathMappingRulesFile`) agrees with the mapper.
+`Session.PathMappingRulesFile`) therefore picks the same rule as the mapper,
+as long as it splits and compares paths the same way (see
+[Divergence from Python](#divergence-from-python) for where pathlib differs).
 
 ### Output
 
@@ -397,9 +414,9 @@ with the rule count (openjd-rs#210).
 
 The Python openjd-sessions `PathMappingRule.apply` uses `PurePosixPath` /
 `PureWindowsPath` and is applied rule by rule. The Rust `PathMapper` splits
-paths itself and walks a trie. They agree on components (`.` and empty
-components dropped, `..` kept, the POSIX backslash rule, UNC anchors) and on
-output, with these differences:
+paths itself and walks a trie. They agree on how input paths split into
+components (`.` and empty components dropped, `..` kept, the POSIX backslash
+rule, UNC anchors), with these differences:
 
 - **Windows case.** Rust uses the Windows uppercase table. Python
   openjd-sessions uses an ASCII-only fold, chosen to match the earlier Rust
@@ -409,9 +426,20 @@ output, with these differences:
   and it then matches only relative inputs.
 - **Two leading slashes.** `PurePosixPath('//a')` keeps `//` as its own root,
   so it is not relative to `/a`. Rust treats `//a` as `/a`, as Linux and
-  macOS do.
+  macOS do. So in Rust, but not in Python, a POSIX rule can match a
+  `//server/share/...` path, where it competes with WINDOWS UNC rules (see
+  [Which rule wins](#which-rule-wins)).
 - **Ties.** Between rules for the same location, Rust takes the rule given
   last. Python sorts rules by component count, and among rules for the same
   location takes the one given first.
-
-URI path handling is functionally identical between implementations.
+- **Destination.** Rust appends the remaining components to
+  `destination_path` as written. Python rebuilds the result with
+  `PurePath(*destination.parts, *rest)`, which normalizes the destination:
+  for the destination `D:\x\`, Rust gives `D:\x\\f` and Python `D:\x\f`.
+  This predates `PathMapper`.
+- **URI rules.** Python accepts a one-letter scheme (`C://data`) for a URI
+  rule; Rust rejects it, because `C://data` is a Windows path (see
+  [is_uri](#scheme-must-be-at-least-two-characters)). For precedence, Python
+  strips slashes from both ends of a URI path, so it counts `s3://b/a/` as
+  two components; Rust keeps the empty segment and counts three. Matching
+  and output for a single URI rule are the same.

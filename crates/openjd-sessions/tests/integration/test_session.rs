@@ -2628,6 +2628,55 @@ async fn test_extend_path_mapping_rules_appends_in_order() {
     assert_eq!(s.path_mapping_rules().len(), 3);
 }
 
+#[tokio::test]
+async fn test_with_config_rejects_relative_path_mapping_source() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+
+    let tmp = TempDir::new().unwrap();
+    let mut config = config_in_root(tmp.path(), "test-bad-rule");
+    config.path_mapping_rules = Some(vec![PathMappingRule {
+        source_path_format: PathFormat::Windows,
+        source_path: "\\projects".into(),
+        destination_path: "/p".into(),
+    }]);
+    let err = Session::with_config(config)
+        .err()
+        .expect("rule is rejected");
+    assert!(
+        matches!(
+            err,
+            openjd_sessions::SessionError::InvalidPathMappingRule(_)
+        ),
+        "{err:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "Invalid path mapping rules: path mapping rule 0: source_path '\\projects' must be an \
+         absolute WINDOWS path, starting with a drive such as 'C:\\' or a UNC share such as \
+         '\\\\server\\share'"
+    );
+}
+
+#[tokio::test]
+async fn test_with_path_mapping_rejects_relative_source() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+
+    let tmp = TempDir::new().unwrap();
+    let err = Session::new_for_test(tmp.path().to_path_buf())
+        .with_path_mapping(vec![PathMappingRule {
+            source_path_format: PathFormat::Uri,
+            source_path: "bucket/prefix".into(),
+            destination_path: "/b".into(),
+        }])
+        .err()
+        .expect("rule is rejected");
+    assert_eq!(
+        err.to_string(),
+        "Invalid path mapping rules: path mapping rule 0: source_path 'bucket/prefix' must be \
+         a URI, starting with '<scheme>://'"
+    );
+}
+
 // ══════════════════════════════════════════════════════════════
 // cancel_action via Session API
 // ══════════════════════════════════════════════════════════════

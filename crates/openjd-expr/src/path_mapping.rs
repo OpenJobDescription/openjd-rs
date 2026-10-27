@@ -153,6 +153,9 @@ struct SplitPath<'a> {
     /// (`C:`) or UNC share (`\\SERVER\SHARE`) for Windows; the
     /// ASCII-lowercased `scheme://authority` for URI.
     anchor: String,
+    /// How many components the anchor counts as when rules of different
+    /// formats compete: 2 for a UNC share (server and share), 1 otherwise.
+    anchor_depth: usize,
     /// The components after the anchor, as written.
     parts: Vec<&'a str>,
 }
@@ -184,13 +187,15 @@ fn split_path(path: &str, format: PathFormat) -> Option<SplitPath<'_>> {
             let rest = path.strip_prefix('/')?;
             Some(SplitPath {
                 anchor: "/".to_string(),
+                anchor_depth: 1,
                 parts: filesystem_parts(rest, false),
             })
         }
         PathFormat::Windows => {
-            let (anchor, rest) = split_windows_anchor(path)?;
+            let (anchor, anchor_depth, rest) = split_windows_anchor(path)?;
             Some(SplitPath {
                 anchor,
+                anchor_depth,
                 parts: filesystem_parts(rest, true),
             })
         }
@@ -208,18 +213,20 @@ fn split_path(path: &str, format: PathFormat) -> Option<SplitPath<'_>> {
             };
             Some(SplitPath {
                 anchor: path[..path_start].to_ascii_lowercase(),
+                anchor_depth: 1,
                 parts,
             })
         }
     }
 }
 
-/// Split an absolute Windows path into its anchor's trie key and the text
-/// after the anchor. The anchor is a drive followed by a separator (`C:\`)
-/// or a UNC share (`\\server\share`), with `\` and `/` interchangeable.
-/// Drive-relative (`C:dir`) and rooted-without-drive (`\dir`) paths are not
-/// absolute and give `None`.
-fn split_windows_anchor(path: &str) -> Option<(String, &str)> {
+/// Split an absolute Windows path into its anchor's trie key, the anchor's
+/// depth (see [`SplitPath::anchor_depth`]) and the text after the anchor.
+/// The anchor is a drive followed by a separator (`C:\`) or a UNC share
+/// (`\\server\share`), with `\` and `/` interchangeable. Drive-relative
+/// (`C:dir`) and rooted-without-drive (`\dir`) paths are not absolute and
+/// give `None`.
+fn split_windows_anchor(path: &str) -> Option<(String, usize, &str)> {
     let bytes = path.as_bytes();
     if bytes.len() >= 3
         && bytes[0].is_ascii_alphabetic()
@@ -227,7 +234,7 @@ fn split_windows_anchor(path: &str) -> Option<(String, &str)> {
         && is_windows_sep(char::from(bytes[2]))
     {
         let drive = char::from(bytes[0]).to_ascii_uppercase();
-        return Some((format!("{drive}:"), &path[3..]));
+        return Some((format!("{drive}:"), 1, &path[3..]));
     }
     let after = path
         .strip_prefix(is_windows_sep)?
@@ -243,7 +250,7 @@ fn split_windows_anchor(path: &str) -> Option<(String, &str)> {
         return None;
     }
     let anchor = format!("\\\\{}\\{}", fold_windows(server), fold_windows(share));
-    Some((anchor, &after_server[share_end..]))
+    Some((anchor, 2, &after_server[share_end..]))
 }
 
 /// The trie key of a component of a path in `format`.
@@ -266,7 +273,8 @@ struct TrieNode {
 struct Match<'a> {
     /// Index of the rule in [`PathMapper::rules`].
     rule: usize,
-    /// Number of components in the rule's source path, anchor included.
+    /// Number of components in the rule's source path, counting the anchor
+    /// as [`SplitPath::anchor_depth`] components.
     depth: usize,
     /// The source format of the trie that matched.
     format: PathFormat,
@@ -295,7 +303,9 @@ struct Match<'a> {
 ///
 /// When several rules match, the one whose source path has the most
 /// components wins. Rules with the same components name the same location,
-/// and the one given last wins.
+/// and the one given last wins. When rules of different formats match the
+/// same path (`//srv/share/x` is a POSIX path and a UNC path), a UNC share
+/// counts as two components, its server and share.
 #[derive(Debug, Clone, Default)]
 pub struct PathMapper {
     rules: Vec<PathMappingRule>,
@@ -321,7 +331,7 @@ impl PathMapper {
                 index: Some(i),
                 ..rule.invalid()
             })?;
-            depths.push(1 + split.parts.len());
+            depths.push(split.anchor_depth + split.parts.len());
             let mut node = tries[format.trie_index()]
                 .children
                 .entry(split.anchor)
@@ -436,10 +446,12 @@ impl PathMapper {
             let Some((rule, consumed)) = found else {
                 continue;
             };
-            let depth = 1 + consumed;
+            let depth = split.anchor_depth + consumed;
             // A path can be absolute in more than one format (`//srv/share`
             // is a POSIX path and a Windows UNC share). The deeper match
-            // wins, and between equally deep ones, the rule given last.
+            // wins, and between equally deep ones, the rule given last. A
+            // UNC share counts as two components so that `\\srv\share`
+            // is as deep as `/srv/share`, which names the same two names.
             if best
                 .as_ref()
                 .is_none_or(|b| (depth, rule) > (b.depth, b.rule))

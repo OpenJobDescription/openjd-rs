@@ -1679,8 +1679,9 @@ steps:
         assert!(stderr.contains("exceeds maximum size"), "stderr: {stderr}");
     }
 
-    /// A path mapping rule with a relative source path is rejected before
-    /// the session starts, naming the rule.
+    /// A path mapping rule with a relative source path is rejected when the
+    /// rules are loaded, naming the rule. The template's required parameter
+    /// has no value, so a later check would report that instead.
     #[test]
     fn test_run_path_mapping_rules_relative_source_rejected() {
         let mut tpl = NamedTempFile::with_suffix(".yaml").unwrap();
@@ -1688,6 +1689,9 @@ steps:
             tpl,
             r#"specificationVersion: "jobtemplate-2023-09"
 name: test
+parameterDefinitions:
+  - name: Required
+    type: PATH
 steps:
   - name: s1
     script:

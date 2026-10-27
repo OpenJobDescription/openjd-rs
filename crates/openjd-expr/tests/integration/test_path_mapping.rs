@@ -1030,26 +1030,65 @@ mod apply_unit {
 
     #[test]
     fn cross_format_deepest_then_last_wins() {
-        // `//srv/share/x` is a POSIX path and a Windows UNC path.
+        // `//srv/share/x` is a POSIX path and a Windows UNC path. A UNC
+        // share counts as two components, its server and share.
         let posix = posix_rule("/srv", "/posix");
         let unc_deep = windows_rule("\\\\srv\\share\\x", "/unc");
         let unc_shallow = windows_rule("\\\\srv\\share", "/unc");
-        // POSIX /srv has two components, \\srv\share has one: POSIX wins.
-        let m = mapper(vec![posix.clone(), unc_shallow]);
+        let path = "//srv/share/x/f";
+        // `\\srv\share\x` has three components, `/srv` two.
+        for rules in [
+            vec![posix.clone(), unc_deep.clone()],
+            vec![unc_deep.clone(), posix.clone()],
+        ] {
+            assert_eq!(
+                mapper(rules).map_with_format(path, PathFormat::Posix),
+                "/unc/f"
+            );
+        }
+        // `\\srv\share` and `/srv` have two each: the rule given last wins.
+        let m = mapper(vec![posix.clone(), unc_shallow.clone()]);
+        assert_eq!(m.map_with_format(path, PathFormat::Posix), "/unc/x/f");
+        let m = mapper(vec![unc_shallow, posix]);
         assert_eq!(
-            m.map_with_format("//srv/share/x/f", PathFormat::Posix),
+            m.map_with_format(path, PathFormat::Posix),
             "/posix/share/x/f"
         );
-        // Two components each: the rule given last wins.
-        let m = mapper(vec![posix.clone(), unc_deep.clone()]);
+        // `/srv/share/x/f` has five components, `\\srv\share\x` three.
+        let m = mapper(vec![posix_rule("/srv/share/x/f", "/deep"), unc_deep]);
+        assert_eq!(m.map_with_format(path, PathFormat::Posix), "/deep");
+        let order: Vec<&str> = m
+            .rules_by_precedence()
+            .map(|r| r.destination_path.as_str())
+            .collect();
+        assert_eq!(order, ["/deep", "/unc"]);
+    }
+
+    #[test]
+    fn uri_scheme_and_authority_fold_path_does_not() {
+        // An authority after a longer scheme, and an empty authority.
+        let m = mapper(vec![uri_rule("https://H/Path", "/h")]);
         assert_eq!(
-            m.map_with_format("//srv/share/x/f", PathFormat::Posix),
-            "/unc/f"
+            m.map_with_format("HTTPS://h/Path/f", PathFormat::Posix),
+            "/h/f"
         );
-        let m = mapper(vec![unc_deep, posix]);
         assert_eq!(
-            m.map_with_format("//srv/share/x/f", PathFormat::Posix),
-            "/posix/share/x/f"
+            m.apply_with_format("https://h/path/f", PathFormat::Posix),
+            None
+        );
+        let m = mapper(vec![uri_rule("file:///mnt/x", "/d")]);
+        assert!(!m.is_empty());
+        assert_eq!(
+            m.map_with_format("file:///mnt/x/y", PathFormat::Posix),
+            "/d/y"
+        );
+        assert_eq!(
+            m.apply_with_format("file:///mnt/xy", PathFormat::Posix),
+            None
+        );
+        assert_eq!(
+            m.apply_with_format("file://h/mnt/x/y", PathFormat::Posix),
+            None
         );
     }
 
