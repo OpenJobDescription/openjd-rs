@@ -225,12 +225,20 @@ impl Session {
 
     // ── Builder-style configuration (post-construction) ──
 
-    /// Replace the session's path-mapping rules. Rebuilds the derived
-    /// `FunctionLibrary` used for evaluating `apply_path_mapping`.
-    pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Self;
+    /// Replace the session's path-mapping rules, keeping the order given.
+    /// Rebuilds the session's `PathMapper` and the derived
+    /// `FunctionLibrary` used for evaluating `apply_path_mapping`. Fails
+    /// with `SessionError::InvalidPathMappingRule` when a rule's source
+    /// path is not absolute for its format.
+    pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Result<Self, SessionError>;
 
-    /// Append to the existing rules (in-place).
-    pub fn extend_path_mapping_rules(&mut self, additional: Vec<PathMappingRule>);
+    /// Append to the existing rules (in-place). Between rules for the
+    /// same location the one given last wins, so an added rule replaces
+    /// an existing one. On `SessionError::InvalidPathMappingRule` the
+    /// rules are unchanged.
+    pub fn extend_path_mapping_rules(
+        &mut self, additional: Vec<PathMappingRule>,
+    ) -> Result<(), SessionError>;
 
     /// Replace the session's profile (revision + extensions).
     /// Rebuilds the derived `FunctionLibrary`.
@@ -304,9 +312,11 @@ pub struct SessionConfig {
     /// `openjd_model::preprocess_job_parameters`.
     pub job_parameter_values: JobParameterValues,
 
-    /// Path-mapping rules from the spec's Path Mapping JSON object.
-    /// Registered as `apply_path_mapping(...)` in the session's
-    /// function library at construction time.
+    /// Path-mapping rules from the spec's Path Mapping JSON object, in
+    /// the order given. Registered as `apply_path_mapping(...)` in the session's
+    /// function library at construction time. `with_config` fails with
+    /// `SessionError::InvalidPathMappingRule` when a rule's source path
+    /// is not absolute for its format.
     pub path_mapping_rules: Option<Vec<PathMappingRule>>,
 
     /// If true, `cleanup()` skips the working-directory removal —
@@ -1008,6 +1018,12 @@ pub enum SessionError {
     /// environment is already active. Raised before any state is
     /// recorded for the rejected environment; the session stays Ready.
     MultipleWrapEnvironments { existing: String, entering: String },
+
+    /// A path mapping rule's source path is not absolute for its format.
+    /// From `with_config`, `with_path_mapping` and
+    /// `extend_path_mapping_rules`. Display:
+    /// "Invalid path mapping rules: path mapping rule <i>: <reason>".
+    InvalidPathMappingRule(openjd_expr::InvalidPathMappingRule),
 }
 ```
 
@@ -1020,7 +1036,9 @@ pub use openjd_expr::path_mapping::PathMappingRule;
 ```
 
 `PathFormat` and `PathMappingRule` are the types used on
-`SessionConfig.path_mapping_rules`. They are re-exported here so
+`SessionConfig.path_mapping_rules`. `PathMapper` and
+`InvalidPathMappingRule` are reachable through the re-exported
+`path_mapping` module. They are re-exported here so
 downstream callers don't need to depend on `openjd-expr` directly.
 
 ## Cross-User Execution

@@ -777,7 +777,7 @@ fn large_apply_path_mapping_exceeds() {
         .unwrap();
     let lib = FunctionLibrary::for_profile(
         &ExprProfile::current()
-            .with_host_context(HostContext::with_rules(Vec::<PathMappingRule>::new())),
+            .with_host_context(HostContext::with_rules(Vec::<PathMappingRule>::new()).unwrap()),
     );
     let r = openjd_expr::ParsedExpression::new("S.apply_path_mapping()")
         .unwrap()

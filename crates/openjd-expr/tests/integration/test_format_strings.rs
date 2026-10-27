@@ -159,7 +159,7 @@ fn resolve_typed_single_expr_preserves_list() {
 fn validate_catches_undefined_variable() {
     let fs = FormatString::new("{{Param.Missing}}").unwrap();
     let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
-        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()).unwrap(),
     ));
     let result = fs.validate_expressions(
         &SymbolTable::new(),
@@ -175,7 +175,7 @@ fn validate_passes_with_unresolved_types() {
     let fs = FormatString::new("{{Param.X + 1}}").unwrap();
     let st = symtab!("Param.X" => ExprValue::unresolved(ExprType::INT));
     let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
-        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()).unwrap(),
     ));
     assert!(fs
         .validate_expressions(&st, &FormatStringOptions::new().with_library(&*lib))
@@ -186,7 +186,7 @@ fn validate_passes_with_unresolved_types() {
 
 fn static_resolution(input: &str, st: &SymbolTable) -> openjd_expr::StaticResolution {
     let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
-        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()).unwrap(),
     ));
     FormatString::new(input)
         .unwrap()
@@ -301,7 +301,7 @@ fn check_static_resolution_against_typed_resolution(
     target: &ExprType,
 ) -> openjd_expr::StaticResolution {
     let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
-        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()).unwrap(),
     ));
     let fs = FormatString::new(input).unwrap();
     let sr = fs
@@ -447,7 +447,7 @@ fn resolved_type_reflects_target_coercion_of_unresolved() {
     // An unresolved FLOAT coerced toward an INT target reports the coerced
     // type the resolution will produce.
     let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
-        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()).unwrap(),
     ));
     let st = symtab!("Param.X" => ExprValue::unresolved(ExprType::FLOAT));
     let sr = FormatString::new("{{ Param.X }}")
@@ -486,7 +486,7 @@ fn static_resolution_with_target(
     target: &ExprType,
 ) -> openjd_expr::StaticResolution {
     let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
-        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()).unwrap(),
     ));
     FormatString::new(input)
         .unwrap()
@@ -656,7 +656,7 @@ fn static_resolution_unresolved_symbol_coerces_at_type_level() {
     // coercion is checked at the type level), contributes 0 to the bound,
     // and blocks the static value — same as without a target.
     let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
-        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()).unwrap(),
     ));
     let st = symtab!("Param.X" => ExprValue::unresolved(ExprType::FLOAT));
     let sr = FormatString::new("{{ Param.X }}")
@@ -719,7 +719,7 @@ fn static_resolution_uncoercible_value_fails_validation_like_resolution() {
     // A value that cannot coerce to the target fails resolution, so it
     // must fail validation with the same diagnostic.
     let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
-        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()).unwrap(),
     ));
     let fs = FormatString::new("{{ 'abc' }}").unwrap();
     let st = SymbolTable::new();

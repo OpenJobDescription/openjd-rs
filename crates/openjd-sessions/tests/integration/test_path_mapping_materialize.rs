@@ -23,7 +23,9 @@ async fn test_path_mapping_file_created_with_rules() {
         source_path: "/mnt/shared".into(),
         destination_path: "/local/shared".into(),
     }];
-    let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(rules);
+    let mut session = Session::new_for_test(tmp.path().to_path_buf())
+        .with_path_mapping(rules)
+        .unwrap();
     let script = StepScript {
         let_bindings: None,
         actions: StepActions {
@@ -82,7 +84,9 @@ async fn test_has_path_mapping_rules_true() {
         source_path: "/src".into(),
         destination_path: "/dst".into(),
     }];
-    let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(rules);
+    let mut session = Session::new_for_test(tmp.path().to_path_buf())
+        .with_path_mapping(rules)
+        .unwrap();
     let script = StepScript {
         let_bindings: None,
         actions: StepActions {
@@ -140,7 +144,9 @@ async fn test_path_mapping_multiple_rules() {
             destination_path: "/local/share".into(),
         },
     ];
-    let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(rules);
+    let mut session = Session::new_for_test(tmp.path().to_path_buf())
+        .with_path_mapping(rules)
+        .unwrap();
     let script = StepScript {
         let_bindings: None,
         actions: StepActions {
@@ -160,7 +166,8 @@ async fn test_path_mapping_multiple_rules() {
     let json: serde_json::Value = serde_json::from_str(result.stdout.trim()).unwrap();
     let rules = json["path_mapping_rules"].as_array().unwrap();
     assert_eq!(rules.len(), 2);
-    // Sorted by longest source_path first: "C:\\share" (8) > "/mnt/a" (6)
-    assert_eq!(rules[0]["source_path_format"], "WINDOWS");
-    assert_eq!(rules[1]["source_path_format"], "POSIX");
+    // In precedence order: "/mnt/a" has three components ("/", "mnt", "a"),
+    // "C:\\share" two ("C:", "share").
+    assert_eq!(rules[0]["source_path_format"], "POSIX");
+    assert_eq!(rules[1]["source_path_format"], "WINDOWS");
 }

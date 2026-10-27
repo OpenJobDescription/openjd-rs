@@ -2590,38 +2590,42 @@ async fn test_exit_environment_failure_still_pops_for_lifo() {
 // ══════════════════════════════════════════════════════════════
 
 #[tokio::test]
-async fn test_extend_path_mapping_rules_appends_and_sorts() {
+async fn test_extend_path_mapping_rules_appends_in_order() {
     use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
 
+    let posix = |src: &str, dst: &str| PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: src.into(),
+        destination_path: dst.into(),
+    };
     let tmp = TempDir::new().unwrap();
-    let mut s =
-        Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(vec![PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/short".into(),
-            destination_path: "/s".into(),
-        }]);
+    let mut s = Session::new_for_test(tmp.path().to_path_buf())
+        .with_path_mapping(vec![posix("/short", "/s")])
+        .unwrap();
 
     assert_eq!(s.path_mapping_rules().len(), 1);
 
-    s.extend_path_mapping_rules(vec![
-        PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/much/longer/path".into(),
-            destination_path: "/m".into(),
-        },
-        PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/med".into(),
-            destination_path: "/d".into(),
-        },
-    ]);
+    s.extend_path_mapping_rules(vec![posix("/much/longer/path", "/m"), posix("/med", "/d")])
+        .unwrap();
 
-    let rules = s.path_mapping_rules();
-    assert_eq!(rules.len(), 3);
-    // Sorted by source_path length descending (longest first)
-    assert_eq!(rules[0].source_path, "/much/longer/path");
-    assert_eq!(rules[1].source_path, "/short");
-    assert_eq!(rules[2].source_path, "/med");
+    let sources: Vec<&str> = s
+        .path_mapping_rules()
+        .iter()
+        .map(|r| r.source_path.as_str())
+        .collect();
+    // Kept in the order given; the trie decides precedence.
+    assert_eq!(sources, ["/short", "/much/longer/path", "/med"]);
+
+    // A rejected rule leaves the rules unchanged.
+    let err = s
+        .extend_path_mapping_rules(vec![posix("relative", "/r")])
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Invalid path mapping rules: path mapping rule 3: source_path 'relative' must be an \
+         absolute POSIX path, starting with '/'"
+    );
+    assert_eq!(s.path_mapping_rules().len(), 3);
 }
 
 // ══════════════════════════════════════════════════════════════

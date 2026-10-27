@@ -124,6 +124,10 @@ pub enum SessionError {
          already defines wrap hooks; cannot also enter '{entering}'."
     )]
     MultipleWrapEnvironments { existing: String, entering: String },
+
+    /// A path mapping rule's source path is not absolute for its format.
+    #[error("Invalid path mapping rules: {0}")]
+    InvalidPathMappingRule(#[from] openjd_expr::InvalidPathMappingRule),
 }
 
 fn format_expected(states: &[SessionState]) -> String {

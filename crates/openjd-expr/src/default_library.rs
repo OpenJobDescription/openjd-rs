@@ -97,7 +97,7 @@ impl FunctionLibrary {
     ///
     /// // Runtime library with real path mapping rules.
     /// let profile = ExprProfile::current()
-    ///     .with_host_context(HostContext::with_rules(Vec::new()));
+    ///     .with_host_context(HostContext::with_rules(Vec::new()).unwrap());
     /// let lib = FunctionLibrary::for_profile(&profile);
     /// assert!(!lib.get_signatures("apply_path_mapping").is_empty());
     /// ```
@@ -123,7 +123,7 @@ impl FunctionLibrary {
         // Slow path: WithRules always needs the rules applied on top of
         // a no-host skeleton. We cache the *no-host* skeleton, not the
         // WithRules variant, because the rules are per-call.
-        if let HostContext::WithRules(rules) = profile.host_context() {
+        if let HostContext::WithRules(mapper) = profile.host_context() {
             // Pull the no-host skeleton (a separate cache entry, since
             // the key for this call is `WithRules` but we want the
             // `None` skeleton underneath). If it's absent, build it.
@@ -143,7 +143,7 @@ impl FunctionLibrary {
             // The clone is cheap — `FunctionLibrary` holds `Arc<dyn Fn>`
             // entries in its `HashMap`.
             let mut derived = (*base).clone();
-            register_host_context_functions(&mut derived, Arc::clone(rules));
+            register_host_context_functions(&mut derived, Arc::clone(mapper));
             return Arc::new(derived);
         }
 
@@ -784,16 +784,16 @@ fn regex_ops() -> FunctionLibrary {
 
 /// Register host-context-only functions (e.g. `apply_path_mapping`).
 ///
-/// `rules` are captured by the registered closure and applied on every
+/// `mapper` is captured by the registered closure and applied on every
 /// `apply_path_mapping` call during evaluation.
 pub fn register_host_context_functions(
     lib: &mut FunctionLibrary,
-    rules: std::sync::Arc<Vec<crate::path_mapping::PathMappingRule>>,
+    mapper: std::sync::Arc<crate::path_mapping::PathMapper>,
 ) {
     lib.register_sig(
         "apply_path_mapping",
         "(string) -> path",
-        crate::functions::path::make_apply_path_mapping_fn(rules),
+        crate::functions::path::make_apply_path_mapping_fn(mapper),
     )
     .expect("bad builtin signature");
 }
@@ -1246,7 +1246,7 @@ mod tests {
     #[test]
     fn host_context_has_apply_path_mapping() {
         let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
-            HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
+            HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()).unwrap(),
         ));
         assert!(!lib.get_signatures("apply_path_mapping").is_empty());
     }
@@ -1285,7 +1285,8 @@ mod for_profile_tests {
             source_path: "/src".into(),
             destination_path: "/dst".into(),
         };
-        let profile = ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule]));
+        let profile =
+            ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule]).unwrap());
         let lib = FunctionLibrary::for_profile(&profile);
         assert!(!lib.get_signatures("apply_path_mapping").is_empty());
     }
@@ -1322,8 +1323,8 @@ mod for_profile_tests {
             source_path: "/c".into(),
             destination_path: "/d".into(),
         }];
-        let p1 = ExprProfile::current().with_host_context(HostContext::with_rules(r1));
-        let p2 = ExprProfile::current().with_host_context(HostContext::with_rules(r2));
+        let p1 = ExprProfile::current().with_host_context(HostContext::with_rules(r1).unwrap());
+        let p2 = ExprProfile::current().with_host_context(HostContext::with_rules(r2).unwrap());
         let a = FunctionLibrary::for_profile(&p1);
         let b = FunctionLibrary::for_profile(&p2);
         assert!(!std::sync::Arc::ptr_eq(&a, &b));

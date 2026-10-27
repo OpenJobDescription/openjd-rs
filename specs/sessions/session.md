@@ -292,11 +292,19 @@ the per-action `sudo -i` overhead.
 
 ```rust
 pub fn extend_path_mapping_rules(&mut self, additional: Vec<PathMappingRule>)
+    -> Result<(), SessionError>
 ```
 
-Appends additional path mapping rules to the session's existing rules. Rules are
-re-sorted by source path length (longest first) after extending, ensuring that more
-specific rules take precedence over shorter ones.
+Appends additional path mapping rules after the session's existing rules and
+rebuilds the session's `PathMapper` and function library. Rules keep the order
+given. The rule with the most source path components wins, and between rules for
+the same location the one given last wins (see
+[expr path-mapping.md § Which rule wins](../expr/path-mapping.md#which-rule-wins)),
+so an added rule replaces an existing rule for the same source path.
+
+Returns `SessionError::InvalidPathMappingRule`, and leaves the rules unchanged,
+when an added rule's source path is not absolute for its format. The error's
+index counts from the first existing rule.
 
 Used by the worker agent when additional path mapping rules become available after
 session creation (e.g., from job attachment manifests).
@@ -357,7 +365,10 @@ rules applied.
 `materialize_path_mapping()` writes the path mapping rules to a JSON file in the working
 directory using the `pathmapping-1.0` format. This file is referenced by
 `Session.PathMappingRulesFile` in the symbol table, allowing actions to read and apply
-path mapping rules themselves.
+path mapping rules themselves. The rules are written in precedence order
+(`PathMapper::rules_by_precedence`): most source path components first, and between
+rules with the same number, the one given last first. A reader that applies the first
+matching rule therefore gets the same result as the session.
 
 ## Environment Variable Evaluation
 
@@ -501,12 +512,15 @@ optional features before the first action:
 ### with_path_mapping
 
 ```rust
-pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Self
+pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Result<Self, SessionError>
 ```
 
-Sets the session's path mapping rules. Rules are sorted by source path length
-(longest first) so more specific rules take precedence. Called immediately after
-construction when path mapping rules are known at session creation time.
+Replaces the session's path mapping rules, keeping the order given. Fails with
+`SessionError::InvalidPathMappingRule` when a rule's source path is not absolute
+for its format. Called immediately after construction when path mapping rules are
+known at session creation time. `Session::with_config` builds the session's
+`PathMapper` from `SessionConfig::path_mapping_rules` the same way and fails with
+the same error.
 
 ### with_library
 
@@ -550,7 +564,7 @@ Read-only accessors on `Session`:
 | `working_directory()` | `&Path` | Path to the session's working directory |
 | `files_directory()` | `&Path` | Path to the embedded files subdirectory |
 | `environments_entered()` | `&[EnvironmentIdentifier]` | Stack of entered environment IDs (entry order) |
-| `path_mapping_rules()` | `&[PathMappingRule]` | Current path mapping rules (sorted by source path length, longest first) |
+| `path_mapping_rules()` | `&[PathMappingRule]` | Current path mapping rules, in the order given |
 | `action_status()` | `Option<ActionStatus>` | Snapshot of the current/most-recent action status. `None` if no action has run. |
 | `clone_cancel_writer()` | `Option<std::fs::File>` | Clone the cancel-info file writer for the cross-user helper. Used by PyO3 bindings to send cancel commands from a background thread. |
 | `override_action_state(state)` | `()` | Override the action state. Used by PyO3 bindings to convert Failed → Canceled when cancel was requested externally. |

@@ -30,6 +30,7 @@ pub mod symbol_table;
 pub mod types;
 pub mod uri_path;
 pub mod value;
+pub(crate) mod windows_upcase;
 
 pub use error::{ExpressionError, ExpressionErrorKind};
 pub use eval::{
@@ -42,7 +43,7 @@ pub use format_string::FormatStringOptions;
 pub use format_string::FormatStringValidationError;
 pub use format_string::StaticResolution;
 pub use function_library::{EvalContext, FunctionLibrary};
-pub use path_mapping::{PathFormat, PathMappingRule};
+pub use path_mapping::{InvalidPathMappingRule, PathFormat, PathMapper, PathMappingRule};
 pub use profile::{ExprExtension, ExprProfile, ExprRevision, HostContext};
 pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS, MAX_RANGE_EXPR_LEN};
 pub use symbol_table::{

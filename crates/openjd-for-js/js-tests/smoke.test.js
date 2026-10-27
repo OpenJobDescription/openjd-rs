@@ -340,6 +340,33 @@ describe("getDefaultLibrary", () => {
   });
 });
 
+describe("FunctionLibrary.withPathMappingRules", () => {
+  it("maps paths with the rule that has the most components", () => {
+    const lib = mod.FunctionLibrary.withPathMappingRules([
+      new mod.PathMappingRule(mod.PathFormat.Posix, "/mnt", "/all"),
+      new mod.PathMappingRule(mod.PathFormat.Posix, "/mnt/a", "/a"),
+    ]);
+    const st = new mod.SymbolTable();
+    const parsed = mod.parseExpression("apply_path_mapping('/mnt/a/f.txt')");
+    const v = parsed.evaluate(st, lib);
+    expect(v.toString()).toBe("/a/f.txt");
+    v.free();
+    parsed.free();
+    st.free();
+  });
+
+  it("throws for a relative source path, naming the rule", () => {
+    expect(() =>
+      mod.FunctionLibrary.withPathMappingRules([
+        new mod.PathMappingRule(mod.PathFormat.Posix, "/ok", "/a"),
+        new mod.PathMappingRule(mod.PathFormat.Posix, "relative", "/b"),
+      ]),
+    ).toThrow(
+      "path mapping rule 1: source_path 'relative' must be an absolute POSIX path, starting with '/'",
+    );
+  });
+});
+
 describe("getDefaultMemoryLimit / getDefaultOperationLimit", () => {
   it("returns positive numbers", () => {
     expect(mod.getDefaultMemoryLimit()).toBeGreaterThan(0);

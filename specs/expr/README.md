@@ -21,7 +21,7 @@ implementation in Rust.
 | [error-formatting.md](error-formatting.md) | Caret error messages with smart positioning |
 | [edit-distance.md](edit-distance.md) | Levenshtein "did you mean?" suggestions |
 | [range-expr.md](range-expr.md) | RangeExpr parsing, indexing, iteration |
-| [path-mapping.md](path-mapping.md) | PathFormat, PathMappingRule, URI path handling |
+| [path-mapping.md](path-mapping.md) | PathFormat, PathMappingRule, PathMapper, URI path handling |
 | [path-parse.md](path-parse.md) | Format-aware path parsing for PATH properties/methods |
 
 ## Normative References

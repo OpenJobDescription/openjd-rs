@@ -34,7 +34,7 @@ use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 
 use openjd_expr::function_library::FunctionLibrary;
-use openjd_expr::path_mapping::PathMappingRule;
+use openjd_expr::path_mapping::{PathMapper, PathMappingRule};
 use openjd_model::job::{Environment, StepScript};
 use openjd_model::symbol_table::SymbolTable;
 use openjd_model::types::JobParameterValues;
@@ -112,6 +112,11 @@ pub type SessionCallbackType = Box<dyn Fn(&str, &ActionStatus) + Send + Sync>;
 pub struct SessionConfig {
     pub session_id: String,
     pub job_parameter_values: JobParameterValues,
+    /// Path mapping rules for the session, in the order given. Between
+    /// rules for the same location, the one given last wins.
+    /// [`Session::with_config`] fails with
+    /// [`SessionError::InvalidPathMappingRule`] when a rule's source path is
+    /// not absolute for its format.
     pub path_mapping_rules: Option<Vec<PathMappingRule>>,
     pub retain_working_dir: bool,
     pub callback: Option<SessionCallbackType>,
@@ -484,9 +489,9 @@ struct CrossUserFields {
 /// `apply_path_mapping` always reflects the session's current rules.
 fn derive_library(
     profile: Option<&openjd_model::ModelProfile>,
-    rules: &Arc<Vec<PathMappingRule>>,
+    mapper: &Arc<PathMapper>,
 ) -> Arc<FunctionLibrary> {
-    let host = openjd_expr::HostContext::WithRules(rules.clone());
+    let host = openjd_expr::HostContext::WithRules(mapper.clone());
     let expr_profile = match profile {
         Some(p) => p.to_expr_profile(host),
         None => openjd_expr::ExprProfile::current().with_host_context(host),
@@ -527,10 +532,10 @@ pub struct Session {
     // `library` is the cached derived library, built from the session's
     // `library` is the cached derived library, built from the session's
     // `profile` (an optional `ModelProfile`) plus the current
-    // `path_mapping_rules`. Whenever either input changes, the library
+    // `path_mapper`. Whenever either input changes, the library
     // must be rebuilt via `derive_library`.
     library: Arc<FunctionLibrary>,
-    path_mapping_rules: Arc<Vec<PathMappingRule>>,
+    path_mapper: Arc<PathMapper>,
     job_parameter_values: JobParameterValues,
     // Grouped fields
     action: ActionStatusFields,
@@ -572,8 +577,8 @@ impl Session {
             env_vars: HashMap::new(),
             process_env: HashMap::new(),
             created_env_vars: HashMap::new(),
-            library: derive_library(None, &Arc::new(Vec::new())),
-            path_mapping_rules: Arc::new(Vec::new()),
+            library: derive_library(None, &Arc::new(PathMapper::default())),
+            path_mapper: Arc::new(PathMapper::default()),
             job_parameter_values: HashMap::new(),
             action: ActionStatusFields::new(),
             cancel: CancelFields::new(None),
@@ -693,11 +698,11 @@ impl Session {
         let working_directory = working_dir.path().to_path_buf();
         let files_directory = files_dir.path().to_path_buf();
 
-        let mut path_mapping_rules = config.path_mapping_rules.unwrap_or_default();
-        path_mapping_rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
-        let path_mapping_rules = Arc::new(path_mapping_rules);
+        let path_mapper = Arc::new(PathMapper::new(
+            config.path_mapping_rules.unwrap_or_default(),
+        )?);
         let profile = config.profile.take();
-        let library = derive_library(profile.as_ref(), &path_mapping_rules);
+        let library = derive_library(profile.as_ref(), &path_mapper);
         let process_env = config.os_env_vars.unwrap_or_default();
 
         // Create helpers directory and spawn cross-user helper if needed.
@@ -802,7 +807,7 @@ impl Session {
             process_env,
             created_env_vars: HashMap::new(),
             library,
-            path_mapping_rules,
+            path_mapper,
             job_parameter_values: config.job_parameter_values,
             action: ActionStatusFields::new(),
             cancel: CancelFields::new(config.cancel_token),
@@ -822,30 +827,42 @@ impl Session {
         })
     }
 
-    #[allow(
-        missing_docs,
-        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-    )]
-    pub fn with_path_mapping(mut self, mut rules: Vec<PathMappingRule>) -> Self {
-        rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
-        self.path_mapping_rules = Arc::new(rules);
-        self.library = derive_library(self.profile.as_ref(), &self.path_mapping_rules);
-        self
+    /// Replace the session's path mapping rules, keeping the order given.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::InvalidPathMappingRule`] when a rule's source
+    /// path is not absolute for its format.
+    pub fn with_path_mapping(mut self, rules: Vec<PathMappingRule>) -> Result<Self, SessionError> {
+        self.path_mapper = Arc::new(PathMapper::new(rules)?);
+        self.library = derive_library(self.profile.as_ref(), &self.path_mapper);
+        Ok(self)
     }
 
-    /// Extend the session's path mapping rules with additional rules.
-    /// Rules are re-sorted by source path length (longest first) after extending.
-    pub fn extend_path_mapping_rules(&mut self, additional: Vec<PathMappingRule>) {
-        let mut rules = (*self.path_mapping_rules).clone();
+    /// Extend the session's path mapping rules with additional rules,
+    /// appended after the existing ones. Between rules for the same
+    /// location, the one given last wins, so an added rule replaces an
+    /// existing rule for the same source path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::InvalidPathMappingRule`], and leaves the
+    /// rules unchanged, when an added rule's source path is not absolute
+    /// for its format.
+    pub fn extend_path_mapping_rules(
+        &mut self,
+        additional: Vec<PathMappingRule>,
+    ) -> Result<(), SessionError> {
+        let mut rules = self.path_mapper.rules().to_vec();
         rules.extend(additional);
-        rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
-        self.path_mapping_rules = Arc::new(rules);
-        self.library = derive_library(self.profile.as_ref(), &self.path_mapping_rules);
+        self.path_mapper = Arc::new(PathMapper::new(rules)?);
+        self.library = derive_library(self.profile.as_ref(), &self.path_mapper);
+        Ok(())
     }
 
-    /// Get the current path mapping rules.
+    /// Get the current path mapping rules, in the order given.
     pub fn path_mapping_rules(&self) -> &[PathMappingRule] {
-        &self.path_mapping_rules
+        self.path_mapper.rules()
     }
 
     /// Set the [`ModelProfile`](openjd_model::ModelProfile) that drives
@@ -855,7 +872,7 @@ impl Session {
     /// sees the new profile.
     pub fn with_profile(mut self, profile: openjd_model::ModelProfile) -> Self {
         self.profile = Some(profile);
-        self.library = derive_library(self.profile.as_ref(), &self.path_mapping_rules);
+        self.library = derive_library(self.profile.as_ref(), &self.path_mapper);
         self
     }
 
@@ -2372,11 +2389,13 @@ impl Session {
 
     /// Materialize path mapping rules to a JSON file and set symbol table entries.
     fn materialize_path_mapping(&self, symtab: &mut SymbolTable) -> Result<(), SessionError> {
-        let has_rules = !self.path_mapping_rules.is_empty();
+        let has_rules = !self.path_mapper.is_empty();
         let rules_json = if has_rules {
+            // In precedence order, so a reader that applies the first
+            // matching rule gets the same result as the session.
             let rules: Vec<serde_json::Value> = self
-                .path_mapping_rules
-                .iter()
+                .path_mapper
+                .rules_by_precedence()
                 .map(|rule| {
                     serde_json::json!({
                         "source_path_format": match rule.source_path_format {
@@ -2708,12 +2727,7 @@ impl Session {
 
     /// Apply path mapping rules to a string, returning the mapped result.
     fn apply_path_mapping_to_string(&self, path: &str) -> String {
-        for rule in self.path_mapping_rules.iter() {
-            if let Some(mapped) = rule.apply(path) {
-                return mapped;
-            }
-        }
-        path.to_string()
+        self.path_mapper.map(path)
     }
 
     /// Apply path mapping rules to a value if it's a Path or ListPath type.
@@ -2726,20 +2740,15 @@ impl Session {
                 value: path_str,
                 format,
                 ..
-            } => {
-                for rule in self.path_mapping_rules.iter() {
-                    if let Some(mapped) = rule.apply(path_str) {
-                        return openjd_expr::ExprValue::new_path(mapped, *format);
-                    }
-                }
-                value.clone()
-            }
+            } => match self.path_mapper.apply(path_str) {
+                Some(mapped) => openjd_expr::ExprValue::new_path(mapped, *format),
+                None => value.clone(),
+            },
             openjd_expr::ExprValue::ListPath(elements, fmt, _) => {
                 let mapped: Vec<openjd_expr::ExprValue> = elements
                     .iter()
                     .map(|s| {
-                        let mapped_s =
-                            openjd_expr::path_mapping::apply_rules(&self.path_mapping_rules, s);
+                        let mapped_s = self.path_mapper.map(s);
                         openjd_expr::ExprValue::new_path(mapped_s, *fmt)
                     })
                     .collect();

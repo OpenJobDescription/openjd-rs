@@ -31,7 +31,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::path_mapping::PathMappingRule;
+use crate::path_mapping::{InvalidPathMappingRule, PathMapper, PathMappingRule};
 
 /// Expression-language specification revision.
 ///
@@ -105,17 +105,22 @@ pub enum HostContext {
     /// available but signatures must be known for type checking.
     Unresolved,
     /// Host-context functions are registered with implementations that
-    /// use the supplied path mapping rules. Use this at runtime.
+    /// use the supplied path mapper. Use this at runtime.
     ///
-    /// Rules are shared via `Arc` so cloning a library is cheap.
-    WithRules(Arc<Vec<PathMappingRule>>),
+    /// The mapper is shared via `Arc` so cloning a library is cheap.
+    WithRules(Arc<PathMapper>),
 }
 
 impl HostContext {
-    /// Convenience constructor: take ownership of a `Vec<PathMappingRule>`
-    /// and wrap it in an `Arc`.
-    pub fn with_rules(rules: Vec<PathMappingRule>) -> Self {
-        HostContext::WithRules(Arc::new(rules))
+    /// Convenience constructor: build a [`PathMapper`] from `rules` and
+    /// wrap it in an `Arc`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvalidPathMappingRule`] when a rule's `source_path` is
+    /// not absolute for its format (see [`PathMapper::new`]).
+    pub fn with_rules(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule> {
+        Ok(HostContext::WithRules(Arc::new(PathMapper::new(rules)?)))
     }
 
     /// Whether this host context registers any host-context functions.
@@ -546,7 +551,7 @@ mod tests {
     #[test]
     fn with_host_context_rules() {
         let rules = vec![];
-        let p = ExprProfile::current().with_host_context(HostContext::with_rules(rules));
+        let p = ExprProfile::current().with_host_context(HostContext::with_rules(rules).unwrap());
         assert!(p.host_context().is_enabled());
         assert!(!p.host_context().is_unresolved());
     }
@@ -566,8 +571,10 @@ mod tests {
             source_path: "/c".into(),
             destination_path: "/d".into(),
         };
-        let p1 = ExprProfile::current().with_host_context(HostContext::with_rules(vec![r1]));
-        let p2 = ExprProfile::current().with_host_context(HostContext::with_rules(vec![r2]));
+        let p1 =
+            ExprProfile::current().with_host_context(HostContext::with_rules(vec![r1]).unwrap());
+        let p2 =
+            ExprProfile::current().with_host_context(HostContext::with_rules(vec![r2]).unwrap());
         assert_eq!(p1.cache_key(), p2.cache_key());
     }
 
@@ -578,7 +585,7 @@ mod tests {
             .with_host_context(HostContext::Unresolved)
             .cache_key();
         let c = ExprProfile::current()
-            .with_host_context(HostContext::with_rules(vec![]))
+            .with_host_context(HostContext::with_rules(vec![]).unwrap())
             .cache_key();
         assert_ne!(a, b);
         assert_ne!(a, c);
