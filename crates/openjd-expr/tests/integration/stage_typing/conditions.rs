@@ -207,3 +207,38 @@ fn name_that_resolves_nowhere_in_a_part_a_run_may_skip_is_an_error() {
         ],
     );
 }
+
+#[test]
+fn member_some_type_has_in_a_custom_library_is_absorbed() {
+    // Round 2 B-F1/B-F2: with a library where the member exists for some
+    // type, a misuse fails on the value's type and is absorbed in a part a
+    // run may skip: a property of a generic receiver that fails, a method
+    // that is also a property of another type, and a property that is also
+    // a method of another type.
+    fn failing(_: &mut dyn EvalContext, _: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
+        Err(ExpressionError::new("first: the list is empty"))
+    }
+    fn stem2(_: &mut dyn EvalContext, a: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
+        Ok(a[0].clone())
+    }
+    let mut lib = (*FunctionLibrary::for_profile(&ExprProfile::current())).clone();
+    lib.register_sig("__property_first__", "(list[T]) -> T", failing)
+        .unwrap();
+    lib.register_sig("stem", "(path, int) -> path", stem2)
+        .unwrap();
+    lib.register_sig("__property_upper__", "(path) -> string", failing)
+        .unwrap();
+    let [p8, _, _] = states();
+    for expr in [
+        "Task.Param.C or [1].first == 1",
+        "Task.Param.C or path('/a').stem() == 'x'",
+        "Task.Param.C or 'a'.upper == 'x'",
+    ] {
+        let v = ParsedExpression::new(expr)
+            .unwrap()
+            .with_library(&lib)
+            .evaluate(&[&p8])
+            .unwrap_or_else(|e| panic!("{expr}: {e}"));
+        assert_eq!(v.expr_type(), tp("unresolved[bool]"), "{expr}");
+    }
+}

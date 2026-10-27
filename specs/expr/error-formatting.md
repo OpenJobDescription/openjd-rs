@@ -129,10 +129,10 @@ ExpressionError::parse_error("Syntax error: ...")
 ExpressionError::expression_too_deep(depth, MAX_EXPRESSION_DEPTH)
 ```
 
-`UndefinedVariable` and `UnknownFunction` carry structured fields that no
-convenience constructor shortcut wraps today — build them via
+`UndefinedVariable`, `UnknownFunction` and `UnknownMember` carry structured
+fields that no convenience constructor shortcut wraps today — build them via
 `ExpressionError::from_kind(ExpressionErrorKind::UndefinedVariable { name, suggestion })`
-or the equivalent `UnknownFunction` form.
+or the equivalent `UnknownFunction` / `UnknownMember { message }` form.
 
 ## Smart Caret Positioning
 

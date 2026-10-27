@@ -663,3 +663,20 @@ fn type_variable_element_type_is_not_a_list_of_lists() {
     }
     assert_eq!(eval(expr, &rt).to_display_string(), "[1, 2]");
 }
+
+#[test]
+fn dotted_path_on_a_misused_member_reports_the_member() {
+    // Round 2 A-F1: a dotted chain whose base fails on a misused member
+    // reported "Undefined variable" for the whole path, though the
+    // variable exists. The member's own error stands, and still
+    // propagates from a part a run may skip.
+    let expr = "[x.nam.name for x in Param.L]";
+    assert_err_all(
+        expr,
+        &[
+            "Cannot access attribute 'nam' on int\n",
+            &format!("  {expr}\n"),
+            "   ~~^~~",
+        ],
+    );
+}

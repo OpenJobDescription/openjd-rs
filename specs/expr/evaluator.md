@@ -235,10 +235,11 @@ This dual-purpose resolution is why `Param.Frame` works as a variable lookup and
 
 Steps 2 and 3 replace the original error with a friendlier one: a failed base
 evaluation with a dotted path becomes "Undefined variable 'Param.Frame'" with
-a suggestion when the base failed to resolve a name (a base that fails on its
-value's type keeps its own error), and a failed property dispatch becomes "'name' property is not
+a suggestion when the base failed on an undefined symbol (a base that fails on
+its value's type, or on a misused member, keeps its own error), and a failed property dispatch becomes "'name' property is not
 available for string" (or "is a method, not a property", or "Cannot access
-attribute"; the last two, when no type has the property, are `UnknownMember`). Budget errors are
+attribute"; the last two, when no type has the property, are `UnknownMember`, and
+"Cannot access attribute" for a property only a generic receiver has stays a plain error). Budget errors are
 not replaced; they propagate unchanged. A replaced budget error would be a
 value error that an enclosing construct may absorb (see
 [Speculative evaluation](#speculative-evaluation)), and the memory and
@@ -515,9 +516,11 @@ errors with friendlier ones: [`eval_attribute`](#attribute-eval_attribute)'s
 fallbacks and [`eval_call`](#call-eval_call)'s "is a property, not a method"
 error for a failed method call. Both leave budget errors as they are. The
 first `eval_attribute` fallback reports a dotted path as `UndefinedVariable`
-only when its base failed to resolve a name (`Param.Typo.Deep`), which
+only when its base failed on an undefined symbol (`Param.Typo.Deep`), which
 propagates; a base that fails on its value's type (`x.parent.name` with
-`x: int`) keeps that error, which is absorbed. A property name called as a
+`x: int`) keeps that error, which is absorbed, and a base that fails on a
+misused member (`x.nam.name`) keeps its `UnknownMember`, which propagates.
+A property name called as a
 method (`x.name()` when no type has a `name` method), a method used as a
 property (`x.upper`), and a property no type has (`x.nam`) are
 `UnknownMember`, which propagates; a property some other type has (`x.name`
@@ -554,11 +557,13 @@ Rejects:
 - Direct dunder calls (`__add__(1, 2)` — use `1 + 2` instead)
 - Calling properties as methods (`path.name()` — use `path.name` instead).
   When a method call fails and a property of the same name exists, the
-  original error is replaced with "is a property, not a method". Budget
-  errors are not replaced (see
-  [Speculative evaluation](#speculative-evaluation)). No method in the
-  default library shares a name with a property, so this only applies to
-  custom libraries.
+  original error is replaced with "is a property, not a method". When no
+  method of that name exists (as for every property in the default
+  library), the replacement is `UnknownMember`, a name error that static
+  checking reports even in a part a run may skip; when a method of that
+  name exists for other types, the call failed on the value's type and the
+  replacement is a plain error. Budget errors are not replaced (see
+  [Speculative evaluation](#speculative-evaluation)).
 
 ### List (`eval_list`)
 Evaluates list literals. Validates max 2 nesting levels. Coerces elements when mixed

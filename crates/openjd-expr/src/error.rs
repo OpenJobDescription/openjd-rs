@@ -30,7 +30,10 @@ pub enum ExpressionErrorKind {
     /// property of no type (`x.nam`). Like [`Self::UnknownFunction`], it
     /// does not depend on any value.
     #[error("{message}")]
-    UnknownMember { message: String },
+    UnknownMember {
+        /// The diagnostic, naming the member and how it was misused.
+        message: String,
+    },
 
     /// Argument types did not match any overload signature.
     #[error("{message}")]

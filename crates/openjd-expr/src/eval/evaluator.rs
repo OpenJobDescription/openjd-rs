@@ -831,13 +831,16 @@ impl<'a> Evaluator<'a> {
         // error would be a value error that an enclosing
         // `eval_speculative` could absorb, and the memory and operations
         // were spent regardless. The dotted path is reported as undefined
-        // only when the base failed to resolve a name; a base that fails
-        // on its value's type (`x.parent.name` with `x: int`) keeps its
-        // error, which depends on the value.
+        // only when the base failed on an undefined symbol; a base that
+        // fails on its value's type (`x.parent.name` with `x: int`) or on
+        // a misused member (`x.nam.name`) keeps its own error.
         let value = match self.eval_node(&a.value, None) {
             Ok(v) => v,
             Err(e) if contains_budget_error(&e) => return Err(e),
-            Err(e) if dotted_path.is_some() && contains_name_error(&e) => {
+            Err(e)
+                if dotted_path.is_some()
+                    && matches!(e.kind(), ExpressionErrorKind::UndefinedVariable { .. }) =>
+            {
                 let path = dotted_path.as_ref().unwrap();
                 let available = self.collect_symbol_names();
                 let suggestion = crate::edit_distance::suggest_closest(
@@ -912,13 +915,16 @@ impl<'a> Evaluator<'a> {
                     }
                 }
 
-                // No type has the property or a method of that name.
-                Err(
-                    ExpressionError::from_kind(ExpressionErrorKind::UnknownMember {
-                        message: format!("Cannot access attribute '{attr}' on {val_type_str}"),
-                    })
-                    .with_node(src, &attr_node),
-                )
+                // No type has the property or a method of that name; a
+                // property of a generic receiver (`list[T]`), which the
+                // listing above leaves out, fails on the value.
+                let message = format!("Cannot access attribute '{attr}' on {val_type_str}");
+                let err = if self.library.get_signatures(&prop_name).is_empty() {
+                    ExpressionError::from_kind(ExpressionErrorKind::UnknownMember { message })
+                } else {
+                    ExpressionError::new(message)
+                };
+                Err(err.with_node(src, &attr_node))
             }
         }
     }
@@ -1860,15 +1866,16 @@ impl<'a> Evaluator<'a> {
     /// boolop after an unresolved one, the links of a chained comparison
     /// after an unresolved one, or a comprehension's filter and body typed
     /// over an unresolved iterable or filter (through [`Self::speculate`]).
-    /// Both absorption rules live here so that every absorbing construct
-    /// applies both:
+    /// All three absorption rules live here so that every absorbing
+    /// construct applies them:
     ///
     /// - A budget error (`MemoryLimitExceeded` / `OperationLimitExceeded`,
     ///   directly or inside a compound error's sub-errors) is returned as
     ///   `Err`. The memory and operations were spent regardless of what
     ///   a runtime would skip.
     /// - A name that resolves nowhere (an undefined symbol, an unknown
-    ///   function or method; [`contains_name_error`]) is returned as `Err`
+    ///   function, or a method or property that no type has;
+    ///   [`contains_name_error`]) is returned as `Err`
     ///   too: it does not depend on any value, so every run that evaluates
     ///   the sub-expression fails on it.
     /// - Any other value error is returned as `Absorbed`, and the live footprint
@@ -1922,8 +1929,9 @@ impl<'a> Evaluator<'a> {
     /// only run that can succeed keeps no element: the result is
     /// `unresolved(list[nulltype])`, not an error. The failure surfaces at
     /// the stage whose values reach it. Budget exceedances, and names that
-    /// resolve nowhere (an undefined symbol, an unknown function or
-    /// method), propagate: neither depends on the values.
+    /// resolve nowhere (an undefined symbol, an unknown function, or a
+    /// method or property that no type has), propagate: neither depends on
+    /// the values.
     fn eval_listcomp_unresolved(
         &mut self,
         lc: &ast::ExprListComp,
