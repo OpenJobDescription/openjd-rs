@@ -497,6 +497,20 @@ fn more_than_max_len_values_rejected() {
 }
 
 #[test]
+fn accept_single_huge_chunk() {
+    // A single chunk with a very large logical length is allowed —
+    // `RangeExpr` stores chunks symbolically, so the heap cost is O(1)
+    // regardless of `end - start`. Only chunk count is capped. Under a
+    // deadline: an implementation that lists the values never finishes.
+    within_deadline(Duration::from_secs(10), || {
+        let expr = "1-100000000000";
+        let r = expr.parse::<RangeExpr>().unwrap();
+        assert_eq!(r.ranges().len(), 1);
+        assert_eq!(r.len(), 100_000_000_000);
+    });
+}
+
+#[test]
 fn largest_count_parses_and_indexes() {
     // i64::MAX values: an implementation that lists them never finishes.
     within_deadline(Duration::from_secs(10), || {

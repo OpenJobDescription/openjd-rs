@@ -1340,7 +1340,8 @@ impl RangeExpr {
     pub fn to_vec(&self) -> Vec<i64>;
 
     /// Slice with already-normalized start/stop and a positive step.
-    /// Returns a new `RangeExpr` in canonical form, in O(runs). Errors on
+    /// Returns a new `RangeExpr` in canonical form, in O(log runs + runs
+    /// the index span overlaps). Errors on
     /// a non-positive step, or on more than MAX_RANGE_EXPR_CHUNKS runs in
     /// the result's canonical form (a slice can have more runs than the
     /// value it slices).

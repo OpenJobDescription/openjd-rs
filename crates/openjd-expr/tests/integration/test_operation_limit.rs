@@ -5,6 +5,9 @@
 //! Tests ported from Python test_operation_limit.py
 
 use openjd_expr::*;
+use std::time::Duration;
+
+use crate::test_range_expr_canonical::within_deadline;
 
 fn eval_op(expr: &str, limit: usize) -> Result<EvalResult, ExpressionError> {
     ParsedExpression::new(expr).and_then(|p| {
@@ -873,27 +876,31 @@ fn list_range_length_mismatch_charged_by_steps_taken() {
 
 #[test]
 fn comprehension_over_huge_range_bounded_lazily() {
-    // A huge symbolic range is iterated lazily: the default memory
-    // limit trips while the result is being built (honest usage
-    // figure), rather than an up-front materialization of ~4.6e18
-    // elements or a pre-charge with an astronomical op count.
-    let e = ParsedExpression::new("[x for x in range_expr('0-4611686018427387902')]")
-        .and_then(|p| p.evaluate(&SymbolTable::new()))
-        .unwrap_err()
-        .to_string();
-    assert_eq!(
-        e,
-        [
-            // 134217824 ~ 128 MiB: the Vec's projected post-doubling
-            // capacity, charged before the growth allocation happens.
-            "Expression memory usage (134217824 bytes) exceeded limit (100000000 bytes)
+    // Under a deadline: an implementation that lists the values, or
+    // streams them without charging memory, never finishes.
+    within_deadline(Duration::from_secs(10), || {
+        // A huge symbolic range is iterated lazily: the default memory
+        // limit trips while the result is being built (honest usage
+        // figure), rather than an up-front materialization of ~4.6e18
+        // elements or a pre-charge with an astronomical op count.
+        let e = ParsedExpression::new("[x for x in range_expr('0-4611686018427387902')]")
+            .and_then(|p| p.evaluate(&SymbolTable::new()))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            e,
+            [
+                // 134217824 ~ 128 MiB: the Vec's projected post-doubling
+                // capacity, charged before the growth allocation happens.
+                "Expression memory usage (134217824 bytes) exceeded limit (100000000 bytes)
 ",
-            "  [x for x in range_expr('0-4611686018427387902')]
+                "  [x for x in range_expr('0-4611686018427387902')]
 ",
-            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
-        ]
-        .concat()
-    );
+                "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+            ]
+            .concat()
+        );
+    });
 }
 
 #[test]

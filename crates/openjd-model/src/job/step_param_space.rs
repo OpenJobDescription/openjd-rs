@@ -12,7 +12,13 @@
 //! - `RangeExprNode`: computes values on demand via index arithmetic
 //! - `ProductNode`: divmod indexing (rightmost moves fastest)
 //! - `AssociationNode`: lockstep indexing
-//! - `StaticChunkNode`: pre-computed chunk boundaries
+//! - `StaticChunkNode`: NONCONTIGUOUS chunk boundaries by index arithmetic
+//! - `ContiguousChunkNode`: CONTIGUOUS chunks of the range's interval groups
+//! - `AdaptiveChunkNode`: chunks whose size can change during iteration
+//!
+//! No chunking path lists a range expression's values: a NONCONTIGUOUS
+//! chunk is a `RangeExpr::slice`, and CONTIGUOUS chunks come from at most
+//! three interval groups per run of the range.
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -113,61 +119,300 @@ pub(crate) fn chunk_int_value_bound_message(v: i64) -> String {
     format!("value {v} exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)")
 }
 
-/// Render a chunk's values as a `RangeExpr`.
+/// A CONTIGUOUS chunk: the values `first..=last`, flagged with
+/// `with_contiguous(true)` so `Display` writes `<first>-<last>`, including a
+/// single value (`"3-3"`).
+fn contiguous_chunk(first: i64, last: i64) -> RangeExpr {
+    format!("{first}-{last}")
+        .parse::<RangeExpr>()
+        .expect("range string built from valid integers")
+        .with_contiguous(true)
+}
+
+/// The NONCONTIGUOUS chunk of the values at indices `start..end` of `range`,
+/// in the canonical form of Template Schemas §3.4.1.1.1 (e.g. `[1,2,4,6]` →
+/// `"1,2-6:2"`, `[1,2,3,5,7,8,9]` → `"1-3,5,7-9"`).
 ///
-/// CONTIGUOUS chunks span `first-last` and carry the contiguous display flag.
-/// NONCONTIGUOUS chunks are built with `RangeExpr::from_values`, so they are
-/// written in the canonical form of Template Schemas §3.4.1.1.1 (e.g.
-/// `[1,2,4,6]` → `"1,2-6:2"`, `[1,2,3,5,7,8,9]` → `"1-3,5,7-9"`).
-fn chunk_values_to_range_expr(vals: &[i64], constraint: &RangeConstraint) -> RangeExpr {
-    match constraint {
-        RangeConstraint::Contiguous => {
-            // Always "{first}-{last}", including a single value ("3-3").
-            // with_contiguous(true) makes Display keep that form.
-            format!("{}-{}", vals[0], vals[vals.len() - 1])
-                .parse::<RangeExpr>()
-                .expect("range string built from valid integers")
-                .with_contiguous(true)
-        }
-        // from_values fails only for i64::MIN or more than
-        // MAX_RANGE_EXPR_CHUNKS runs. CHUNK[INT] values are within the range
-        // value bound (checked by `StepParameterSpaceIterator::new_inner`;
-        // an INT parameter with chunks, which only the public API builds, is
-        // not checked there). Every chunk built here fits the run cap:
-        // static chunks are checked by `check_noncontiguous_chunks_fit`, and
-        // adaptive chunks are shortened by `AdaptiveChunkIterator::next`.
-        RangeConstraint::Noncontiguous => RangeExpr::from_values(vals.to_vec())
-            .expect("chunk values within the value bound and the run cap"),
+/// A range expression is cut with `RangeExpr::slice`, in O(log R + runs the
+/// chunk spans), without listing its values; a list is already in memory and
+/// goes through `RangeExpr::from_values`. Both fail only when the chunk's
+/// canonical form has more than [`MAX_RANGE_EXPR_CHUNKS`] runs, or, for a
+/// list, holds `i64::MIN`. Callers guarantee `start <= end <= len`.
+fn noncontiguous_chunk(
+    range: &job::TaskParamRange<i64>,
+    start: usize,
+    end: usize,
+) -> Result<RangeExpr, openjd_expr::ExpressionError> {
+    match range {
+        // A range expression has at most i64::MAX values, so its indices fit i64.
+        job::TaskParamRange::RangeExpr(r) => r.slice(start as i64, end as i64, 1),
+        job::TaskParamRange::List(values) => RangeExpr::from_values(values[start..end].to_vec()),
     }
 }
 
-/// Build a `RangeExpr` for chunk `i` given the chunk layout parameters.
-/// Used by `StaticChunkNode` and `StaticChunkIterator` for noncontiguous chunking.
-///
-/// - `range`: the full integer range being chunked
-/// - `constraint`: whether chunks must be contiguous (`1-10`) or can be non-contiguous (`1,3,7-10`)
-/// - `small`: base chunk size (`total_values / num_chunks`)
-/// - `leftovers`: how many of the first chunks get one extra element (`total_values % num_chunks`)
-/// - `i`: zero-based chunk index to build
-fn build_chunk_range_expr(
-    range: &job::TaskParamRange<i64>,
-    constraint: &RangeConstraint,
+/// How static NONCONTIGUOUS chunking splits `total` values into `num_chunks`
+/// chunks of consecutive indices: the first `leftovers` chunks take
+/// `small + 1` values and the rest take `small`.
+#[derive(Clone, Copy)]
+struct StaticLayout {
+    num_chunks: usize,
     small: usize,
     leftovers: usize,
-    i: usize,
-) -> RangeExpr {
-    let size = small + if i < leftovers { 1 } else { 0 };
-    let offset = i * small + i.min(leftovers);
-    let build = |vals: &[i64]| -> RangeExpr { chunk_values_to_range_expr(vals, constraint) };
-    match range {
-        job::TaskParamRange::RangeExpr(r) => {
-            let vals: Vec<i64> = (offset..offset + size)
-                .map(|j| r.get(j as i64).expect("chunk element within range bounds"))
-                .collect();
-            build(&vals)
+}
+
+impl StaticLayout {
+    /// The layout for `total > 0` values and chunks of at most
+    /// `default_task_count >= 1` values.
+    fn new(total: usize, default_task_count: usize) -> Self {
+        let num_chunks = total.div_ceil(default_task_count);
+        Self {
+            num_chunks,
+            small: total / num_chunks,
+            leftovers: total % num_chunks,
         }
-        job::TaskParamRange::List(values) => build(&values[offset..offset + size]),
     }
+
+    /// The largest chunk's size.
+    fn largest(&self) -> usize {
+        self.small + usize::from(self.leftovers > 0)
+    }
+
+    /// Chunk `i` covers indices `offset..offset + size`; returns
+    /// `(offset, size)`. Offsets are at most the value count, so nothing
+    /// overflows.
+    fn bounds(&self, i: usize) -> (usize, usize) {
+        let size = self.small + usize::from(i < self.leftovers);
+        let offset = i * self.small + i.min(self.leftovers);
+        (offset, size)
+    }
+
+    /// The chunk that holds the value at `index` (below the value count).
+    fn chunk_holding(&self, index: usize) -> usize {
+        // The larger chunks come first.
+        let larger_span = self.leftovers * (self.small + 1);
+        if index < larger_span {
+            index / (self.small + 1)
+        } else {
+            (self.leftovers + (index - larger_span) / self.small).min(self.num_chunks - 1)
+        }
+    }
+}
+
+/// The index of `value` in `r`, or `None` if `r` does not hold it. O(log R).
+fn range_expr_index_of(r: &RangeExpr, value: i64) -> Option<usize> {
+    let runs = r.ranges();
+    let k = runs.partition_point(|run| run.end() < value);
+    let run = runs.get(k).filter(|run| run.contains(value))?;
+    let before = match k {
+        0 => 0,
+        k => r.cumulative_lengths()[k - 1],
+    };
+    // `step > 0`, and `value` is on the run's progression.
+    let offset = value.abs_diff(run.start()) / run.step() as u64;
+    usize::try_from(before + offset).ok()
+}
+
+/// Whether every value of `sub` is a value of `sup`, decided on their runs
+/// without listing values: O(R_sub log R_sup + R_sup).
+///
+/// For each run of `sub`, `x` is its next value still to check. The run of
+/// `sup` that could hold `x` is the first that ends at or after it. When
+/// that run holds `x` and its step divides the step of `sub`'s run, it also
+/// holds every later value of `sub`'s run up to its own end, so those are
+/// skipped in one move.
+fn range_expr_is_subset(sub: &RangeExpr, sup: &RangeExpr) -> bool {
+    let runs = sup.ranges();
+    sub.ranges().iter().all(|p| {
+        // i128: `x` can step past i64::MAX after `sub`'s last value.
+        let (step, last) = (i128::from(p.step()), i128::from(p.end()));
+        let mut x = i128::from(p.start());
+        let mut k = 0;
+        while x <= last {
+            // `x` is a value of `p`, so it fits i64.
+            let xv = x as i64;
+            k += runs[k..].partition_point(|q| q.end() < xv);
+            let Some(q) = runs.get(k).filter(|q| q.contains(xv)) else {
+                return false;
+            };
+            let through = last.min(i128::from(q.end()));
+            let count = (through - x) / step + 1;
+            if count >= 2 && step % i128::from(q.step()) != 0 {
+                return false;
+            }
+            x += count * step;
+        }
+        true
+    })
+}
+
+/// The contiguous intervals of a range, which CONTIGUOUS chunking splits
+/// into chunks: maximal sets of values that are adjacent in the range and
+/// consecutive integers. A run with a step above 1 has one interval per
+/// value, so its inner values are kept as one [`IntervalGroup::Singles`]
+/// group rather than one group each, which keeps a range of `R` runs to at
+/// most `3R` groups however many values it has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IntervalGroup {
+    /// One interval: the values `first..=last`.
+    Interval { first: i64, last: i64 },
+    /// `count >= 1` intervals of one value each: `first`, `first + step`,
+    /// and so on.
+    Singles { first: i64, step: i64, count: usize },
+}
+
+impl IntervalGroup {
+    /// The group's largest value.
+    fn last_value(&self) -> i64 {
+        match *self {
+            Self::Interval { last, .. } => last,
+            // The values are those of a run, so this is exact.
+            Self::Singles { first, step, count } => {
+                first.wrapping_add_unsigned((count as u64 - 1) * step as u64)
+            }
+        }
+    }
+
+    /// The number of values in the group.
+    fn value_count(&self) -> usize {
+        match *self {
+            // At most the length of a range, so it fits on 64-bit targets.
+            Self::Interval { first, last } => (last.abs_diff(first) + 1) as usize,
+            Self::Singles { count, .. } => count,
+        }
+    }
+
+    /// The number of chunks the group splits into.
+    fn chunk_count(&self, default_task_count: usize) -> usize {
+        match *self {
+            Self::Interval { .. } => interval_chunking(self.value_count(), default_task_count).0,
+            Self::Singles { count, .. } => count,
+        }
+    }
+
+    /// The group's chunk `j` (below its chunk count).
+    fn chunk(&self, j: usize, default_task_count: usize) -> RangeExpr {
+        match *self {
+            Self::Interval { first, .. } => {
+                let (cc, small, lo) = interval_chunking(self.value_count(), default_task_count);
+                let offset = j * small + larger_chunks_before(j, lo, cc);
+                let size =
+                    small + (larger_chunks_before(j + 1, lo, cc) - larger_chunks_before(j, lo, cc));
+                let start = first + offset as i64;
+                contiguous_chunk(start, start + size as i64 - 1)
+            }
+            Self::Singles { first, step, .. } => {
+                let v = first.wrapping_add_unsigned(j as u64 * step as u64);
+                contiguous_chunk(v, v)
+            }
+        }
+    }
+
+    /// The group's chunk that holds `value`, if any, for `value <= last_value()`.
+    fn chunk_holding(&self, value: i64, default_task_count: usize) -> Option<RangeExpr> {
+        match *self {
+            Self::Interval { first, .. } => {
+                if value < first {
+                    return None;
+                }
+                let offset = value.abs_diff(first) as usize;
+                let (cc, small, lo) = interval_chunking(self.value_count(), default_task_count);
+                let start = |j: usize| j * small + larger_chunks_before(j, lo, cc);
+                // The last chunk that starts at or before `offset`; chunk
+                // starts increase with `j`, and chunk 0 starts at 0.
+                let (mut found, mut beyond) = (0, cc);
+                while beyond - found > 1 {
+                    let mid = found + (beyond - found) / 2;
+                    if start(mid) <= offset {
+                        found = mid;
+                    } else {
+                        beyond = mid;
+                    }
+                }
+                Some(self.chunk(found, default_task_count))
+            }
+            Self::Singles { first, step, .. } => (value >= first
+                && value.abs_diff(first).is_multiple_of(step as u64))
+            .then(|| contiguous_chunk(value, value)),
+        }
+    }
+}
+
+/// Builds the [`IntervalGroup`]s of a range in order, merging each new
+/// interval into the one before it when their values are consecutive.
+#[derive(Default)]
+struct IntervalGroupBuilder {
+    groups: Vec<IntervalGroup>,
+    open: Option<(i64, i64)>,
+}
+
+impl IntervalGroupBuilder {
+    fn push_interval(&mut self, first: i64, last: i64) {
+        self.open = match self.open {
+            Some((a, b)) if b.checked_add(1) == Some(first) => Some((a, last)),
+            open => {
+                self.flush(open);
+                Some((first, last))
+            }
+        };
+    }
+
+    fn push_singles(&mut self, first: i64, step: i64, count: usize) {
+        if count > 0 {
+            let open = self.open.take();
+            self.flush(open);
+            self.groups
+                .push(IntervalGroup::Singles { first, step, count });
+        }
+    }
+
+    fn flush(&mut self, open: Option<(i64, i64)>) {
+        if let Some((first, last)) = open {
+            self.groups.push(IntervalGroup::Interval { first, last });
+        }
+    }
+
+    fn finish(mut self) -> Vec<IntervalGroup> {
+        let open = self.open.take();
+        self.flush(open);
+        self.groups
+    }
+}
+
+/// The [`IntervalGroup`]s of a range, in range order. O(R) for a range
+/// expression of `R` runs, O(N) for a list of `N` values.
+///
+/// A list's intervals follow list order, as in the reference
+/// (`divide_int_list_into_contiguous_chunks`): a value joins the interval
+/// before it when it is one more than the value before it in the list.
+fn interval_groups(range: &job::TaskParamRange<i64>) -> Vec<IntervalGroup> {
+    let mut builder = IntervalGroupBuilder::default();
+    match range {
+        job::TaskParamRange::List(values) => {
+            for &v in values {
+                builder.push_interval(v, v);
+            }
+        }
+        job::TaskParamRange::RangeExpr(r) => {
+            for run in r.ranges() {
+                if run.step() == 1 {
+                    builder.push_interval(run.start(), run.end());
+                } else {
+                    // A step above 1 separates every pair of the run's
+                    // values; only its first and last values can join a
+                    // neighbouring interval.
+                    let n = run.len();
+                    builder.push_interval(run.start(), run.start());
+                    if n > 2 {
+                        builder.push_singles(run.start() + run.step(), run.step(), n - 2);
+                    }
+                    if n >= 2 {
+                        builder.push_interval(run.end(), run.end());
+                    }
+                }
+            }
+        }
+    }
+    builder.finish()
 }
 
 /// Reject static NONCONTIGUOUS chunking with a chunk whose canonical form
@@ -190,12 +435,9 @@ fn build_chunk_range_expr(
 fn check_noncontiguous_chunks_fit(
     name: &str,
     range: &job::TaskParamRange<i64>,
-    num_chunks: usize,
-    small: usize,
-    leftovers: usize,
+    layout: &StaticLayout,
 ) -> Result<(), ModelError> {
-    let largest = small + usize::from(leftovers > 0);
-    if largest <= MAX_RANGE_EXPR_CHUNKS {
+    if layout.largest() <= MAX_RANGE_EXPR_CHUNKS {
         return Ok(());
     }
     // Names the chunk by its index and its smallest and largest values.
@@ -203,12 +445,6 @@ fn check_noncontiguous_chunks_fit(
         ModelError::DecodeValidation(format!(
             "Task parameter '{name}': chunk {i} (values {first} to {last}): {e}"
         ))
-    };
-    // Chunk `i` covers indices `offset..offset + size` of the range.
-    let bounds = |i: usize| {
-        let size = small + usize::from(i < leftovers);
-        let offset = i * small + i.min(leftovers);
-        (offset, size)
     };
     match range {
         job::TaskParamRange::RangeExpr(r) => {
@@ -219,30 +455,24 @@ fn check_noncontiguous_chunks_fit(
             // index beyond usize, on a 32-bit target, saturates like the
             // range's `len()`.)
             let first_of_run_2 = usize::try_from(r.cumulative_lengths()[1]).unwrap_or(usize::MAX);
-            // The larger chunks come first, so find which one holds it.
-            let larger_span = leftovers * (small + 1);
-            let i = if first_of_run_2 < larger_span {
-                first_of_run_2 / (small + 1)
-            } else {
-                (leftovers + (first_of_run_2 - larger_span) / small).min(num_chunks - 1)
-            };
-            let (offset, size) = bounds(i);
-            // Chunk offsets and sizes are within the range's length, at most
-            // i64::MAX.
-            let (start, stop) = (offset as i64, (offset + size) as i64);
-            r.slice(start, stop, 1).map(|_| ()).map_err(|e| {
-                let value = |k: i64| r.get(k).expect("chunk index within the range");
-                chunk_error(i, value(start), value(stop - 1), e)
-            })
-        }
-        job::TaskParamRange::List(values) => (0..num_chunks).try_for_each(|i| {
-            let (offset, size) = bounds(i);
-            // A list may be unsorted: name its smallest and largest values.
-            let chunk = &values[offset..offset + size];
-            RangeExpr::from_values(chunk.to_vec())
+            let i = layout.chunk_holding(first_of_run_2);
+            let (offset, size) = layout.bounds(i);
+            noncontiguous_chunk(range, offset, offset + size)
                 .map(|_| ())
                 .map_err(|e| {
-                    let (min, max) = chunk
+                    // Chunk offsets and sizes are within the range's length,
+                    // at most i64::MAX.
+                    let value = |k: usize| r.get(k as i64).expect("chunk index within the range");
+                    chunk_error(i, value(offset), value(offset + size - 1), e)
+                })
+        }
+        job::TaskParamRange::List(values) => (0..layout.num_chunks).try_for_each(|i| {
+            let (offset, size) = layout.bounds(i);
+            noncontiguous_chunk(range, offset, offset + size)
+                .map(|_| ())
+                .map_err(|e| {
+                    // A list may be unsorted: name its smallest and largest values.
+                    let (min, max) = values[offset..offset + size]
                         .iter()
                         .fold((i64::MAX, i64::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
                     chunk_error(i, min, max, e)
@@ -349,33 +579,24 @@ impl NodeIterator for RangeExprIterator {
     }
 }
 
-/// Value-producing iterator for static chunk nodes.
+/// Value-producing iterator for static NONCONTIGUOUS chunk nodes.
 struct StaticChunkIterator {
     name: String,
     range: job::TaskParamRange<i64>,
-    constraint: RangeConstraint,
-    num_chunks: usize,
-    small: usize,
-    leftovers: usize,
+    layout: StaticLayout,
     index: usize,
-}
-
-impl StaticChunkIterator {
-    fn chunk_range_expr(&self, i: usize) -> RangeExpr {
-        build_chunk_range_expr(&self.range, &self.constraint, self.small, self.leftovers, i)
-    }
 }
 
 impl NodeIterator for StaticChunkIterator {
     fn next(&mut self, result: &mut TaskParameterSet) -> bool {
-        if self.index >= self.num_chunks {
+        if self.index >= self.layout.num_chunks {
             return false;
         }
         result.insert(
             self.name.clone(),
             TaskParameterValue {
                 param_type: TaskParameterType::ChunkInt,
-                value: ExprValue::RangeExpr(self.chunk_range_expr(self.index)),
+                value: ExprValue::RangeExpr(static_chunk(&self.range, &self.layout, self.index)),
             },
         );
         self.index += 1;
@@ -386,170 +607,89 @@ impl NodeIterator for StaticChunkIterator {
     }
 }
 
+/// Static NONCONTIGUOUS chunk `i` of `range`. It fits the run cap: the node
+/// was built only after `check_noncontiguous_chunks_fit` passed.
+fn static_chunk(range: &job::TaskParamRange<i64>, layout: &StaticLayout, i: usize) -> RangeExpr {
+    let (offset, size) = layout.bounds(i);
+    noncontiguous_chunk(range, offset, offset + size)
+        .expect("chunks checked against the run cap when the node was built")
+}
+
 /// Contiguous chunking node: splits values into chunks that respect gaps.
-/// Contiguous runs in the source range are identified, then each run is
-/// chunked independently. Uses index-based access to avoid materializing values.
+///
+/// The range's contiguous intervals are kept as [`IntervalGroup`]s (at most
+/// `3R` for a range expression of `R` runs, however many values it has), and
+/// each interval is chunked independently and arithmetically, so no path
+/// lists values or walks chunks.
 struct ContiguousChunkNode {
     name: String,
-    range: job::TaskParamRange<i64>,
+    groups: Arc<[IntervalGroup]>,
     default_task_count: usize,
-    num_chunks: usize, // cached exact count
-    total_len: usize,
-}
-
-/// Count contiguous chunks by walking the range's sub-ranges.
-/// For `RangeExpr`, uses the internal `IntRange` structure for O(R) where R is the
-/// number of sub-ranges (not the number of values). For `List`, scans values in O(N).
-fn count_contiguous_chunks_for_range(
-    range: &job::TaskParamRange<i64>,
-    default_task_count: usize,
-) -> usize {
-    match range {
-        job::TaskParamRange::List(v) => {
-            if v.is_empty() {
-                return 0;
-            }
-            let mut total = 0usize;
-            let mut interval_start = 0usize;
-            for i in 0..v.len() - 1 {
-                if v[i + 1] != v[i] + 1 {
-                    let len = i - interval_start + 1;
-                    total += len.div_ceil(default_task_count);
-                    interval_start = i + 1;
-                }
-            }
-            total += (v.len() - interval_start).div_ceil(default_task_count);
-            total
-        }
-        job::TaskParamRange::RangeExpr(r) => {
-            count_contiguous_chunks_from_sub_ranges(r, default_task_count)
-        }
-    }
-}
-
-/// Count contiguous chunks by iterating the `IntRange` sub-ranges of a `RangeExpr`.
-/// Merges adjacent intervals and computes chunk counts arithmetically per interval.
-fn count_contiguous_chunks_from_sub_ranges(r: &RangeExpr, default_task_count: usize) -> usize {
-    let sub_ranges = r.ranges();
-    if sub_ranges.is_empty() {
-        return 0;
-    }
-
-    let mut total_chunks = 0usize;
-    // Track the current merged contiguous interval as (start_val, end_val)
-    let mut interval: Option<(i64, i64)> = None;
-
-    for sr in sub_ranges {
-        if sr.step() == 1 {
-            // This sub-range is contiguous: values from sr.start() to sr.end()
-            match interval {
-                Some((is, ie)) if sr.start() == ie + 1 => {
-                    // Extends the current interval
-                    interval = Some((is, sr.end()));
-                }
-                Some((is, ie)) => {
-                    // Gap — flush the current interval
-                    let len = (ie - is + 1) as usize;
-                    total_chunks += len.div_ceil(default_task_count);
-                    interval = Some((sr.start(), sr.end()));
-                }
-                None => {
-                    interval = Some((sr.start(), sr.end()));
-                }
-            }
-        } else {
-            // Step > 1: each value is isolated (has gaps between them).
-            // We need to check if the first value merges with the current interval,
-            // then each subsequent value is its own interval.
-            let count = sr.len();
-            for idx in 0..count {
-                // SAFETY: idx is bounded by sr.len(), so get() always returns Some.
-                let val = sr.get(idx).expect("index within sub-range bounds");
-                match interval {
-                    Some((is, ie)) if val == ie + 1 => {
-                        interval = Some((is, val));
-                    }
-                    Some((is, ie)) => {
-                        let len = (ie - is + 1) as usize;
-                        total_chunks += len.div_ceil(default_task_count);
-                        interval = Some((val, val));
-                    }
-                    None => {
-                        interval = Some((val, val));
-                    }
-                }
-            }
-        }
-    }
-    // Flush final interval
-    if let Some((is, ie)) = interval {
-        let len = (ie - is + 1) as usize;
-        total_chunks += len.div_ceil(default_task_count);
-    }
-    total_chunks
+    /// Entry `g` is the number of chunks in groups `0..=g`.
+    cumulative_chunks: Vec<usize>,
+    /// Whether the groups are in increasing order of value, so a value's
+    /// group can be found by binary search: true for a range expression.
+    /// A list's groups follow list order, which may be unsorted.
+    sorted: bool,
 }
 
 impl ContiguousChunkNode {
-    fn new(name: String, range: job::TaskParamRange<i64>, default_task_count: usize) -> Self {
-        let total_len = match &range {
-            job::TaskParamRange::List(v) => v.len(),
-            job::TaskParamRange::RangeExpr(r) => r.len(),
-        };
+    fn new(name: String, range: &job::TaskParamRange<i64>, default_task_count: usize) -> Self {
         let dtc = default_task_count.max(1);
-        let num_chunks = count_contiguous_chunks_for_range(&range, dtc);
+        let groups: Arc<[IntervalGroup]> = interval_groups(range).into();
+        let mut total = 0usize;
+        let cumulative_chunks = groups
+            .iter()
+            .map(|g| {
+                // At most one chunk per value, so this saturates only where
+                // the range's `len()` does (32-bit targets).
+                total = total.saturating_add(g.chunk_count(dtc));
+                total
+            })
+            .collect();
         Self {
             name,
-            range,
+            groups,
             default_task_count: dtc,
-            num_chunks,
-            total_len,
+            cumulative_chunks,
+            sorted: matches!(range, job::TaskParamRange::RangeExpr(_)),
         }
     }
-}
 
-impl ContiguousChunkNode {
-    /// The chunk at `index`, without walking the chunks before it.
-    ///
-    /// Intervals still have to be walked, because which interval holds a given chunk is
-    /// only known from the chunk counts of the intervals before it. The chunk *within*
-    /// that interval is computed arithmetically, so one huge contiguous interval costs
-    /// O(1) instead of O(index) — which is what keeps a 100-billion-value range usable.
+    /// The chunk at `index`, in O(log G) for `G` groups.
     fn chunk_at(&self, index: usize) -> Option<RangeExpr> {
-        // Borrows the range rather than cloning it: this runs per random access, and a
-        // `List` range would otherwise copy every value on each call.
-        let mut cursor = 0usize;
-        let mut remaining = index;
-        while cursor < self.total_len {
-            let first = range_value_at(&self.range, cursor);
-            let end_idx = interval_end_index(&self.range, cursor);
-            let last = range_value_at(&self.range, end_idx);
-            let interval_len = (last - first + 1) as usize;
-            cursor = end_idx + 1;
+        let g = self.cumulative_chunks.partition_point(|&c| c <= index);
+        let group = self.groups.get(g)?;
+        let before = match g {
+            0 => 0,
+            g => self.cumulative_chunks[g - 1],
+        };
+        Some(group.chunk(index - before, self.default_task_count))
+    }
 
-            let (cc, small, lo) = interval_chunking(interval_len, self.default_task_count);
-            if remaining < cc {
-                let offset = remaining * small + larger_chunks_before(remaining, lo, cc);
-                let size = small
-                    + (larger_chunks_before(remaining + 1, lo, cc)
-                        - larger_chunks_before(remaining, lo, cc));
-                let start = first + offset as i64;
-                let end = start + size as i64 - 1;
-                return Some(
-                    format!("{start}-{end}")
-                        .parse::<RangeExpr>()
-                        .expect("range string built from valid integers")
-                        .with_contiguous(true),
-                );
-            }
-            remaining -= cc;
+    /// Whether `r` is one of the chunks.
+    fn is_chunk(&self, r: &RangeExpr) -> bool {
+        if !self.sorted {
+            // A list: at most one chunk per value, and the values are
+            // already in memory.
+            return (0..self.len()).any(|i| self.chunk_at(i).as_ref() == Some(r));
         }
-        None
+        // The chunks are disjoint, so only the one holding `r`'s first value
+        // can equal it.
+        let Some(first) = r.get(0) else {
+            return false;
+        };
+        let g = self.groups.partition_point(|g| g.last_value() < first);
+        self.groups
+            .get(g)
+            .and_then(|group| group.chunk_holding(first, self.default_task_count))
+            .is_some_and(|chunk| chunk == *r)
     }
 }
 
 impl Node for ContiguousChunkNode {
     fn len(&self) -> usize {
-        self.num_chunks
+        self.cumulative_chunks.last().copied().unwrap_or(0)
     }
     fn get(&self, index: usize, result: &mut TaskParameterSet) {
         if let Some(r) = self.chunk_at(index) {
@@ -571,16 +711,14 @@ impl Node for ContiguousChunkNode {
         })?;
         match &v.value {
             ExprValue::RangeExpr(r) => {
-                // Check by iterating chunks
-                for chunk in ContiguousChunkIterState::new(self) {
-                    if chunk == *r {
-                        return Ok(());
-                    }
+                if self.is_chunk(r) {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Parameter '{}' value '{}' is not a valid chunk in the parameter space.",
+                        self.name, r
+                    ))
                 }
-                Err(format!(
-                    "Parameter '{}' value '{}' is not a valid chunk in the parameter space.",
-                    self.name, r
-                ))
             }
             _ => Err(format!(
                 "Parameter '{}' value '{}' is not in the parameter space range.",
@@ -591,63 +729,12 @@ impl Node for ContiguousChunkNode {
     }
     fn iter(&self) -> Box<dyn NodeIterator> {
         Box::new(ContiguousChunkNodeIterator {
-            state: ContiguousChunkIterState::new(self),
             name: self.name.clone(),
+            groups: self.groups.clone(),
+            default_task_count: self.default_task_count,
+            group: 0,
+            chunk: 0,
         })
-    }
-}
-
-/// Reusable state for iterating contiguous chunks from a range.
-/// Finds contiguous intervals, then divides each interval evenly into chunks
-/// matching the Python `divide_int_interval_into_chunks` algorithm.
-struct ContiguousChunkIterState {
-    range: job::TaskParamRange<i64>,
-    default_task_count: usize,
-    total_len: usize,
-    cursor: usize,
-    // Current interval chunking state
-    interval_start_val: i64, // first value of current interval
-    interval_chunks_remaining: usize,
-    interval_pos: i64, // next value to emit within interval
-    interval_small: usize,
-    interval_leftovers: usize,
-    interval_chunk_index: usize,
-    interval_chunk_count: usize,
-}
-
-impl ContiguousChunkIterState {
-    fn new(node: &ContiguousChunkNode) -> Self {
-        Self {
-            range: node.range.clone(),
-            default_task_count: node.default_task_count,
-            total_len: node.total_len,
-            cursor: 0,
-            interval_start_val: 0,
-            interval_chunks_remaining: 0,
-            interval_pos: 0,
-            interval_small: 0,
-            interval_leftovers: 0,
-            interval_chunk_index: 0,
-            interval_chunk_count: 0,
-        }
-    }
-
-    fn get_value(&self, i: usize) -> i64 {
-        range_value_at(&self.range, i)
-    }
-
-    fn find_interval_end(&self, start: usize) -> usize {
-        interval_end_index(&self.range, start)
-    }
-}
-
-/// Value at index `i` of a task parameter range.
-///
-/// `i` must be within the range length; every caller bounds it by `total_len` first.
-fn range_value_at(range: &job::TaskParamRange<i64>, i: usize) -> i64 {
-    match range {
-        job::TaskParamRange::List(v) => v[i],
-        job::TaskParamRange::RangeExpr(r) => r.get(i as i64).expect("index within range bounds"),
     }
 }
 
@@ -688,159 +775,22 @@ fn larger_chunks_before(j: usize, leftovers: usize, chunk_count: usize) -> usize
     (product.div_ceil(chunk_count as u128)) as usize
 }
 
-/// Find the last index of the contiguous interval starting at `start`.
-///
-/// For `RangeExpr`, uses sub-range structure to skip step-1 ranges in O(R). For `List`,
-/// scans values in O(interval_len). Note a step > 1 sub-range yields one interval per
-/// value, so a stepped range has as many intervals as values.
-fn interval_end_index(range: &job::TaskParamRange<i64>, start: usize) -> usize {
-    {
-        match range {
-            job::TaskParamRange::List(v) => {
-                let mut end = start;
-                while end + 1 < v.len() && v[end + 1] == v[end] + 1 {
-                    end += 1;
-                }
-                end
-            }
-            job::TaskParamRange::RangeExpr(r) => {
-                // Use sub-ranges: find which sub-range contains `start`, then
-                // walk forward through step-1 sub-ranges that are adjacent.
-                // cumulative_lengths is u64 (exact per-chunk element counts);
-                // task-parameter ranges are bounded well below usize on all
-                // practical targets, so the conversions are lossless here.
-                let cumulative = r.cumulative_lengths();
-                let sub_ranges = r.ranges();
-
-                // Binary search for the sub-range containing `start`
-                let sr_idx = cumulative.partition_point(|&c| c <= start as u64);
-                let sr_offset = if sr_idx == 0 {
-                    0
-                } else {
-                    cumulative[sr_idx - 1] as usize
-                };
-
-                let sr = &sub_ranges[sr_idx];
-
-                // Where this interval ends within the current sub-range, and the value it
-                // ends on. A step > 1 sub-range has a gap between each of its own values,
-                // so the interval is that single value — but if it is the sub-range's
-                // *last* value it can still merge into an adjacent following sub-range,
-                // which is what `count_contiguous_chunks_from_sub_ranges` does. Returning
-                // early here instead left iteration and `len()` disagreeing: `1-5:2,6-10`
-                // at defaultTaskCount 2 counted 5 chunks but yielded 6.
-                let (mut end, mut last_val) = if sr.step() != 1 {
-                    let is_last_of_sub_range = start == sr_offset + sr.len() - 1;
-                    if !is_last_of_sub_range {
-                        return start;
-                    }
-                    (start, range_value_at(range, start))
-                } else {
-                    // Step-1: the interval extends to the end of this sub-range.
-                    (sr_offset + sr.len() - 1, sr.end())
-                };
-                for next_sr in &sub_ranges[sr_idx + 1..] {
-                    if next_sr.start() == last_val + 1 && next_sr.step() == 1 {
-                        end += next_sr.len();
-                        last_val = next_sr.end();
-                    } else if next_sr.start() == last_val + 1 && next_sr.step() > 1 {
-                        // The first value is adjacent, so it joins the interval. For a
-                        // multi-value stepped sub-range the *second* value has a gap
-                        // before it, so the interval ends here. A length-1 stepped
-                        // sub-range has no second value, so it bridges into whatever
-                        // follows instead of terminating the interval -- which is what
-                        // `count_contiguous_chunks_from_sub_ranges` does, and leaving it
-                        // out made `len()` under-report for e.g. `1-2,3-3:2,4-8`.
-                        end += 1;
-                        if next_sr.len() > 1 {
-                            break;
-                        }
-                        last_val = next_sr.end();
-                    } else {
-                        break;
-                    }
-                }
-                end
-            }
-        }
-    }
-}
-
-impl ContiguousChunkIterState {
-    /// Advance cursor to find the next contiguous interval and set up chunking state.
-    fn start_next_interval(&mut self) -> bool {
-        if self.cursor >= self.total_len {
-            return false;
-        }
-        let first = self.get_value(self.cursor);
-
-        // Find end of contiguous interval efficiently
-        let end_idx = self.find_interval_end(self.cursor);
-        let last = self.get_value(end_idx);
-        let interval_len = (last - first + 1) as usize;
-        self.cursor = end_idx + 1;
-
-        let (chunk_count, small, leftovers) =
-            interval_chunking(interval_len, self.default_task_count);
-
-        self.interval_start_val = first;
-        self.interval_pos = first;
-        self.interval_chunks_remaining = chunk_count;
-        self.interval_small = small;
-        self.interval_leftovers = leftovers;
-        self.interval_chunk_index = 0;
-        self.interval_chunk_count = chunk_count;
-        true
-    }
-
-    fn next_chunk(&mut self) -> Option<RangeExpr> {
-        // If no chunks remaining in current interval, find next interval
-        while self.interval_chunks_remaining == 0 {
-            if !self.start_next_interval() {
-                return None;
-            }
-        }
-
-        // Even distribution, matching the reference's
-        // `chunk_sizes[(i * chunk_count) // leftovers] += 1`.
-        let idx = self.interval_chunk_index;
-        let cc = self.interval_chunk_count;
-        let lo = self.interval_leftovers;
-        let size = self.interval_small
-            + (larger_chunks_before(idx + 1, lo, cc) - larger_chunks_before(idx, lo, cc));
-
-        let start = self.interval_pos;
-        let end = start + size as i64 - 1;
-        self.interval_pos = end + 1;
-        self.interval_chunks_remaining -= 1;
-        self.interval_chunk_index += 1;
-
-        let s = format!("{start}-{end}");
-        Some(
-            s.parse::<RangeExpr>()
-                .expect("valid range")
-                .with_contiguous(true),
-        )
-    }
-}
-
-impl Iterator for ContiguousChunkIterState {
-    type Item = RangeExpr;
-    fn next(&mut self) -> Option<RangeExpr> {
-        self.next_chunk()
-    }
-}
-
-/// NodeIterator wrapper for ContiguousChunkNode.
+/// Sequential iterator for [`ContiguousChunkNode`]: O(1) per chunk.
 struct ContiguousChunkNodeIterator {
-    state: ContiguousChunkIterState,
     name: String,
+    groups: Arc<[IntervalGroup]>,
+    default_task_count: usize,
+    /// The group of the next chunk, and the chunk's index within it.
+    group: usize,
+    chunk: usize,
 }
 
 impl NodeIterator for ContiguousChunkNodeIterator {
     fn next(&mut self, result: &mut TaskParameterSet) -> bool {
-        match self.state.next_chunk() {
-            Some(expr) => {
+        while let Some(group) = self.groups.get(self.group) {
+            if self.chunk < group.chunk_count(self.default_task_count) {
+                let expr = group.chunk(self.chunk, self.default_task_count);
+                self.chunk += 1;
                 result.insert(
                     self.name.clone(),
                     TaskParameterValue {
@@ -848,14 +798,16 @@ impl NodeIterator for ContiguousChunkNodeIterator {
                         value: ExprValue::RangeExpr(expr),
                     },
                 );
-                true
+                return true;
             }
-            None => false,
+            self.group += 1;
+            self.chunk = 0;
         }
+        false
     }
     fn reset(&mut self) {
-        self.state.cursor = 0;
-        self.state.interval_chunks_remaining = 0;
+        self.group = 0;
+        self.chunk = 0;
     }
 }
 
@@ -1003,33 +955,43 @@ impl Node for RangeExprNode {
     }
 }
 
-/// Wraps a parameter name + pre-computed chunk `RangeExpr`s.
+/// Static NONCONTIGUOUS chunking: chunk `i` is the values at the indices
+/// [`StaticLayout::bounds`] gives, built on demand.
 struct StaticChunkNode {
     name: String,
     range: job::TaskParamRange<i64>,
-    constraint: RangeConstraint,
-    num_chunks: usize,
-    small: usize,     // base chunk size = total / num_chunks
-    leftovers: usize, // first `leftovers` chunks get size small+1
+    layout: StaticLayout,
 }
 
 impl StaticChunkNode {
-    /// Build a RangeExpr for chunk `i` on the fly.
-    fn chunk_range_expr(&self, i: usize) -> RangeExpr {
-        build_chunk_range_expr(&self.range, &self.constraint, self.small, self.leftovers, i)
+    /// Whether `r` is one of the chunks.
+    fn is_chunk(&self, r: &RangeExpr) -> bool {
+        match &self.range {
+            // A range expression's values are distinct, so only the chunk
+            // holding `r`'s first value can equal it.
+            job::TaskParamRange::RangeExpr(range) => r
+                .get(0)
+                .and_then(|first| range_expr_index_of(range, first))
+                .is_some_and(|index| {
+                    static_chunk(&self.range, &self.layout, self.layout.chunk_holding(index)) == *r
+                }),
+            // A list is already in memory, and may repeat a value.
+            job::TaskParamRange::List(_) => (0..self.layout.num_chunks)
+                .any(|i| static_chunk(&self.range, &self.layout, i) == *r),
+        }
     }
 }
 
 impl Node for StaticChunkNode {
     fn len(&self) -> usize {
-        self.num_chunks
+        self.layout.num_chunks
     }
     fn get(&self, index: usize, result: &mut TaskParameterSet) {
         result.insert(
             self.name.clone(),
             TaskParameterValue {
                 param_type: TaskParameterType::ChunkInt,
-                value: ExprValue::RangeExpr(self.chunk_range_expr(index)),
+                value: ExprValue::RangeExpr(static_chunk(&self.range, &self.layout, index)),
             },
         );
     }
@@ -1045,7 +1007,7 @@ impl Node for StaticChunkNode {
                 // RangeExpr equality compares values (its representation is
                 // canonical), so a caller handing back a chunk string the
                 // iterator printed passes validation, however it was built.
-                if (0..self.num_chunks).any(|i| self.chunk_range_expr(i) == *r) {
+                if self.is_chunk(r) {
                     Ok(())
                 } else {
                     Err(format!(
@@ -1065,10 +1027,7 @@ impl Node for StaticChunkNode {
         Box::new(StaticChunkIterator {
             name: self.name.clone(),
             range: self.range.clone(),
-            constraint: self.constraint.clone(),
-            num_chunks: self.num_chunks,
-            small: self.small,
-            leftovers: self.leftovers,
+            layout: self.layout,
             index: 0,
         })
     }
@@ -1288,11 +1247,17 @@ impl NodeIterator for AssociationIterator {
 }
 
 /// Adaptive chunk node: produces chunks on the fly based on mutable `default_task_count`.
+///
+/// Holds the range as given, never its list of values: a NONCONTIGUOUS chunk
+/// is a window of indices cut with [`noncontiguous_chunk`], and a CONTIGUOUS
+/// chunk is taken from the range's [`IntervalGroup`]s.
 struct AdaptiveChunkNode {
     name: String,
-    values: Vec<i64>,
+    range: job::TaskParamRange<i64>,
+    total_len: usize,
+    /// The interval groups, for CONTIGUOUS chunking only.
+    groups: Option<Arc<[IntervalGroup]>>,
     default_task_count: Arc<AtomicUsize>,
-    range_constraint: RangeConstraint,
 }
 
 impl Node for AdaptiveChunkNode {
@@ -1300,7 +1265,7 @@ impl Node for AdaptiveChunkNode {
         // Upper bound: one chunk per value. Actual count depends on runtime chunk size.
         // Used only for association length validation during construction.
         let dtc = self.default_task_count.load(Ordering::Relaxed).max(1);
-        self.values.len().div_ceil(dtc)
+        self.total_len.div_ceil(dtc)
     }
     fn get(&self, _index: usize, _result: &mut TaskParameterSet) {
         // Random access not supported — use iter() instead.
@@ -1314,16 +1279,23 @@ impl Node for AdaptiveChunkNode {
         })?;
         match &v.value {
             ExprValue::RangeExpr(r) => {
-                let valid: HashSet<i64> = self.values.iter().copied().collect();
-                for val in r.iter() {
-                    if !valid.contains(&val) {
-                        return Err(format!(
-                            "Parameter '{}' value '{}' is not a subset of the range in the parameter space.",
-                            self.name, r
-                        ));
+                let subset = match &self.range {
+                    job::TaskParamRange::RangeExpr(range) => range_expr_is_subset(r, range),
+                    // `r`'s values are distinct, so this stops by the list's
+                    // length plus one, however long `r` is.
+                    job::TaskParamRange::List(values) => {
+                        let valid: HashSet<i64> = values.iter().copied().collect();
+                        r.iter().all(|val| valid.contains(&val))
                     }
+                };
+                if subset {
+                    Ok(())
+                } else {
+                    Err(format!(
+                        "Parameter '{}' value '{}' is not a subset of the range in the parameter space.",
+                        self.name, r
+                    ))
                 }
-                Ok(())
             }
             _ => Err(format!(
                 "Parameter '{}' value '{}' is not in the parameter space range.",
@@ -1335,10 +1307,12 @@ impl Node for AdaptiveChunkNode {
     fn iter(&self) -> Box<dyn NodeIterator> {
         Box::new(AdaptiveChunkIterator {
             name: self.name.clone(),
-            values: self.values.clone(),
+            range: self.range.clone(),
+            total_len: self.total_len,
+            groups: self.groups.clone(),
             default_task_count: self.default_task_count.clone(),
-            range_constraint: self.range_constraint.clone(),
             cursor: 0,
+            group: 0,
         })
     }
 }
@@ -1346,59 +1320,88 @@ impl Node for AdaptiveChunkNode {
 /// Iterator for adaptive chunk nodes.
 struct AdaptiveChunkIterator {
     name: String,
-    values: Vec<i64>,
+    range: job::TaskParamRange<i64>,
+    total_len: usize,
+    groups: Option<Arc<[IntervalGroup]>>,
     default_task_count: Arc<AtomicUsize>,
-    range_constraint: RangeConstraint,
+    /// NONCONTIGUOUS: the index of the next value. CONTIGUOUS: the offset of
+    /// the next value within group `group`.
     cursor: usize,
+    group: usize,
 }
 
 impl AdaptiveChunkIterator {
-    fn make_chunk(&self, slice: &[i64]) -> RangeExpr {
-        chunk_values_to_range_expr(slice, &self.range_constraint)
+    /// The next NONCONTIGUOUS chunk: the next `chunk_size` values, or all
+    /// that remain.
+    fn next_noncontiguous(&mut self, chunk_size: usize) -> Option<RangeExpr> {
+        if self.cursor >= self.total_len {
+            return None;
+        }
+        // Saturating: any chunk size, up to usize::MAX, is valid.
+        let end = self.cursor.saturating_add(chunk_size).min(self.total_len);
+        let chunk = match noncontiguous_chunk(&self.range, self.cursor, end) {
+            Ok(chunk) => {
+                self.cursor = end;
+                chunk
+            }
+            // The values are within the range value bound (checked by
+            // `StepParameterSpaceIterator::new_inner`), so the error is the
+            // run cap: these values' canonical form has more than
+            // MAX_RANGE_EXPR_CHUNKS runs, which takes more than
+            // MAX_RANGE_EXPR_CHUNKS values. Shorten the chunk to
+            // MAX_RANGE_EXPR_CHUNKS values, which always fit.
+            Err(_) => {
+                let end = self.cursor.saturating_add(MAX_RANGE_EXPR_CHUNKS).min(end);
+                let chunk = noncontiguous_chunk(&self.range, self.cursor, end)
+                    .expect("MAX_RANGE_EXPR_CHUNKS values fit the run cap");
+                self.cursor = end;
+                chunk
+            }
+        };
+        Some(chunk)
+    }
+
+    /// The next CONTIGUOUS chunk: up to `chunk_size` values from the current
+    /// interval.
+    fn next_contiguous(
+        &mut self,
+        groups: &[IntervalGroup],
+        chunk_size: usize,
+    ) -> Option<RangeExpr> {
+        loop {
+            let group = groups.get(self.group)?;
+            if self.cursor < group.value_count() {
+                let chunk = match *group {
+                    IntervalGroup::Interval { first, .. } => {
+                        let take = chunk_size.min(group.value_count() - self.cursor);
+                        let start = first + self.cursor as i64;
+                        self.cursor += take;
+                        contiguous_chunk(start, start + (take - 1) as i64)
+                    }
+                    // Each value is an interval of its own.
+                    IntervalGroup::Singles { .. } => {
+                        let chunk = group.chunk(self.cursor, 1);
+                        self.cursor += 1;
+                        chunk
+                    }
+                };
+                return Some(chunk);
+            }
+            self.group += 1;
+            self.cursor = 0;
+        }
     }
 }
 
 impl NodeIterator for AdaptiveChunkIterator {
     fn next(&mut self, result: &mut TaskParameterSet) -> bool {
-        if self.cursor >= self.values.len() {
-            return false;
-        }
         let chunk_size = self.default_task_count.load(Ordering::Relaxed).max(1);
-        let chunk = match self.range_constraint {
-            RangeConstraint::Contiguous => {
-                let start = self.cursor;
-                let mut end = start + 1;
-                while end < self.values.len()
-                    && end - start < chunk_size
-                    && self.values[end] == self.values[end - 1] + 1
-                {
-                    end += 1;
-                }
-                let slice = &self.values[start..end];
-                self.cursor = end;
-                self.make_chunk(slice)
-            }
-            RangeConstraint::Noncontiguous => {
-                let end = (self.cursor + chunk_size).min(self.values.len());
-                match RangeExpr::from_values(self.values[self.cursor..end].to_vec()) {
-                    Ok(chunk) => {
-                        self.cursor = end;
-                        chunk
-                    }
-                    // The values are within the range value bound (checked
-                    // by `StepParameterSpaceIterator::new_inner`), so the
-                    // error is the run cap: these values' canonical form has
-                    // more than MAX_RANGE_EXPR_CHUNKS runs, which takes more
-                    // than MAX_RANGE_EXPR_CHUNKS values. Shorten the chunk
-                    // to MAX_RANGE_EXPR_CHUNKS values, which always fit.
-                    Err(_) => {
-                        let end = self.cursor + MAX_RANGE_EXPR_CHUNKS;
-                        let slice = &self.values[self.cursor..end];
-                        self.cursor = end;
-                        self.make_chunk(slice)
-                    }
-                }
-            }
+        let chunk = match self.groups.clone() {
+            Some(groups) => self.next_contiguous(&groups, chunk_size),
+            None => self.next_noncontiguous(chunk_size),
+        };
+        let Some(chunk) = chunk else {
+            return false;
         };
         result.insert(
             self.name.clone(),
@@ -1411,6 +1414,7 @@ impl NodeIterator for AdaptiveChunkIterator {
     }
     fn reset(&mut self) {
         self.cursor = 0;
+        self.group = 0;
     }
 }
 
@@ -1550,10 +1554,9 @@ impl StepParameterSpaceIterator {
         let adaptive_chunk_size = adaptive_info.map(|(_, rc)| rc);
 
         // Which path `Iterator::next` takes. Contiguous chunking stays sequential here
-        // even though it now supports random access: locating a chunk means walking the
-        // intervals before it, so driving a full walk through `get` would be
-        // O(chunks x intervals) — quadratic for a range whose values are mostly isolated,
-        // where every value is its own interval. Random access is gated separately, on
+        // even though it supports random access: `get` locates a chunk by binary search
+        // over the range's interval groups, O(log G) per index, while the node iterator
+        // walks the groups in O(1) per chunk. Random access is gated separately, on
         // `adaptive` alone.
         let needs_sequential = adaptive || has_contiguous_chunks(space);
         let node_iter = if needs_sequential {
@@ -1914,9 +1917,9 @@ fn make_leaf_node(
 
 /// Whether any chunk parameter uses the contiguous constraint.
 ///
-/// Such a space prefers sequential iteration: `ContiguousChunkNode` can answer a single
-/// index, but only by walking the intervals before it, so a full walk driven through
-/// `get` would be quadratic where values are mostly isolated.
+/// Such a space prefers sequential iteration: `ContiguousChunkNode` answers a single
+/// index by binary search over its interval groups, O(log G), while its node iterator
+/// takes O(1) per chunk.
 fn has_contiguous_chunks(space: &job::StepParameterSpace) -> bool {
     space.task_parameter_definitions.values().any(|p| {
         matches!(
@@ -1940,15 +1943,14 @@ fn make_chunk_node(
     // Check if this parameter should use adaptive chunking
     if let Some((adaptive_name, rc)) = adaptive_info {
         if adaptive_name == name {
-            let values: Vec<i64> = match range {
-                job::TaskParamRange::List(v) => v.clone(),
-                job::TaskParamRange::RangeExpr(r) => r.iter().collect(),
-            };
+            let groups = (chunks.range_constraint == RangeConstraint::Contiguous)
+                .then(|| interval_groups(range).into());
             return Ok(Box::new(AdaptiveChunkNode {
                 name: name.to_string(),
-                values,
+                range: range.clone(),
+                total_len: range_len(range),
+                groups,
                 default_task_count: rc.clone(),
-                range_constraint: chunks.range_constraint.clone(),
             }));
         }
     }
@@ -1956,10 +1958,7 @@ fn make_chunk_node(
     // Use override if provided, otherwise use the template's default
     let default_task_count = chunk_override.unwrap_or(chunks.default_task_count).max(1);
 
-    let total_len = match range {
-        job::TaskParamRange::List(v) => v.len(),
-        job::TaskParamRange::RangeExpr(r) => r.len(),
-    };
+    let total_len = range_len(range);
     if total_len == 0 {
         return Ok(Box::new(RangeListNode {
             name: name.to_string(),
@@ -1972,24 +1971,27 @@ fn make_chunk_node(
     if chunks.range_constraint == RangeConstraint::Contiguous {
         return Ok(Box::new(ContiguousChunkNode::new(
             name.to_string(),
-            range.clone(),
+            range,
             default_task_count,
         )));
     }
 
-    let chunk_count = total_len.div_ceil(default_task_count);
-    let small = total_len / chunk_count;
-    let leftovers = total_len % chunk_count;
-    check_noncontiguous_chunks_fit(name, range, chunk_count, small, leftovers)?;
+    let layout = StaticLayout::new(total_len, default_task_count);
+    check_noncontiguous_chunks_fit(name, range, &layout)?;
 
     Ok(Box::new(StaticChunkNode {
         name: name.to_string(),
         range: range.clone(),
-        constraint: chunks.range_constraint.clone(),
-        num_chunks: chunk_count,
-        small,
-        leftovers,
+        layout,
     }))
+}
+
+/// The number of values in a task parameter range.
+fn range_len(range: &job::TaskParamRange<i64>) -> usize {
+    match range {
+        job::TaskParamRange::List(v) => v.len(),
+        job::TaskParamRange::RangeExpr(r) => r.len(),
+    }
 }
 
 #[cfg(test)]
@@ -2002,8 +2004,22 @@ mod tests {
     /// case is marked; see `specs/model/parameter-space.md`.
     #[test]
     fn test_noncontiguous_chunk_rendering_is_canonical() {
-        let nc = RangeConstraint::Noncontiguous;
-        let render = |vals: &[i64]| chunk_values_to_range_expr(vals, &nc).to_string();
+        // A list chunk goes through `from_values`; a range-expression chunk
+        // is a slice, which must write the same string.
+        let render = |vals: &[i64]| {
+            let list = job::TaskParamRange::List(vals.to_vec());
+            let text = noncontiguous_chunk(&list, 0, vals.len())
+                .unwrap()
+                .to_string();
+            let expr =
+                job::TaskParamRange::RangeExpr(RangeExpr::from_values(vals.to_vec()).unwrap());
+            let len = range_len(&expr);
+            assert_eq!(
+                noncontiguous_chunk(&expr, 0, len).unwrap().to_string(),
+                text
+            );
+            text
+        };
         assert_eq!(render(&[1]), "1");
         assert_eq!(render(&[5]), "5");
         assert_eq!(render(&[1, 3]), "1,3");
@@ -2035,8 +2051,7 @@ mod tests {
 
     #[test]
     fn test_contiguous_chunk_rendering_keeps_dash_form() {
-        let c = RangeConstraint::Contiguous;
-        let render = |vals: &[i64]| chunk_values_to_range_expr(vals, &c).to_string();
+        let render = |vals: &[i64]| contiguous_chunk(vals[0], vals[vals.len() - 1]).to_string();
         assert_eq!(render(&[7, 8]), "7-8");
         assert_eq!(render(&[1, 2, 3]), "1-3");
         // A single value keeps the dash form, including negative frames.
@@ -2114,107 +2129,145 @@ mod tests {
 
     const HUGE_RANGE: &str = "1-100000000000";
 
+    const DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+    /// Run `f` on its own thread and fail if it does not finish within
+    /// `limit`: an implementation that streams a huge range's values
+    /// allocates nothing and never finishes, which only a deadline catches.
+    /// The same helper as openjd-expr's `test_range_expr_canonical::within_deadline`.
+    fn within_deadline<F: FnOnce() + Send + 'static>(limit: std::time::Duration, f: F) {
+        let (done, finished) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            f();
+            let _ = done.send(());
+        });
+        match finished.recv_timeout(limit) {
+            Ok(()) => worker.join().unwrap(),
+            // `f` panicked: report its panic.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                std::panic::resume_unwind(worker.join().unwrap_err())
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!("did not finish within {limit:?}: is it expanding the values?")
+            }
+        }
+    }
+
     #[test]
     fn test_lazy_construction_range_expr() {
-        let space = make_space(vec![("X", range_expr_param(HUGE_RANGE))], None);
-        let iter = StepParameterSpaceIterator::new(&space).unwrap();
-        assert_eq!(iter.len(), 100_000_000_000);
+        within_deadline(DEADLINE, || {
+            let space = make_space(vec![("X", range_expr_param(HUGE_RANGE))], None);
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            assert_eq!(iter.len(), 100_000_000_000);
+        });
     }
 
     #[test]
     fn test_lazy_random_access_range_expr() {
-        let space = make_space(vec![("X", range_expr_param(HUGE_RANGE))], None);
-        let iter = StepParameterSpaceIterator::new(&space).unwrap();
-        let first = iter.get(0).unwrap();
-        assert_eq!(first["X"].value, ExprValue::Int(1));
-        let last = iter.get(99_999_999_999).unwrap();
-        assert_eq!(last["X"].value, ExprValue::Int(100_000_000_000));
+        within_deadline(DEADLINE, || {
+            let space = make_space(vec![("X", range_expr_param(HUGE_RANGE))], None);
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            let first = iter.get(0).unwrap();
+            assert_eq!(first["X"].value, ExprValue::Int(1));
+            let last = iter.get(99_999_999_999).unwrap();
+            assert_eq!(last["X"].value, ExprValue::Int(100_000_000_000));
+        });
     }
 
     #[test]
     fn test_lazy_product_with_huge_range() {
-        let space = make_space(
-            vec![
-                ("A", int_param(vec![1, 2])),
-                ("X", range_expr_param(HUGE_RANGE)),
-            ],
-            None,
-        );
-        let iter = StepParameterSpaceIterator::new(&space).unwrap();
-        assert_eq!(iter.len(), 200_000_000_000);
-        // Random access into the middle
-        let mid = iter.get(50_000_000_000).unwrap();
-        assert!(mid.contains_key("A"));
-        assert!(mid.contains_key("X"));
+        within_deadline(DEADLINE, || {
+            let space = make_space(
+                vec![
+                    ("A", int_param(vec![1, 2])),
+                    ("X", range_expr_param(HUGE_RANGE)),
+                ],
+                None,
+            );
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            assert_eq!(iter.len(), 200_000_000_000);
+            // Random access into the middle
+            let mid = iter.get(50_000_000_000).unwrap();
+            assert!(mid.contains_key("A"));
+            assert!(mid.contains_key("X"));
+        });
     }
 
     #[test]
     fn test_lazy_iterate_first_few_of_huge_range() {
-        let space = make_space(vec![("X", range_expr_param(HUGE_RANGE))], None);
-        let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
-        let first = iter.next().unwrap();
-        assert_eq!(first["X"].value, ExprValue::Int(1));
-        let second = iter.next().unwrap();
-        assert_eq!(second["X"].value, ExprValue::Int(2));
+        within_deadline(DEADLINE, || {
+            let space = make_space(vec![("X", range_expr_param(HUGE_RANGE))], None);
+            let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+            let first = iter.next().unwrap();
+            assert_eq!(first["X"].value, ExprValue::Int(1));
+            let second = iter.next().unwrap();
+            assert_eq!(second["X"].value, ExprValue::Int(2));
+        });
     }
 
     #[test]
     fn test_lazy_product_iterate_first_few() {
-        let space = make_space(
-            vec![
-                ("A", int_param(vec![10, 20])),
-                ("X", range_expr_param(HUGE_RANGE)),
-            ],
-            None,
-        );
-        let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
-        // First item: A=10, X=1 (or A=20, X=1 depending on HashMap order)
-        let first = iter.next().unwrap();
-        assert!(first.contains_key("A"));
-        assert!(first.contains_key("X"));
-        // Just verify we can get a few without hanging
-        for _ in 0..10 {
-            assert!(iter.next().is_some());
-        }
+        within_deadline(DEADLINE, || {
+            let space = make_space(
+                vec![
+                    ("A", int_param(vec![10, 20])),
+                    ("X", range_expr_param(HUGE_RANGE)),
+                ],
+                None,
+            );
+            let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+            // First item: A=10, X=1 (or A=20, X=1 depending on HashMap order)
+            let first = iter.next().unwrap();
+            assert!(first.contains_key("A"));
+            assert!(first.contains_key("X"));
+            // Just verify we can get a few without hanging
+            for _ in 0..10 {
+                assert!(iter.next().is_some());
+            }
+        });
     }
 
     #[test]
     fn test_lazy_static_chunk_with_huge_range() {
         // 100B items / 1000 per chunk = 100M chunks — construction must be lazy
-        let space = make_space(vec![("C", static_chunk_param(HUGE_RANGE, 1000))], None);
-        let iter = StepParameterSpaceIterator::new(&space).unwrap();
-        assert_eq!(iter.len(), 100_000_000);
-        // Iterate first few chunks
-        let first: Vec<_> = iter.take(3).collect();
-        assert_eq!(first.len(), 3);
-        assert!(first[0].contains_key("C"));
+        within_deadline(DEADLINE, || {
+            let space = make_space(vec![("C", static_chunk_param(HUGE_RANGE, 1000))], None);
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            assert_eq!(iter.len(), 100_000_000);
+            // Iterate first few chunks
+            let first: Vec<_> = iter.take(3).collect();
+            assert_eq!(first.len(), 3);
+            assert!(first[0].contains_key("C"));
+        });
     }
 
     #[test]
     fn test_lazy_iter_of_product_with_huge_range() {
         // Tests that ProductNode::iter() doesn't materialize the huge child
-        let space = make_space(
-            vec![
-                ("A", int_param(vec![1, 2])),
-                ("X", range_expr_param(HUGE_RANGE)),
-                ("Chunk", adaptive_chunk_param(vec![10, 20, 30, 40], 2)),
-            ],
-            None,
-        );
-        let iter = StepParameterSpaceIterator::new(&space).unwrap();
-        assert!(iter.chunks_adaptive());
-        // Iterate a few — must not OOM from materializing X's 100B values
-        let mut count = 0;
-        for params in iter {
-            assert!(params.contains_key("A"));
-            assert!(params.contains_key("X"));
-            assert!(params.contains_key("Chunk"));
-            count += 1;
-            if count >= 5 {
-                break;
+        within_deadline(DEADLINE, || {
+            let space = make_space(
+                vec![
+                    ("A", int_param(vec![1, 2])),
+                    ("X", range_expr_param(HUGE_RANGE)),
+                    ("Chunk", adaptive_chunk_param(vec![10, 20, 30, 40], 2)),
+                ],
+                None,
+            );
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            assert!(iter.chunks_adaptive());
+            // Iterate a few — must not OOM from materializing X's 100B values
+            let mut count = 0;
+            for params in iter {
+                assert!(params.contains_key("A"));
+                assert!(params.contains_key("X"));
+                assert!(params.contains_key("Chunk"));
+                count += 1;
+                if count >= 5 {
+                    break;
+                }
             }
-        }
-        assert_eq!(count, 5);
+            assert_eq!(count, 5);
+        });
     }
 
     // ── Adaptive chunking tests ──
@@ -2390,8 +2443,8 @@ mod tests {
 
     #[test]
     fn test_contiguous_chunk_stepped_range_iterates_without_panic() {
-        // Stepped range (step=2) exercises the sr.get(idx) path in
-        // count_contiguous_chunks_for_range and ContiguousChunkIterState::get_value
+        // Stepped range (step=2): every value is its own interval, which
+        // `interval_groups` keeps as one `IntervalGroup::Singles` group.
         let space = make_space(vec![("C", static_chunk_param("1-10:2", 2))], None);
         let iter = StepParameterSpaceIterator::new(&space).unwrap();
         let results: Vec<_> = iter.collect();
@@ -2615,12 +2668,14 @@ mod tests {
         // One interval of 100 billion values. Indexing near the end must not walk the
         // chunks before it, which is the whole reason the chunk is computed
         // arithmetically rather than by advancing an iterator.
-        let space = make_space(vec![("Frame", static_chunk_param(HUGE_RANGE, 1000))], None);
-        let iter = StepParameterSpaceIterator::new(&space).unwrap();
-        assert_eq!(iter.len(), 100_000_000);
-        assert_eq!(chunk_via_get(&iter, 0), "1-1000");
-        assert_eq!(chunk_via_get(&iter, 1), "1001-2000");
-        assert_eq!(chunk_via_get(&iter, 99_999_999), "99999999001-100000000000");
+        within_deadline(DEADLINE, || {
+            let space = make_space(vec![("Frame", static_chunk_param(HUGE_RANGE, 1000))], None);
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            assert_eq!(iter.len(), 100_000_000);
+            assert_eq!(chunk_via_get(&iter, 0), "1-1000");
+            assert_eq!(chunk_via_get(&iter, 1), "1001-2000");
+            assert_eq!(chunk_via_get(&iter, 99_999_999), "99999999001-100000000000");
+        });
     }
 
     #[test]
@@ -2629,32 +2684,35 @@ mod tests {
         // interval is over roughly 8.6e9 values. A default_task_count that divides the
         // range evenly leaves `leftovers == 0` and never multiplies, so the arithmetic has
         // to be exercised with one that leaves a remainder.
-        let space = make_space(vec![("Frame", static_chunk_param(HUGE_RANGE, 3))], None);
-        let iter = StepParameterSpaceIterator::new(&space).unwrap();
-        let n = iter.len();
-        assert_eq!(n, 33_333_333_334);
+        within_deadline(DEADLINE, || {
+            let space = make_space(vec![("Frame", static_chunk_param(HUGE_RANGE, 3))], None);
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            let n = iter.len();
+            assert_eq!(n, 33_333_333_334);
 
-        // Both ends, plus the last index, where the product is largest.
-        assert_eq!(chunk_via_get(&iter, 0), "1-3");
-        assert_eq!(chunk_via_get(&iter, n - 1), "99999999999-100000000000");
+            // Both ends, plus the last index, where the product is largest.
+            assert_eq!(chunk_via_get(&iter, 0), "1-3");
+            assert_eq!(chunk_via_get(&iter, n - 1), "99999999999-100000000000");
 
-        // Chunks must tile the range without gaps or overlaps. Spot-check adjacency
-        // deep into the space, where a wrapped product would show up as a wild offset.
-        for i in [1usize, 2, 1_000_000, 30_000_000_000, n - 2] {
-            let a = chunk_via_get(&iter, i);
-            let b = chunk_via_get(&iter, i + 1);
-            let a_end: i64 = a.split('-').next_back().unwrap().parse().unwrap();
-            let b_start: i64 = b.split('-').next().unwrap().parse().unwrap();
-            assert_eq!(b_start, a_end + 1, "chunks {i} and {} do not tile", i + 1);
-        }
+            // Chunks must tile the range without gaps or overlaps. Spot-check adjacency
+            // deep into the space, where a wrapped product would show up as a wild offset.
+            for i in [1usize, 2, 1_000_000, 30_000_000_000, n - 2] {
+                let a = chunk_via_get(&iter, i);
+                let b = chunk_via_get(&iter, i + 1);
+                let a_end: i64 = a.split('-').next_back().unwrap().parse().unwrap();
+                let b_start: i64 = b.split('-').next().unwrap().parse().unwrap();
+                assert_eq!(b_start, a_end + 1, "chunks {i} and {} do not tile", i + 1);
+            }
+        });
     }
 
     #[test]
     fn test_len_agrees_with_iteration_across_mixed_step_ranges() {
-        // `len()` comes from `count_contiguous_chunks_for_range` while iteration walks
-        // intervals via `interval_end_index`. The two used to disagree whenever an
-        // interval began in a step > 1 sub-range and continued into an adjacent step-1
-        // one, which made `len()` under-report and left the last chunk unreachable.
+        // `len()` sums the groups' chunk counts while iteration walks the groups. An
+        // earlier implementation computed the two separately, and they disagreed
+        // whenever an interval began in a step > 1 sub-range and continued into an
+        // adjacent step-1 one, which made `len()` under-report and left the last chunk
+        // unreachable.
         for (expr, dtc) in [
             ("1-5:2,6-10", 2),
             ("1-5:2,6-10", 3),
@@ -2717,8 +2775,8 @@ mod tests {
     #[test]
     fn test_contiguous_chunking_keeps_sequential_iteration_but_gains_random_access() {
         // The two concerns are deliberately decoupled. Iteration stays on the node
-        // iterator, because driving a full walk through `get` would re-walk the intervals
-        // for every index. Random access is gated on `adaptive` alone, so `get` answers.
+        // iterator, O(1) per chunk where `get` is O(log G) per index. Random access is
+        // gated on `adaptive` alone, so `get` answers.
         let space = make_space(vec![("Frame", static_chunk_param("1-10", 3))], None);
         let iter = StepParameterSpaceIterator::new(&space).unwrap();
         assert!(
@@ -2732,10 +2790,10 @@ mod tests {
 
     #[test]
     fn test_many_interval_iteration_stays_linear() {
-        // A stepped range makes every value its own interval, which is the shape that
-        // would go quadratic if `Iterator::next` were routed through `chunk_at`. 20k
-        // values would be ~4e8 interval walks; this completes promptly because iteration
-        // uses the sequential path.
+        // A stepped range makes every value its own interval, the shape that went
+        // quadratic when locating a chunk walked the intervals before it. Its 20k
+        // intervals are one `IntervalGroup::Singles` group, so both iteration and
+        // random access stay linear.
         let space = make_space(vec![("Frame", static_chunk_param("1-40000:2", 1))], None);
         let iter = StepParameterSpaceIterator::new(&space).unwrap();
         assert_eq!(iter.len(), 20_000);

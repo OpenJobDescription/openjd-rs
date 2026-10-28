@@ -1215,10 +1215,12 @@ impl Iterator for StepParameterSpaceIterator {
 Random-access indexing uses `O(1)` arithmetic on a product-of-factors
 representation — submitters that want to shard a large parameter
 space across workers can compute per-worker index slices without
-iterating the whole space. Contiguous chunking costs an additional
-walk over the range's intervals to locate the chunk's — O(R) in
-sub-ranges for step-1 sub-ranges, but O(N) where a range is stepped or
-heavily gapped, since each such value is its own interval.
+iterating the whole space. A chunked parameter adds the cost of
+building one chunk, which never lists the range's values: a
+NONCONTIGUOUS chunk is a `RangeExpr::slice` (O(log R + runs it spans)),
+and a CONTIGUOUS chunk is found by binary search over the range's
+interval groups (O(log G), with at most three groups per run however
+many values the range has).
 
 Adaptive chunking (TASK_CHUNKING §4 / RFC 0001) is the one case that
 forces sequential iteration, because chunk size depends on runtime

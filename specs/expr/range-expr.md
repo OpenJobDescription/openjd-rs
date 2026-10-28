@@ -97,9 +97,10 @@ Per constructor:
 - `from_str` and `from_ranges`: O(k log k) to sort the k elements, then O(k).
 - `from_values`: the list is already expanded, so O(n log n) to sort and O(n) for the
   runs.
-- `slice`: O(m) in the m runs of the source, producing at most one progression per run
-  (two single values when two selected values are further apart than `i64::MAX`), then
-  O(m) to canonicalize.
+- `slice`: O(log m + k), where k of the source's m runs overlap the index span
+  `start..stop` (a binary search finds the first), producing at most one progression per
+  overlapped run (two single values when two selected values are further apart than
+  `i64::MAX`), then O(k) to canonicalize.
 
 Each of these also rejects a value with more than `MAX_RANGE_EXPR_CHUNKS` runs (see
 Defensive Caps), within the same bounds.
@@ -337,8 +338,11 @@ let r = RangeExpr::from_str("1-100")?;
 let sliced = r.slice(10, 50, 2)?;  // elements at indices 10, 12, 14, ..., 48
 ```
 
-The algorithm operates in O(m) time where m is the number of sub-ranges, by walking
-the sub-ranges and computing intersections with the requested index range. No element
+The algorithm operates in O(log m + k) time, where m is the number of sub-ranges and k
+the number that the index span `start..stop` overlaps: a binary search over the cumulative
+lengths finds the sub-range holding `start`, and the walk computes intersections with the
+requested index range until it passes `stop`. Cutting a range into consecutive windows, as
+`CHUNK[INT]` chunking does, so costs O(m + windows) in total plus the binary searches. No element
 vector is allocated — the result is a new `RangeExpr` built directly from computed
 progressions and then canonicalized, so `range_expr("1-10")[::2]` is written `"1-9:2"`
 and equals `range_expr("1,3,5,7,9")`. Step must be positive.

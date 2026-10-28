@@ -1142,7 +1142,7 @@ fn noncontiguous_chunk_string_round_trips_through_validate_containment() {
 }
 
 /// Random access must render identically to sequential iteration: the
-/// static node's `get(i)` and the iterator share `build_chunk_range_expr`.
+/// static node's `get(i)` and the iterator share `static_chunk`.
 #[test]
 fn noncontiguous_chunk_get_matches_iteration() {
     let template = r#"{
