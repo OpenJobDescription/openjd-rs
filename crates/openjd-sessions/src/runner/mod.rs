@@ -842,6 +842,7 @@ mod tests {
                 max_resolved_data_len: Some(2),
                 max_eval_memory_bytes: Some(3),
                 max_eval_operations: Some(4),
+                max_path_mapping_trie_bytes: None,
             }
         );
     }
