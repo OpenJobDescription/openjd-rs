@@ -4,6 +4,22 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.13.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.12.0...openjd-expr-v0.13.0) - 2026-10-28
+
+### Bug fixes
+
+- [**breaking**] Write range expressions in canonical form and compare them by value ([#469](https://github.com/OpenJobDescription/openjd-rs/pull/469)) ([#469](https://github.com/OpenJobDescription/openjd-rs/pull/469))
+
+- [**breaking**] Type list comprehensions and unknown values so every check stage agrees ([#462](https://github.com/OpenJobDescription/openjd-rs/pull/462)) ([#462](https://github.com/OpenJobDescription/openjd-rs/pull/462))
+
+- Uri_path::join on a bare authority; cover suffix/stem edges ([#441](https://github.com/OpenJobDescription/openjd-rs/pull/441)) ([#441](https://github.com/OpenJobDescription/openjd-rs/pull/441))
+
+
+### CI
+
+- Check public API and docs mechanically; mutate with cargo-mutants ([#440](https://github.com/OpenJobDescription/openjd-rs/pull/440)) ([#440](https://github.com/OpenJobDescription/openjd-rs/pull/440))
+
+
 ## [0.12.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.11.0...openjd-expr-v0.12.0) - 2026-10-14
 
 ### Bug fixes
