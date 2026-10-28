@@ -351,7 +351,7 @@ Mirrors the Python binding's `__setitem__` / `__getitem__` / `__contains__` / `g
 
 | Static | `FunctionLibrary.default()` — Built-in functions |
 |---|---|
-| `withPathMappingRules(rules: PathMappingRule[])` | `FunctionLibrary` — Library with path mapping. Throws when a rule's source path is not absolute for its format; the message names the rule's index |
+| `withPathMappingRules(rules: PathMappingRule[])` | `FunctionLibrary` — Library with path mapping. Throws when a rule is invalid (a relative source path, or a path longer than 32 KiB); the message names the rule's index |
 
 #### `PathMappingRule`
 

@@ -125,7 +125,9 @@ pub enum SessionError {
     )]
     MultipleWrapEnvironments { existing: String, entering: String },
 
-    /// A path mapping rule's source path is not absolute for its format.
+    /// A path mapping rule is invalid: its source path is not absolute for
+    /// its format, or a path is longer than
+    /// [`MAX_PATH_LEN`](openjd_expr::path_mapping::MAX_PATH_LEN) bytes.
     #[error("Invalid path mapping rules: {0}")]
     InvalidPathMappingRule(#[from] openjd_expr::InvalidPathMappingRule),
 }

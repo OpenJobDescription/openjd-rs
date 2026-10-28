@@ -86,7 +86,9 @@ const SOURCE_FORMATS: [PathFormat; 3] = [PathFormat::Posix, PathFormat::Windows,
 /// <https://github.com/OpenJobDescription/openjd-specifications/wiki/How-Jobs-Are-Run#path-mapping>
 ///
 /// Rules are applied through a [`PathMapper`], which rejects a rule whose
-/// `source_path` is not absolute for its format (see [`validate`]).
+/// `source_path` is not absolute for its format, or whose `source_path` or
+/// `destination_path` is longer than [`MAX_PATH_LEN`] bytes (see
+/// [`validate`]).
 ///
 /// [`validate`]: PathMappingRule::validate
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -422,8 +424,9 @@ impl PathMapper {
     /// # Errors
     ///
     /// Returns [`InvalidPathMappingRule`], with `index` set to the rule's
-    /// position, for the first rule whose `source_path` is not absolute for
-    /// its format (see [`PathMappingRule::validate`]).
+    /// position, for the first invalid rule: a `source_path` that is not
+    /// absolute for its format, or a `source_path` or `destination_path`
+    /// longer than [`MAX_PATH_LEN`] bytes (see [`PathMappingRule::validate`]).
     pub fn new(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule> {
         let mut nodes = vec![TrieNode::default(); SOURCE_FORMATS.len()];
         let mut depths = Vec::with_capacity(rules.len());

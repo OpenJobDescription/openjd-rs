@@ -117,8 +117,10 @@ impl HostContext {
     ///
     /// # Errors
     ///
-    /// Returns [`InvalidPathMappingRule`] when a rule's `source_path` is
-    /// not absolute for its format (see [`PathMapper::new`]).
+    /// Returns [`InvalidPathMappingRule`] when a rule is invalid: a
+    /// `source_path` that is not absolute for its format, or a path longer
+    /// than [`MAX_PATH_LEN`](crate::path_mapping::MAX_PATH_LEN) bytes (see
+    /// [`PathMapper::new`]).
     pub fn with_rules(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule> {
         Ok(HostContext::WithRules(Arc::new(PathMapper::new(rules)?)))
     }

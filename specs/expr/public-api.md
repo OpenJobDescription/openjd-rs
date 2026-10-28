@@ -284,7 +284,8 @@ pub enum HostContext {
 
 impl HostContext {
     /// Build a `PathMapper` from `rules` and wrap it in `WithRules`.
-    /// Errors when a rule's source path is not absolute for its format.
+    /// Errors when a rule's source path is not absolute for its format or
+    /// a path is longer than `MAX_PATH_LEN`.
     pub fn with_rules(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule>;
 
     pub fn is_enabled(&self) -> bool;       // true iff not None
@@ -1404,9 +1405,10 @@ pub struct PathMappingRule {
     pub destination_path: String,
 }
 
-/// The longest `source_path`, `destination_path` or mapped path, in bytes
+/// The longest `source_path`, `destination_path` or input path, in bytes
 /// (32 KiB). Longer rule paths are rejected; a longer input path matches no
-/// rule, and `apply_path_mapping` raises an error for it.
+/// rule, and `apply_path_mapping` raises an error for it. A mapped result
+/// can be longer (destination plus the rest of the input).
 pub const path_mapping::MAX_PATH_LEN: usize = 32768;
 
 impl PathMappingRule {
@@ -1439,7 +1441,8 @@ pub struct PathMapper { /* private fields */ }
 impl Default for PathMapper; // no rules
 
 impl PathMapper {
-    /// Errors, with the rule's index, on the first relative source path.
+    /// Errors, with the rule's index, on the first invalid rule (see
+    /// `PathMappingRule::validate`).
     pub fn new(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule>;
     /// The rules in the order given.
     pub fn rules(&self) -> &[PathMappingRule];

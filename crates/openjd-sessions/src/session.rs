@@ -115,8 +115,8 @@ pub struct SessionConfig {
     /// Path mapping rules for the session, in the order given. Between
     /// rules for the same location, the one given last wins.
     /// [`Session::with_config`] fails with
-    /// [`SessionError::InvalidPathMappingRule`] when a rule's source path is
-    /// not absolute for its format.
+    /// [`SessionError::InvalidPathMappingRule`] when a rule is invalid (see
+    /// [`PathMappingRule::validate`]).
     pub path_mapping_rules: Option<Vec<PathMappingRule>>,
     pub retain_working_dir: bool,
     pub callback: Option<SessionCallbackType>,
@@ -833,8 +833,8 @@ impl Session {
     ///
     /// # Errors
     ///
-    /// Returns [`SessionError::InvalidPathMappingRule`] when a rule's source
-    /// path is not absolute for its format.
+    /// Returns [`SessionError::InvalidPathMappingRule`] when a rule is
+    /// invalid (see [`PathMappingRule::validate`]).
     pub fn with_path_mapping(mut self, rules: Vec<PathMappingRule>) -> Result<Self, SessionError> {
         self.path_mapper = Arc::new(PathMapper::new(rules)?);
         self.library = derive_library(self.profile.as_ref(), &self.path_mapper);

@@ -858,4 +858,15 @@ fn apply_path_mapping_rejects_a_path_over_the_limit() {
             MAX_PATH_LEN + 1
         )
     );
+    // A path of exactly the limit is mapped.
+    let mut st = SymbolTable::new();
+    st.set("S", ExprValue::String("a".repeat(MAX_PATH_LEN)))
+        .unwrap();
+    let ok = openjd_expr::ParsedExpression::new("apply_path_mapping(S)")
+        .unwrap()
+        .with_library(&lib)
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&[&st])
+        .unwrap();
+    assert_eq!(ok.to_display_string().len(), MAX_PATH_LEN);
 }

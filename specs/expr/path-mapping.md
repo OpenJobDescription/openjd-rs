@@ -466,7 +466,7 @@ rule, UNC anchors), with these differences:
   ASCII.
 - **Source paths.** Rust rejects a relative source path. Python accepts one,
   and it then matches only relative inputs.
-- **Length.** Rust limits rule paths and mapped paths to 32 KiB
+- **Length.** Rust limits rule paths and input paths to 32 KiB
   ([Path length limit](#path-length-limit)); Python has no limit.
 - **Two leading slashes.** `PurePosixPath('//a')` keeps `//` as its own root,
   so it is not relative to `/a`. Rust treats `//a` as `/a`, as Linux and

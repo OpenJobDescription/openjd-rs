@@ -148,8 +148,8 @@ the agent would need to track and cancel each action individually.
 `Session::with_config(config: SessionConfig) -> Result<Self, SessionError>`:
 
 1. Builds the session's `PathMapper` from `config.path_mapping_rules`, failing with
-   `SessionError::InvalidPathMappingRule` before any directory is created when a rule's
-   source path is not absolute for its format
+   `SessionError::InvalidPathMappingRule` before any directory is created when
+   a rule is invalid (a relative source path, or a path longer than 32 KiB)
 2. Creates the session root directory via `custom_gettempdir()` if not provided
 3. Creates the working directory via `TempDir::new_session_working_dir()` with the
    session user for cross-user permissions. Its name is 8 random characters from
@@ -307,7 +307,7 @@ so an added rule takes precedence over an existing rule for the same location
 (`path_mapping_rules()` still returns both).
 
 Returns `SessionError::InvalidPathMappingRule`, and leaves the rules unchanged,
-when an added rule's source path is not absolute for its format. The error's
+when an added rule is invalid (a relative source path, or a path longer than 32 KiB). The error's
 index counts from the first existing rule.
 
 Used by the worker agent when additional path mapping rules become available after
@@ -525,8 +525,7 @@ pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Result<Self, Sess
 ```
 
 Replaces the session's path mapping rules, keeping the order given. Fails with
-`SessionError::InvalidPathMappingRule` when a rule's source path is not absolute
-for its format. Called immediately after construction when path mapping rules are
+`SessionError::InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB). Called immediately after construction when path mapping rules are
 known at session creation time. `Session::with_config` builds the session's
 `PathMapper` from `SessionConfig::path_mapping_rules` the same way and fails with
 the same error.
