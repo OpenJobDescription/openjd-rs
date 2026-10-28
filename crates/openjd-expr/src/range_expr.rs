@@ -440,6 +440,20 @@ impl std::str::FromStr for RangeExpr {
 /// [`MAX_RANGE_EXPR_CHUNKS`] runs. Runs beyond the cap are counted (for the
 /// message) but not stored, so the allocation stays within the cap.
 fn canonical_runs(progressions: &[IntRange]) -> Result<Vec<IntRange>, ExpressionError> {
+    let (mut runs, run_count) = capped_canonical_runs(progressions);
+    if run_count > MAX_RANGE_EXPR_CHUNKS {
+        return Err(too_many_runs(run_count));
+    }
+    // The capacity is one per progression, up to the cap; a value keeps
+    // only its runs.
+    runs.shrink_to_fit();
+    Ok(runs)
+}
+
+/// The work of [`canonical_runs`]: returns the first
+/// [`MAX_RANGE_EXPR_CHUNKS`] runs, in a vector whose capacity is at most
+/// that, and the total number of runs.
+fn capped_canonical_runs(progressions: &[IntRange]) -> (Vec<IntRange>, usize) {
     let count = progressions.len();
     let mut runs = Vec::with_capacity(count.min(MAX_RANGE_EXPR_CHUNKS));
     let mut run_count: usize = 0;
@@ -504,13 +518,7 @@ fn canonical_runs(progressions: &[IntRange]) -> Result<Vec<IntRange>, Expression
             position = Some(second);
         }
     }
-    if run_count > MAX_RANGE_EXPR_CHUNKS {
-        return Err(too_many_runs(run_count));
-    }
-    // The capacity is one per progression, up to the cap; a value keeps
-    // only its runs.
-    runs.shrink_to_fit();
-    Ok(runs)
+    (runs, run_count)
 }
 
 impl RangeExpr {
@@ -1238,7 +1246,55 @@ mod tests {
             .collect::<Vec<_>>()
             .join(",");
         let err = expr.parse::<RangeExpr>().unwrap_err().to_string();
-        assert!(err.contains("too many sub-ranges"), "got: {err}");
+        assert_eq!(
+            err,
+            format!("Range expression has too many sub-ranges (> 50000): '{expr}'")
+        );
+    }
+
+    #[test]
+    fn runs_beyond_the_cap_are_counted_but_not_stored() {
+        // Two million isolated values: the first MAX_RANGE_EXPR_CHUNKS runs
+        // are kept, in a vector never larger than that, and all two
+        // million are counted.
+        let singles: Vec<IntRange> = (0..2_000_000i64).map(|i| IntRange::single(i * i)).collect();
+        let (runs, count) = capped_canonical_runs(&singles);
+        assert_eq!(count, 2_000_000);
+        assert_eq!(runs.len(), MAX_RANGE_EXPR_CHUNKS);
+        assert_eq!(runs.capacity(), MAX_RANGE_EXPR_CHUNKS);
+        assert_eq!(runs[..], singles[..MAX_RANGE_EXPR_CHUNKS]);
+        assert_eq!(
+            canonical_runs(&singles).unwrap_err().to_string(),
+            "Range expression has too many sub-ranges in canonical form (2000000); maximum is 50000"
+        );
+        // Fewer progressions than the cap: one slot per progression.
+        let (runs, count) = capped_canonical_runs(&singles[..10]);
+        assert_eq!((runs.len(), runs.capacity(), count), (10, 10, 10));
+    }
+
+    #[test]
+    fn element_cap_stops_parsing_before_the_rest_of_the_input() {
+        // The parser stops at element 50,001, so it never reaches the
+        // invalid text after it: the error is the cap, not "Expected
+        // integer". (A check only after parsing would report the "x".)
+        let expr = (0..=MAX_RANGE_EXPR_CHUNKS as i64)
+            .map(|i| i.to_string())
+            .chain(["x".to_string()])
+            .collect::<Vec<_>>()
+            .join(",");
+        let err = expr.parse::<RangeExpr>().unwrap_err().to_string();
+        assert_eq!(
+            err,
+            format!("Range expression has too many sub-ranges (> 50000): '{expr}'")
+        );
+        // At the cap, the parser does reach it.
+        let expr = (0..MAX_RANGE_EXPR_CHUNKS as i64)
+            .map(|i| i.to_string())
+            .chain(["x".to_string()])
+            .collect::<Vec<_>>()
+            .join(",");
+        let err = expr.parse::<RangeExpr>().unwrap_err().to_string();
+        assert_eq!(err, format!("Expected integer in '{expr}'"));
     }
 
     #[test]

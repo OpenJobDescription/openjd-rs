@@ -628,6 +628,24 @@ fn canonical_form_beyond_the_cap_is_rejected_by_parse_and_from_ranges() {
 }
 
 #[test]
+fn serialized_form_beyond_the_run_cap_is_rejected_by_deserialize() {
+    // 25,001 two-value runs: within the element cap, but 50,002 runs in
+    // canonical form.
+    let runs = (0..25_001i64)
+        .map(|i| format!(r#"{{"start":{},"end":{},"step":1}}"#, 3 * i, 3 * i + 1))
+        .collect::<Vec<_>>()
+        .join(",");
+    let json = format!(r#"{{"ranges":[{runs}]}}"#);
+    let err = serde_json::from_str::<RangeExpr>(&json)
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        "Range expression has too many sub-ranges in canonical form (50002); maximum is 50000"
+    );
+}
+
+#[test]
 fn serialized_form_beyond_the_cap_is_rejected_by_deserialize() {
     // No `RangeExpr` has more than CAP runs, so write the serialized form by
     // hand: 50,001 runs.
@@ -665,9 +683,11 @@ fn from_values_is_capped() {
 }
 
 #[test]
-fn from_values_beyond_the_cap_does_not_store_the_extra_runs() {
-    // Two million isolated values are rejected without building two
-    // million runs; the error still counts them.
+fn from_values_far_beyond_the_cap_is_rejected_quickly() {
+    // Two million isolated values are rejected in linear time; the error
+    // counts all their runs. (That the runs beyond the cap are not stored
+    // is tested by the unit test
+    // runs_beyond_the_cap_are_counted_but_not_stored in src/range_expr.rs.)
     let err = within_deadline_result(Duration::from_secs(10), || {
         RangeExpr::from_values(squares(2_000_000))
             .unwrap_err()

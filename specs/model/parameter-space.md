@@ -277,9 +277,11 @@ expression has too many sub-ranges in canonical form (50001); maximum is 50000`,
 chunk by its index and its first and last values.
 
 **Deviation from Template Schemas §3.4.1.5:** the specification places no limit on the runs
-of a chunk, so this is a limit of this implementation. It is reachable only with a range of
-at least 49,999 runs chunked in chunks of more than 50,000 values. openjd-model-for-python
-has no such limit.
+of a chunk, so this is a limit of this implementation. It is reachable only with chunks of
+more than 50,000 values, cut from a range expression of at least 49,999 runs or from a
+public-API list of more than 50,000 values. (A list is chunked in list order, so a chunk of
+an unsorted list can have more runs than the whole list.) openjd-model-for-python has no
+such limit.
 
 A CONTIGUOUS chunk is built from the string `"<N>-<M>"` and flagged with
 `RangeExpr::with_contiguous(true)`, so it is written `<N>-<M>` even with one or two values

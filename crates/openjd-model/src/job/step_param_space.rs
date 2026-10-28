@@ -129,12 +129,13 @@ fn chunk_values_to_range_expr(vals: &[i64], constraint: &RangeConstraint) -> Ran
                 .expect("range string built from valid integers")
                 .with_contiguous(true)
         }
-        // Chunk values are within the range value bound (checked by
-        // `StepParameterSpaceIterator::new_inner`), and every chunk built
-        // here fits MAX_RANGE_EXPR_CHUNKS runs: static chunks are checked by
-        // `check_noncontiguous_chunks_fit`, and adaptive chunks are
-        // shortened by `AdaptiveChunkIterator::next`. So from_values cannot
-        // fail.
+        // from_values fails only for i64::MIN or more than
+        // MAX_RANGE_EXPR_CHUNKS runs. CHUNK[INT] values are within the range
+        // value bound (checked by `StepParameterSpaceIterator::new_inner`;
+        // an INT parameter with chunks, which only the public API builds, is
+        // not checked there). Every chunk built here fits the run cap:
+        // static chunks are checked by `check_noncontiguous_chunks_fit`, and
+        // adaptive chunks are shortened by `AdaptiveChunkIterator::next`.
         RangeConstraint::Noncontiguous => RangeExpr::from_values(vals.to_vec())
             .expect("chunk values within the value bound and the run cap"),
     }
