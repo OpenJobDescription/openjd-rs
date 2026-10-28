@@ -2952,6 +2952,16 @@ async fn test_path_parameter_over_the_length_limit_is_an_error() {
         .build_symbol_table(Some(&task), None)
         .unwrap_err();
     assert_eq!(err.to_string(), expected("Task.Param.T"));
+
+    // The limit applies with no rules too, as apply_path_mapping does with
+    // an empty rule list.
+    let mut config = config_in_root(tmp.path(), "no-rules");
+    config.job_parameter_values = [("P".to_string(), path(&long))].into_iter().collect();
+    let err = Session::with_config(config)
+        .unwrap()
+        .build_symbol_table(None, None)
+        .unwrap_err();
+    assert_eq!(err.to_string(), expected("Param.P"));
 }
 
 // ══════════════════════════════════════════════════════════════

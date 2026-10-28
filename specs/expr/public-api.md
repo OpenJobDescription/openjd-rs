@@ -284,8 +284,9 @@ pub enum HostContext {
 
 impl HostContext {
     /// Build a `PathMapper` from `rules` and wrap it in `WithRules`.
-    /// Errors when a rule's source path is not absolute for its format or
-    /// a path is longer than `MAX_PATH_LEN`.
+    /// Errors when a rule's source path is not absolute for its format, a
+    /// path is longer than `MAX_PATH_LEN`, or the rules' trie would pass
+    /// `DEFAULT_MAX_TRIE_BYTES`.
     pub fn with_rules(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule>;
 
     pub fn is_enabled(&self) -> bool;       // true iff not None

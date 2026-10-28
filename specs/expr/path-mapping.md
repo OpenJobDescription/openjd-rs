@@ -122,6 +122,11 @@ impl Default for PathMapper; // no rules
 
 impl PathMapper {
     pub fn new(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule>;
+    pub fn with_max_trie_bytes(
+        rules: Vec<PathMappingRule>,
+        max_trie_bytes: usize,
+    ) -> Result<Self, InvalidPathMappingRule>;
+    pub fn trie_bytes(&self) -> usize;
     pub fn rules(&self) -> &[PathMappingRule];
     pub fn rules_by_precedence(&self) -> impl Iterator<Item = &PathMappingRule> + '_;
     pub fn is_empty(&self) -> bool;

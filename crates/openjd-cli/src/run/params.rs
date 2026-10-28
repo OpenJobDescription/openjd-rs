@@ -305,8 +305,9 @@ pub fn load_path_mapping_rules(
         .iter()
         .map(|r| serde_json::from_value(r.clone()))
         .collect::<Result<_, _>>()?;
-    // Reject a relative source path here, naming the rule, rather than when
-    // the session starts.
+    // Reject an invalid rule here (a relative source path, a path over
+    // MAX_PATH_LEN, or a trie over the default size limit), naming the
+    // rule, rather than when the session starts.
     openjd_sessions::path_mapping::PathMapper::new(rules.clone())
         .map_err(|e| format!("Invalid path mapping rules: {e}"))?;
     Ok(rules)
