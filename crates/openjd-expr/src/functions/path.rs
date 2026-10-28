@@ -638,6 +638,13 @@ pub fn make_apply_path_mapping_fn(
 ) -> impl Fn(&mut dyn EvalContext, &[ExprValue]) -> R + Send + Sync + 'static {
     move |ctx, a| {
         let (path_str, fmt) = get_path(&a[0], ctx)?;
+        if path_str.len() > crate::path_mapping::MAX_PATH_LEN {
+            return Err(ExpressionError::new(format!(
+                "apply_path_mapping: the path is {} bytes long, more than the limit of {} bytes",
+                path_str.len(),
+                crate::path_mapping::MAX_PATH_LEN
+            )));
+        }
         // `PathMapper` walks the path's components down each source
         // format's trie once, so matching is linear in the path length
         // whatever the number of rules. Building the result copies the

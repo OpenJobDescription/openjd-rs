@@ -465,6 +465,7 @@ impl serde_core::ser::Serialize for openjd_expr::path_mapping::PathMappingRule
 pub fn openjd_expr::path_mapping::PathMappingRule::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::path_mapping::PathMappingRule
 pub fn openjd_expr::path_mapping::PathMappingRule::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub const openjd_expr::path_mapping::MAX_PATH_LEN: usize
 pub fn openjd_expr::path_mapping::is_uri(&str) -> bool
 pub mod openjd_expr::profile
 #[non_exhaustive] pub enum openjd_expr::profile::ExprExtension

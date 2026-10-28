@@ -1210,11 +1210,12 @@ mod apply_unit {
     #[test]
     fn deep_rule_builds_maps_clones_and_drops_on_a_small_stack() {
         // The trie is a flat arena, so nothing about a mapper recurses per
-        // component; a 50,000-component rule must not overflow a small stack.
+        // component; the deepest rule the length limit allows (16,383
+        // components) must not overflow a 64 KiB stack.
         let handle = std::thread::Builder::new()
-            .stack_size(256 * 1024)
+            .stack_size(64 * 1024)
             .spawn(|| {
-                let source = "/a".repeat(50_000);
+                let source = "/a".repeat(openjd_expr::path_mapping::MAX_PATH_LEN / 2 - 1);
                 let m = mapper(vec![posix_rule(&source, "/d")]);
                 let path = format!("{source}/f");
                 assert_eq!(m.map_with_format(&path, PathFormat::Posix), "/d/f");
@@ -1232,6 +1233,108 @@ mod apply_unit {
         // Only `/` is a POSIX trailing separator, so no `/` is added.
         let m = mapper(vec![posix_rule("/a", "/d")]);
         assert_eq!(m.map_with_format("/a/b\\", PathFormat::Posix), "/d/b\\");
+    }
+
+    #[test]
+    fn paths_longer_than_the_limit() {
+        use openjd_expr::path_mapping::MAX_PATH_LEN;
+        let long = format!("/{}", "a".repeat(MAX_PATH_LEN));
+        let err =
+            PathMapper::new(vec![posix_rule("/ok", "/a"), posix_rule(&long, "/d")]).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "path mapping rule 1: source_path is {} bytes long, more than the limit of \
+                 {MAX_PATH_LEN} bytes",
+                MAX_PATH_LEN + 1
+            )
+        );
+        let err = posix_rule("/a", &long).validate().unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "destination_path is {} bytes long, more than the limit of {MAX_PATH_LEN} bytes",
+                MAX_PATH_LEN + 1
+            )
+        );
+        // At the limit is accepted; a longer input path matches no rule.
+        let at_limit = format!("/{}", "a".repeat(MAX_PATH_LEN - 1));
+        let m = mapper(vec![posix_rule(&at_limit, "/d"), posix_rule("/", "/root")]);
+        assert_eq!(m.map_with_format(&at_limit, PathFormat::Posix), "/d");
+        assert_eq!(m.apply_with_format(&long, PathFormat::Posix), None);
+    }
+
+    /// A small deterministic generator, so the property test needs no
+    /// dependency and fails the same way every time.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self, n: usize) -> usize {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((self.0 >> 33) as usize) % n
+        }
+    }
+
+    #[test]
+    fn precedence_properties_hold_on_random_rules() {
+        // First match over rules_by_precedence() equals apply, and a mapper
+        // rebuilt from that list in a shuffled order maps the same way.
+        let anchors = [
+            "/",
+            "//srv/share/",
+            "C:\\",
+            "c:/",
+            "\\\\SRV\\share\\",
+            "s3://B/",
+            "s3://b//",
+        ];
+        let names = ["srv", "share", "a", "A", ".", "", "x", "\u{e9}", "\u{c9}"];
+        let mut rng = Lcg(42);
+        let random_path = |rng: &mut Lcg| {
+            let mut p = anchors[rng.next(anchors.len())].to_string();
+            for _ in 0..rng.next(4) {
+                p.push_str(names[rng.next(names.len())]);
+                p.push(if rng.next(2) == 0 { '/' } else { '\\' });
+            }
+            p
+        };
+        let formats = [PathFormat::Posix, PathFormat::Windows, PathFormat::Uri];
+        for _ in 0..2000 {
+            let rules: Vec<PathMappingRule> = (0..1 + rng.next(5))
+                .map(|i| PathMappingRule {
+                    source_path_format: formats[rng.next(3)],
+                    source_path: random_path(&mut rng),
+                    destination_path: format!("/d{i}"),
+                })
+                .filter(|r| r.validate().is_ok())
+                .collect();
+            let m = mapper(rules);
+            let mut listed: Vec<PathMappingRule> = m.rules_by_precedence().cloned().collect();
+            let paths: Vec<String> = (0..10).map(|_| random_path(&mut rng)).collect();
+            for path in &paths {
+                let first = listed
+                    .iter()
+                    .find_map(|r| r.apply_with_format(path, PathFormat::Posix));
+                assert_eq!(
+                    first,
+                    m.apply_with_format(path, PathFormat::Posix),
+                    "{path}"
+                );
+            }
+            for i in (1..listed.len()).rev() {
+                listed.swap(i, rng.next(i + 1));
+            }
+            let rebuilt = mapper(listed);
+            for path in &paths {
+                assert_eq!(
+                    rebuilt.apply_with_format(path, PathFormat::Posix),
+                    m.apply_with_format(path, PathFormat::Posix),
+                    "{path}"
+                );
+            }
+        }
     }
 
     #[test]

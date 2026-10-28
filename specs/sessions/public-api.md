@@ -237,7 +237,8 @@ impl Session {
     /// Append to the existing rules (in-place). Between rules for the
     /// same location the one given last wins, so an added rule takes
     /// precedence over an existing one (`path_mapping_rules()` keeps both).
-    /// On `SessionError::InvalidPathMappingRule` the rules are unchanged.
+    /// On `SessionError::InvalidPathMappingRule` the rules are unchanged;
+    /// its index counts from the first existing rule.
     pub fn extend_path_mapping_rules(
         &mut self, additional: Vec<PathMappingRule>,
     ) -> Result<(), SessionError>;

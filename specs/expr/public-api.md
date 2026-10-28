@@ -1404,9 +1404,15 @@ pub struct PathMappingRule {
     pub destination_path: String,
 }
 
+/// The longest `source_path`, `destination_path` or mapped path, in bytes
+/// (32 KiB). Longer rule paths are rejected; a longer input path matches no
+/// rule, and `apply_path_mapping` raises an error for it.
+pub const path_mapping::MAX_PATH_LEN: usize = 32768;
+
 impl PathMappingRule {
-    /// Check that `source_path` is absolute for `source_path_format`.
-    /// The error's `index` is `None`.
+    /// Check that `source_path` is absolute for `source_path_format` and
+    /// that neither path is longer than `MAX_PATH_LEN` bytes. The error's
+    /// `index` is `None`.
     pub fn validate(&self) -> Result<(), InvalidPathMappingRule>;
 }
 

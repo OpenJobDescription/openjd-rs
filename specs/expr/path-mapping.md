@@ -64,6 +64,21 @@ The error is `InvalidPathMappingRule { index, reason }`. Its `Display` is
 `PathMapper::new`, and the same without the `path mapping rule <index>: `
 prefix from `validate`, which sets `index` to `None`.
 
+### Path length limit
+
+`path_mapping::MAX_PATH_LEN` is 32 KiB (32,768 bytes). `validate` and
+`PathMapper::new` reject a rule whose `source_path` or `destination_path` is
+longer, with `source_path is <n> bytes long, more than the limit of 32768
+bytes` (or `destination_path ...`). An input path longer than the limit
+matches no rule, and `apply_path_mapping` raises `apply_path_mapping: the
+path is <n> bytes long, more than the limit of 32768 bytes` for one.
+
+32 KiB covers a Windows extended-length path (up to 32,767 UTF-16 code units)
+of ASCII characters and is eight times Linux's `PATH_MAX` (4096). It keeps
+the work bounded: a trie node costs about 240 bytes, so an unbounded rule of
+millions of components (a 10 MB rules file is accepted by the CLI) would need
+gigabytes.
+
 ### Serde
 
 `PathMappingRule` implements `Serialize` and `Deserialize` for JSON interchange:
@@ -451,6 +466,8 @@ rule, UNC anchors), with these differences:
   ASCII.
 - **Source paths.** Rust rejects a relative source path. Python accepts one,
   and it then matches only relative inputs.
+- **Length.** Rust limits rule paths and mapped paths to 32 KiB
+  ([Path length limit](#path-length-limit)); Python has no limit.
 - **Two leading slashes.** `PurePosixPath('//a')` keeps `//` as its own root,
   so it is not relative to `/a`. Rust treats `//a` as `/a`, as Linux and
   macOS do. So in Rust, but not in Python, a POSIX rule can match a

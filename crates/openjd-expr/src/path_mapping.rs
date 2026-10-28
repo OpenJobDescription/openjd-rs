@@ -69,6 +69,14 @@ impl PathFormat {
     }
 }
 
+/// The longest path, in bytes, that path mapping handles: a rule's
+/// `source_path` or `destination_path` longer than this is rejected, and a
+/// longer path matches no rule. 32 KiB covers a Windows extended-length path
+/// (up to 32,767 UTF-16 code units) of ASCII characters and is eight times
+/// Linux's `PATH_MAX`, while keeping a rule's trie, about 240 bytes per
+/// component, small.
+pub const MAX_PATH_LEN: usize = 32 * 1024;
+
 /// The source formats, in [`PathFormat::trie_index`] order.
 const SOURCE_FORMATS: [PathFormat; 3] = [PathFormat::Posix, PathFormat::Windows, PathFormat::Uri];
 
@@ -96,19 +104,38 @@ pub struct PathMappingRule {
 }
 
 impl PathMappingRule {
-    /// Check that `source_path` is absolute for `source_path_format`.
+    /// Check that `source_path` is absolute for `source_path_format`, and
+    /// that neither path is longer than [`MAX_PATH_LEN`] bytes.
     ///
     /// # Errors
     ///
     /// Returns [`InvalidPathMappingRule`], with `index` set to `None`, when
-    /// `source_path` is not absolute: not starting with `/` for `POSIX`, with
-    /// neither a drive (`C:\`) nor a UNC share (`\\server\share`) for
-    /// `WINDOWS`, or without a `<scheme>://` prefix for `URI`.
+    /// `source_path` or `destination_path` is longer than [`MAX_PATH_LEN`]
+    /// bytes, or `source_path` is not absolute: not starting with `/` for
+    /// `POSIX`, with neither a drive (`C:\`) nor a UNC share
+    /// (`\\server\share`) for `WINDOWS`, or without a `<scheme>://` prefix for
+    /// `URI`.
     pub fn validate(&self) -> Result<(), InvalidPathMappingRule> {
-        match self.split_source() {
-            Some(_) => Ok(()),
-            None => Err(self.invalid()),
+        self.checked_split().map(|_| ())
+    }
+
+    /// [`validate`](Self::validate), returning the split `source_path`.
+    fn checked_split(&self) -> Result<SplitPath<'_>, InvalidPathMappingRule> {
+        for (field, value) in [
+            ("source_path", &self.source_path),
+            ("destination_path", &self.destination_path),
+        ] {
+            if value.len() > MAX_PATH_LEN {
+                return Err(InvalidPathMappingRule {
+                    index: None,
+                    reason: format!(
+                        "{field} is {} bytes long, more than the limit of {MAX_PATH_LEN} bytes",
+                        value.len()
+                    ),
+                });
+            }
         }
+        self.split_source().ok_or_else(|| self.invalid())
     }
 
     /// Split `source_path` for the trie, or `None` when it is not absolute
@@ -403,9 +430,9 @@ impl PathMapper {
         let mut replaced = vec![false; rules.len()];
         for (i, rule) in rules.iter().enumerate() {
             let format = rule.source_path_format;
-            let split = rule.split_source().ok_or_else(|| InvalidPathMappingRule {
+            let split = rule.checked_split().map_err(|e| InvalidPathMappingRule {
                 index: Some(i),
-                ..rule.invalid()
+                ..e
             })?;
             let mut node =
                 Self::child_or_insert(&mut nodes, format.trie_index(), split.anchor.clone());
@@ -453,7 +480,8 @@ impl PathMapper {
 
     /// Map `path`, joining the components after the matched source path to
     /// the destination with this host's separator. Returns `None` when no
-    /// rule matches.
+    /// rule matches, which includes a path longer than [`MAX_PATH_LEN`]
+    /// bytes.
     pub fn apply(&self, path: &str) -> Option<String> {
         self.apply_with_format(path, PathFormat::host())
     }
@@ -498,8 +526,12 @@ impl PathMapper {
             .unwrap_or_else(|| path.to_string())
     }
 
-    /// The winning rule for `path`, if any rule matches.
+    /// The winning rule for `path`, if any rule matches. A path longer
+    /// than [`MAX_PATH_LEN`] bytes matches none.
     fn find<'a>(&self, path: &'a str) -> Option<Match<'a>> {
+        if path.len() > MAX_PATH_LEN {
+            return None;
+        }
         let mut best: Option<Match<'a>> = None;
         // Reused for each folded WINDOWS component, so the walk allocates
         // only for the longest component.

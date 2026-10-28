@@ -852,8 +852,10 @@ impl Session {
     /// # Errors
     ///
     /// Returns [`SessionError::InvalidPathMappingRule`], and leaves the
-    /// rules unchanged, when an added rule's source path is not absolute
-    /// for its format.
+    /// rules unchanged, when an added rule is invalid (see
+    /// [`PathMappingRule::validate`]). The error's index counts from the
+    /// first existing rule, so `additional[0]` is index
+    /// `path_mapping_rules().len()`.
     pub fn extend_path_mapping_rules(
         &mut self,
         additional: Vec<PathMappingRule>,
