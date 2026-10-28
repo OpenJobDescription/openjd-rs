@@ -198,7 +198,7 @@ fn check_noncontiguous_chunks_fit(
     if largest <= MAX_RANGE_EXPR_CHUNKS {
         return Ok(());
     }
-    // Names the chunk by its index and its first and last values.
+    // Names the chunk by its index and its smallest and largest values.
     let chunk_error = |i: usize, first: i64, last: i64, e: openjd_expr::ExpressionError| {
         ModelError::DecodeValidation(format!(
             "Task parameter '{name}': chunk {i} (values {first} to {last}): {e}"
@@ -237,10 +237,16 @@ fn check_noncontiguous_chunks_fit(
         }
         job::TaskParamRange::List(values) => (0..num_chunks).try_for_each(|i| {
             let (offset, size) = bounds(i);
+            // A list may be unsorted: name its smallest and largest values.
             let chunk = &values[offset..offset + size];
             RangeExpr::from_values(chunk.to_vec())
                 .map(|_| ())
-                .map_err(|e| chunk_error(i, chunk[0], chunk[size - 1], e))
+                .map_err(|e| {
+                    let (min, max) = chunk
+                        .iter()
+                        .fold((i64::MAX, i64::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
+                    chunk_error(i, min, max, e)
+                })
         }),
     }
 }

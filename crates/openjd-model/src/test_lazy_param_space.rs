@@ -1461,6 +1461,25 @@ fn test_noncontiguous_static_list_chunk_beyond_the_run_cap_is_an_error() {
 }
 
 #[test]
+fn test_noncontiguous_static_unsorted_list_chunk_error_names_its_smallest_and_largest_values() {
+    // A public-API list is chunked in list order; the error names the
+    // chunk's smallest and largest values, whatever their order.
+    let squares: Vec<i64> = (0..100_001i64).rev().map(|i| i * i).collect();
+    let space = make_space(
+        vec![(
+            "F",
+            chunk_int_of(TaskParamRange::List(squares), 60_000, None),
+        )],
+        None,
+    );
+    let err = StepParameterSpaceIterator::new(&space).err().unwrap();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Task parameter 'F': chunk 0 (values 2500000000 to 10000000000): Range expression has too many sub-ranges in canonical form (50001); maximum is 50000"
+    );
+}
+
+#[test]
 fn test_noncontiguous_adaptive_chunk_beyond_the_run_cap_is_shortened() {
     // An adaptive chunk size can grow past the cap at run time, where
     // iteration cannot fail. A chunk whose canonical form would have more
@@ -1648,19 +1667,26 @@ fn test_noncontiguous_static_check_with_many_leftovers() {
     );
 }
 
-/// The first chunk beyond the run cap, found by building every chunk.
-fn first_chunk_beyond_the_cap(range: &RangeExpr, dtc: usize) -> Option<usize> {
+/// The first chunk beyond the run cap, found by building every chunk, with
+/// the error the check should report for it.
+fn first_chunk_beyond_the_cap(range: &RangeExpr, dtc: usize) -> Option<(usize, String)> {
     let total = range.len();
     let chunks = total.div_ceil(dtc);
     let (small, larger) = (total / chunks, total % chunks);
     let mut offset = 0;
-    (0..chunks).find(|&i| {
+    (0..chunks).find_map(|i| {
         let size = small + usize::from(i < larger);
-        let fails = range
-            .slice(offset as i64, (offset + size) as i64, 1)
-            .is_err();
+        let (start, stop) = (offset as i64, (offset + size) as i64);
         offset += size;
-        fails
+        range.slice(start, stop, 1).err().map(|e| {
+            let (first, last) = (range.get(start).unwrap(), range.get(stop - 1).unwrap());
+            (
+                i,
+                format!(
+                    "Validation error: Task parameter 'F': chunk {i} (values {first} to {last}): {e}"
+                ),
+            )
+        })
     })
 }
 
@@ -1694,15 +1720,10 @@ fn test_noncontiguous_static_check_agrees_with_building_every_chunk() {
                 let want = first_chunk_beyond_the_cap(&shifted, dtc);
                 let got = static_noncontiguous_error(shifted.clone(), dtc);
                 match want {
-                    Some(i) => {
+                    Some((i, message)) => {
                         outcomes.0 += 1;
                         let got = got.unwrap_or_else(|| panic!("chunk {i} missed"));
-                        assert!(
-                            got.starts_with(&format!(
-                                "Validation error: Task parameter 'F': chunk {i} (values "
-                            )),
-                            "{got}"
-                        );
+                        assert_eq!(got, message);
                     }
                     None => {
                         outcomes.1 += 1;

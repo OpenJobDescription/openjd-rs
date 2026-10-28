@@ -274,7 +274,7 @@ memory; a template caps it at 1,024 values, so this matters only for a
 `RangeExpr::from_values`. A chunk that does not fit fails `StepParameterSpaceIterator::new`,
 and so job creation, with `Task parameter 'F': chunk 1 (values 50004 to 3499850112): Range
 expression has too many sub-ranges in canonical form (50001); maximum is 50000`, naming the
-chunk by its index and its first and last values.
+chunk by its index and its smallest and largest values.
 
 **Deviation from Template Schemas §3.4.1.5:** the specification places no limit on the runs
 of a chunk, so this is a limit of this implementation. It is reachable only with chunks of
