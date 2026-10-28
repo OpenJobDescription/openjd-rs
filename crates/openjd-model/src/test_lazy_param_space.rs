@@ -1356,3 +1356,400 @@ fn test_py_multi_contig_chunksize2_override1() {
         ]
     );
 }
+
+// ── NONCONTIGUOUS chunks and the range expression run cap ──
+//
+// A NONCONTIGUOUS chunk is a `RangeExpr`, which holds at most
+// `MAX_RANGE_EXPR_CHUNKS` runs, and its canonical form can have up to two
+// more runs than the runs of the range it intersects (see
+// specs/model/parameter-space.md, Noncontiguous Static Chunking).
+
+const CAP: usize = openjd_expr::MAX_RANGE_EXPR_CHUNKS;
+
+/// A range of `CAP` runs: `0-(head-1)`, then `CAP - 2` isolated values,
+/// then a run of three far away. Splitting it into two chunks that cut the
+/// first run two values from its end gives a second chunk of `CAP + 1`
+/// runs: the last two values of the first run are written as two runs.
+fn cap_runs_range(head: i64) -> RangeExpr {
+    let mut values: Vec<i64> = (0..head).collect();
+    values.extend((1..=CAP as i64 - 2).map(|k| head + 100 + k * k));
+    let far = values[values.len() - 1] + 1_000_000_000;
+    values.extend([far, far + 1, far + 2]);
+    let r = RangeExpr::from_values(values).unwrap();
+    assert_eq!(r.ranges().len(), CAP);
+    r
+}
+
+fn chunk_int_of(range: TaskParamRange<i64>, dtc: usize, trs: Option<usize>) -> TaskParameter {
+    TaskParameter::ChunkInt {
+        range,
+        chunks: ResolvedChunks {
+            default_task_count: dtc,
+            target_runtime_seconds: trs,
+            range_constraint: RangeConstraint::Noncontiguous,
+        },
+    }
+}
+
+fn chunk_value(set: &TaskParameterSet) -> RangeExpr {
+    match &set["F"].value {
+        ExprValue::RangeExpr(r) => r.clone(),
+        other => panic!("expected a RangeExpr chunk, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_noncontiguous_static_chunk_beyond_the_run_cap_is_an_error() {
+    // 50,006 + 49,998 + 3 = 100,007 values in two chunks of 50,004 and
+    // 50,003: the second starts two values before the end of the first run.
+    let range = cap_runs_range(50_006);
+    assert_eq!(range.len(), 100_007);
+    let space = make_space(
+        vec![(
+            "F",
+            chunk_int_of(TaskParamRange::RangeExpr(range), 60_000, None),
+        )],
+        None,
+    );
+    let err = StepParameterSpaceIterator::new(&space).err().unwrap();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Task parameter 'F': chunk 1 (values 50004 to 3499850112): Range expression has too many sub-ranges in canonical form (50001); maximum is 50000"
+    );
+}
+
+#[test]
+fn test_noncontiguous_static_chunks_of_a_cap_run_range_that_fit() {
+    // The same range in one chunk is the range itself; cut three values
+    // from the end of the first run instead of two, both chunks fit.
+    for (head, dtc, chunks) in [(50_006, 100_007, 1), (50_007, 60_000, 2)] {
+        let range = cap_runs_range(head);
+        let space = make_space(
+            vec![(
+                "F",
+                chunk_int_of(TaskParamRange::RangeExpr(range.clone()), dtc, None),
+            )],
+            None,
+        );
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        let got: Vec<RangeExpr> = iter.map(|set| chunk_value(&set)).collect();
+        assert_eq!(got.len(), chunks, "head {head}");
+        let total: usize = got.iter().map(RangeExpr::len).sum();
+        assert_eq!(total, range.len());
+        assert!(got.iter().all(|c| c.ranges().len() <= CAP));
+    }
+}
+
+#[test]
+fn test_noncontiguous_static_list_chunk_beyond_the_run_cap_is_an_error() {
+    // A list range from the public API (a template caps lists at 1,024
+    // values): 100,001 squares in chunks of 50,001 and 50,000 values, each
+    // value a run.
+    let squares: Vec<i64> = (0..100_001i64).map(|i| i * i).collect();
+    let space = make_space(
+        vec![(
+            "F",
+            chunk_int_of(TaskParamRange::List(squares), 60_000, None),
+        )],
+        None,
+    );
+    let err = StepParameterSpaceIterator::new(&space).err().unwrap();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Task parameter 'F': chunk 0 (values 0 to 2500000000): Range expression has too many sub-ranges in canonical form (50001); maximum is 50000"
+    );
+}
+
+#[test]
+fn test_noncontiguous_static_unsorted_list_chunk_error_names_its_smallest_and_largest_values() {
+    // A public-API list is chunked in list order; the error names the
+    // chunk's smallest and largest values, whatever their order.
+    let squares: Vec<i64> = (0..100_001i64).rev().map(|i| i * i).collect();
+    let space = make_space(
+        vec![(
+            "F",
+            chunk_int_of(TaskParamRange::List(squares), 60_000, None),
+        )],
+        None,
+    );
+    let err = StepParameterSpaceIterator::new(&space).err().unwrap();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Task parameter 'F': chunk 0 (values 2500000000 to 10000000000): Range expression has too many sub-ranges in canonical form (50001); maximum is 50000"
+    );
+}
+
+#[test]
+fn test_noncontiguous_adaptive_chunk_beyond_the_run_cap_is_shortened() {
+    // An adaptive chunk size can grow past the cap at run time, where
+    // iteration cannot fail. A chunk whose canonical form would have more
+    // than CAP runs takes CAP values instead.
+    let range = cap_runs_range(10);
+    let len = range.len();
+    let space = make_space(
+        vec![(
+            "F",
+            chunk_int_of(TaskParamRange::RangeExpr(range.clone()), 2, Some(60)),
+        )],
+        None,
+    );
+    let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+    assert!(iter.chunks_adaptive());
+    // All but the last value: CAP + 1 runs, so CAP values are taken.
+    iter.set_chunks_default_task_count(len - 1);
+    let first = chunk_value(&iter.next().unwrap());
+    assert_eq!(first.len(), CAP);
+    assert_eq!(first.to_vec(), range.to_vec()[..CAP]);
+    let rest = chunk_value(&iter.next().unwrap());
+    assert_eq!(rest.to_vec(), range.to_vec()[CAP..]);
+    assert!(iter.next().is_none());
+    // A chunk that fits is not shortened: the whole range is CAP runs.
+    iter.reset();
+    iter.set_chunks_default_task_count(len);
+    assert_eq!(chunk_value(&iter.next().unwrap()), range);
+    assert!(iter.next().is_none());
+}
+
+/// A chunk layout for `check_noncontiguous_chunks_fit`: `chunks` chunks, the
+/// first `larger` of `small + 1` values and the rest of `small`, with chunk
+/// `failing` the only one beyond the run cap.
+///
+/// The range is written as text, so it is never expanded: an optional
+/// isolated value far below (`lead`), then one run that ends two values
+/// into chunk `failing`, then `isolated` isolated values, then one run that
+/// starts two values before the end of chunk `failing`. Chunk `failing`
+/// has `2 + isolated + 2` values, each its own run, and the range has
+/// `isolated + 2` runs (`+ 1` with `lead`).
+struct ChunkLayout {
+    chunks: usize,
+    small: usize,
+    larger: usize,
+    failing: usize,
+    lead: bool,
+}
+
+impl ChunkLayout {
+    fn size(&self, i: usize) -> usize {
+        self.small + usize::from(i < self.larger)
+    }
+
+    /// The range, the `defaultTaskCount` that gives this layout, the
+    /// number of runs, and the failing chunk's first and last values.
+    fn build(&self) -> (RangeExpr, usize, usize, i64, i64) {
+        let failing_size = self.size(self.failing);
+        let isolated = failing_size - 4;
+        let before: usize = (0..self.failing).map(|i| self.size(i)).sum();
+        let after: usize = (self.failing + 1..self.chunks).map(|i| self.size(i)).sum();
+        let mut elements = Vec::new();
+        let head_start: i64 = if self.lead {
+            elements.push("-1000".to_string());
+            0
+        } else {
+            0
+        };
+        let head_len = (before + 2 - usize::from(self.lead)) as i64;
+        let head_end = head_start + head_len - 1;
+        elements.push(format!("{head_start}-{head_end}"));
+        let mut last = head_end;
+        for k in 1..=isolated as i64 {
+            last = head_end + 100 + k * k;
+            elements.push(last.to_string());
+        }
+        let tail_start = last + 1_000_000_000;
+        let tail_end = tail_start + (after + 2) as i64 - 1;
+        elements.push(format!("{tail_start}-{tail_end}"));
+        let range: RangeExpr = elements.join(",").parse().unwrap();
+        let total = range.len();
+        assert_eq!(total, self.chunks * self.small + self.larger);
+        // ceil(total / dtc) == chunks, with the remainder spread as above.
+        let dtc = if self.larger == 0 {
+            self.small
+        } else {
+            self.small + 1
+        };
+        assert_eq!(total.div_ceil(dtc), self.chunks);
+        let runs = range.ranges().len();
+        (range, dtc, runs, head_end - 1, tail_start + 1)
+    }
+}
+
+fn static_noncontiguous_error(range: RangeExpr, dtc: usize) -> Option<String> {
+    let space = make_space(
+        vec![(
+            "F",
+            chunk_int_of(TaskParamRange::RangeExpr(range), dtc, None),
+        )],
+        None,
+    );
+    StepParameterSpaceIterator::new(&space)
+        .err()
+        .map(|e| e.to_string())
+}
+
+#[test]
+fn test_noncontiguous_static_check_finds_the_failing_chunk_anywhere() {
+    // The check examines one chunk, found by index arithmetic: cover a
+    // failing chunk in the middle among the larger chunks, the last larger
+    // chunk, among the smaller chunks, a failing chunk that misses the
+    // range's first run (`lead`), and both 49,999 and 50,000 runs. (A
+    // failing first or last chunk is tested above.) Each row: chunks,
+    // small, larger, failing, lead, expected runs.
+    let rows = [
+        (6, 50_001, 4, 2, false, 50_000),
+        (6, 50_001, 4, 3, false, 50_000),
+        (6, 50_002, 2, 4, false, 50_000),
+        (6, 50_001, 0, 3, false, 49_999),
+        (6, 50_000, 3, 1, false, 49_999),
+        (6, 50_001, 0, 3, true, 50_000),
+        (6, 50_000, 5, 2, true, 50_000),
+    ];
+    for (chunks, small, larger, failing, lead, expected_runs) in rows {
+        let layout = ChunkLayout {
+            chunks,
+            small,
+            larger,
+            failing,
+            lead,
+        };
+        let (range, dtc, runs, first, last) = layout.build();
+        assert_eq!(runs, expected_runs, "{chunks} {small} {larger} {failing}");
+        let failing_runs = layout.size(failing);
+        // The failing chunk is the only one beyond the cap.
+        for i in 0..chunks {
+            let offset: usize = (0..i).map(|j| layout.size(j)).sum();
+            let chunk = range
+                .slice(offset as i64, (offset + layout.size(i)) as i64, 1)
+                .map(|c| c.ranges().len());
+            if i == failing {
+                assert!(chunk.is_err(), "chunk {i}");
+            } else {
+                assert!(
+                    chunk.unwrap() <= openjd_expr::MAX_RANGE_EXPR_CHUNKS,
+                    "chunk {i}"
+                );
+            }
+        }
+        assert_eq!(
+            static_noncontiguous_error(range, dtc).as_deref(),
+            Some(
+                format!(
+                    "Validation error: Task parameter 'F': chunk {failing} (values {first} to {last}): Range expression has too many sub-ranges in canonical form ({failing_runs}); maximum is 50000"
+                )
+                .as_str()
+            ),
+            "{chunks} {small} {larger} {failing} {lead}"
+        );
+    }
+}
+
+#[test]
+fn test_noncontiguous_static_check_with_many_leftovers() {
+    // 50,001 chunks, the first 50,000 of 50,002 values and the last of
+    // 50,001: the last larger chunk fails. Locating it depends on the span
+    // of the larger chunks, `larger * (small + 1)`.
+    let layout = ChunkLayout {
+        chunks: 50_001,
+        small: 50_001,
+        larger: 50_000,
+        failing: 49_999,
+        lead: false,
+    };
+    let (range, dtc, runs, first, last) = layout.build();
+    assert_eq!(runs, 50_000);
+    assert_eq!(
+        static_noncontiguous_error(range, dtc).as_deref(),
+        Some(
+            format!(
+                "Validation error: Task parameter 'F': chunk 49999 (values {first} to {last}): Range expression has too many sub-ranges in canonical form (50002); maximum is 50000"
+            )
+            .as_str()
+        )
+    );
+}
+
+/// The first chunk beyond the run cap, found by building every chunk, with
+/// the error the check should report for it.
+fn first_chunk_beyond_the_cap(range: &RangeExpr, dtc: usize) -> Option<(usize, String)> {
+    let total = range.len();
+    let chunks = total.div_ceil(dtc);
+    let (small, larger) = (total / chunks, total % chunks);
+    let mut offset = 0;
+    (0..chunks).find_map(|i| {
+        let size = small + usize::from(i < larger);
+        let (start, stop) = (offset as i64, (offset + size) as i64);
+        offset += size;
+        range.slice(start, stop, 1).err().map(|e| {
+            let (first, last) = (range.get(start).unwrap(), range.get(stop - 1).unwrap());
+            (
+                i,
+                format!(
+                    "Validation error: Task parameter 'F': chunk {i} (values {first} to {last}): {e}"
+                ),
+            )
+        })
+    })
+}
+
+#[test]
+fn test_noncontiguous_static_check_agrees_with_building_every_chunk() {
+    // Shift the chunk boundaries of failing layouts by dropping values from
+    // either end, so the cut falls zero to five values before the end of a
+    // run, and compare the check with building every chunk. Some shifts
+    // fail and some fit; the check must agree on both, and on which chunk.
+    let mut outcomes = (0, 0);
+    for (chunks, small, larger, failing, lead) in [
+        (3, 50_001, 0, 1, false),
+        (4, 50_000, 3, 2, false),
+        (4, 50_001, 2, 2, true),
+    ] {
+        let (range, _, _, _, _) = ChunkLayout {
+            chunks,
+            small,
+            larger,
+            failing,
+            lead,
+        }
+        .build();
+        let len = range.len() as i64;
+        for (cut_front, cut_back) in [(0, 0), (1, 0), (2, 0), (3, 0), (0, 1), (0, 3), (2, 2)] {
+            let shifted = range.slice(cut_front, len - cut_back, 1).unwrap();
+            for dtc in [
+                shifted.len().div_ceil(chunks),
+                shifted.len().div_ceil(chunks) + 1,
+            ] {
+                let want = first_chunk_beyond_the_cap(&shifted, dtc);
+                let got = static_noncontiguous_error(shifted.clone(), dtc);
+                match want {
+                    Some((i, message)) => {
+                        outcomes.0 += 1;
+                        let got = got.unwrap_or_else(|| panic!("chunk {i} missed"));
+                        assert_eq!(got, message);
+                    }
+                    None => {
+                        outcomes.1 += 1;
+                        assert_eq!(got, None);
+                    }
+                }
+            }
+        }
+    }
+    // Both outcomes occur, so the comparison tests the check both ways.
+    assert!(outcomes.0 > 0 && outcomes.1 > 0, "{outcomes:?}");
+}
+
+#[test]
+fn test_noncontiguous_static_check_passes_when_no_chunk_can_fail() {
+    // 49,998 runs: no window has more than 50,000 runs, so the check does
+    // not look at any chunk, even with chunks of more than 50,000 values.
+    let layout = ChunkLayout {
+        chunks: 3,
+        small: 50_000,
+        larger: 1,
+        failing: 1,
+        lead: false,
+    };
+    let (range, dtc, runs, _, _) = layout.build();
+    assert_eq!(runs, 49_998);
+    assert_eq!(first_chunk_beyond_the_cap(&range, dtc), None);
+    assert_eq!(static_noncontiguous_error(range, dtc), None);
+}
