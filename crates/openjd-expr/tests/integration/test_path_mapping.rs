@@ -616,7 +616,7 @@ fn no_rules_unchanged() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// PathMappingRule::apply() unit tests (no evaluator needed)
+// PathMapper unit tests (no evaluator needed); `ApplyOne` applies one rule
 // ══════════════════════════════════════════════════════════════
 
 mod apply_unit {
@@ -1102,8 +1102,8 @@ mod apply_unit {
             .collect();
         // Names: `/a/b/c` 3, `C:\\a\\b` 3 (the drive counts as one),
         // `s3://b/x` 2 (the authority counts as one), `/a` 1. Later first
-        // among equals.
-        assert_eq!(order, ["/5", "/2", "/3", "/4", "/1"]);
+        // among equals. `/1` is left out: `/4` replaces it.
+        assert_eq!(order, ["/5", "/2", "/3", "/4"]);
         let given: Vec<&str> = m
             .rules()
             .iter()

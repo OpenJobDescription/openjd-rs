@@ -173,12 +173,15 @@ the same rule. They differ for redundant spellings: string length prefers
 longer spelling instead of the rule given last.
 
 `rules()` returns the rules in the order given. `rules_by_precedence()`
-returns them with the most names first and, among rules with the same
-number, the one given last first. Applying the first rule in that order that
-matches a path gives the same result as `apply`. A consumer that reads the
-rules and applies the first match (such as a job script reading
-`Session.PathMappingRulesFile`) therefore picks the same rule as the mapper,
-as long as it splits and compares paths the same way (see
+returns the rules that can apply, with the most names first and, among rules
+with the same number, the one given last first. A rule replaced by a later
+rule for the same location is left out, so each location appears once.
+Applying the first rule in that order that matches a path gives the same
+result as `apply`, and so does building a new mapper from that list, because
+no two rules in it tie. A consumer that reads the rules (such as a job script
+reading `Session.PathMappingRulesFile`) therefore picks the same rule as the
+mapper whether it takes the first match or the deepest match with the last
+one winning ties, as long as it splits and compares paths the same way (see
 [Divergence from Python](#divergence-from-python) for where pathlib differs).
 
 ### Output

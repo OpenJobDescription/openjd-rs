@@ -1435,7 +1435,9 @@ impl PathMapper {
     pub fn new(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule>;
     /// The rules in the order given.
     pub fn rules(&self) -> &[PathMappingRule];
-    /// The rules in precedence order: first match in this order equals `apply`.
+    /// The rules that can apply (a rule replaced by a later one for the
+    /// same location is left out), in precedence order: first match in
+    /// this order equals `apply`.
     pub fn rules_by_precedence(&self) -> impl Iterator<Item = &PathMappingRule> + '_;
     pub fn is_empty(&self) -> bool;
     /// Host-native output separator; `None` when no rule matches.

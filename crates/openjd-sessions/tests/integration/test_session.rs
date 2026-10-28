@@ -2642,6 +2642,8 @@ async fn test_with_config_rejects_relative_path_mapping_source() {
     let err = Session::with_config(config)
         .err()
         .expect("rule is rejected");
+    // Nothing is left in the session root.
+    assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
     assert!(
         matches!(
             err,
@@ -2760,6 +2762,14 @@ async fn test_list_path_parameter_value_is_path_mapped() {
     let tmp = TempDir::new().unwrap();
     let mut config = config_in_root(tmp.path(), "test-list-path");
     let mut params = openjd_model::types::JobParameterValues::new();
+    // A LIST[PATH] parameter whose value is a single path is mapped too.
+    params.insert(
+        "One".into(),
+        JobParameterValue {
+            param_type: JobParameterType::ListPath,
+            value: ExprValue::new_path("C:\\src\\c", PathFormat::Windows),
+        },
+    );
     params.insert(
         "Files".into(),
         JobParameterValue {
@@ -2782,8 +2792,15 @@ async fn test_list_path_parameter_value_is_path_mapped() {
         destination_path: "/dst".into(),
     }]);
     let mut s = Session::with_config(config).unwrap();
-    let out = echo_arg(&mut s, "{{ Param.Files[0] }}|{{ Param.Files[1] }}").await;
-    assert_eq!(out, format!("{}|C:\\other\\b", host("/dst/a")));
+    let out = echo_arg(
+        &mut s,
+        "{{ Param.Files[0] }}|{{ Param.Files[1] }}|{{ Param.One }}",
+    )
+    .await;
+    assert_eq!(
+        out,
+        format!("{}|C:\\other\\b|{}", host("/dst/a"), host("/dst/c"))
+    );
 }
 
 // ══════════════════════════════════════════════════════════════

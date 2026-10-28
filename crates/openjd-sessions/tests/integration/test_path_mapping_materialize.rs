@@ -170,12 +170,10 @@ async fn test_path_mapping_multiple_rules() {
         .map(|r| r["destination_path"].as_str().unwrap())
         .collect();
     // In precedence order: most names first ("/mnt/a/b" has three), then,
-    // among the two-name rules "/mnt/a/", "/mnt/a" and "C:\\share" (the
-    // drive counts as one name), the one given last first.
-    assert_eq!(
-        destinations,
-        ["/local/b", "/last", "/first", "/local/share"]
-    );
-    assert_eq!(rules[3]["source_path_format"], "WINDOWS");
-    assert_eq!(rules[3]["source_path"], "C:\\share");
+    // among the two-name rules "/mnt/a/" and "C:\\share" (the drive counts
+    // as one name), the one given last first. "/mnt/a" is left out: the
+    // later "/mnt/a/" names the same location and replaces it.
+    assert_eq!(destinations, ["/local/b", "/last", "/local/share"]);
+    assert_eq!(rules[2]["source_path_format"], "WINDOWS");
+    assert_eq!(rules[2]["source_path"], "C:\\share");
 }

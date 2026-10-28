@@ -328,6 +328,7 @@ impl PathMapper {
     pub fn new(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule> {
         let mut tries: [TrieNode; 3] = Default::default();
         let mut depths = Vec::with_capacity(rules.len());
+        let mut replaced = vec![false; rules.len()];
         for (i, rule) in rules.iter().enumerate() {
             let format = rule.source_path_format;
             let split = rule.split_source().ok_or_else(|| InvalidPathMappingRule {
@@ -346,9 +347,11 @@ impl PathMapper {
                     .or_default();
             }
             // A later rule for the same location replaces an earlier one.
-            node.rule = Some(i);
+            if let Some(earlier) = node.rule.replace(i) {
+                replaced[earlier] = true;
+            }
         }
-        let mut precedence: Vec<usize> = (0..rules.len()).collect();
+        let mut precedence: Vec<usize> = (0..rules.len()).filter(|&i| !replaced[i]).collect();
         precedence.sort_by(|&a, &b| depths[b].cmp(&depths[a]).then(b.cmp(&a)));
         Ok(PathMapper {
             rules,
@@ -362,9 +365,12 @@ impl PathMapper {
         &self.rules
     }
 
-    /// The rules in precedence order: most source path names first (see
-    /// [`PathMapper`]), and among rules with the same number, the one given
-    /// last first.
+    /// The rules that can apply, in precedence order: most source path
+    /// names first (see [`PathMapper`]), and among rules with the same
+    /// number, the one given last first. A rule replaced by a later rule for
+    /// the same location is left out, so each location appears once and a
+    /// reader that takes the last of several rules for one location reads
+    /// the same rules.
     /// Applying the first rule in this order that matches a path gives the
     /// same result as [`apply`](PathMapper::apply).
     pub fn rules_by_precedence(&self) -> impl Iterator<Item = &PathMappingRule> + '_ {
