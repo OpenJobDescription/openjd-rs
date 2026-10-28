@@ -6601,11 +6601,11 @@ fn test_single_valued_attr_deferred_count_still_capped_at_50_at_decode() {
 // This function both consumes and produces `JobParameterValues`, and both are public,
 // so a caller can hand its output straight back to it. `create_job` does something
 // adjacent already: it re-runs `check_constraints` over every value it is given
-// (create_job/mod.rs:54-60). "Every value it emits, it accepts" is therefore a
-// requirement, and LIST[PATH] is where it first failed.
-//
-// A goal rather than an invariant: scalar PATH violates it, see issue #388 and
-// "Round trip" in specs/model/job-creation.md.
+// (the "Validate parameter values against template constraints" loop in
+// create_job/mod.rs). "Every value it emits, it accepts" is therefore a requirement,
+// and LIST[PATH] is where it first failed. Scalar PATH under a constraint holds it
+// too, because every pass checks the joined value; see "Scalar PATH constraints
+// across passes" below and "Round trip" in specs/model/job-creation.md.
 
 /// A minimal job template declaring EXPR, which the LIST[*] parameter types require.
 fn minimal_expr_job_template(params: &str) -> serde_json::Value {
@@ -6946,6 +6946,244 @@ fn preprocess_accepts_its_own_nested_list_output() {
         "inner[1] arrived as {:?}, expected ListInt([1, 2])",
         outer[1]
     );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Scalar PATH constraints across passes (#388)
+// ══════════════════════════════════════════════════════════════
+//
+// Template validation checks a PATH default as written, and job creation checks the
+// joined value (Template Schemas §2.2 items 4-6). `preprocess_job_parameters` checks the
+// joined default on the first pass, so a default whose joined path violates a constraint
+// is refused there, with a diagnostic naming the joined path, rather than accepted and
+// then refused when the output is resubmitted. A default whose joined path satisfies
+// the constraint round trips, and `create_job` accepts it, because every stage after
+// decode measures the same joined string.
+//
+// The first-pass refusals overlap `path_default_max_length_checked_after_join` and
+// `env_template_path_defaults_checked_after_join` (#421), which call preprocessing once.
+// The tests here add the second pass and `create_job`, so they pin the round trip.
+
+/// The template dir joined with `relative`, as the first pass resolves a PATH default.
+fn joined_default(td: &TestDirs, relative: &str) -> String {
+    TestDirs::join_normalized(td.template(), relative)
+}
+
+/// The current working dir joined with `relative`, as a pass resolves a submitted value.
+fn joined_submitted(td: &TestDirs, relative: &str) -> String {
+    TestDirs::join_normalized(td.cwd(), relative)
+}
+
+/// Decode a round-trip template and run the first pass, which must fail. Returns the
+/// full diagnostic. Decoding must succeed: each case is a template that validation
+/// accepts, because the constraint holds for the default as written.
+fn first_pass_error(template_json: &str, td: &TestDirs) -> String {
+    let jt = decode_job_template(
+        minimal_expr_job_template(&format!(
+            r#"{template_json},
+               {{"name": "{CARRIED}", "type": "STRING"}}"#
+        )),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("the default satisfies its constraint as written, so the template decodes");
+    let mut initial = JobParameterInputValues::new();
+    initial.insert(
+        CARRIED.into(),
+        openjd_expr::ExprValue::String(CARRIED_VALUE.into()),
+    );
+    preprocess_job_parameters(&jt, &initial, &[], &round_trip_options(td))
+        .expect_err("the joined default violates its constraint")
+        .to_string()
+}
+
+/// Run both passes over `template_json` and `create_job` over the second pass's output,
+/// and return the value `name` held after each pass. All three stages must accept it.
+fn path_round_trip(template_json: &str, name: &str, td: &TestDirs) -> (String, String) {
+    let (jt, filled) = preprocess_defaults(template_json, td);
+    let again = preprocess_again(&jt, &filled, td)
+        .expect("a value the first pass returned must be one the second pass accepts");
+    assert_carried_through(&again);
+    openjd_model::create_job(&jt, &again, &jt.default_validation_context())
+        .expect("create_job re-checks constraints against the same joined value");
+    let as_string = |values: &openjd_model::JobParameterValues| match &values[name].value {
+        openjd_expr::ExprValue::String(s) => s.clone(),
+        other => panic!("{name} arrived as {other:?}, expected a String"),
+    };
+    (as_string(&filled), as_string(&again))
+}
+
+#[test]
+fn path_default_whose_joined_value_exceeds_max_length_is_refused_on_the_first_pass() {
+    // The issue's repro. "out" is 3 characters, so decode accepts it; the joined path is
+    // longer than 8, so the first pass refuses it. Before #421 the first pass skipped the
+    // check and the second pass refused the joined path it was handed.
+    let td = TestDirs::new();
+    let joined = joined_default(&td, "out");
+    let err = first_pass_error(
+        r#"{"name": "P", "type": "PATH", "default": "out", "maxLength": 8}"#,
+        &td,
+    );
+    assert_eq!(
+        err,
+        format!(
+            "Validation error: Parameter 'P': value length {} exceeds maximum 8",
+            joined.len()
+        )
+    );
+}
+
+#[test]
+fn path_default_whose_joined_value_is_not_allowed_is_refused_on_the_first_pass() {
+    let td = TestDirs::new();
+    let joined = joined_default(&td, "out");
+    let err = first_pass_error(
+        r#"{"name": "P", "type": "PATH", "default": "out", "allowedValues": ["out"]}"#,
+        &td,
+    );
+    assert_eq!(
+        err,
+        format!("Validation error: Parameter 'P': value '{joined}' is not in allowed values")
+    );
+}
+
+#[test]
+fn path_default_round_trips_when_its_joined_value_meets_max_length() {
+    // maxLength set to exactly the joined length, so the default passes at decode (as
+    // written, 3 characters) and at every later stage (joined) with no slack: measuring
+    // anything longer than the joined path on either pass would refuse it.
+    let td = TestDirs::new();
+    let joined = joined_default(&td, "out");
+    let (first, second) = path_round_trip(
+        &format!(
+            r#"{{"name": "P", "type": "PATH", "default": "out", "maxLength": {}}}"#,
+            joined.len()
+        ),
+        "P",
+        &td,
+    );
+    assert_eq!(first, joined, "the first pass joins the default");
+    assert_eq!(
+        second, joined,
+        "the second pass leaves the absolute value as is"
+    );
+}
+
+#[test]
+fn path_default_round_trips_when_allowed_values_list_both_forms() {
+    // §2.2 item 4: a relative default satisfies both checks only if allowedValues holds
+    // the default as written (for decode) and its joined path (for job creation).
+    let td = TestDirs::new();
+    let joined = joined_default(&td, "out");
+    let allowed = serde_json::to_string(&["out", joined.as_str()]).unwrap();
+    let (first, second) = path_round_trip(
+        &format!(
+            r#"{{"name": "P", "type": "PATH", "default": "out", "allowedValues": {allowed}}}"#
+        ),
+        "P",
+        &td,
+    );
+    assert_eq!(first, joined);
+    assert_eq!(second, joined);
+}
+
+#[test]
+fn path_default_without_a_constraint_round_trips() {
+    // Control from the issue: the join alone never caused a refusal.
+    let td = TestDirs::new();
+    let joined = joined_default(&td, "out");
+    let (first, second) = path_round_trip(
+        r#"{"name": "P", "type": "PATH", "default": "out"}"#,
+        "P",
+        &td,
+    );
+    assert_eq!(first, joined);
+    assert_eq!(second, joined);
+}
+
+#[test]
+fn string_default_with_max_length_round_trips() {
+    // Control from the issue: a STRING is never joined, so the constraint sees the
+    // default as written at every stage.
+    let td = TestDirs::new();
+    let (first, second) = path_round_trip(
+        r#"{"name": "S", "type": "STRING", "default": "out", "maxLength": 8}"#,
+        "S",
+        &td,
+    );
+    assert_eq!(first, "out");
+    assert_eq!(second, "out");
+}
+
+#[test]
+fn submitted_relative_path_is_checked_joined_at_every_stage() {
+    // A submitted relative value is joined with the current working dir (§2.2), and
+    // job creation checks the joined value. minLength and maxLength are both exactly the
+    // joined length, so preprocessing, the resubmission, and create_job all measure the
+    // joined path: any stage measuring something shorter (such as the value as typed)
+    // or longer would refuse it.
+    let td = TestDirs::new();
+    let joined = joined_submitted(&td, "in");
+    let jt = decode_job_template(
+        minimal_expr_job_template(&format!(
+            r#"{{"name": "P", "type": "PATH", "minLength": {len}, "maxLength": {len}}}"#,
+            len = joined.len()
+        )),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("template decodes");
+    let mut input = JobParameterInputValues::new();
+    input.insert("P".into(), openjd_expr::ExprValue::String("in".into()));
+    let filled = preprocess_job_parameters(&jt, &input, &[], &round_trip_options(&td))
+        .expect("the joined submitted value meets minLength and maxLength");
+    assert!(
+        matches!(&filled["P"].value, openjd_expr::ExprValue::String(s) if *s == joined),
+        "P arrived as {:?}, expected the joined path {joined}",
+        filled["P"].value
+    );
+    let again = preprocess_again(&jt, &filled, &td).expect("the joined value is accepted again");
+    assert!(
+        matches!(&again["P"].value, openjd_expr::ExprValue::String(s) if *s == joined),
+        "P arrived as {:?} on the second pass, expected {joined}",
+        again["P"].value
+    );
+    openjd_model::create_job(&jt, &again, &jt.default_validation_context())
+        .expect("create_job measures the same joined value");
+}
+
+#[test]
+fn submitted_relative_path_not_allowed_once_joined_is_refused_by_preprocess_and_create() {
+    // allowedValues holds the value as typed, not its join. Preprocessing refuses it,
+    // naming the joined path, and create_job refuses the same joined value with the same
+    // diagnostic: the two stages agree on which string the constraint is about.
+    let td = TestDirs::new();
+    let joined = joined_submitted(&td, "in");
+    let jt = decode_job_template(
+        minimal_expr_job_template(r#"{"name": "P", "type": "PATH", "allowedValues": ["in"]}"#),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("template decodes");
+    let expected = format!("Parameter 'P': value '{joined}' is not in allowed values");
+
+    let mut input = JobParameterInputValues::new();
+    input.insert("P".into(), openjd_expr::ExprValue::String("in".into()));
+    let err = preprocess_job_parameters(&jt, &input, &[], &round_trip_options(&td))
+        .expect_err("the joined submitted value is not in allowedValues");
+    assert_eq!(err.to_string(), format!("Validation error: {expected}"));
+
+    let mut joined_values = openjd_model::JobParameterValues::new();
+    joined_values.insert(
+        "P".into(),
+        openjd_model::JobParameterValue {
+            param_type: openjd_model::JobParameterType::Path,
+            value: openjd_expr::ExprValue::String(joined.clone()),
+        },
+    );
+    let err = openjd_model::create_job(&jt, &joined_values, &jt.default_validation_context())
+        .expect_err("create_job checks the same joined value");
+    assert_eq!(err.to_string(), format!("Validation error: {expected}"));
 }
 
 // ══════════════════════════════════════════════════════════════
