@@ -497,6 +497,26 @@ fn more_than_max_len_values_rejected() {
 }
 
 #[test]
+fn largest_count_parses_and_indexes() {
+    // i64::MAX values: an implementation that lists them never finishes.
+    within_deadline(Duration::from_secs(10), || {
+        let max = i64::MAX;
+        let range: RangeExpr = format!("1-{max}").parse().unwrap();
+        assert_eq!(range.len() as u64, openjd_expr::MAX_RANGE_EXPR_LEN);
+        assert_eq!(range.get(-1), Some(max));
+        assert_eq!(range.to_string(), format!("1-{max}"));
+        // One more is too many.
+        assert_eq!(
+            format!("0-{max}")
+                .parse::<RangeExpr>()
+                .unwrap_err()
+                .to_string(),
+            "Range expression has too many values; the maximum is 9223372036854775807"
+        );
+    });
+}
+
+#[test]
 fn widest_legal_range_exact_everywhere() {
     // i64::MAX values: an implementation that lists them never finishes.
     within_deadline(

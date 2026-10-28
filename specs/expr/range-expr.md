@@ -137,7 +137,9 @@ containment checks.
 (0.13.0) predates the canonical form: `str()` writes the elements it stored
 (`str(IntRangeExpr.from_str("1,3,5,7,9"))` is `"1,3,5,7,9"`, and `"19-23:5,13-18"` is
 `"13-18,19"`), and `==` compares those elements, so `"1,3,5,7,9"` and `"1-9:2"` are
-unequal. openjd-rs follows the specification (Template Schemas §3.4.1.1.1, Expression
+unequal. The same holds for a value built from a list: `range_expr([1,2,4,6])` is
+`"1,2-6:2"` in openjd-rs, while Python's `IntRangeExpr.from_list([1,2,4,6])` (0.13.0 and
+0.14.0) and an openjd-cli 0.8.0 template expression give `"1,2,4,6"`. openjd-rs follows the specification (Template Schemas §3.4.1.1.1, Expression
 Language §1.2.5), which defines both by value.
 
 ## Parsing
@@ -240,6 +242,13 @@ can report the length of such a range, and every range of practical size is far 
 bound. (Accepting such a range and failing only in `len()` and indexing would remove the
 deviation at the cost of making those operations partial.)
 
+**Deviation from Template Schemas §3.4.1.1.1:** the specification allows any integer as a
+value, and the Expression Language's `int` includes `i64::MIN` (-2^63). openjd-rs rejects
+`i64::MIN` as a range value, endpoint, or step (for the reasons above: its negation
+overflows, and the parser reads `-<digits>` as a negated non-negative literal, so
+`"-9223372036854775808"` fails with `Invalid integer`). openjd-model-for-python accepts it.
+No conformance case uses `i64::MIN`.
+
 **Divergence from the Python reference:** Python's implementation uses arbitrary-precision
 integers and accepts any endpoint and any count. Values beyond `i64` cannot occur in an
 openjd-rs expression, whose `int` is 64-bit.
@@ -341,7 +350,8 @@ writes `"{first}-{last}"`; otherwise it writes the canonical form. The model lay
 the flag on every `CONTIGUOUS` chunk it builds, the CLI sets it on a `--task-param` or
 `--tasks` value for a `CONTIGUOUS` `CHUNK[INT]` parameter, and every string path (`Task.Param`,
 `Task.RawParam`, `string()`, `repr_*`, `+`) goes through `Display`, so the chunk form
-reaches all of them. The flag is not transported: `Serialize` writes only the runs, and
+reaches all of them. The flag is not transported: `Serialize` writes the runs and their lengths with the flag
+bit masked out of `length`, and
 `SerializedSymbolTable` carries the value as its string (`"5-5"`), which `to_symtab`
 parses back without the flag, so `string()` of the received value is `"5"`. No path in
 openjd-rs transports a chunk value this way; sessions receives the `TaskParameterSet`

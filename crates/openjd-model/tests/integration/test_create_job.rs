@@ -5665,6 +5665,41 @@ fn chunk_int_range_expr_value_beyond_range_bound_rejected() {
 }
 
 #[test]
+fn chunk_int_range_bound_checked_before_chunks_fields() {
+    // Job creation checks a resolved CHUNK[INT] range against the bound as
+    // soon as it is resolved, before the chunks fields, so the bound error
+    // (with the parameter's name) is reported even when a later field is
+    // also invalid.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {"name": "R", "type": "STRING"},
+            {"name": "N", "type": "INT"}
+        ],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [{
+                    "name": "Frame",
+                    "type": "CHUNK[INT]",
+                    "range": "{{Param.R}}",
+                    "chunks": {"defaultTaskCount": "{{Param.N}}", "rangeConstraint": "CONTIGUOUS"}
+                }]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    let err = parse_and_create_err(template, &[("R", "1-3,4611686018427387904"), ("N", "0")]);
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'Frame': value 4611686018427387904 \
+         exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)"
+    );
+}
+
+#[test]
 fn chunk_int_values_just_inside_range_bound_accepted() {
     // The bound is exclusive: magnitudes up to 2^62 - 1 are accepted, as a
     // list and as a range expression, and chunk normally.

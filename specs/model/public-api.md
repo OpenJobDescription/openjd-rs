@@ -1149,10 +1149,16 @@ pub fn convert_environment_with_symtab(
 pub struct StepParameterSpaceIterator { /* private fields */ }
 
 impl StepParameterSpaceIterator {
+    /// Errors: `ModelError::DecodeValidation` naming the parameter when a
+    /// `CHUNK[INT]` parameter's range (a list or a range expression) has a
+    /// value of magnitude 2^62 or more (see parameter-space.md "Chunking");
+    /// `ModelError::DecodeValidation` also when the combination expression
+    /// does not fit the parameters or the task count overflows `usize`.
     pub fn new(space: &job::StepParameterSpace) -> Result<Self, ModelError>;
 
     /// Build with a one-task-per-chunk override. `Some(1)` disables
     /// adaptive chunking and lets the iterator count individual tasks.
+    /// Same errors as `new`.
     pub fn new_with_chunk_override(
         space: &job::StepParameterSpace,
         override_count: Option<usize>,

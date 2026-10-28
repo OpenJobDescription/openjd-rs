@@ -523,7 +523,9 @@ impl RangeExpr {
     }
 
     /// Create a RangeExpr from a list of individual values, in any order
-    /// and with duplicates allowed (matching Python `from_list`).
+    /// and with duplicates allowed (the inputs Python `from_list` accepts).
+    /// The result is written in canonical form, so `[1, 2, 4, 6]` displays
+    /// as `"1,2-6:2"` where Python's `from_list` writes `"1,2,4,6"`.
     ///
     /// Runs in O(n log n) for the sort, then O(n) to find the runs of the
     /// canonical form. Returns an integer-overflow error if any value is
@@ -1310,18 +1312,8 @@ mod tests {
         assert_eq!(range.to_vec(), vec![max - 2, max - 1, max]);
         let range: RangeExpr = format!("{}-{}", -max, -max + 2).parse().unwrap();
         assert_eq!(range.to_vec(), vec![-max, -max + 1, -max + 2]);
-        // The largest count, i64::MAX values.
-        let range: RangeExpr = format!("1-{max}").parse().unwrap();
-        assert_eq!(range.len_u64(), MAX_RANGE_EXPR_LEN);
-        assert_eq!(range.get(-1), Some(max));
-        // One more is too many.
-        assert_eq!(
-            format!("0-{max}")
-                .parse::<RangeExpr>()
-                .unwrap_err()
-                .to_string(),
-            "Range expression has too many values; the maximum is 9223372036854775807"
-        );
+        // The largest count (i64::MAX values) is tested in the integration
+        // test largest_count_parses_and_indexes, under a deadline.
     }
 
     #[test]
