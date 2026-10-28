@@ -1338,6 +1338,54 @@ mod apply_unit {
     }
 
     #[test]
+    fn trie_size_limit() {
+        use openjd_expr::path_mapping::DEFAULT_MAX_TRIE_BYTES;
+        assert_eq!(DEFAULT_MAX_TRIE_BYTES, 30 * 1024 * 1024);
+        // Rules under a common root share its nodes, so only new components
+        // add to the estimate.
+        let one = mapper(vec![posix_rule("/mnt/projects/a", "/a")]);
+        let two = mapper(vec![
+            posix_rule("/mnt/projects/a", "/a"),
+            posix_rule("/mnt/projects/b", "/b"),
+        ]);
+        let per_new_component = two.trie_bytes() - one.trie_bytes();
+        assert!(per_new_component > 0);
+        let same = mapper(vec![
+            posix_rule("/mnt/projects/a", "/a"),
+            posix_rule("/mnt/projects/a/", "/a2"),
+        ]);
+        assert_eq!(same.trie_bytes(), one.trie_bytes());
+        // Any number of rules is allowed until the estimate passes the limit;
+        // the error names the rule that passed it.
+        let limit = two.trie_bytes();
+        let rules = vec![
+            posix_rule("/mnt/projects/a", "/a"),
+            posix_rule("/mnt/projects/b", "/b"),
+            posix_rule("/mnt/projects/c", "/c"),
+        ];
+        assert_eq!(
+            PathMapper::with_max_trie_bytes(rules[..2].to_vec(), limit)
+                .unwrap()
+                .trie_bytes(),
+            limit
+        );
+        let err = PathMapper::with_max_trie_bytes(rules, limit).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "path mapping rule 2: the rules' trie would need about {} bytes, more than the \
+                 limit of {limit} bytes",
+                limit + per_new_component
+            )
+        );
+        // Many rules under a shared root fit easily in the default limit.
+        let many: Vec<PathMappingRule> = (0..20_000)
+            .map(|i| posix_rule(&format!("/mnt/projects/show{}/shot{i}", i / 100), "/d"))
+            .collect();
+        assert!(mapper(many).trie_bytes() < DEFAULT_MAX_TRIE_BYTES);
+    }
+
+    #[test]
     fn no_match_returns_original() {
         let m = mapper(vec![posix_rule("/a", "/b")]);
         assert_eq!(

@@ -422,6 +422,11 @@ pub struct SessionLimits {
     /// Operation budget per expression evaluation. `None` =
     /// `openjd_expr::DEFAULT_OPERATION_LIMIT` (10 million).
     pub max_eval_operations: Option<usize>,
+    /// Limit on the estimated size of the path mapping trie
+    /// (`PathMapper::with_max_trie_bytes`). `None` = 30 MiB
+    /// (`openjd_expr::path_mapping::DEFAULT_MAX_TRIE_BYTES`). Applies in
+    /// `with_config`, `with_path_mapping` and `extend_path_mapping_rules`.
+    pub max_path_mapping_trie_bytes: Option<usize>,
 }
 
 /// Mirror the run-time-relevant fields of a submitting service's

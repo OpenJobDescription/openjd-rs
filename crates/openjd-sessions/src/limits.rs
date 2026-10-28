@@ -17,8 +17,9 @@ use openjd_expr::FormatStringOptions;
 
 /// Opt-in caps and evaluation budgets enforced by the session runtime,
 /// mirroring the corresponding `openjd_model::CallerLimits` fields a
-/// submitting service would set. All fields default to `None` — no
-/// restriction beyond the OpenJD specification.
+/// submitting service would set. All fields default to `None`, which
+/// means no restriction beyond the OpenJD specification, except that the
+/// path mapping trie keeps its 30 MiB default.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SessionLimits {
     /// Maximum character length of the resolved action `command`
@@ -43,6 +44,20 @@ pub struct SessionLimits {
     /// `None` uses the spec-recommended default
     /// ([`openjd_expr::DEFAULT_OPERATION_LIMIT`], 10 million).
     pub max_eval_operations: Option<usize>,
+    /// Limit, in bytes, on the estimated size of the path mapping rules'
+    /// trie ([`openjd_expr::PathMapper::with_max_trie_bytes`]). Any number
+    /// of rules is allowed; rules under a common root share trie nodes.
+    /// `None` uses [`openjd_expr::path_mapping::DEFAULT_MAX_TRIE_BYTES`]
+    /// (30 MiB).
+    pub max_path_mapping_trie_bytes: Option<usize>,
+}
+
+impl SessionLimits {
+    /// The path mapping trie limit in effect.
+    pub(crate) fn path_mapping_trie_bytes(&self) -> usize {
+        self.max_path_mapping_trie_bytes
+            .unwrap_or(openjd_expr::path_mapping::DEFAULT_MAX_TRIE_BYTES)
+    }
 }
 
 /// Mirror the run-time-relevant fields of a submitting service's
@@ -57,6 +72,7 @@ impl From<&openjd_model::CallerLimits> for SessionLimits {
             max_resolved_data_len: limits.max_resolved_data_len,
             max_eval_memory_bytes: limits.max_eval_memory_bytes,
             max_eval_operations: limits.max_eval_operations,
+            max_path_mapping_trie_bytes: None,
         }
     }
 }

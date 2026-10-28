@@ -96,9 +96,13 @@ would set:
   format-string expression evaluation the session performs (env var
   values, command/args, timeout/cancelation fields, embedded data),
   defaulting to the Expression Language spec's 100 MB / 10 M.
+- `max_path_mapping_trie_bytes` — limits the estimated size of the session's
+  path mapping trie (`PathMapper::with_max_trie_bytes`); `None` uses 30 MiB.
+  Any number of rules is allowed.
 
-All default to `None` — no restriction beyond the spec (§5.1/§5.2/§6.1.2
-set no maxima of their own). Violations surface as
+All default to `None`. That means no restriction beyond the spec (§5.1/§5.2/§6.1.2
+set no maxima of their own), except that the path mapping trie uses its 30 MiB
+default. Violations surface as
 `SessionError::FormatString` with reason
 `resolved value is {n} characters, exceeding the maximum of {max}.`,
 following the `notifyPeriodInSeconds ≤ 600` and env-var §4.4.2
@@ -336,7 +340,12 @@ Populates a `SymbolTable` with:
 | `Task.RawParam.<name>` | Task parameter value (no path mapping) | `run_task()` call |
 
 PATH-type parameters have path mapping rules applied. LIST_PATH parameters have rules
-applied to each element. All other parameter values are coerced to their declared
+applied to each element. A PATH or LIST_PATH value longer than 32 KiB
+(`openjd_expr::path_mapping::MAX_PATH_LEN`) fails symbol table construction with
+`SessionError::Runtime`: `Failed to apply path mapping to Param.<name>: the path is <n>
+bytes long, more than the limit of 32768 bytes`, as `apply_path_mapping` does. The
+session's path mapping trie is limited by `SessionLimits::max_path_mapping_trie_bytes`
+(default 30 MiB). All other parameter values are coerced to their declared
 parameter type when seeded, for `Param.*`, `RawParam.*`, `Task.Param.*`, and
 `Task.RawParam.*` alike: values cross the language boundary as strings (an INT parameter
 arrives as `"5"`), and typed expression evaluation requires typed symbols, so the value

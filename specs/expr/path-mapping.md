@@ -74,10 +74,29 @@ matches no rule, and `apply_path_mapping` raises `apply_path_mapping: the
 path is <n> bytes long, more than the limit of 32768 bytes` for one.
 
 32 KiB covers a Windows extended-length path (up to 32,767 UTF-16 code units)
-of ASCII characters and is eight times Linux's `PATH_MAX` (4096). It keeps
-the work bounded: a trie node costs about 240 bytes, so an unbounded rule of
-millions of components (a 10 MB rules file is accepted by the CLI) would need
-gigabytes.
+of ASCII characters and is eight times Linux's `PATH_MAX` (4096). It bounds
+the work for one path, and the trie size limit below bounds the rules as a
+whole.
+
+### Trie size limit
+
+Any number of rules is allowed. What is limited is the estimated size of the
+trie, `PathMapper::trie_bytes()`: each node counts its key's length plus 224
+bytes for the node and its entry in the parent's map (measured at about 230
+bytes per one-character component; the estimate is within about 10% for
+chains of single-child nodes and above the real size for wide trees). A rule
+adds only the components it does not share with earlier rules, so rules
+under a common root, as real rule sets are, cost little.
+
+`PathMapper::new` limits the estimate to
+`path_mapping::DEFAULT_MAX_TRIE_BYTES` (30 MiB);
+`PathMapper::with_max_trie_bytes(rules, max)` takes the limit. When a rule
+takes the estimate past the limit, it is rejected with
+`path mapping rule <i>: the rules' trie would need about <n> bytes, more than
+the limit of <max> bytes`. Without the limit, a 10 MB rules file (which the
+CLI accepts) of rules near 32 KiB that share nothing would build a trie of
+about 1.2 GB. `openjd-sessions` takes the limit from
+`SessionLimits::max_path_mapping_trie_bytes`.
 
 ### Serde
 

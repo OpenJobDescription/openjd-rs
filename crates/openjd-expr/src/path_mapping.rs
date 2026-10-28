@@ -77,6 +77,15 @@ impl PathFormat {
 /// component, small.
 pub const MAX_PATH_LEN: usize = 32 * 1024;
 
+/// The default limit, in bytes, on the estimated size of a [`PathMapper`]'s
+/// trie (30 MiB). See [`PathMapper::with_max_trie_bytes`].
+pub const DEFAULT_MAX_TRIE_BYTES: usize = 30 * 1024 * 1024;
+
+/// Estimated bytes for one trie node besides its key: the node itself and
+/// its entry in the parent's map. Measured at about 230 bytes per
+/// one-character component.
+const TRIE_NODE_BYTES: usize = 224;
+
 /// The source formats, in [`PathFormat::trie_index`] order.
 const SOURCE_FORMATS: [PathFormat; 3] = [PathFormat::Posix, PathFormat::Windows, PathFormat::Uri];
 
@@ -391,6 +400,8 @@ struct Match<'a> {
 pub struct PathMapper {
     rules: Vec<PathMappingRule>,
     precedence: Vec<usize>,
+    /// The estimated size of the trie, in bytes.
+    trie_bytes: usize,
     /// The trie nodes. The first three are the roots of the POSIX, WINDOWS
     /// and URI tries, in [`PathFormat::trie_index`] order.
     nodes: Vec<TrieNode>,
@@ -401,34 +412,64 @@ impl Default for PathMapper {
         PathMapper {
             rules: Vec::new(),
             precedence: Vec::new(),
+            trie_bytes: 0,
             nodes: vec![TrieNode::default(); SOURCE_FORMATS.len()],
         }
     }
 }
 
 impl PathMapper {
-    /// The child of `node` for `key`, added if it does not exist yet.
-    fn child_or_insert(nodes: &mut Vec<TrieNode>, node: usize, key: String) -> usize {
+    /// The child of `node` for `key`, added if it does not exist yet. Adds
+    /// the estimated size of a new node to `bytes`.
+    fn child_or_insert(
+        nodes: &mut Vec<TrieNode>,
+        node: usize,
+        key: String,
+        bytes: &mut usize,
+    ) -> usize {
         if let Some(&child) = nodes[node].children.get(&key) {
             return child;
         }
+        *bytes = bytes.saturating_add(TRIE_NODE_BYTES + key.len());
         let child = nodes.len();
         nodes.push(TrieNode::default());
         nodes[node].children.insert(key, child);
         child
     }
 
-    /// Validate `rules` and build the mapper. The rules keep the order
-    /// given, which decides between rules for the same location.
+    /// Validate `rules` and build the mapper, with the trie limited to
+    /// [`DEFAULT_MAX_TRIE_BYTES`]. The rules keep the order given, which
+    /// decides between rules for the same location.
     ///
     /// # Errors
     ///
     /// Returns [`InvalidPathMappingRule`], with `index` set to the rule's
     /// position, for the first invalid rule: a `source_path` that is not
     /// absolute for its format, or a `source_path` or `destination_path`
-    /// longer than [`MAX_PATH_LEN`] bytes (see [`PathMappingRule::validate`]).
+    /// longer than [`MAX_PATH_LEN`] bytes (see [`PathMappingRule::validate`]);
+    /// or for the rule that makes the trie larger than the limit (see
+    /// [`with_max_trie_bytes`](PathMapper::with_max_trie_bytes)).
     pub fn new(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule> {
+        Self::with_max_trie_bytes(rules, DEFAULT_MAX_TRIE_BYTES)
+    }
+
+    /// [`new`](PathMapper::new), with the trie limited to `max_trie_bytes`.
+    ///
+    /// Any number of rules is allowed; the limit is on the estimated size
+    /// of the trie ([`trie_bytes`](PathMapper::trie_bytes)), which grows
+    /// only for components a rule does not share with earlier rules. Rules
+    /// under a common root share that root's nodes.
+    ///
+    /// # Errors
+    ///
+    /// As [`new`](PathMapper::new), and for the first rule whose new
+    /// components make the trie larger than `max_trie_bytes`.
+    pub fn with_max_trie_bytes(
+        rules: Vec<PathMappingRule>,
+        max_trie_bytes: usize,
+    ) -> Result<Self, InvalidPathMappingRule> {
         let mut nodes = vec![TrieNode::default(); SOURCE_FORMATS.len()];
+        let mut trie_bytes = 0usize;
         let mut depths = Vec::with_capacity(rules.len());
         let mut replaced = vec![false; rules.len()];
         for (i, rule) in rules.iter().enumerate() {
@@ -437,12 +478,23 @@ impl PathMapper {
                 index: Some(i),
                 ..e
             })?;
+            let bytes = &mut trie_bytes;
             let mut node =
-                Self::child_or_insert(&mut nodes, format.trie_index(), split.anchor.clone());
+                Self::child_or_insert(&mut nodes, format.trie_index(), split.anchor.clone(), bytes);
             let mut depth = split.anchor_depth;
             for part in split.parts() {
-                node = Self::child_or_insert(&mut nodes, node, part_key(part, format).into_owned());
+                let key = part_key(part, format).into_owned();
+                node = Self::child_or_insert(&mut nodes, node, key, bytes);
                 depth += 1;
+            }
+            if trie_bytes > max_trie_bytes {
+                return Err(InvalidPathMappingRule {
+                    index: Some(i),
+                    reason: format!(
+                        "the rules' trie would need about {trie_bytes} bytes, more than the \
+                         limit of {max_trie_bytes} bytes"
+                    ),
+                });
             }
             depths.push(depth);
             // A later rule for the same location replaces an earlier one.
@@ -456,8 +508,17 @@ impl PathMapper {
         Ok(PathMapper {
             rules,
             precedence,
+            trie_bytes,
             nodes,
         })
+    }
+
+    /// The estimated size of the trie in bytes: for each node, its key's
+    /// length plus a fixed estimate for the node and its map entry. This is
+    /// what [`with_max_trie_bytes`](PathMapper::with_max_trie_bytes)
+    /// limits.
+    pub fn trie_bytes(&self) -> usize {
+        self.trie_bytes
     }
 
     /// The rules, in the order given to [`new`](PathMapper::new).

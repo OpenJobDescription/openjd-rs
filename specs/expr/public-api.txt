@@ -441,6 +441,8 @@ pub fn openjd_expr::path_mapping::PathMapper::map_with_format(&self, &str, openj
 pub fn openjd_expr::path_mapping::PathMapper::new(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> core::result::Result<Self, openjd_expr::path_mapping::InvalidPathMappingRule>
 pub fn openjd_expr::path_mapping::PathMapper::rules(&self) -> &[openjd_expr::path_mapping::PathMappingRule]
 pub fn openjd_expr::path_mapping::PathMapper::rules_by_precedence(&self) -> impl core::iter::traits::iterator::Iterator<Item = &openjd_expr::path_mapping::PathMappingRule> + '_
+pub fn openjd_expr::path_mapping::PathMapper::trie_bytes(&self) -> usize
+pub fn openjd_expr::path_mapping::PathMapper::with_max_trie_bytes(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>, usize) -> core::result::Result<Self, openjd_expr::path_mapping::InvalidPathMappingRule>
 impl core::clone::Clone for openjd_expr::path_mapping::PathMapper
 pub fn openjd_expr::path_mapping::PathMapper::clone(&self) -> openjd_expr::path_mapping::PathMapper
 impl core::default::Default for openjd_expr::path_mapping::PathMapper
@@ -465,6 +467,7 @@ impl serde_core::ser::Serialize for openjd_expr::path_mapping::PathMappingRule
 pub fn openjd_expr::path_mapping::PathMappingRule::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::path_mapping::PathMappingRule
 pub fn openjd_expr::path_mapping::PathMappingRule::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+pub const openjd_expr::path_mapping::DEFAULT_MAX_TRIE_BYTES: usize
 pub const openjd_expr::path_mapping::MAX_PATH_LEN: usize
 pub fn openjd_expr::path_mapping::is_uri(&str) -> bool
 pub mod openjd_expr::profile
@@ -1352,6 +1355,8 @@ pub fn openjd_expr::path_mapping::PathMapper::map_with_format(&self, &str, openj
 pub fn openjd_expr::path_mapping::PathMapper::new(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> core::result::Result<Self, openjd_expr::path_mapping::InvalidPathMappingRule>
 pub fn openjd_expr::path_mapping::PathMapper::rules(&self) -> &[openjd_expr::path_mapping::PathMappingRule]
 pub fn openjd_expr::path_mapping::PathMapper::rules_by_precedence(&self) -> impl core::iter::traits::iterator::Iterator<Item = &openjd_expr::path_mapping::PathMappingRule> + '_
+pub fn openjd_expr::path_mapping::PathMapper::trie_bytes(&self) -> usize
+pub fn openjd_expr::path_mapping::PathMapper::with_max_trie_bytes(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>, usize) -> core::result::Result<Self, openjd_expr::path_mapping::InvalidPathMappingRule>
 impl core::clone::Clone for openjd_expr::path_mapping::PathMapper
 pub fn openjd_expr::path_mapping::PathMapper::clone(&self) -> openjd_expr::path_mapping::PathMapper
 impl core::default::Default for openjd_expr::path_mapping::PathMapper

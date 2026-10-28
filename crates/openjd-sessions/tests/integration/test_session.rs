@@ -2828,6 +2828,74 @@ async fn test_list_path_parameter_value_is_path_mapped() {
     );
 }
 
+#[tokio::test]
+async fn test_path_mapping_trie_limit_comes_from_session_limits() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+
+    let posix = |src: &str| PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: src.into(),
+        destination_path: "/d".into(),
+    };
+    let tmp = TempDir::new().unwrap();
+    let mut config = config_in_root(tmp.path(), "test-trie-limit");
+    config.limits.max_path_mapping_trie_bytes = Some(1);
+    config.path_mapping_rules = Some(vec![posix("/mnt")]);
+    let err = Session::with_config(config).err().expect("trie too large");
+    assert!(
+        err.to_string().starts_with(
+            "Invalid path mapping rules: path mapping rule 0: the rules' trie would need about "
+        ) && err
+            .to_string()
+            .ends_with(" bytes, more than the limit of 1 bytes"),
+        "{err}"
+    );
+
+    // The same limit applies when rules are replaced or extended later.
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    s.set_limits_for_test(openjd_sessions::SessionLimits {
+        max_path_mapping_trie_bytes: Some(1),
+        ..Default::default()
+    });
+    assert!(s.extend_path_mapping_rules(vec![posix("/mnt")]).is_err());
+    assert!(s.with_path_mapping(vec![posix("/mnt")]).is_err());
+}
+
+#[tokio::test]
+async fn test_path_parameter_over_the_length_limit_is_an_error() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule, MAX_PATH_LEN};
+    use openjd_expr::ExprValue;
+    use openjd_model::types::{JobParameterType, JobParameterValue};
+
+    let tmp = TempDir::new().unwrap();
+    let mut config = config_in_root(tmp.path(), "test-long-param");
+    let long = format!("/mnt/{}", "a".repeat(MAX_PATH_LEN));
+    let mut params = openjd_model::types::JobParameterValues::new();
+    params.insert(
+        "Long".into(),
+        JobParameterValue {
+            param_type: JobParameterType::Path,
+            value: ExprValue::String(long.clone()),
+        },
+    );
+    config.job_parameter_values = params;
+    config.path_mapping_rules = Some(vec![PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "/mnt".into(),
+        destination_path: "/local".into(),
+    }]);
+    let s = Session::with_config(config).unwrap();
+    let err = s.build_symbol_table(None, None).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "Failed to apply path mapping to Param.Long: the path is {} bytes long, more than \
+             the limit of {MAX_PATH_LEN} bytes",
+            long.len()
+        )
+    );
+}
+
 // ══════════════════════════════════════════════════════════════
 // cancel_action via Session API
 // ══════════════════════════════════════════════════════════════

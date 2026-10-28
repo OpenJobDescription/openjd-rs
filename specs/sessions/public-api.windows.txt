@@ -147,6 +147,7 @@ pub mod openjd_sessions::limits
 pub struct openjd_sessions::limits::SessionLimits
 pub openjd_sessions::limits::SessionLimits::max_eval_memory_bytes: core::option::Option<usize>
 pub openjd_sessions::limits::SessionLimits::max_eval_operations: core::option::Option<usize>
+pub openjd_sessions::limits::SessionLimits::max_path_mapping_trie_bytes: core::option::Option<usize>
 pub openjd_sessions::limits::SessionLimits::max_resolved_arg_len: core::option::Option<usize>
 pub openjd_sessions::limits::SessionLimits::max_resolved_data_len: core::option::Option<usize>
 impl core::clone::Clone for openjd_sessions::limits::SessionLimits
@@ -794,6 +795,7 @@ pub openjd_sessions::SessionConfig::user: core::option::Option<alloc::sync::Arc<
 pub struct openjd_sessions::SessionLimits
 pub openjd_sessions::SessionLimits::max_eval_memory_bytes: core::option::Option<usize>
 pub openjd_sessions::SessionLimits::max_eval_operations: core::option::Option<usize>
+pub openjd_sessions::SessionLimits::max_path_mapping_trie_bytes: core::option::Option<usize>
 pub openjd_sessions::SessionLimits::max_resolved_arg_len: core::option::Option<usize>
 pub openjd_sessions::SessionLimits::max_resolved_data_len: core::option::Option<usize>
 impl core::clone::Clone for openjd_sessions::limits::SessionLimits

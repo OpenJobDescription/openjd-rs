@@ -1411,6 +1411,9 @@ pub struct PathMappingRule {
 /// can be longer (destination plus the rest of the input).
 pub const path_mapping::MAX_PATH_LEN: usize = 32768;
 
+/// Default limit on `PathMapper::trie_bytes()` (30 MiB).
+pub const path_mapping::DEFAULT_MAX_TRIE_BYTES: usize = 31457280;
+
 impl PathMappingRule {
     /// Check that `source_path` is absolute for `source_path_format` and
     /// that neither path is longer than `MAX_PATH_LEN` bytes. The error's
@@ -1442,8 +1445,16 @@ impl Default for PathMapper; // no rules
 
 impl PathMapper {
     /// Errors, with the rule's index, on the first invalid rule (see
-    /// `PathMappingRule::validate`).
+    /// `PathMappingRule::validate`), or on the rule that takes the trie
+    /// past `DEFAULT_MAX_TRIE_BYTES`.
     pub fn new(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule>;
+    /// As `new`, with the trie limited to `max_trie_bytes`. Any number of
+    /// rules is allowed; shared leading components share trie nodes.
+    pub fn with_max_trie_bytes(
+        rules: Vec<PathMappingRule>, max_trie_bytes: usize,
+    ) -> Result<Self, InvalidPathMappingRule>;
+    /// The estimated trie size in bytes that the limit applies to.
+    pub fn trie_bytes(&self) -> usize;
     /// The rules in the order given.
     pub fn rules(&self) -> &[PathMappingRule];
     /// The rules that can apply (a rule replaced by a later one for the
