@@ -213,7 +213,7 @@ fn range_expr_index_of(r: &RangeExpr, value: i64) -> Option<usize> {
 }
 
 /// Whether every value of `sub` is a value of `sup`, decided on their runs
-/// without listing values: O(R_sub log R_sup + R_sup).
+/// without listing values: O((R_sub + R_sup) log R_sup).
 ///
 /// For each run of `sub`, `x` is its next value still to check. The run of
 /// `sup` that could hold `x` is the first that ends at or after it. When
@@ -612,6 +612,10 @@ impl NodeIterator for StaticChunkIterator {
 fn static_chunk(range: &job::TaskParamRange<i64>, layout: &StaticLayout, i: usize) -> RangeExpr {
     let (offset, size) = layout.bounds(i);
     noncontiguous_chunk(range, offset, offset + size)
+        // A CHUNK[INT] range is within the value bound, so the only error is
+        // the run cap, checked when the node was built. (An INT parameter
+        // with chunks, which only the public API builds, is not
+        // bound-checked: a list holding i64::MIN fails here.)
         .expect("chunks checked against the run cap when the node was built")
 }
 
@@ -1344,8 +1348,9 @@ impl AdaptiveChunkIterator {
                 self.cursor = end;
                 chunk
             }
-            // The values are within the range value bound (checked by
-            // `StepParameterSpaceIterator::new_inner`), so the error is the
+            // CHUNK[INT] values are within the range value bound (checked by
+            // `StepParameterSpaceIterator::new_inner`; an INT parameter with
+            // chunks, which only the public API builds, is not), so the error is the
             // run cap: these values' canonical form has more than
             // MAX_RANGE_EXPR_CHUNKS runs, which takes more than
             // MAX_RANGE_EXPR_CHUNKS values. Shorten the chunk to
@@ -1670,7 +1675,10 @@ impl StepParameterSpaceIterator {
         }
     }
 
-    /// Update the chunk size for adaptive chunking.
+    /// Update the chunk size for adaptive chunking; a no-op for a
+    /// non-adaptive space. Any value is accepted: 0 acts as 1, and a size
+    /// beyond the values that remain (up to `usize::MAX`) makes the next
+    /// chunk take all of them (for CONTIGUOUS, the rest of its interval).
     pub fn set_chunks_default_task_count(&mut self, value: usize) {
         if let Some(ref a) = self.adaptive_chunk_size {
             a.store(value, Ordering::Relaxed);

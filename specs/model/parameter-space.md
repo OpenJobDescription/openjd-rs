@@ -183,7 +183,8 @@ one-value run) is an interval, merged into the interval before it when its first
 one more than that interval's last. A run with a step above 1 separates every pair of its
 values, so its first and last values are one-value intervals (which can merge with a
 neighbour) and its inner values are one `Singles` group. So a range of `R` runs has at most
-`3R` groups however many values it has: `"1-1000000000000:2"` (5e11 intervals) has two. A
+`3R` groups however many values it has: `"1-1000000000000:2"` (5e11 intervals) has three: `1`, the inner values `3`
+to `999999999997`, and `999999999999`. A
 list's intervals follow list order, as in the reference: a value joins the interval before
 it when it is one more than the value before it in the list, so a list of `N` values has at
 most `N` groups.
@@ -333,7 +334,7 @@ shortened, and only for a range of at least 49,999 runs (or a public-API list of
 (`targetRuntimeSeconds` is a target), so this stays within the specification.
 
 `AdaptiveChunkNode::validate_containment()` accepts any subset of the range. For a range
-expression `range_expr_is_subset()` decides it on the runs, O(R_sub log R + R): for each
+expression `range_expr_is_subset()` decides it on the runs, O((R_sub + R) log R): for each
 run of the candidate it finds the range's run that could hold the next unchecked value,
 and when that run holds it and its step divides the candidate run's step, skips every value
 of the candidate run up to that run's end in one move. For a list it looks each candidate

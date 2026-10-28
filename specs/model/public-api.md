@@ -1196,7 +1196,10 @@ impl StepParameterSpaceIterator {
     pub fn chunks_default_task_count(&self) -> Option<usize>;
 
     /// Adaptive-only: a static chunk size cannot change mid-walk, so this
-    /// is a no-op for a non-adaptive space.
+    /// is a no-op for a non-adaptive space. Any value is accepted: 0 acts
+    /// as 1, and a size beyond the values that remain (up to usize::MAX)
+    /// makes the next chunk take all of them (for CONTIGUOUS, the rest of
+    /// its interval).
     pub fn set_chunks_default_task_count(&mut self, value: usize);
 
     /// Rewind the iterator so a fresh `Iterator::next` walk yields the

@@ -152,7 +152,12 @@ fn adaptive_noncontiguous_chunks_of_a_huge_range_are_built_lazily() {
         // The containment check of a chunk is a subset test on the runs.
         assert!(iter.contains(&chunk_param("13-300000000010:3")));
         assert!(iter.contains(&chunk_param("1-999999999997:3")));
-        assert!(!iter.contains(&chunk_param("1-999999999997:2")));
+        assert_eq!(
+            iter.validate_containment(&chunk_param("1-999999999997:2"))
+                .unwrap_err(),
+            "Parameter 'F' value '1-999999999997:2' is not a subset of the range in the \
+             parameter space."
+        );
         assert!(!iter.contains(&chunk_param("1-1000000000003:3")));
     });
 }
@@ -242,7 +247,12 @@ fn static_contiguous_containment_of_a_huge_interval_locates_the_chunk() {
         let last = iter.get(iter.len() - 1).unwrap();
         assert_eq!(chunk_of(&last), "999999999999-1000000000000");
         assert!(iter.contains(&last));
-        assert!(!iter.contains(&chunk_param("999999999998-1000000000000")));
+        assert_eq!(
+            iter.validate_containment(&chunk_param("999999999998-1000000000000"))
+                .unwrap_err(),
+            "Parameter 'F' value '999999999998-1000000000000' is not a valid chunk in the \
+             parameter space."
+        );
     });
 }
 
@@ -541,30 +551,43 @@ fn unsorted_list_chunks_agree_with_the_value_based_construction() {
         let dtc = 1 + rng.below(n as u64 + 2) as usize;
         let range = job::TaskParamRange::List(values.clone());
         let ctx = format!("case {case}: {values:?} dtc={dtc}");
-        let walk = |constraint: RangeConstraint| -> Vec<String> {
-            let space = chunk_space(range.clone(), dtc, None, constraint);
-            StepParameterSpaceIterator::new(&space)
+        // Static: chunks, then containment against the chunk set.
+        for (constraint, want) in [
+            (
+                RangeConstraint::Noncontiguous,
+                oracle_static_noncontiguous(&values, dtc).unwrap(),
+            ),
+            (
+                RangeConstraint::Contiguous,
+                oracle_static_contiguous(&values, dtc),
+            ),
+        ] {
+            let space = chunk_space(range.clone(), dtc, None, constraint.clone());
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            let got: Vec<String> = StepParameterSpaceIterator::new(&space)
                 .unwrap()
                 .map(|s| chunk_of(&s))
-                .collect()
-        };
-        assert_eq!(
-            walk(RangeConstraint::Noncontiguous),
-            oracle_static_noncontiguous(&values, dtc).unwrap(),
-            "{ctx}"
-        );
-        assert_eq!(
-            walk(RangeConstraint::Contiguous),
-            oracle_static_contiguous(&values, dtc),
-            "{ctx}"
-        );
+                .collect();
+            assert_eq!(got, want, "{ctx} {constraint:?}");
+            let set: Vec<RangeExpr> = want.iter().map(|c| c.parse().unwrap()).collect();
+            check_containment(&iter, &values, &want, |r| set.contains(r), &mut rng);
+        }
         for constraint in [RangeConstraint::Noncontiguous, RangeConstraint::Contiguous] {
             let schedule = [dtc, 1 + rng.below(n as u64) as usize, usize::MAX];
             let space = chunk_space(range.clone(), dtc, Some(60), constraint.clone());
+            let want = oracle_adaptive(&values, &schedule, &constraint);
             assert_eq!(
                 walk_adaptive(&space, &schedule),
-                oracle_adaptive(&values, &schedule, &constraint),
+                want,
                 "{ctx} {constraint:?}"
+            );
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            check_containment(
+                &iter,
+                &values,
+                &want,
+                |r| r.iter().all(|v| values.contains(&v)),
+                &mut rng,
             );
         }
     }
@@ -614,4 +637,37 @@ fn run_cap_behavior_agrees_with_the_value_based_construction() {
             );
         }
     }
+}
+
+/// A range of 49,999 isolated values (squares, no three equally spaced),
+/// so 49,999 runs, written as text.
+fn many_runs_text() -> String {
+    (0..49_999i64)
+        .map(|k| (k * k).to_string())
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+#[test]
+fn walking_every_chunk_of_a_range_with_many_runs_stays_linear() {
+    // One chunk per run: each chunk must cost O(log R), not O(R), or the
+    // walk is quadratic (about 2.5e9 run visits here).
+    within_deadline(DEADLINE, || {
+        let range = expr(&many_runs_text());
+        let last = format!("{}", 49_998i64 * 49_998);
+        let space = chunk_space(range.clone(), 1, None, RangeConstraint::Noncontiguous);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert_eq!(iter.len(), 49_999);
+        assert_eq!(chunk_of(&iter.get(49_998).unwrap()), last);
+        let walked: Vec<String> = iter.map(|s| chunk_of(&s)).collect();
+        assert_eq!(walked.len(), 49_999);
+        assert_eq!(walked[49_998], last);
+        let space = chunk_space(range, 1, Some(60), RangeConstraint::Noncontiguous);
+        let walked: Vec<String> = StepParameterSpaceIterator::new(&space)
+            .unwrap()
+            .map(|s| chunk_of(&s))
+            .collect();
+        assert_eq!(walked.len(), 49_999);
+        assert_eq!(walked[49_998], last);
+    });
 }

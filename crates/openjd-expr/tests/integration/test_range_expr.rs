@@ -511,6 +511,23 @@ fn accept_single_huge_chunk() {
 }
 
 #[test]
+fn slicing_consecutive_windows_stays_linear() {
+    // `slice` visits only the runs its index span overlaps, after a binary
+    // search for the first: cutting a range of R runs into R one-value
+    // windows is O(R log R). Visiting every run per slice would be about
+    // 2.5e9 run visits here.
+    within_deadline(Duration::from_secs(10), || {
+        let text: Vec<String> = (0..49_999i64).map(|k| (k * k).to_string()).collect();
+        let r: RangeExpr = text.join(",").parse().unwrap();
+        assert_eq!(r.ranges().len(), 49_999);
+        for (i, want) in text.iter().enumerate() {
+            let i = i as i64;
+            assert_eq!(&r.slice(i, i + 1, 1).unwrap().to_string(), want);
+        }
+    });
+}
+
+#[test]
 fn largest_count_parses_and_indexes() {
     // i64::MAX values: an implementation that lists them never finishes.
     within_deadline(Duration::from_secs(10), || {
