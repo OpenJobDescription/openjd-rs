@@ -2,9 +2,11 @@
 
 ## Overview
 
-`RangeExpr` represents a sorted set of integers expressed as sorted, non-overlapping integer ranges like `"1-10"`,
+`RangeExpr` represents a set of integers written as a range expression like `"1-10"`,
 `"1-10:2"`, or `"1-5,10-15"`. It's used for frame ranges and other integer sequences
-in job templates.
+in job templates. Its value is its list of values in increasing order (Template Schemas
+§3.4.1.1.1); how it was written is not part of the value. It is stored as the runs of its
+canonical form, so equality, hashing, and `Display` all follow from the values alone.
 
 Defined in `range_expr.rs`.
 
@@ -22,8 +24,9 @@ Examples:
 - `"1-10"` → [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 - `"1-10:2"` → [1, 3, 5, 7, 9]
 - `"1-5,10-15"` → [1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15]
-- `"10-1:-1"` → [10, 9, 8, 7, 6, 5, 4, 3, 2, 1] (descending, requires negative step)
-- `"10-1:-3"` → [10, 7, 4, 1] (descending with step)
+- `"10-1:-1"` → [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] (written descending, which requires a
+  negative step; the value is in increasing order)
+- `"10-1:-3"` → [1, 4, 7, 10] (written descending with step)
 
 Note: Descending ranges (where start > end) require a negative step. `"10-1"` without
 a step is invalid. Use `"10-1:-1"` for step -1, or `"10-1:-N"` for larger steps.
@@ -32,35 +35,112 @@ a step is invalid. Use `"10-1:-1"` for step -1, or `"10-1:-N"` for larger steps.
 
 ```rust
 pub struct RangeExpr {
-    ranges: Vec<IntRange>,
-    length: u64,                    // packed: low 63 bits = exact element count,
-                                    // MSB = contiguous display flag
+    ranges: Vec<IntRange>,          // the runs of the canonical form
     cumulative_lengths: Vec<u64>,   // exact cumulative lengths for binary
                                     // search indexing (mirrors the Python
                                     // reference's _range_length_indices)
+    length: u64,                    // packed: low 63 bits = exact element count,
+                                    // MSB = contiguous display flag
 }
 
 struct IntRange {
-    start: i64,  // |start| < 2^62 (see Value Bounds)
-    end: i64,    // inclusive, actual last value; |end| < 2^62
-    step: i64,   // always positive after construction; step < 2^62
+    start: i64,  // first value; never i64::MIN (see Value Bounds)
+    end: i64,    // inclusive, actual last value
+    step: i64,   // always positive after construction
 }
 ```
 
-All lengths and counts are exact u64 values — with the value bounds
-below, no count can reach 2^63, so nothing saturates and all index
-arithmetic is plain i64/u64.
-
-Ranges are stored in ascending order with positive steps regardless of how they were
-specified. Descending ranges like `"10-1:-1"` are normalized to ascending form during
-`IntRange::new`: the original direction is not retained. Iteration, indexing, and
-`Display` all operate on the canonical ascending form.
+An `IntRange` is one arithmetic progression. Ranges are stored in ascending order with
+positive steps regardless of how they were specified. Descending ranges like `"10-1:-1"`
+are normalized to ascending form during `IntRange::new`, and an end that the step does not
+reach is replaced by the last value reached (`"1-10:4"` stores end 9): the original
+spelling is not retained.
 
 This is a deliberate simplification over the Python reference implementation, which
-preserves the user-supplied direction. The Rust crate chose canonical form because
+preserves the user-supplied direction. The Rust crate chose ascending form because
 (a) every consumer of `RangeExpr` in openjd-rs treats a range as an unordered
 sorted set of integers, and (b) it eliminates a whole class of edge cases
 (descending-with-positive-step, one-element ranges) from the indexing arithmetic.
+
+### Canonical runs
+
+Every constructor (`from_str`, `from_ranges`, `from_values`, `slice`, and deserialization)
+normalizes `ranges` to the **runs of the canonical form** of Template Schemas §3.4.1.1.1.
+Over the sorted values $v_1 < \dots < v_n$, runs are taken greedily from the left: at
+$v_i$, let $s = v_{i+1} - v_i$ and extend to the last $v_j$ reached with constant
+difference $s$; a run of three or more values is $v_i..v_j$ and the next run starts at
+$v_{j+1}$, otherwise $v_i$ is a run alone and the next run starts at $v_{i+1}$. So each run
+is one value (stored with step 1) or three or more values, never two, and the runs are a
+function of the list of values alone:
+
+| Written | Runs | `Display` |
+|---------|------|-----------|
+| `"1,3,5,7,9"`, `"1-9:2"`, `"1-10:2"` | 1..9 step 2 | `"1-9:2"` |
+| `"1-2"`, `"1,2"` | 1; 2 | `"1,2"` |
+| `"13-18,19"`, `"19-18:-5,13-18"` | 13..19 step 1 | `"13-19"` |
+| `"2,4,6,8,9,10"` | 2..8 step 2; 9; 10 | `"2-8:2,9,10"` |
+| `"1,3,5-7"` | 1..5 step 2; 6; 7 | `"1-5:2,6,7"` |
+| `"1,3,4,5"` | 1; 3..5 step 1 | `"1,3-5"` |
+
+`canonical_runs` computes the runs from a sequence of progressions whose values are
+strictly increasing, **without listing the values**. This is the informative algorithm of
+§3.4.1.1.1: a run walks positions (progression, offset); along a progression whose step
+equals the run's difference it jumps to that progression's end in one move, and across a
+boundary it compares the next progression's first value. Each progression is visited a
+bounded number of times, so the work is O(k) in the number of progressions and never
+depends on the number of values; the output has at most two runs per progression. A
+range like `"1-6000000000000000000"` or `"0-4000000000000000000:2,4000000000000000001"`
+(more than 10^18 values) is canonicalized, compared, and printed in constant time.
+
+Per constructor:
+
+- `from_str` and `from_ranges`: O(k log k) to sort the k elements, then O(k).
+- `from_values`: the list is already expanded, so O(n log n) to sort and O(n) for the
+  runs.
+- `slice`: O(m) in the m runs of the source, producing at most one progression per run
+  (two single values when two selected values are further apart than `i64::MAX`), then
+  O(m) to canonicalize.
+
+Differences between consecutive values are computed as `u64` (`abs_diff`), since two
+values can be up to 2^64 - 2 apart. The step of a run of three or more values is at most
+half its span, so it always fits `i64`.
+
+## Canonical Form (`Display`)
+
+`Display` writes the canonical form: each run as `x` (one value), `x-y` (step 1), or
+`x-y:s`, in base 10 with a leading `-` for negatives, joined by `,` with no white space.
+Because the runs are stored, this is O(number of runs). Every path that writes a range
+expression value as a string goes through it: `string(r)`, `+` with a string,
+format-string interpolation, `repr_py`/`repr_json`/`repr_pwsh`, the JSON and display forms
+of a list containing a range, and the model, sessions, and CLI layers that print task
+parameter values. The canonical form parses back to the same value and prints the same
+string again, for a nonempty value within the run cap of Defensive Caps. (The empty value,
+from an empty list or an empty slice, writes `""`, which does not parse: the canonical
+form is defined for one or more values, and a range expression cannot be empty.) The only other form is the contiguous chunk form (see Contiguous Display
+Mode).
+
+`IntRange` also implements `Display`, writing one progression as `x`, `x,y` (two values),
+`x-y`, or `x-y:s`; for a run of the canonical form this is the run's text. It is used in
+error messages about elements, like the overlap error.
+
+## Equality and Hashing
+
+Two `RangeExpr` values are equal exactly when they have the same list of values
+(Expression Language §1.2.5): `range_expr("1,3,5,7,9") == range_expr("1-9:2")` is `true`.
+Since the runs are canonical, `PartialEq` compares `ranges` (O(number of runs), no
+expansion) and `Hash` hashes them, which keeps `Hash` consistent with `Eq`. The
+contiguous display flag is not part of the value. `ExprValue` equality and hashing for
+`range_expr` delegate to these, and so do the model's `TaskParamRange` equality and chunk
+containment checks.
+
+**Divergence from the Python reference:** openjd-model-for-python's `IntRangeExpr`
+(0.13.0) predates the canonical form: `str()` writes the elements it stored
+(`str(IntRangeExpr.from_str("1,3,5,7,9"))` is `"1,3,5,7,9"`, and `"19-23:5,13-18"` is
+`"13-18,19"`), and `==` compares those elements, so `"1,3,5,7,9"` and `"1-9:2"` are
+unequal. The same holds for a value built from a list: `range_expr([1,2,4,6])` is
+`"1,2-6:2"` in openjd-rs, while Python's `IntRangeExpr.from_list([1,2,4,6])` (0.13.0 and
+0.14.0) and an openjd-cli 0.8.0 template expression give `"1,2,4,6"`. openjd-rs follows the specification (Template Schemas §3.4.1.1.1, Expression
+Language §1.2.5), which defines both by value.
 
 ## Parsing
 
@@ -96,41 +176,27 @@ logical length. The model layer relies on this laziness to support very
 large parameter spaces (millions of frames, billions of iterations) without
 materialization. Downstream conversion (`list(range_expr)`, comprehensions
 over the range) is already bounded by the evaluator's per-element operation
-charge and memory limit.
+charge and memory limit. (The count is bounded only by `MAX_RANGE_EXPR_LEN`; see Value
+Bounds.)
 
-## Value Bounds
+Canonicalization can split an element into two runs (`"0-1,3-4"` is `"0,1,3,4"`), so
+`from_ranges` (and so `from_str` and deserialization) also rejects a value whose canonical
+form has more than `MAX_RANGE_EXPR_CHUNKS` runs, with `Range expression has too many
+sub-ranges in canonical form (20000); maximum is 10000`. Every value these constructors
+accept therefore has a canonical form, and a serialized form, that they accept again. Values
+computed by `from_values` (`range_expr(list)`) and `slice` are not capped this way: their
+size is bounded by the evaluator's memory limit, and a computed value with more than
+`MAX_RANGE_EXPR_CHUNKS` runs (for example `range_expr([i*i for i in range(15000)])`) has a
+canonical form that `from_str` rejects. Its serialized form is likewise rejected by
+`Deserialize`, so such a value does not survive serde transport (a serialized
+`StepParameterSpace`, or `SerializedSymbolTable::to_symtab`, which re-parses the canonical
+string).
 
-Range endpoints and steps are restricted to magnitudes **strictly below
-2^62** (`MAX_RANGE_VALUE_MAGNITUDE`). Inputs at or beyond the bound —
-through parsing, `IntRange::new`, `RangeExpr::from_values`, or
-`RangeExpr::from_ranges` — are rejected with an integer overflow error
-(`ExpressionErrorKind::IntegerOverflow`) at construction time.
-
-This is a deliberate narrowing of the language surface chosen so that
-**every derived quantity is exactly representable in 64 bits**:
-
-- The widest possible endpoint span is below 2^63, so element counts fit
-  i64/u64 exactly — `len()` never saturates, and the cumulative index
-  table used for O(log m) `get()` is always exact.
-- Index products (`i * step`), normalization intermediates
-  (`start + (count - 1) * step`), adjacency checks (`end + step`), and
-  `from_values` gap detection all stay within i64 with 2x headroom.
-- No widened (i128/u128) arithmetic and no saturating-vs-exact length
-  split exists anywhere in the implementation; the element count can
-  never collide with the contiguous-display flag packed into the length
-  field's high bit.
-
-The total element count across all chunks is also below 2^63: chunks are
-non-overlapping subsets of the bounded value domain, so the sum cannot
-exceed the domain size.
-
-**Divergence from the Python reference:** Python's implementation uses
-arbitrary-precision integers and accepts any endpoint. 2^62 ≈ 4.6×10^18 is
-nine orders of magnitude beyond any realistic frame range or task index,
-so the restriction is not expected to affect real templates. One slicing
-edge case remains: a slice whose selected-value spacing
-(`chunk_step × slice_step`) reaches the step bound stores the (at most
-two) selected values as singleton chunks rather than a stepped chunk.
+**Divergence from the Python reference and the specification:** both caps are
+implementation limits. Template Schemas §3.4.1.1.1 places no limit on the number of
+elements of a range expression, and openjd-model-for-python's `IntRangeExpr.from_str`
+(0.13.0) has none: it accepts 10,001 elements, and 6,000 two-value elements
+(`"0-1,4-5,..."`, 12,000 runs in canonical form), both of which openjd-rs rejects.
 
 This cap is orders of magnitude above any realistic render-farm frame
 range: real multi-chunk inputs select frames from a handful of shots, well
@@ -142,6 +208,58 @@ violated limit. The crate does not allocate a dedicated
 `ExpressionErrorKind` variant for this case because `RangeExpr::from_str`
 errors are routed through `ExpressionError::parse_error` to match the
 existing diagnostic style.
+
+## Value Bounds
+
+A range value, endpoint, or step may be **any `i64` except `i64::MIN`**, and a range
+expression holds **at most `MAX_RANGE_EXPR_LEN` = `i64::MAX` values**:
+
+- `i64::MIN` is rejected with an integer overflow error
+  (`ExpressionErrorKind::IntegerOverflow`), through `IntRange::new`,
+  `RangeExpr::from_values`, and `RangeExpr::from_ranges`. Its negation overflows, and the
+  parser cannot read it either (see below), so excluding it keeps every canonical form
+  parseable.
+- A range or element with more than `i64::MAX` values is rejected with
+  `Range expression has too many values; the maximum is 9223372036854775807`. So
+  `"-9223372036854775807,9223372036854775807"` (two values) and `"1-9223372036854775807"`
+  (the largest count) are accepted, and `"-9223372036854775807-9223372036854775807"`
+  (2^64 - 1 values) is not.
+
+The count bound exists because the expression language's `int` is 64-bit: `len(r)` and
+every index into `r` must fit one. With it, counts and cumulative lengths are exact in
+`u64` and convert to `i64` exactly, index arithmetic in `slice` and `get` is plain
+`i64`/`u64`, and the element count never reaches the contiguous flag packed into the
+length field's high bit. Spans between values, however, can reach 2^64 - 2, so
+`IntRange` computes them with `abs_diff` (u64) and applies offsets with
+`wrapping_add_unsigned`, which is exact because each result is a value of the range.
+
+**Deviation from Template Schemas §3.4.1.1.1:** the specification does not constrain the
+number of values a range expression expands to, and expects an implementation that bounds
+Tasks to limit the Task count instead. openjd-rs rejects a range expression with more than
+`i64::MAX` values at construction, because the Expression Language's `int` is 64-bit
+(§1.2.1) and `len(r)` and every index into `r` must be an `int`. No 64-bit implementation
+can report the length of such a range, and every range of practical size is far below the
+bound. (Accepting such a range and failing only in `len()` and indexing would remove the
+deviation at the cost of making those operations partial.)
+
+**Deviation from Template Schemas §3.4.1.1.1:** the specification allows any integer as a
+value, and the Expression Language's `int` includes `i64::MIN` (-2^63). openjd-rs rejects
+`i64::MIN` as a range value, endpoint, or step (for the reasons above: its negation
+overflows, and the parser reads `-<digits>` as a negated non-negative literal, so
+`"-9223372036854775808"` fails with `Invalid integer`). openjd-model-for-python accepts it.
+No conformance case uses `i64::MIN`.
+
+**Divergence from the Python reference:** Python's implementation uses arbitrary-precision
+integers and accepts any endpoint and any count. Values beyond `i64` cannot occur in an
+openjd-rs expression, whose `int` is 64-bit.
+
+**Known gap:** the parser reads an integer's digits as a positive `i64` and then negates
+it, so `"-9223372036854775808"` (`i64::MIN`) fails to parse with `Invalid integer`. That
+value is out of the domain above anyway.
+
+The model narrows the domain further for `CHUNK[INT]` task parameters (magnitudes below
+2^62), whose chunking arithmetic is plain i64; see
+[model parameter-space.md](../model/parameter-space.md#chunking).
 
 ## Indexing
 
@@ -170,13 +288,14 @@ walks through sub-ranges without materializing the full list.
 | From | To | Method |
 |------|----|--------|
 | `&str` | `RangeExpr` | `RangeExpr::from_str(s)` |
-| `Vec<i64>` | `RangeExpr` | `RangeExpr::from_values(values)` — sorts, deduplicates, auto-detects step patterns |
-| `RangeExpr` | `String` | `to_string()` — canonical form |
+| `Vec<i64>` | `RangeExpr` | `RangeExpr::from_values(values)` — sorts, deduplicates, finds the canonical runs |
+| `RangeExpr` | `String` | `to_string()` — canonical form (or `<N>-<M>` with the contiguous flag) |
 | `RangeExpr` | `Vec<i64>` | `iter().collect()` |
 | `RangeExpr` | `ExprValue::ListInt` | Via `list()` function in expression language |
 
-`from_values` sorts and deduplicates the input, then detects arithmetic sequences to
-reconstruct compact range representations. For example, `[1, 3, 5, 7, 9]` becomes `"1-9:2"`.
+`from_values` sorts and deduplicates the input, then finds the runs of the canonical
+form. For example, `[1, 3, 5, 7, 9]` becomes `"1-9:2"` and `[1, 3, 4, 5]` becomes
+`"1,3-5"`.
 
 ## Slicing
 
@@ -191,12 +310,12 @@ let sliced = r.slice(10, 50, 2)?;  // elements at indices 10, 12, 14, ..., 48
 The algorithm operates in O(m) time where m is the number of sub-ranges, by walking
 the sub-ranges and computing intersections with the requested index range. No element
 vector is allocated — the result is a new `RangeExpr` built directly from computed
-sub-ranges. Step must be positive.
+progressions and then canonicalized, so `range_expr("1-10")[::2]` is written `"1-9:2"`
+and equals `range_expr("1,3,5,7,9")`. Step must be positive.
 
-When a slice selects exactly two values from one sub-range and their spacing
-(`chunk_step × slice_step`) reaches the value bound, the result is
-represented as two singleton chunks, since the combined step would violate
-the bounded step domain of the stored `IntRange` (see Value Bounds).
+When a slice selects exactly two values from one run and their spacing
+(`run_step × slice_step`) exceeds `i64::MAX`, they are passed to canonicalization as two
+single values, since the combined step does not fit an `IntRange` step.
 
 ## Containment
 
@@ -210,29 +329,41 @@ r.contains(4)  // → false
 
 ## Contiguous Display Mode
 
-`RangeExpr` supports a contiguous display flag that changes how single values are
-formatted:
+`RangeExpr` supports a contiguous display flag for the one value the specification does
+not write in canonical form: a `CONTIGUOUS` chunk of a `CHUNK[INT]` task parameter, which
+is always written `<N>-<M>`, even with one or two values (Template Schemas §3.4.1.5,
+Expression Language §1.2.2):
 
 ```rust
 let r = RangeExpr::from_str("5")?.with_contiguous(true);
 r.to_string()  // → "5-5" (not "5")
 
+let r = RangeExpr::from_str("5-6")?.with_contiguous(true);
+r.to_string()  // → "5-6" (not "5,6")
+
 let r = RangeExpr::from_str("1-10")?.with_contiguous(true);
 r.to_string()  // → "1-10" (unchanged)
 ```
 
-When the contiguous flag is set, `Display` always uses `"{start}-{end}"` format, even
-for single values. This is used by the model layer's step parameter space chunking,
-where a range expression represents a contiguous chunk of work assigned to a task. A
-chunk containing a single frame (e.g., frame 5) must display as `"5-5"` rather than
-`"5"` so that the consuming code can unambiguously parse it as a range chunk.
+When the flag is set and the values are contiguous (`last - first + 1 == len`), `Display`
+writes `"{first}-{last}"`; otherwise it writes the canonical form. The model layer sets
+the flag on every `CONTIGUOUS` chunk it builds, the CLI sets it on a `--task-param` or
+`--tasks` value for a `CONTIGUOUS` `CHUNK[INT]` parameter, and every string path (`Task.Param`,
+`Task.RawParam`, `string()`, `repr_*`, `+`) goes through `Display`, so the chunk form
+reaches all of them. The flag is not transported: `Serialize` writes the runs and their lengths with the flag
+bit masked out of `length`, and
+`SerializedSymbolTable` carries the value as its string (`"5-5"`), which `to_symtab`
+parses back without the flag, so `string()` of the received value is `"5"`. No path in
+openjd-rs transports a chunk value this way; sessions receives the `TaskParameterSet`
+in-process.
 
 The flag is packed into the high bit of the `length` field to avoid increasing the
 struct size. The packing matters because `RangeExpr` is instantiated **once per task**
 during step parameter space chunking — a step producing a million tasks allocates a
 million `RangeExpr` chunk descriptors, so an extra 8 bytes per instance would cost
-8 MB for that one step. The flag only affects `Display`; it is not preserved through
-constructors like `from_values` and does not affect equality comparison or iteration.
+8 MB for that one step. The flag is not part of the value: it does not affect equality,
+hashing, or iteration, and no constructor preserves it, so a range computed from a chunk
+(a slice, `range_expr(list(...))`) is written in canonical form.
 
 ## Expression Language Integration
 
@@ -242,7 +373,7 @@ In the expression language, `RangeExpr` values support:
 |-----------|--------|
 | `len(r)` | Element count |
 | `r[i]` | Index access |
-| `r[i:j]` / `r[i:j:k]` | Slice → `list[int]` |
+| `r[i:j]` / `r[i:j:k]` | Slice → `range_expr` (in canonical form) for a positive step, `list[int]` for a negative step |
 | `x in r` | Containment check |
 | `min(r)` / `max(r)` / `sum(r)` | Aggregate operations |
 | `list(r)` | Convert to `list[int]` |

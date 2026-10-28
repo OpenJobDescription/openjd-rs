@@ -226,9 +226,11 @@ pub enum TaskParameter {
 ```
 
 `Int` and `ChunkInt` ranges may be either a materialized list or a `RangeExpr` (from
-`openjd-expr`) for compact representation of large integer sequences. `Float`, `String`,
-and `Path` ranges are always materialized lists because they don't have a compact
-representation.
+`openjd-expr`) for compact representation of large integer sequences. A `RangeExpr`
+compares and hashes by its values, so two range-expression ranges written differently
+(`"1,3,5,7,9"` and `"1-9:2"`) but holding the same values are equal, and so are the
+`TaskParameter`s holding them. `Float`, `String`, and `Path` ranges are always
+materialized lists because they don't have a compact representation.
 
 ### Float range elements
 

@@ -886,11 +886,12 @@ fn range_list_is_still_capped() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// NONCONTIGUOUS chunk rendering parity with the Python reference
-// (IntRangeExpr.from_list). Expected strings measured against the
-// Python source. The old compressor rendered an interior consecutive
-// pair absorbed into a following progression ("1,2-6:2"); the
-// reference consumes the pair atomically ("1,2,4,6").
+// NONCONTIGUOUS chunk rendering: the canonical form of Template Schemas
+// §3.4.1.1.1 (§3.4.1.5 rangeConstraint). A value that cannot start a run
+// of three is written alone and the next run starts at the value after
+// it, so an interior pair's second value can start a run ("1,2-6:2"). The
+// Python reference's from_list consumes such a pair whole ("1,2,4,6"), a
+// divergence recorded in specs/model/parameter-space.md.
 // ══════════════════════════════════════════════════════════════
 
 fn chunk_strings(template_json: &str) -> Vec<String> {
@@ -906,7 +907,7 @@ fn chunk_strings(template_json: &str) -> Vec<String> {
 
 /// Static path: one chunk holding a pair followed by a stepped progression.
 #[test]
-fn noncontiguous_static_interior_pair_renders_like_python() {
+fn noncontiguous_static_interior_pair_renders_canonically() {
     let chunks = chunk_strings(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -921,13 +922,13 @@ fn noncontiguous_static_interior_pair_renders_like_python() {
         }]
     }"#,
     );
-    assert_eq!(chunks, vec!["1,2,4,6"]);
+    assert_eq!(chunks, vec!["1,2-6:2"]);
 }
 
 /// Static path, list-form range: a stepped pair followed by a step-1 run.
-/// The reference's greedy pair-commit eats the 3, so no "3-5" appears.
+/// 1 cannot start a run of three, so the run 3-5 starts at the 3.
 #[test]
-fn noncontiguous_static_stepped_pair_renders_like_python() {
+fn noncontiguous_static_stepped_pair_renders_canonically() {
     let chunks = chunk_strings(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -942,7 +943,7 @@ fn noncontiguous_static_stepped_pair_renders_like_python() {
         }]
     }"#,
     );
-    assert_eq!(chunks, vec!["1,3,4,5"]);
+    assert_eq!(chunks, vec!["1,3-5"]);
 }
 
 /// The conformance fixture shape (noncontiguous-format.test.yaml): range 1-8,
@@ -969,7 +970,7 @@ fn noncontiguous_static_trailing_pair_renders_comma_separated() {
 /// Adaptive path (targetRuntimeSeconds > 0) goes through
 /// AdaptiveChunkIterator::make_chunk, not the static node. Same contract.
 #[test]
-fn noncontiguous_adaptive_interior_pair_renders_like_python() {
+fn noncontiguous_adaptive_interior_pair_renders_canonically() {
     let chunks = chunk_strings(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -984,7 +985,7 @@ fn noncontiguous_adaptive_interior_pair_renders_like_python() {
         }]
     }"#,
     );
-    assert_eq!(chunks, vec!["1,2,4,6"]);
+    assert_eq!(chunks, vec!["1,2-6:2"]);
 }
 
 /// Differential guard: CONTIGUOUS rendering is unchanged by the parity fix.
@@ -1011,9 +1012,8 @@ fn contiguous_trailing_pair_still_renders_dash_form() {
 /// A chunk must pass `validate_containment` after a round trip through its
 /// own rendered string: consumers (e.g. `--task-params` on the CLI) hand
 /// chunk values back as strings. This range splits into a stepped-pair
-/// chunk ("6,9"), which `from_values` groups as one stepped IntRange while
-/// the parser reads two singletons — structural comparison would reject it,
-/// so containment must compare by value sequence.
+/// chunk ("6,9"). Range expression equality compares values, so the
+/// re-parsed chunk equals the one the iterator built.
 #[test]
 fn noncontiguous_chunk_string_round_trips_through_validate_containment() {
     let template = r#"{
@@ -1052,6 +1052,26 @@ fn noncontiguous_chunk_string_round_trips_through_validate_containment() {
         seen += 1;
     }
     assert_eq!(seen, 3);
+    // A value with the values of no chunk is rejected, however it is
+    // spelled: "4,6,9" mixes two chunks, and "6-9:3" is the chunk "6,9"
+    // spelled differently (accepted).
+    let with_p = |text: &str| {
+        let mut set = StepParameterSpaceIterator::new(ps).unwrap().next().unwrap();
+        let param_type = set["P"].param_type;
+        set.insert(
+            "P".to_string(),
+            openjd_model::types::TaskParameterValue {
+                param_type,
+                value: openjd_expr::ExprValue::RangeExpr(text.parse().unwrap()),
+            },
+        );
+        set
+    };
+    assert_eq!(
+        iter.validate_containment(&with_p("4,6,9")).unwrap_err(),
+        "Parameter 'P' value '4,6,9' is not a valid chunk in the parameter space."
+    );
+    iter.validate_containment(&with_p("6-9:3")).unwrap();
 }
 
 /// Random access must render identically to sequential iteration: the

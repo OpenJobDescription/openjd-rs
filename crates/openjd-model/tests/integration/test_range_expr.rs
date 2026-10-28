@@ -289,7 +289,7 @@ fn from_str_pos_neg_steps() {
             .parse::<RangeExpr>()
             .unwrap()
             .to_string(),
-        "0-5,6-12:2"
+        "0-6,8-12:2"
     );
 }
 

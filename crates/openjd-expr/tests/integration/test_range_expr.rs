@@ -5,6 +5,9 @@
 //! Tests ported from Python test_range_expr.py
 
 use openjd_expr::{ExprValue, ParsedExpression, RangeExpr, SymbolTable};
+use std::time::Duration;
+
+use crate::test_range_expr_canonical::within_deadline;
 
 fn eval(expr: &str) -> ExprValue {
     ParsedExpression::new(expr)
@@ -452,80 +455,109 @@ fn range_expr_max_large_range_perf() {
     );
 }
 
-// === Regression tests: bounded value domain (|v| < 2^62) ===
-// Range endpoints and steps are restricted below the full i64 domain so
-// all derived arithmetic (spans, counts, index products, cumulative
-// sums) stays exactly representable in i64/u64. Inputs at or beyond the
-// bound raise an integer overflow error at construction.
+// === Value bounds: values in (i64::MIN, i64::MAX], at most i64::MAX values ===
+// A range accepts every i64 value except i64::MIN, and at most
+// MAX_RANGE_EXPR_LEN (i64::MAX) values so that len() and every index fit
+// an int. Spans between values can exceed i64 (up to 2^64 - 2); the
+// arithmetic over them must be exact.
 
 #[test]
-fn endpoint_at_bound_rejected_with_overflow_error() {
+fn value_i64_min_rejected_with_overflow_error() {
     assert_err(
-        "range_expr('0-4611686018427387904')",
+        "range_expr([1, -9223372036854775807 - 1])",
         &[
             "Integer overflow: result is outside the 64-bit signed range\n",
-            "  range_expr('0-4611686018427387904')\n",
-            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
-        ],
-    );
-    assert_err(
-        "range_expr('-4611686018427387904')",
-        &[
-            "Integer overflow: result is outside the 64-bit signed range\n",
-            "  range_expr('-4611686018427387904')\n",
-            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+            "  range_expr([1, -9223372036854775807 - 1])\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
         ],
     );
 }
 
 #[test]
-fn step_at_bound_rejected_with_overflow_error() {
+fn more_than_max_len_values_rejected() {
+    // 2^64 - 1 values in one element.
     assert_err(
-        "range_expr('0-10:4611686018427387904')",
+        "range_expr('-9223372036854775807-9223372036854775807')",
         &[
-            "Integer overflow: result is outside the 64-bit signed range\n",
-            "  range_expr('0-10:4611686018427387904')\n",
-            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+            "Range expression has too many values; the maximum is 9223372036854775807\n",
+            "  range_expr('-9223372036854775807-9223372036854775807')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
         ],
+    );
+    // 2^63 values in one element, one past the limit.
+    assert_err(
+        "range_expr('-9223372036854775807-0')",
+        &["Range expression has too many values; the maximum is 9223372036854775807\n"],
+    );
+    // Each element is within the limit; together they are not.
+    assert_err(
+        "range_expr('-9223372036854775807--1,0')",
+        &["Range expression has too many values; the maximum is 9223372036854775807\n"],
     );
 }
 
 #[test]
-fn from_value_list_at_bound_rejected() {
-    assert_err(
-        "range_expr([1, 4611686018427387904])",
-        &[
-            "Integer overflow: result is outside the 64-bit signed range\n",
-            "  range_expr([1, 4611686018427387904])\n",
-            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
-        ],
-    );
+fn largest_count_parses_and_indexes() {
+    // i64::MAX values: an implementation that lists them never finishes.
+    within_deadline(Duration::from_secs(10), || {
+        let max = i64::MAX;
+        let range: RangeExpr = format!("1-{max}").parse().unwrap();
+        assert_eq!(range.len() as u64, openjd_expr::MAX_RANGE_EXPR_LEN);
+        assert_eq!(range.get(-1), Some(max));
+        assert_eq!(range.to_string(), format!("1-{max}"));
+        // One more is too many.
+        assert_eq!(
+            format!("0-{max}")
+                .parse::<RangeExpr>()
+                .unwrap_err()
+                .to_string(),
+            "Range expression has too many values; the maximum is 9223372036854775807"
+        );
+    });
 }
 
 #[test]
 fn widest_legal_range_exact_everywhere() {
-    // Largest legal magnitude: 2^62 - 1. Every derived quantity is
-    // exact — len, tail indexing, membership, min/max, equality.
-    let max = (1i64 << 62) - 1;
+    // i64::MAX values: an implementation that lists them never finishes.
+    within_deadline(
+        Duration::from_secs(10),
+        widest_legal_range_exact_everywhere_body,
+    );
+}
+
+fn widest_legal_range_exact_everywhere_body() {
+    // The most values a range can hold, i64::MAX, spread over the whole
+    // domain with step 2 (span 2^64 - 4, beyond i64). Every derived
+    // quantity is exact — len, tail indexing, membership, min/max,
+    // equality.
+    let max = i64::MAX;
     let mut st = SymbolTable::new();
     st.set(
         "R",
-        ExprValue::RangeExpr(format!("{}-{}", -max, max).parse().unwrap()),
+        ExprValue::RangeExpr(format!("{}-{}:2", -max, max - 2).parse().unwrap()),
     )
     .unwrap();
     assert_eq!(
         eval_with("len(R)", &st).to_display_string(),
-        "9223372036854775807" // 2 * (2^62 - 1) + 1
+        "9223372036854775807"
     );
-    assert_eq!(eval_with("R[-1]", &st).to_display_string(), max.to_string());
+    assert_eq!(
+        eval_with("R[-1]", &st).to_display_string(),
+        (max - 2).to_string()
+    );
     assert_eq!(
         eval_with("R[0]", &st).to_display_string(),
         (-max).to_string()
     );
     assert_eq!(eval_with("5 in R", &st).to_display_string(), "true");
+    assert_eq!(eval_with("4 in R", &st).to_display_string(), "false");
+    assert_eq!(
+        eval_with("string(R)", &st).to_display_string(),
+        "-9223372036854775807-9223372036854775805:2"
+    );
     assert_eq!(
         eval_with("max(R)", &st).to_display_string(),
-        max.to_string()
+        (max - 2).to_string()
     );
     assert_eq!(
         eval_with("min(R)", &st).to_display_string(),
@@ -536,19 +568,37 @@ fn widest_legal_range_exact_everywhere() {
 
 #[test]
 fn widest_legal_range_slice_exact() {
-    let max = (1i64 << 62) - 1;
+    // i64::MAX values: an implementation that lists them never finishes.
+    within_deadline(Duration::from_secs(10), widest_legal_range_slice_exact_body);
+}
+
+fn widest_legal_range_slice_exact_body() {
+    // i64::MAX values ending at i64::MAX.
+    let max = i64::MAX;
     let mut st = SymbolTable::new();
     st.set(
         "R",
-        ExprValue::RangeExpr(format!("{}-{}", -max, max).parse().unwrap()),
+        ExprValue::RangeExpr(format!("1-{max}").parse().unwrap()),
     )
     .unwrap();
     let sliced = eval_with("R[0:3]", &st).to_display_string();
-    assert_eq!(sliced, format!("{}-{}", -max, -max + 2));
+    assert_eq!(sliced, "1-3");
     // Tail slice resolves against the exact length. (Two-element ranges
-    // display in comma form.)
+    // are written as two values.)
     let tail = eval_with("R[-2:]", &st).to_display_string();
     assert_eq!(tail, format!("{},{}", max - 1, max));
+    // A stride whose spacing between the two selected values does not
+    // fit i64 is still exact.
+    let mut st = SymbolTable::new();
+    st.set(
+        "R",
+        ExprValue::RangeExpr(format!("{}-{max}:{max}", -max).parse().unwrap()),
+    )
+    .unwrap();
+    assert_eq!(
+        eval_with("R[::2]", &st).to_display_string(),
+        format!("{},{max}", -max)
+    );
 }
 
 #[test]
@@ -563,9 +613,9 @@ fn reverse_slice_with_huge_step_single_element() {
 
 #[test]
 fn merge_at_value_bound_no_overflow() {
-    // Two singletons adjacent at the top of the legal domain: the merge
-    // check computes end + step without overflow.
-    let max = (1i64 << 62) - 1;
+    // Two singletons adjacent at the top of the domain: canonicalization
+    // compares their difference without overflow.
+    let max = i64::MAX;
     let r: RangeExpr = format!("{},{}", max - 1, max).parse().unwrap();
     assert_eq!(r.len(), 2);
     assert_eq!(r.get(-1), Some(max));
@@ -575,7 +625,7 @@ fn merge_at_value_bound_no_overflow() {
 fn parse_duplicate_bound_singletons_overlap_error() {
     // Duplicates are an overlap error (and the merge check's end + step
     // stays in i64 at the domain edge).
-    let max = (1i64 << 62) - 1;
+    let max = i64::MAX;
     let expr = format!("range_expr('{max},{max}')");
     let e = ParsedExpression::new(&expr)
         .and_then(|p| p.evaluate(&SymbolTable::new()))
@@ -706,17 +756,15 @@ fn coerce_large_range_to_list_rejected() {
 
 #[test]
 fn from_values_far_apart_values_stay_singletons() {
-    // The gap between two in-bound values can span up to just under
-    // 2^63, exceeding the per-chunk step bound (2^62): the pair must
-    // stay singleton chunks, and the extrapolation must not overflow.
-    let max = (1i64 << 62) - 1;
+    // The gap between two values can be 2^64 - 2, beyond i64: the pair
+    // is two runs of one value, and computing the gap must not overflow.
+    let max = i64::MAX;
     let r = RangeExpr::from_values(vec![-max, max]).unwrap();
     assert_eq!(r.ranges().len(), 2);
     assert_eq!(r.get(0), Some(-max));
     assert_eq!(r.get(1), Some(max));
-    // Three equally-spaced values whose step (2^62 - 1) is within the
-    // bound form a legal stepped chunk — and extrapolating one step past
-    // `max` (which would overflow i64) must terminate cleanly.
+    // Three equally-spaced values form one run, whose step (i64::MAX)
+    // always fits i64.
     let r = RangeExpr::from_values(vec![-max, 0, max]).unwrap();
     assert_eq!(r.ranges().len(), 1);
     assert_eq!(r.ranges()[0].step(), max);

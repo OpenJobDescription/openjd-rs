@@ -64,13 +64,61 @@ fn tokenize(expr: &str) -> Vec<String> {
     tokens
 }
 
+/// Exclusive bound on the magnitude of a `CHUNK[INT]` task parameter value: 2^62.
+///
+/// Chunking computes interval lengths and adjacency (`last - first + 1`,
+/// `value + 1`) in i64, which is exact for values below this bound. Range
+/// expressions accept nearly the whole i64 domain (see
+/// `openjd_expr::MAX_RANGE_EXPR_LEN`), so `CHUNK[INT]` keeps its own,
+/// narrower bound. 2^62 is about 4.6e18, far beyond any frame range.
+pub(crate) const CHUNK_INT_VALUE_BOUND: i64 = 1 << 62;
+
+/// Reject a `CHUNK[INT]` range with a value at or beyond
+/// [`CHUNK_INT_VALUE_BOUND`]. A range expression's values are sorted, so
+/// checking its first and last values suffices.
+pub(crate) fn check_chunk_int_value_bound(
+    name: &str,
+    range: &job::TaskParamRange<i64>,
+) -> Result<(), ModelError> {
+    let found = match range {
+        job::TaskParamRange::List(values) => {
+            values.iter().copied().find(|v| beyond_chunk_int_bound(*v))
+        }
+        job::TaskParamRange::RangeExpr(r) => chunk_int_range_expr_value_beyond_bound(r),
+    };
+    match found {
+        Some(v) => Err(ModelError::DecodeValidation(format!(
+            "Task parameter '{name}': {}",
+            chunk_int_value_bound_message(v)
+        ))),
+        None => Ok(()),
+    }
+}
+
+fn beyond_chunk_int_bound(v: i64) -> bool {
+    v.unsigned_abs() >= CHUNK_INT_VALUE_BOUND as u64
+}
+
+/// The first or last value of `r` if it is at or beyond
+/// [`CHUNK_INT_VALUE_BOUND`] (the values are sorted, so these suffice).
+pub(crate) fn chunk_int_range_expr_value_beyond_bound(r: &RangeExpr) -> Option<i64> {
+    [r.get(0), r.get(-1)]
+        .into_iter()
+        .flatten()
+        .find(|v| beyond_chunk_int_bound(*v))
+}
+
+/// The error text for a `CHUNK[INT]` value beyond [`CHUNK_INT_VALUE_BOUND`].
+pub(crate) fn chunk_int_value_bound_message(v: i64) -> String {
+    format!("value {v} exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)")
+}
+
 /// Render a chunk's values as a `RangeExpr`.
 ///
 /// CONTIGUOUS chunks span `first-last` and carry the contiguous display flag.
-/// NONCONTIGUOUS chunks group values via `RangeExpr::from_values`, which
-/// mirrors the Python reference's `IntRangeExpr.from_list`, so the rendered
-/// chunk string is byte-identical across the two implementations (e.g.
-/// `[1,2,4,6]` → `"1,2,4,6"`, `[1,2,3,5,7,8,9]` → `"1-3,5,7,8,9"`).
+/// NONCONTIGUOUS chunks are built with `RangeExpr::from_values`, so they are
+/// written in the canonical form of Template Schemas §3.4.1.1.1 (e.g.
+/// `[1,2,4,6]` → `"1,2-6:2"`, `[1,2,3,5,7,8,9]` → `"1-3,5,7-9"`).
 fn chunk_values_to_range_expr(vals: &[i64], constraint: &RangeConstraint) -> RangeExpr {
     match constraint {
         RangeConstraint::Contiguous => {
@@ -909,12 +957,10 @@ impl Node for StaticChunkNode {
         })?;
         match &v.value {
             ExprValue::RangeExpr(r) => {
-                // Compare by value sequence, not structure: a chunk holding a
-                // stepped pair renders as "6,9", which parses back as two
-                // singleton ranges while from_values built one stepped range.
-                // A caller handing back a chunk string the iterator printed
-                // must pass validation.
-                if (0..self.num_chunks).any(|i| self.chunk_range_expr(i).iter().eq(r.iter())) {
+                // RangeExpr equality compares values (its representation is
+                // canonical), so a caller handing back a chunk string the
+                // iterator printed passes validation, however it was built.
+                if (0..self.num_chunks).any(|i| self.chunk_range_expr(i) == *r) {
                     Ok(())
                 } else {
                     Err(format!(
@@ -1306,26 +1352,14 @@ impl StepParameterSpaceIterator {
         space: &job::StepParameterSpace,
         chunk_override: Option<usize>,
     ) -> Result<Self, ModelError> {
-        // CHUNK[INT] regroups values into generated RangeExpr chunks,
-        // which bound values to |v| < 2^62. create_job validates this,
-        // but StepParameterSpace is publicly constructible and
-        // deserializable, so re-validate here: an out-of-bound value
-        // would otherwise panic when a chunk is built during iteration.
+        // CHUNK[INT] chunking arithmetic bounds values to |v| < 2^62
+        // (CHUNK_INT_VALUE_BOUND). create_job validates this, but
+        // StepParameterSpace is publicly constructible and deserializable,
+        // so re-validate here: an out-of-bound value would otherwise
+        // overflow when a chunk is built during iteration.
         for (name, param) in &space.task_parameter_definitions {
-            if let job::TaskParameter::ChunkInt {
-                range: job::TaskParamRange::List(values),
-                ..
-            } = param
-            {
-                if let Some(v) = values
-                    .iter()
-                    .find(|v| v.unsigned_abs() >= openjd_expr::MAX_RANGE_VALUE_MAGNITUDE as u64)
-                {
-                    return Err(ModelError::DecodeValidation(format!(
-                        "Task parameter '{name}': value {v} exceeds the CHUNK[INT] \
-                         range value bound (magnitude must be below 2^62)",
-                    )));
-                }
+            if let job::TaskParameter::ChunkInt { range, .. } = param {
+                check_chunk_int_value_bound(name, range)?;
             }
         }
         let names: HashSet<String> = space.task_parameter_definitions.keys().cloned().collect();
@@ -1856,11 +1890,12 @@ fn make_chunk_node(
 mod tests {
     use super::*;
 
-    /// Every expected string below was measured against the Python
-    /// reference's `IntRangeExpr.from_list`, which is the contract for
-    /// NONCONTIGUOUS chunk rendering.
+    /// A NONCONTIGUOUS chunk is written in the canonical form of Template
+    /// Schemas §3.4.1.1.1 (§3.4.1.5 rangeConstraint). Where the Python
+    /// reference's `IntRangeExpr.from_list` writes a different string, the
+    /// case is marked; see `specs/model/parameter-space.md`.
     #[test]
-    fn test_noncontiguous_chunk_rendering_matches_python_reference() {
+    fn test_noncontiguous_chunk_rendering_is_canonical() {
         let nc = RangeConstraint::Noncontiguous;
         let render = |vals: &[i64]| chunk_values_to_range_expr(vals, &nc).to_string();
         assert_eq!(render(&[1]), "1");
@@ -1870,21 +1905,22 @@ mod tests {
         assert_eq!(render(&[1, 2, 3]), "1-3");
         assert_eq!(render(&[2, 4, 6]), "2-6:2");
         // The from_list table from the Python reference's own test suite
-        // (test_range_expr.py), mirrored 1:1.
+        // (test_range_expr.py); the canonical form agrees with it.
         assert_eq!(render(&[1, 2, 3, 4, 5, 7]), "1-5,7");
         assert_eq!(render(&[9, 0, 3, 2, 8, 10, 1, 4, 7, 6, 5]), "0-10");
         assert_eq!(render(&[1, 3, 5, 6, 7, 8, 10, 13, 16]), "1-5:2,6-8,10-16:3");
         assert_eq!(render(&[1, 3, 5, 10]), "1-5:2,10");
         assert_eq!(render(&[1, 1, 1]), "1");
         assert_eq!(render(&[9, 8, 7, 6]), "6-9");
-        // The reference consumes a leading consecutive pair atomically, so
-        // the pair's second value never seeds a later progression. The old
-        // Rust compressor rendered these as "1,2-6:2" and "1,3-5".
-        assert_eq!(render(&[1, 2, 4, 6]), "1,2,4,6");
-        assert_eq!(render(&[1, 3, 4, 5]), "1,3,4,5");
-        // A stepped pair stays a comma pair; only 3+ agreeing gaps collapse.
-        assert_eq!(render(&[1, 2, 3, 5, 7, 8, 9]), "1-3,5,7,8,9");
-        assert_eq!(render(&[1, 2, 4, 6, 8]), "1,2,4-8:2");
+        // A value that cannot start a run of three is written alone, and the
+        // next run starts at the value after it, so the second value of a
+        // pair can start a run. (Python's from_list consumes such a pair
+        // whole and writes "1,2,4,6", "1,3,4,5", "1-3,5,7,8,9", and
+        // "1,2,4-8:2".)
+        assert_eq!(render(&[1, 2, 4, 6]), "1,2-6:2");
+        assert_eq!(render(&[1, 3, 4, 5]), "1,3-5");
+        assert_eq!(render(&[1, 2, 3, 5, 7, 8, 9]), "1-3,5,7-9");
+        assert_eq!(render(&[1, 2, 4, 6, 8]), "1,2-8:2");
         // Negative values render with the same rules.
         assert_eq!(render(&[-5, -3, -1]), "-5--1:2");
         assert_eq!(render(&[-3, -2]), "-3,-2");

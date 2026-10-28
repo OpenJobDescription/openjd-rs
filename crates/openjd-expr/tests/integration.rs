@@ -65,6 +65,8 @@ mod test_paths;
 mod test_profile_threading;
 #[path = "integration/test_range_expr.rs"]
 mod test_range_expr;
+#[path = "integration/test_range_expr_canonical.rs"]
+mod test_range_expr_canonical;
 #[path = "integration/test_regex_validation.rs"]
 mod test_regex_validation;
 #[path = "integration/test_repr_pwsh_roundtrip.rs"]

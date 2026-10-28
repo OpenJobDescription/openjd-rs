@@ -1789,8 +1789,8 @@ impl ExprValue {
             }
             (Self::ListInt(elems), Self::RangeExpr(r))
             | (Self::RangeExpr(r), Self::ListInt(elems)) => {
-                // O(1) uncharged length check first — len_u64() is exact
-                // arithmetic under the bounded value domain — matching
+                // O(1) uncharged length check first — len_u64() is an exact
+                // count, at most MAX_RANGE_EXPR_LEN — matching
                 // the list arms. Then walk the range lazily (never
                 // materializing it), charged per comparison performed;
                 // equal lengths guarantee the zip covers both sides.

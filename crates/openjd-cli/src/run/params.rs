@@ -221,11 +221,17 @@ pub fn coerce_task_params(
                 TaskParameterType::Path,
                 openjd_expr::ExprValue::new_path(value.clone(), openjd_expr::PathFormat::host()),
             ),
-            TaskParameter::ChunkInt { .. } => {
+            TaskParameter::ChunkInt { chunks, .. } => {
                 let r: openjd_expr::RangeExpr =
                     value.parse().map_err(|e: openjd_expr::ExpressionError| {
                         format!("Task parameter '{name}': invalid range expression '{value}': {e}")
                     })?;
+                // A CONTIGUOUS chunk is always written <N>-<M>, even with one
+                // or two values (Template Schemas §3.4.1.5), as the chunks the
+                // model builds are.
+                let contiguous =
+                    chunks.range_constraint == openjd_model::template::RangeConstraint::Contiguous;
+                let r = r.with_contiguous(contiguous);
                 (
                     TaskParameterType::ChunkInt,
                     openjd_expr::ExprValue::RangeExpr(r),

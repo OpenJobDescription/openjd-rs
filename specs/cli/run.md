@@ -173,8 +173,20 @@ Supplying `--task-param` or `--tasks` for such a step is rejected during preflig
 
 When `--task-param` or `--tasks` is provided, the CLI runs exactly the specified tasks.
 Task parameter values are injected as `Task.Param.<name>` and `Task.RawParam.<name>` in
-the symbol table. The parameter type is set to `String` for `--task-param` values (the
-CLI doesn't have type information for explicit params).
+the symbol table. Each value is coerced to the type the step's parameter space declares
+for it (`coerce_task_params` in `run/params.rs`): `INT` and `FLOAT` values are parsed, and a
+`CHUNK[INT]` value is parsed as a range expression. For a `CONTIGUOUS` `CHUNK[INT]` parameter
+the value carries the contiguous display flag, so it is written `<N>-<M>` even with one or
+two values (`-t Frame=5-6` is written `5-6`, not `5,6`), as Template Schemas §3.4.1.5
+requires and as the chunks the CLI computes itself are.
+
+The value is accepted when it has the same values as one of the step's chunks
+(`RangeExpr` equality is by value), however it is spelled, and the parameter-space error
+quotes it in the form the chunk is written. **Divergence from openjd-cli (Python):** for a
+`CONTIGUOUS` parameter, Python rejects a value not spelled `<N>-<M>` (`-t Frame=5,6` gives
+`... is not a contiguous interval like '1-5' as required by the chunk range constraint`),
+while openjd-rs accepts it when `5-6` is a chunk and writes it `5-6`; and for `-t Frame=5`
+when `5` is not a chunk, openjd-rs's error quotes the value as `'5-5'`.
 
 ### Lazy Parameter Space Iteration
 

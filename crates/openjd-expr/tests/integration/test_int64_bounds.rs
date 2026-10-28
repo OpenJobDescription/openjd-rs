@@ -391,8 +391,7 @@ fn int_float_equality_exact_at_boundary() {
 
 #[test]
 fn range_and_list_containment_agree_at_boundary() {
-    // Both containment paths use the same exact equality rule. Range
-    // values are bounded to |v| < 2^62, so probe at that scale: the f64
+    // Both containment paths use the same exact equality rule: the f64
     // nearest to 2^62 - 1 is 2^62, which is NOT a member of a range
     // ending at 2^62 - 1 — the exact rule (not widening) decides this.
     assert_eq!(
@@ -407,6 +406,18 @@ fn range_and_list_containment_agree_at_boundary() {
     assert_eq!(
         eval("4611686018427387903.0 in [4611686018427387903]").to_display_string(),
         "false"
+    ); // At the top of the i64 domain: 9223372036854775807.0 is the f64
+       // 2^63, not an i64, so it is in no range; the largest f64 below 2^63
+       // is an i64 and is a member.
+    assert_eq!(
+        eval("9223372036854775807.0 in range_expr('9223372036854775805-9223372036854775807')")
+            .to_display_string(),
+        "false"
+    );
+    assert_eq!(
+        eval("9223372036854774784.0 in range_expr('9223372036854774784-9223372036854775807')")
+            .to_display_string(),
+        "true"
     );
 }
 

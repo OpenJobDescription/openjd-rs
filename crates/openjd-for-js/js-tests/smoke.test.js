@@ -301,6 +301,37 @@ describe("parseRangeExpr", () => {
   });
 });
 
+describe("range_expr values", () => {
+  // Template Schemas §3.4.1.1.1: a range_expr is written in its canonical
+  // form, which depends only on its values.
+  it("writes the canonical form through toString and the JSON transport", () => {
+    const st = new mod.SymbolTable();
+    const r = mod.evaluateExpression("range_expr('19-18:-5,13-18')", st);
+    expect(r.type).toBe("range_expr");
+    expect(r.toString()).toBe("13-19");
+    // The JSON transport form carries the same string.
+    const json = r.toJSON();
+    expect(json.get("type")).toBe("range_expr");
+    expect(json.get("value")).toBe("13-19");
+    r.free();
+    const s = mod.evaluateExpression("string(range_expr([1, 3, 5, 7, 9]))", st);
+    expect(s.toString()).toBe("1-9:2");
+    s.free();
+    st.free();
+  });
+
+  it("compares range_expr values by their values", () => {
+    const st = new mod.SymbolTable();
+    const r = mod.evaluateExpression(
+      "range_expr('1,3,5,7,9') == range_expr('1-9:2')",
+      st
+    );
+    expect(r.toString()).toBe("true");
+    r.free();
+    st.free();
+  });
+});
+
 describe("getDefaultLibrary", () => {
   it("returns a FunctionLibrary", () => {
     const lib = mod.getDefaultLibrary();

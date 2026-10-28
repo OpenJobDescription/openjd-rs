@@ -352,10 +352,9 @@ pub fn slice_range(ctx: Ctx, a: &[ExprValue]) -> R {
     if step == 0 {
         return Err(ExpressionError::new("Slice step cannot be zero"));
     }
-    // Range lengths are exact and below 2^63 (values are bounded to
-    // |v| < 2^62 at construction), so index resolution fits i64. The
-    // `len + i` sums for negative indices stay in i64 because language
-    // ints are i64 and len < 2^63.
+    // Range lengths are exact and at most MAX_RANGE_EXPR_LEN (i64::MAX),
+    // so index resolution fits i64. The `len + i` sums for negative
+    // indices stay in i64 because language ints are i64 and len <= i64::MAX.
     let len = r.len_u64() as i64;
     let start = extract_int_or_none(&a[1]);
     let stop = extract_int_or_none(&a[2]);

@@ -178,7 +178,7 @@ pub fn len_list(_: Ctx, a: &[ExprValue]) -> R {
 )]
 pub fn len_range(_: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
-        // len_u64 is exact and below 2^63 (bounded value domain), so the
+        // len_u64 is exact and at most MAX_RANGE_EXPR_LEN (i64::MAX), so the
         // i64 conversion is lossless — including on 32-bit targets, where
         // usize len() would truncate.
         ExprValue::RangeExpr(r) => Ok(ExprValue::Int(r.len_u64() as i64)),
