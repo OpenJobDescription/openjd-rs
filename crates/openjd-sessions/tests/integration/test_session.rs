@@ -2660,6 +2660,31 @@ async fn test_with_config_rejects_relative_path_mapping_source() {
 }
 
 #[tokio::test]
+async fn test_with_config_checks_rules_before_creating_directories() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+
+    // The session root is a regular file, so creating any directory under
+    // it fails. The rule error is reported because it is checked first.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("not_a_dir");
+    std::fs::write(&root, "x").unwrap();
+    let mut config = config_in_root(&root, "test-rule-first");
+    config.path_mapping_rules = Some(vec![PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "relative".into(),
+        destination_path: "/p".into(),
+    }]);
+    let err = Session::with_config(config)
+        .err()
+        .expect("rule is rejected");
+    assert_eq!(
+        err.to_string(),
+        "Invalid path mapping rules: path mapping rule 0: source_path 'relative' must be an \
+         absolute POSIX path, starting with '/'"
+    );
+}
+
+#[tokio::test]
 async fn test_with_path_mapping_rejects_relative_source() {
     use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
 
@@ -2675,7 +2700,7 @@ async fn test_with_path_mapping_rejects_relative_source() {
     assert_eq!(
         err.to_string(),
         "Invalid path mapping rules: path mapping rule 0: source_path 'bucket/prefix' must be \
-         a URI, starting with '<scheme>://'"
+         a URI, starting with '<scheme>://' where the scheme has at least two characters"
     );
 }
 

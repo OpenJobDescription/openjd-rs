@@ -81,8 +81,10 @@ Deserializing does not validate `source_path`; `PathMapper::new` does.
 ## PathMapper
 
 ```rust
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PathMapper { /* rules, precedence order, one trie per format */ }
+
+impl Default for PathMapper; // no rules
 
 impl PathMapper {
     pub fn new(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule>;

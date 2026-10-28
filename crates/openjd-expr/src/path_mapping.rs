@@ -128,7 +128,9 @@ impl PathMappingRule {
             PathFormat::Windows => {
                 "an absolute WINDOWS path, starting with a drive such as 'C:\\' or a UNC share such as '\\\\server\\share'"
             }
-            PathFormat::Uri => "a URI, starting with '<scheme>://'",
+            PathFormat::Uri => {
+                "a URI, starting with '<scheme>://' where the scheme has at least two characters"
+            }
         };
         InvalidPathMappingRule {
             index: None,

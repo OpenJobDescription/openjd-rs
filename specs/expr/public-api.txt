@@ -444,7 +444,7 @@ pub fn openjd_expr::path_mapping::PathMapper::rules_by_precedence(&self) -> impl
 impl core::clone::Clone for openjd_expr::path_mapping::PathMapper
 pub fn openjd_expr::path_mapping::PathMapper::clone(&self) -> openjd_expr::path_mapping::PathMapper
 impl core::default::Default for openjd_expr::path_mapping::PathMapper
-pub fn openjd_expr::path_mapping::PathMapper::default() -> openjd_expr::path_mapping::PathMapper
+pub fn openjd_expr::path_mapping::PathMapper::default() -> Self
 impl core::fmt::Debug for openjd_expr::path_mapping::PathMapper
 pub fn openjd_expr::path_mapping::PathMapper::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct openjd_expr::path_mapping::PathMappingRule
@@ -1354,7 +1354,7 @@ pub fn openjd_expr::path_mapping::PathMapper::rules_by_precedence(&self) -> impl
 impl core::clone::Clone for openjd_expr::path_mapping::PathMapper
 pub fn openjd_expr::path_mapping::PathMapper::clone(&self) -> openjd_expr::path_mapping::PathMapper
 impl core::default::Default for openjd_expr::path_mapping::PathMapper
-pub fn openjd_expr::path_mapping::PathMapper::default() -> openjd_expr::path_mapping::PathMapper
+pub fn openjd_expr::path_mapping::PathMapper::default() -> Self
 impl core::fmt::Debug for openjd_expr::path_mapping::PathMapper
 pub fn openjd_expr::path_mapping::PathMapper::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct openjd_expr::PathMappingRule

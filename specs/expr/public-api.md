@@ -1427,8 +1427,10 @@ impl std::error::Error for InvalidPathMappingRule;
 /// Applies a validated set of rules through one trie per source format.
 /// The rule whose source path has the most names wins; then a WINDOWS rule
 /// over a POSIX one; between rules for the same location, the one given last.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PathMapper { /* private fields */ }
+
+impl Default for PathMapper; // no rules
 
 impl PathMapper {
     /// Errors, with the rule's index, on the first relative source path.

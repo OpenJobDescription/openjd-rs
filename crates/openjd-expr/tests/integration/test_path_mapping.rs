@@ -1439,7 +1439,8 @@ mod apply_unit {
         assert_eq!(err.index, Some(1));
         assert_eq!(
             err.to_string(),
-            "path mapping rule 1: source_path 'bucket/prefix' must be a URI, starting with '<scheme>://'"
+            "path mapping rule 1: source_path 'bucket/prefix' must be a URI, starting with \
+             '<scheme>://' where the scheme has at least two characters"
         );
     }
 
@@ -1457,7 +1458,14 @@ mod apply_unit {
     #[test]
     fn single_letter_uri_scheme_is_rejected() {
         // `C://data` is a Windows drive path, not a URI.
-        assert!(uri_rule("C://data", "/x").validate().is_err());
+        assert_eq!(
+            uri_rule("C://data", "/x")
+                .validate()
+                .unwrap_err()
+                .to_string(),
+            "source_path 'C://data' must be a URI, starting with '<scheme>://' where the scheme \
+             has at least two characters"
+        );
         assert!(uri_rule("s3://data", "/x").validate().is_ok());
         assert!(uri_rule("", "/x").validate().is_err());
         assert!(posix_rule("", "/x").validate().is_err());
