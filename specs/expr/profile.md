@@ -89,7 +89,7 @@ three call sites:
 - **`WithRules`** — runtime: real implementations capture a
   [`PathMapper`](path-mapping.md#pathmapper) via `Arc`, so cloning
   libraries is cheap. `HostContext::with_rules(vec)` builds the mapper,
-  and fails with `InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB).
+  and fails with `InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit.
 
 Whether a given library instance has host functions is discoverable only
 one way: whether they are registered — `lib.get_signatures("apply_path_mapping")`.

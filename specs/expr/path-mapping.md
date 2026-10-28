@@ -83,7 +83,7 @@ whole.
 Any number of rules is allowed. What is limited is the estimated size of the
 trie, `PathMapper::trie_bytes()`: each node counts its key's length plus 224
 bytes for the node and its entry in the parent's map (measured at about 230
-bytes per one-character component; the estimate is within about 10% for
+bytes per one-character component; the estimate is within about 15% for
 chains of single-child nodes and above the real size for wide trees). A rule
 adds only the components it does not share with earlier rules, so rules
 under a common root, as real rule sets are, cost little.

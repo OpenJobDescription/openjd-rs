@@ -92,7 +92,7 @@ pub struct Session { /* private fields */ }
 impl Session {
     /// Primary constructor. Builds the session's `PathMapper` first,
     /// failing with `SessionError::InvalidPathMappingRule` before any
-    /// directory is created when a rule is invalid (a relative source path, or a path longer than 32 KiB).
+    /// directory is created when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit.
     /// Then validates paths, creates a working directory (via a `TempDir`
     /// that gets cleaned up on drop), and, for cross-user sessions, spawns
     /// the embedded helper process. Path mapping rules are written to the
@@ -230,7 +230,7 @@ impl Session {
     /// Replace the session's path-mapping rules, keeping the order given.
     /// Rebuilds the session's `PathMapper` and the derived
     /// `FunctionLibrary` used for evaluating `apply_path_mapping`. Fails
-    /// with `SessionError::InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB).
+    /// with `SessionError::InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit.
     pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Result<Self, SessionError>;
 
     /// Append to the existing rules (in-place). Between rules for the
@@ -317,7 +317,7 @@ pub struct SessionConfig {
     /// Path-mapping rules from the spec's Path Mapping JSON object, in
     /// the order given. Registered as `apply_path_mapping(...)` in the session's
     /// function library at construction time. `with_config` fails with
-    /// `SessionError::InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB).
+    /// `SessionError::InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit.
     pub path_mapping_rules: Option<Vec<PathMappingRule>>,
 
     /// If true, `cleanup()` skips the working-directory removal —
@@ -1025,8 +1025,9 @@ pub enum SessionError {
     /// recorded for the rejected environment; the session stays Ready.
     MultipleWrapEnvironments { existing: String, entering: String },
 
-    /// A path mapping rule is invalid: a relative source path, or a path
-    /// longer than 32 KiB.
+    /// A path mapping rule is invalid (a relative source path, or a path
+    /// longer than 32 KiB), or the rules' trie would pass its size limit
+    /// (`SessionLimits::max_path_mapping_trie_bytes`).
     /// From `with_config`, `with_path_mapping` and
     /// `extend_path_mapping_rules`. Display:
     /// "Invalid path mapping rules: path mapping rule <i>: <reason>".

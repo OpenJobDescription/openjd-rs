@@ -1341,6 +1341,16 @@ mod apply_unit {
     fn trie_size_limit() {
         use openjd_expr::path_mapping::DEFAULT_MAX_TRIE_BYTES;
         assert_eq!(DEFAULT_MAX_TRIE_BYTES, 30 * 1024 * 1024);
+        // Each new node counts 224 bytes plus its key: `/a` has the nodes
+        // `/` and `a`; `C:\Ab` has `C:` and the folded `AB`.
+        assert_eq!(
+            mapper(vec![posix_rule("/a", "/x")]).trie_bytes(),
+            2 * 224 + 2
+        );
+        assert_eq!(
+            mapper(vec![windows_rule("C:\\Ab", "/x")]).trie_bytes(),
+            2 * 224 + 4
+        );
         // Rules under a common root share its nodes, so only new components
         // add to the estimate.
         let one = mapper(vec![posix_rule("/mnt/projects/a", "/a")]);

@@ -73,7 +73,7 @@ impl PathFormat {
 /// `source_path` or `destination_path` longer than this is rejected, and a
 /// longer path matches no rule. 32 KiB covers a Windows extended-length path
 /// (up to 32,767 UTF-16 code units) of ASCII characters and is eight times
-/// Linux's `PATH_MAX`, while keeping a rule's trie, about 240 bytes per
+/// Linux's `PATH_MAX`, while keeping a rule's trie, about 230 bytes per
 /// component, small.
 pub const MAX_PATH_LEN: usize = 32 * 1024;
 

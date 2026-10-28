@@ -2837,63 +2837,121 @@ async fn test_path_mapping_trie_limit_comes_from_session_limits() {
         source_path: src.into(),
         destination_path: "/d".into(),
     };
+    // `/mnt` needs two nodes, `/` and `mnt`: 2 x 224 + 1 + 3 bytes.
+    let expected = |index: usize| {
+        format!(
+            "Invalid path mapping rules: path mapping rule {index}: the rules' trie would need \
+             about 452 bytes, more than the limit of 451 bytes"
+        )
+    };
+    let limits = openjd_sessions::SessionLimits {
+        max_path_mapping_trie_bytes: Some(451),
+        ..Default::default()
+    };
     let tmp = TempDir::new().unwrap();
     let mut config = config_in_root(tmp.path(), "test-trie-limit");
-    config.limits.max_path_mapping_trie_bytes = Some(1);
+    config.limits = limits;
     config.path_mapping_rules = Some(vec![posix("/mnt")]);
     let err = Session::with_config(config).err().expect("trie too large");
-    assert!(
-        err.to_string().starts_with(
-            "Invalid path mapping rules: path mapping rule 0: the rules' trie would need about "
-        ) && err
-            .to_string()
-            .ends_with(" bytes, more than the limit of 1 bytes"),
-        "{err}"
-    );
+    assert_eq!(err.to_string(), expected(0));
 
-    // The same limit applies when rules are replaced or extended later.
+    // The same limit applies when rules are extended or replaced later; a
+    // rejected extension leaves the rules unchanged.
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
-    s.set_limits_for_test(openjd_sessions::SessionLimits {
-        max_path_mapping_trie_bytes: Some(1),
-        ..Default::default()
-    });
-    assert!(s.extend_path_mapping_rules(vec![posix("/mnt")]).is_err());
-    assert!(s.with_path_mapping(vec![posix("/mnt")]).is_err());
+    s.set_limits_for_test(limits);
+    s.extend_path_mapping_rules(vec![posix("/")]).unwrap();
+    let err = s
+        .extend_path_mapping_rules(vec![posix("/mnt")])
+        .unwrap_err();
+    assert_eq!(err.to_string(), expected(1));
+    assert_eq!(s.path_mapping_rules(), [posix("/")]);
+    let err = s.with_path_mapping(vec![posix("/mnt")]).err().unwrap();
+    assert_eq!(err.to_string(), expected(0));
 }
 
 #[tokio::test]
 async fn test_path_parameter_over_the_length_limit_is_an_error() {
     use openjd_expr::path_mapping::{PathFormat, PathMappingRule, MAX_PATH_LEN};
-    use openjd_expr::ExprValue;
-    use openjd_model::types::{JobParameterType, JobParameterValue};
+    use openjd_expr::{ExprType, ExprValue, SerializedSymbolTable, SymbolTable};
+    use openjd_model::types::{
+        JobParameterType, JobParameterValue, TaskParameterSet, TaskParameterType,
+        TaskParameterValue,
+    };
 
     let tmp = TempDir::new().unwrap();
-    let mut config = config_in_root(tmp.path(), "test-long-param");
+    // A session with one job parameter and the rule /mnt -> /local.
+    let session = |name: &str, param: JobParameterValue| {
+        let mut config = config_in_root(tmp.path(), name);
+        config.job_parameter_values = [("P".to_string(), param)].into_iter().collect();
+        config.path_mapping_rules = Some(vec![PathMappingRule {
+            source_path_format: PathFormat::Posix,
+            source_path: "/mnt".into(),
+            destination_path: "/local".into(),
+        }]);
+        Session::with_config(config).unwrap()
+    };
+    let at_limit = format!("/mnt/{}", "a".repeat(MAX_PATH_LEN - 5));
     let long = format!("/mnt/{}", "a".repeat(MAX_PATH_LEN));
-    let mut params = openjd_model::types::JobParameterValues::new();
-    params.insert(
-        "Long".into(),
-        JobParameterValue {
-            param_type: JobParameterType::Path,
+    let expected = |key: &str| {
+        format!(
+            "Failed to apply path mapping to {key}: the path is {} bytes long, more than the \
+             limit of {MAX_PATH_LEN} bytes",
+            long.len()
+        )
+    };
+    let path = |v: &str| JobParameterValue {
+        param_type: JobParameterType::Path,
+        value: ExprValue::String(v.into()),
+    };
+    let list_of_strings = |v: &str| JobParameterValue {
+        param_type: JobParameterType::ListPath,
+        value: ExprValue::make_list(vec![ExprValue::String(v.into())], ExprType::STRING).unwrap(),
+    };
+    let list_of_paths = |v: &str| JobParameterValue {
+        param_type: JobParameterType::ListPath,
+        value: ExprValue::make_list(
+            vec![ExprValue::new_path(v, PathFormat::Posix)],
+            ExprType::PATH,
+        )
+        .unwrap(),
+    };
+    let base = SerializedSymbolTable::from_symtab(&SymbolTable::new());
+
+    // A path of exactly the limit is mapped (`/mnt/` -> `/local` plus the
+    // host separator), as apply_path_mapping does.
+    let st = session("at-limit", path(&at_limit))
+        .build_symbol_table(None, None)
+        .unwrap();
+    assert_eq!(
+        st.get_value("Param.P").unwrap().to_display_string().len(),
+        at_limit.len() + 2
+    );
+
+    // One byte more is an error at every place a parameter is mapped.
+    for (name, param, base) in [
+        ("path", path(&long), None),
+        ("path-base", path(&long), Some(&base)),
+        ("list", list_of_strings(&long), None),
+        ("list-base", list_of_strings(&long), Some(&base)),
+        ("list-of-paths", list_of_paths(&long), None),
+    ] {
+        let err = session(name, param)
+            .build_symbol_table(None, base)
+            .unwrap_err();
+        assert_eq!(err.to_string(), expected("Param.P"), "{name}");
+    }
+    let mut task = TaskParameterSet::new();
+    task.insert(
+        "T".into(),
+        TaskParameterValue {
+            param_type: TaskParameterType::Path,
             value: ExprValue::String(long.clone()),
         },
     );
-    config.job_parameter_values = params;
-    config.path_mapping_rules = Some(vec![PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "/mnt".into(),
-        destination_path: "/local".into(),
-    }]);
-    let s = Session::with_config(config).unwrap();
-    let err = s.build_symbol_table(None, None).unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        format!(
-            "Failed to apply path mapping to Param.Long: the path is {} bytes long, more than \
-             the limit of {MAX_PATH_LEN} bytes",
-            long.len()
-        )
-    );
+    let err = session("task", path("/mnt/x"))
+        .build_symbol_table(Some(&task), None)
+        .unwrap_err();
+    assert_eq!(err.to_string(), expected("Task.Param.T"));
 }
 
 // ══════════════════════════════════════════════════════════════

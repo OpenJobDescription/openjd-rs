@@ -383,9 +383,9 @@ impl JsFunctionLibrary {
 
     /// Create a library with path mapping rules.
     ///
-    /// Throws when a rule's source path is not absolute for its format, or
-    /// a path is longer than 32 KiB; the message names the rule's position
-    /// in `rules`.
+    /// Throws when a rule's source path is not absolute for its format, a
+    /// path is longer than 32 KiB, or the rules' trie would pass its 30 MiB
+    /// limit; the message names the rule's position in `rules`.
     #[wasm_bindgen(js_name = "withPathMappingRules")]
     pub fn with_path_mapping_rules(
         rules: Vec<JsPathMappingRule>,

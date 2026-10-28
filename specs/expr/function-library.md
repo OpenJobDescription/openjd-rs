@@ -510,7 +510,7 @@ use openjd_expr::{ExprProfile, FunctionLibrary, HostContext, PathMappingRule};
 let rules: Vec<PathMappingRule> = /* ... */;
 
 // Runtime: real rules baked into an `apply_path_mapping` closure.
-// `with_rules` fails when a rule is invalid (a relative source path, or a path longer than 32 KiB).
+// `with_rules` fails when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit.
 let profile = ExprProfile::current()
     .with_host_context(HostContext::with_rules(rules)?);
 let lib: Arc<FunctionLibrary> = FunctionLibrary::for_profile(&profile);
@@ -519,7 +519,7 @@ assert!(!lib.get_signatures("apply_path_mapping").is_empty());
 
 `HostContext::with_rules(Vec<PathMappingRule>)` builds a
 [`PathMapper`](path-mapping.md#pathmapper) from the rules and wraps it in an
-`Arc`. It returns `InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB). Callers that already have an
+`Arc`. It returns `InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit. Callers that already have an
 `Arc<PathMapper>` can construct `HostContext::WithRules(arc)`
 directly. The `apply_path_mapping` closure owns a clone of the `Arc`, so
 many libraries built from the same mapper share a single allocation.

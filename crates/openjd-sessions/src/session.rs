@@ -116,7 +116,8 @@ pub struct SessionConfig {
     /// rules for the same location, the one given last wins.
     /// [`Session::with_config`] fails with
     /// [`SessionError::InvalidPathMappingRule`] when a rule is invalid (see
-    /// [`PathMappingRule::validate`]).
+    /// [`PathMappingRule::validate`]) or the rules' trie would pass
+    /// [`SessionLimits::max_path_mapping_trie_bytes`].
     pub path_mapping_rules: Option<Vec<PathMappingRule>>,
     pub retain_working_dir: bool,
     pub callback: Option<SessionCallbackType>,
@@ -835,7 +836,8 @@ impl Session {
     /// # Errors
     ///
     /// Returns [`SessionError::InvalidPathMappingRule`] when a rule is
-    /// invalid (see [`PathMappingRule::validate`]).
+    /// invalid (see [`PathMappingRule::validate`]) or the rules' trie would
+    /// pass [`SessionLimits::max_path_mapping_trie_bytes`].
     pub fn with_path_mapping(mut self, rules: Vec<PathMappingRule>) -> Result<Self, SessionError> {
         self.path_mapper = Arc::new(PathMapper::with_max_trie_bytes(
             rules,
@@ -857,7 +859,9 @@ impl Session {
     ///
     /// Returns [`SessionError::InvalidPathMappingRule`], and leaves the
     /// rules unchanged, when an added rule is invalid (see
-    /// [`PathMappingRule::validate`]). The error's index counts from the
+    /// [`PathMappingRule::validate`]) or the rules' trie would pass
+    /// [`SessionLimits::max_path_mapping_trie_bytes`]. The error's index
+    /// counts from the
     /// first existing rule, so `additional[0]` is index
     /// `path_mapping_rules().len()`.
     pub fn extend_path_mapping_rules(

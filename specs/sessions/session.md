@@ -83,7 +83,7 @@ execution is the **enforcement boundary** for resolved-value limits
 (`SessionLimits`, from `openjd_sessions::limits`): a worker can receive
 a job that never passed through this client's template validation or
 job creation, so the checks must hold here on the final resolved values
-regardless of what earlier stages did. The four fields mirror the
+regardless of what earlier stages did. The first four fields mirror the
 corresponding `openjd_model::CallerLimits` fields a submitting service
 would set:
 
@@ -98,11 +98,13 @@ would set:
   defaulting to the Expression Language spec's 100 MB / 10 M.
 - `max_path_mapping_trie_bytes` — limits the estimated size of the session's
   path mapping trie (`PathMapper::with_max_trie_bytes`); `None` uses 30 MiB.
-  Any number of rules is allowed.
+  Any number of rules is allowed. It has no `CallerLimits` counterpart, and a
+  violation is `SessionError::InvalidPathMappingRule` naming the rule that passed
+  the limit.
 
 All default to `None`. That means no restriction beyond the spec (§5.1/§5.2/§6.1.2
 set no maxima of their own), except that the path mapping trie uses its 30 MiB
-default. Violations surface as
+default. Violations of the first two surface as
 `SessionError::FormatString` with reason
 `resolved value is {n} characters, exceeding the maximum of {max}.`,
 following the `notifyPeriodInSeconds ≤ 600` and env-var §4.4.2
@@ -153,7 +155,7 @@ the agent would need to track and cancel each action individually.
 
 1. Builds the session's `PathMapper` from `config.path_mapping_rules`, failing with
    `SessionError::InvalidPathMappingRule` before any directory is created when
-   a rule is invalid (a relative source path, or a path longer than 32 KiB)
+   a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit
 2. Creates the session root directory via `custom_gettempdir()` if not provided
 3. Creates the working directory via `TempDir::new_session_working_dir()` with the
    session user for cross-user permissions. Its name is 8 random characters from
@@ -311,7 +313,7 @@ so an added rule takes precedence over an existing rule for the same location
 (`path_mapping_rules()` still returns both).
 
 Returns `SessionError::InvalidPathMappingRule`, and leaves the rules unchanged,
-when an added rule is invalid (a relative source path, or a path longer than 32 KiB). The error's
+when an added rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit. The error's
 index counts from the first existing rule.
 
 Used by the worker agent when additional path mapping rules become available after
@@ -342,7 +344,7 @@ Populates a `SymbolTable` with:
 PATH-type parameters have path mapping rules applied. LIST_PATH parameters have rules
 applied to each element. A PATH or LIST_PATH value longer than 32 KiB
 (`openjd_expr::path_mapping::MAX_PATH_LEN`) fails symbol table construction with
-`SessionError::Runtime`: `Failed to apply path mapping to Param.<name>: the path is <n>
+`SessionError::Runtime`: `Failed to apply path mapping to <key>: the path is <n>
 bytes long, more than the limit of 32768 bytes`, as `apply_path_mapping` does. The
 session's path mapping trie is limited by `SessionLimits::max_path_mapping_trie_bytes`
 (default 30 MiB). All other parameter values are coerced to their declared
@@ -534,7 +536,7 @@ pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Result<Self, Sess
 ```
 
 Replaces the session's path mapping rules, keeping the order given. Fails with
-`SessionError::InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB). Called immediately after construction when path mapping rules are
+`SessionError::InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit. Called immediately after construction when path mapping rules are
 known at session creation time. `Session::with_config` builds the session's
 `PathMapper` from `SessionConfig::path_mapping_rules` the same way and fails with
 the same error.

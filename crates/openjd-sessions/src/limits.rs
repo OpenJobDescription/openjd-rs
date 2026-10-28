@@ -15,9 +15,11 @@
 use openjd_expr::function_library::FunctionLibrary;
 use openjd_expr::FormatStringOptions;
 
-/// Opt-in caps and evaluation budgets enforced by the session runtime,
-/// mirroring the corresponding `openjd_model::CallerLimits` fields a
-/// submitting service would set. All fields default to `None`, which
+/// Opt-in caps and evaluation budgets enforced by the session runtime.
+/// The first four fields mirror the corresponding
+/// `openjd_model::CallerLimits` fields a submitting service would set;
+/// `max_path_mapping_trie_bytes` has no counterpart there. All fields
+/// default to `None`, which
 /// means no restriction beyond the OpenJD specification, except that the
 /// path mapping trie keeps its 30 MiB default.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
