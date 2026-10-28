@@ -1356,3 +1356,137 @@ fn test_py_multi_contig_chunksize2_override1() {
         ]
     );
 }
+
+// ── NONCONTIGUOUS chunks and the range expression run cap ──
+//
+// A NONCONTIGUOUS chunk is a `RangeExpr`, which holds at most
+// `MAX_RANGE_EXPR_CHUNKS` runs, and its canonical form can have up to two
+// more runs than the runs of the range it intersects (see
+// specs/model/parameter-space.md, Noncontiguous Static Chunking).
+
+const CAP: usize = openjd_expr::MAX_RANGE_EXPR_CHUNKS;
+
+/// A range of `CAP` runs: `0-(head-1)`, then `CAP - 2` isolated values,
+/// then a run of three far away. Splitting it into two chunks that cut the
+/// first run two values from its end gives a second chunk of `CAP + 1`
+/// runs: the last two values of the first run are written as two runs.
+fn cap_runs_range(head: i64) -> RangeExpr {
+    let mut values: Vec<i64> = (0..head).collect();
+    values.extend((1..=CAP as i64 - 2).map(|k| head + 100 + k * k));
+    let far = values[values.len() - 1] + 1_000_000_000;
+    values.extend([far, far + 1, far + 2]);
+    let r = RangeExpr::from_values(values).unwrap();
+    assert_eq!(r.ranges().len(), CAP);
+    r
+}
+
+fn chunk_int_of(range: TaskParamRange<i64>, dtc: usize, trs: Option<usize>) -> TaskParameter {
+    TaskParameter::ChunkInt {
+        range,
+        chunks: ResolvedChunks {
+            default_task_count: dtc,
+            target_runtime_seconds: trs,
+            range_constraint: RangeConstraint::Noncontiguous,
+        },
+    }
+}
+
+fn chunk_value(set: &TaskParameterSet) -> RangeExpr {
+    match &set["F"].value {
+        ExprValue::RangeExpr(r) => r.clone(),
+        other => panic!("expected a RangeExpr chunk, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_noncontiguous_static_chunk_beyond_the_run_cap_is_an_error() {
+    // 50,006 + 49,998 + 3 = 100,007 values in two chunks of 50,004 and
+    // 50,003: the second starts two values before the end of the first run.
+    let range = cap_runs_range(50_006);
+    assert_eq!(range.len(), 100_007);
+    let space = make_space(
+        vec![(
+            "F",
+            chunk_int_of(TaskParamRange::RangeExpr(range), 60_000, None),
+        )],
+        None,
+    );
+    let err = StepParameterSpaceIterator::new(&space).err().unwrap();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Task parameter 'F': chunk 1 (values 50004 to 3499850112): Range expression has too many sub-ranges in canonical form (50001); maximum is 50000"
+    );
+}
+
+#[test]
+fn test_noncontiguous_static_chunks_of_a_cap_run_range_that_fit() {
+    // The same range in one chunk is the range itself; cut three values
+    // from the end of the first run instead of two, both chunks fit.
+    for (head, dtc, chunks) in [(50_006, 100_007, 1), (50_007, 60_000, 2)] {
+        let range = cap_runs_range(head);
+        let space = make_space(
+            vec![(
+                "F",
+                chunk_int_of(TaskParamRange::RangeExpr(range.clone()), dtc, None),
+            )],
+            None,
+        );
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        let got: Vec<RangeExpr> = iter.map(|set| chunk_value(&set)).collect();
+        assert_eq!(got.len(), chunks, "head {head}");
+        let total: usize = got.iter().map(RangeExpr::len).sum();
+        assert_eq!(total, range.len());
+        assert!(got.iter().all(|c| c.ranges().len() <= CAP));
+    }
+}
+
+#[test]
+fn test_noncontiguous_static_list_chunk_beyond_the_run_cap_is_an_error() {
+    // A list range from the public API (a template caps lists at 1,024
+    // values): 100,001 squares in chunks of 50,001 and 50,000 values, each
+    // value a run.
+    let squares: Vec<i64> = (0..100_001i64).map(|i| i * i).collect();
+    let space = make_space(
+        vec![(
+            "F",
+            chunk_int_of(TaskParamRange::List(squares), 60_000, None),
+        )],
+        None,
+    );
+    let err = StepParameterSpaceIterator::new(&space).err().unwrap();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Task parameter 'F': chunk 0 (values 0 to 2500000000): Range expression has too many sub-ranges in canonical form (50001); maximum is 50000"
+    );
+}
+
+#[test]
+fn test_noncontiguous_adaptive_chunk_beyond_the_run_cap_is_shortened() {
+    // An adaptive chunk size can grow past the cap at run time, where
+    // iteration cannot fail. A chunk whose canonical form would have more
+    // than CAP runs takes CAP values instead.
+    let range = cap_runs_range(10);
+    let len = range.len();
+    let space = make_space(
+        vec![(
+            "F",
+            chunk_int_of(TaskParamRange::RangeExpr(range.clone()), 2, Some(60)),
+        )],
+        None,
+    );
+    let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+    assert!(iter.chunks_adaptive());
+    // All but the last value: CAP + 1 runs, so CAP values are taken.
+    iter.set_chunks_default_task_count(len - 1);
+    let first = chunk_value(&iter.next().unwrap());
+    assert_eq!(first.len(), CAP);
+    assert_eq!(first.to_vec(), range.to_vec()[..CAP]);
+    let rest = chunk_value(&iter.next().unwrap());
+    assert_eq!(rest.to_vec(), range.to_vec()[CAP..]);
+    assert!(iter.next().is_none());
+    // A chunk that fits is not shortened: the whole range is CAP runs.
+    iter.reset();
+    iter.set_chunks_default_task_count(len);
+    assert_eq!(chunk_value(&iter.next().unwrap()), range);
+    assert!(iter.next().is_none());
+}

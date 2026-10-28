@@ -218,6 +218,66 @@ cannot start a run of three together with the value after it, so it writes `[1,2
 canonical form writes the first value alone and lets the second start a run. The two agree
 whenever no such pair occurs.
 
+**The run cap.** A chunk is a `RangeExpr`, and every `RangeExpr` has at most
+`openjd_expr::MAX_RANGE_EXPR_CHUNKS` (50,000) runs in its canonical form
+(`specs/expr/range-expr.md`, Defensive Caps). A chunk of `n` values has at most `n` runs,
+so chunks of at most 50,000 values always fit. A larger chunk can fail to: it is a window
+of the range's values, and its canonical form can have more runs than the range has. A
+CONTIGUOUS chunk is one run, so only NONCONTIGUOUS chunking is affected.
+
+*Bound.* Let `T` be the range's sorted values, with canonical runs `G(T)`. The canonical
+form of a window `W = T[i..j)` has at most `I + 2` runs, where `I` is the number of runs of
+`G(T)` that `W` intersects. The bound is reached: `"0-2,4-6"` has 2 runs and its window
+`[1:5]` is `"1,2,4,5"`, 4 runs. Proof, writing `g(q)` for the number of runs the greedy
+canonical algorithm produces on the suffix `T[q..]`:
+
+1. *Prefixes.* The canonical runs of `T[0..j)` are the runs of `G(T)` before the one
+   holding `T[j - 1]`, unchanged, followed by at most two runs for the rest of that run.
+   An earlier run of three or more values is decided by the values through the one after
+   its end, all in the prefix. An earlier one-value run at `q` is decided by `T[q + 1]`,
+   in the prefix, and by `T[q + 2]`; where the prefix ends before `T[q + 2]` the extension
+   reaches two values either way, so `T[q]` is again alone. The rest of `T[j - 1]`'s run is
+   part of an arithmetic progression: one run with three or more values, otherwise one run
+   per value.
+2. *Lemma: `g(q) <= g(q + 1) + 1` for every `q`.* By induction from the right (`g` of an
+   empty suffix is 0). If the greedy run at `q` is `T[q]` alone, `g(q) = 1 + g(q + 1)`. If
+   it is `T[q..=f]` with `f >= q + 3`, the greedy run at `q + 1` is `T[q + 1..=f]` (the same
+   step and the same stopping test), so `g(q + 1) = 1 + g(f + 1) = g(q)`. If `f = q + 2`,
+   the extension at `q + 1` reaches only two values (the difference after `T[q + 2]` is not
+   the step, or the run at `q` would have continued), so `T[q + 1]` is alone and
+   `g(q + 1) = 1 + g(q + 2) >= g(q + 3) = g(q) - 1`, by the lemma at `q + 2`.
+3. *Suffixes.* Let `T[i]` fall in the run `T[p..=e]` of `G(T)`, so `g(p) = 1 + g(e + 1)`.
+   If `T[i..=e]` has three or more values, the greedy run at `i` also ends at `e`, so
+   `g(i) = g(p)`. If it has two, the extension at `e - 1` reaches two values, so
+   `g(e - 1) = 1 + g(e) <= g(e + 1) + 2 = g(p) + 1` by the lemma. If it has one,
+   `g(e) <= g(e + 1) + 1 = g(p)`. So `g(i) <= g(p) + 1`.
+4. *Windows.* Let `T[i]` fall in run `k` of `G(T)` and `T[j - 1]` in run `m`, so
+   `I = m - k + 1`. If `k = m`, `W` is part of one progression: at most two runs.
+   Otherwise, by 1, the canonical runs of `T[0..j)` are runs `k` to `m - 1` of `G(T)`
+   (from `T[i]`'s run on), unchanged, then at most two runs: at most `I + 1` runs from the
+   start of `T[i]`'s run. By 3, applied to `T[0..j)`, its suffix from `i`, which is `W`,
+   has at most one more: `I + 2`.
+
+*Check.* Chunks are built during iteration, which cannot return an error, so
+`make_chunk_node` checks the static chunking when the node is built
+(`check_noncontiguous_chunks_fit`). For a range expression with `R` runs: if the largest
+chunk has at most 50,000 values, or `R + 2 <= 50,000`, every chunk fits. Otherwise
+`R >= 49,999`, and a chunk that does not fit intersects `I >= 49,999 >= R - 1` runs. The
+runs a window intersects are consecutive, so it misses at most one run, the first or the
+last, and contains every value of run 2 (zero-based), including its first. The chunks are disjoint, so only that one chunk is checked, with
+`RangeExpr::slice` in O(R), without listing its values. For a list range (already in
+memory; a template caps it at 1,024 values, so this matters only for a
+`StepParameterSpace` built through the public API) every chunk is checked with
+`RangeExpr::from_values`. A chunk that does not fit fails `StepParameterSpaceIterator::new`,
+and so job creation, with `Task parameter 'F': chunk 1 (values 50004 to 3499850112): Range
+expression has too many sub-ranges in canonical form (50001); maximum is 50000`, naming the
+chunk by its index and its first and last values.
+
+**Deviation from Template Schemas §3.4.1.5:** the specification places no limit on the runs
+of a chunk, so this is a limit of this implementation. It is reachable only with a range of
+at least 49,999 runs chunked in chunks of more than 50,000 values. openjd-model-for-python
+has no such limit.
+
 A CONTIGUOUS chunk is built from the string `"<N>-<M>"` and flagged with
 `RangeExpr::with_contiguous(true)`, so it is written `<N>-<M>` even with one or two values
 (`"3-3"`, `"7-8"`), the one exception §3.4.1.5 makes to the canonical form. Values
@@ -235,6 +295,15 @@ is what triggers adaptive (vs static) chunking.
 
 Adaptive chunking disables random access (`get()` returns `None` and `len()` returns 0)
 because chunk boundaries aren't known in advance.
+
+The chunk size can change at run time, where iteration cannot fail, so a NONCONTIGUOUS
+adaptive chunk is never checked in advance against the run cap (see Noncontiguous Static
+Chunking). Instead, when the next `chunk size` values have a canonical form with more than
+`MAX_RANGE_EXPR_CHUNKS` (50,000) runs, the chunk takes 50,000 values, which always fit,
+and the following chunk starts after them. Only a chunk of more than 50,000 values can be
+shortened, and only for a range of at least 49,999 runs (or a public-API list of more than
+50,000 values). §3.4.1.5 leaves the size of an adaptive chunk to the implementation
+(`targetRuntimeSeconds` is a target), so this stays within the specification.
 
 `AdaptiveChunkNode::validate_containment()` uses a `HashSet` for O(N) lookup.
 

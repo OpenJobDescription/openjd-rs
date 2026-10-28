@@ -234,7 +234,7 @@ Additional per-module caps (see each module section below):
 - `format_string::MAX_FORMAT_STRING_LEN` (1 MB)
 - `format_string::MAX_FORMAT_STRING_SEGMENTS` (1,000)
 - `format_string::MAX_STATIC_RESOLVED_VALUE_LEN` (10 MiB — caps the concatenated `resolved_value` returned by `validate_expressions`; not an error)
-- `range_expr::MAX_RANGE_EXPR_CHUNKS` (10,000)
+- `range_expr::MAX_RANGE_EXPR_CHUNKS` (50,000 — elements parsed, and runs in the canonical form of every value)
 - `range_expr::MAX_RANGE_EXPR_LEN` (`i64::MAX` — bound on the number of values, not a heap cap)
 - `symbol_table::MAX_SYMBOL_TABLE_ENTRIES` (100,000 — transport-only)
 
@@ -1294,13 +1294,14 @@ to the number of values. See `range-expr.md` (Canonical runs).
 Maximum chunk count:
 
 ```rust
-/// Defensive cap on the number of sub-ranges parsed or passed to
-/// from_ranges, and on the number of runs in the canonical form of the
-/// value they build (so the canonical form of every accepted value is
-/// accepted again). Values from from_values and slice are not capped.
-/// 10,000 is two orders of magnitude above any realistic shot-list
+/// Defensive cap on the number of elements parsed or passed to
+/// from_ranges, and on the number of runs in the canonical form of every
+/// value, enforced by every constructor (parse, from_ranges, Deserialize,
+/// from_values, slice). So every RangeExpr has at most this many runs, and
+/// its canonical form and serialized form are always accepted again.
+/// 50,000 is three orders of magnitude above any realistic shot-list
 /// submission.
-pub const range_expr::MAX_RANGE_EXPR_CHUNKS: usize = 10_000;
+pub const range_expr::MAX_RANGE_EXPR_CHUNKS: usize = 50_000;
 
 /// Maximum number of values in a range expression: i64::MAX, so that
 /// len() and every index fit an int. Values may be any i64 except
@@ -1312,7 +1313,8 @@ Construction + inspection:
 
 ```rust
 impl RangeExpr {
-    /// Any order, duplicates allowed. Errors only on i64::MIN.
+    /// Any order, duplicates allowed. Errors on i64::MIN, or on more than
+    /// MAX_RANGE_EXPR_CHUNKS runs in the canonical form.
     pub fn from_values(values: Vec<i64>) -> Result<Self, ExpressionError>;
     /// Any order. Errors on no ranges, more than MAX_RANGE_EXPR_CHUNKS
     /// ranges or canonical runs, overlapping intervals, more than MAX_RANGE_EXPR_LEN values in
@@ -1338,7 +1340,10 @@ impl RangeExpr {
     pub fn to_vec(&self) -> Vec<i64>;
 
     /// Slice with already-normalized start/stop and a positive step.
-    /// Returns a new `RangeExpr` in canonical form, in O(runs).
+    /// Returns a new `RangeExpr` in canonical form, in O(runs). Errors on
+    /// a non-positive step, or on more than MAX_RANGE_EXPR_CHUNKS runs in
+    /// the result's canonical form (a slice can have more runs than the
+    /// value it slices).
     pub fn slice(
         &self, start: i64, stop: i64, step: i64,
     ) -> Result<RangeExpr, ExpressionError>;

@@ -872,6 +872,73 @@ fn range_expression_expansion_is_not_capped() {
     }
 }
 
+/// A NONCONTIGUOUS chunk is a range expression, which holds at most
+/// `MAX_RANGE_EXPR_CHUNKS` (50,000) runs, and a chunk can have up to two
+/// more runs than the range it is cut from. Job creation rejects a static
+/// chunking with a chunk beyond the cap, naming the chunk.
+#[test]
+fn noncontiguous_chunk_beyond_the_run_cap_fails_job_creation() {
+    // 50,000 runs: 0-50005, 49,998 isolated values, and a run of three.
+    // Two chunks of 50,004 and 50,003 values; the second starts with the
+    // last two values of the first run, written as two runs: 50,001.
+    let mut elements = vec!["0-50005".to_string()];
+    let mut last = 0;
+    for k in 1..=49_998i64 {
+        last = 50_106 + k * k;
+        elements.push(last.to_string());
+    }
+    let far = last + 1_000_000_000;
+    elements.push(format!("{far}-{}", far + 2));
+    let template = |dtc: usize| {
+        format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["TASK_CHUNKING"],
+            "name": "Test",
+            "steps": [{{"name": "S",
+                "parameterSpace": {{"taskParameterDefinitions": [
+                    {{"name": "P", "type": "CHUNK[INT]", "range": "{}",
+                     "chunks": {{"defaultTaskCount": {dtc}, "rangeConstraint": "NONCONTIGUOUS"}}}}
+                ]}},
+                "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+            }}]
+        }}"#,
+            elements.join(",")
+        )
+    };
+    let create = |dtc: usize| {
+        let v: serde_json::Value = serde_json::from_str(&template(dtc)).unwrap();
+        let jt =
+            decode_job_template(v, Some(&["TASK_CHUNKING"]), &CallerLimits::default()).unwrap();
+        let processed = preprocess_job_parameters(
+            &jt,
+            &JobParameterInputValues::new(),
+            &[],
+            &openjd_model::PathParameterOptions {
+                job_template_dir: "/tmp",
+                current_working_dir: "/tmp",
+                allow_template_dir_walk_up: true,
+                path_format: openjd_expr::path_mapping::PathFormat::Posix,
+                allow_uri_path_values: true,
+            },
+        )
+        .unwrap();
+        create_job(&jt, &processed, &jt.default_validation_context())
+    };
+    let err = create(60_000).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "Validation error: Task parameter 'P': chunk 1 (values 50004 to {}): Range expression has too many sub-ranges in canonical form (50001); maximum is 50000",
+            far + 2
+        )
+    );
+    // One chunk is the range itself, which fits.
+    let job = create(100_007).unwrap();
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(StepParameterSpaceIterator::new(ps).unwrap().count(), 1);
+}
+
 /// §3.4.1.1 item 4 caps the list form at 1024 elements. That cap stays.
 #[test]
 fn range_list_is_still_capped() {

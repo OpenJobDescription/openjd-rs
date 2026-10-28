@@ -12,18 +12,22 @@
 use crate::error::ExpressionError;
 use std::fmt;
 
-/// Maximum number of comma-separated sub-ranges in a single range expression.
+/// Maximum number of sub-ranges in a range expression: both the number of
+/// comma-separated elements parsing accepts and the number of runs in the
+/// canonical form of any [`RangeExpr`].
 ///
-/// Parsing, [`RangeExpr::from_ranges`], and deserialization reject both an
-/// input with more sub-ranges than this and a value whose canonical form
-/// has more runs than this. The canonical form can have up to two runs per
-/// input sub-range (`"0-1,3-4"` is `"0,1,3,4"`), so the second check is what
-/// guarantees that the canonical form of every accepted value parses (and
-/// deserializes) back. Values computed by [`RangeExpr::from_values`] and
-/// [`RangeExpr::slice`] are not capped; their size is bounded by the
-/// evaluator's memory limit instead.
+/// Parsing and [`RangeExpr::from_ranges`] reject an input with more
+/// elements than this, and every constructor ([`str::parse`],
+/// [`RangeExpr::from_ranges`], deserialization, [`RangeExpr::from_values`],
+/// and [`RangeExpr::slice`]) rejects a value whose canonical form has more
+/// runs than this. So every `RangeExpr` has at most this many runs, and its
+/// canonical form (what `Display` writes) and its serialized form are
+/// always accepted again. The canonical form can have up to two runs per
+/// input element (`"0-1,3-4"` is `"0,1,3,4"`), so an input of up to half
+/// this many elements (25,000) is always accepted.
+///
 /// Real-world range expressions (frame ranges, task chunks) contain at most
-/// a few dozen sub-ranges; 10,000 is two orders of magnitude above any
+/// a few dozen sub-ranges; 50,000 is three orders of magnitude above any
 /// plausible legitimate use. Rejecting larger inputs at parse time prevents
 /// an attacker from forcing a multi-megabyte `Vec<IntRange>` allocation
 /// through a parameter value before any downstream resource-bounding
@@ -39,7 +43,7 @@ use std::fmt;
 /// operation charge and memory limit.
 ///
 /// See `specs/expr/range-expr.md` (Defensive caps) for rationale.
-pub const MAX_RANGE_EXPR_CHUNKS: usize = 10_000;
+pub const MAX_RANGE_EXPR_CHUNKS: usize = 50_000;
 
 /// Error raised when parsing a range expression fails.
 #[derive(Debug, Clone)]
@@ -176,6 +180,14 @@ fn check_range_value(v: i64) -> Result<(), ExpressionError> {
 fn too_many_values() -> ExpressionError {
     ExpressionError::parse_error(format!(
         "Range expression has too many values; the maximum is {MAX_RANGE_EXPR_LEN}"
+    ))
+}
+
+/// The error for a value whose canonical form has `runs` runs, more than
+/// [`MAX_RANGE_EXPR_CHUNKS`].
+fn too_many_runs(runs: usize) -> ExpressionError {
+    ExpressionError::parse_error(format!(
+        "Range expression has too many sub-ranges in canonical form ({runs}); maximum is {MAX_RANGE_EXPR_CHUNKS}"
     ))
 }
 
@@ -345,6 +357,11 @@ impl std::fmt::Display for IntRange {
 /// of the canonical form, so equal values have equal representations:
 /// `==` and `Hash` compare values, and `Display` writes the canonical form
 /// (or `<N>-<M>` for a value flagged with [`RangeExpr::with_contiguous`]).
+///
+/// Every constructor also rejects a value with more than
+/// [`MAX_RANGE_EXPR_CHUNKS`] runs, so every `RangeExpr` has at most that
+/// many: its canonical form parses back to an equal value, and its
+/// serialized form deserializes back to one.
 #[derive(Debug, Clone, Eq, serde::Serialize)]
 pub struct RangeExpr {
     /// The runs of the canonical form, in increasing order: each is one
@@ -418,9 +435,20 @@ impl std::str::FromStr for RangeExpr {
 /// alone and the next run starts at the value after `x`. Each progression
 /// is visited a bounded number of times, so the work is O(number of
 /// progressions), and the output has at most two runs per progression.
-fn canonical_runs(progressions: &[IntRange]) -> Vec<IntRange> {
+///
+/// Returns the [`too_many_runs`] error if there are more than
+/// [`MAX_RANGE_EXPR_CHUNKS`] runs. Runs beyond the cap are counted (for the
+/// message) but not stored, so the allocation stays within the cap.
+fn canonical_runs(progressions: &[IntRange]) -> Result<Vec<IntRange>, ExpressionError> {
     let count = progressions.len();
-    let mut runs = Vec::with_capacity(count);
+    let mut runs = Vec::with_capacity(count.min(MAX_RANGE_EXPR_CHUNKS));
+    let mut run_count: usize = 0;
+    let mut emit = |run: IntRange| {
+        run_count += 1;
+        if run_count <= MAX_RANGE_EXPR_CHUNKS {
+            runs.push(run);
+        }
+    };
     let last_offset = |p: usize| progressions[p].len_u64() - 1;
     let value = |p: usize, o: u64| progressions[p].nth(o);
     let next = |p: usize, o: u64| -> Option<(usize, u64)> {
@@ -436,7 +464,7 @@ fn canonical_runs(progressions: &[IntRange]) -> Vec<IntRange> {
     while let Some((p, o)) = position {
         let first = value(p, o);
         let Some(second) = next(p, o) else {
-            runs.push(IntRange::single(first));
+            emit(IntRange::single(first));
             break;
         };
         // Values increase, so this is the difference itself. It can exceed
@@ -465,20 +493,23 @@ fn canonical_runs(progressions: &[IntRange]) -> Vec<IntRange> {
         if length >= 3 {
             // Three values span 2 * step <= 2^64 - 2, so the step of a run
             // of three or more values fits i64.
-            runs.push(IntRange {
+            emit(IntRange {
                 start: first,
                 end: value(end_p, end_o),
                 step: step as i64,
             });
             position = next(end_p, end_o);
         } else {
-            runs.push(IntRange::single(first));
+            emit(IntRange::single(first));
             position = Some(second);
         }
     }
+    if run_count > MAX_RANGE_EXPR_CHUNKS {
+        return Err(too_many_runs(run_count));
+    }
     // The capacity is one per progression; a value keeps only its runs.
     runs.shrink_to_fit();
-    runs
+    Ok(runs)
 }
 
 impl RangeExpr {
@@ -493,15 +524,19 @@ impl RangeExpr {
 
     /// Build from progressions whose concatenated values are strictly
     /// increasing and number at most [`MAX_RANGE_EXPR_LEN`] in total.
-    fn from_increasing(progressions: &[IntRange]) -> Self {
-        let ranges = canonical_runs(progressions);
+    ///
+    /// Every constructor that computes a value goes through here, so this is
+    /// where the cap of [`MAX_RANGE_EXPR_CHUNKS`] runs is enforced: it
+    /// returns the [`too_many_runs`] error for a value with more runs.
+    fn from_increasing(progressions: &[IntRange]) -> Result<Self, ExpressionError> {
+        let ranges = canonical_runs(progressions)?;
         let cumulative_lengths = build_cumulative(&ranges);
         let length = cumulative_lengths.last().copied().unwrap_or(0);
-        Self {
+        Ok(Self {
             ranges,
             cumulative_lengths,
             length,
-        }
+        })
     }
 
     /// Set contiguous display mode. When true and the values are a
@@ -529,7 +564,9 @@ impl RangeExpr {
     ///
     /// Runs in O(n log n) for the sort, then O(n) to find the runs of the
     /// canonical form. Returns an integer-overflow error if any value is
-    /// `i64::MIN`.
+    /// `i64::MIN`, and an error if the canonical form has more than
+    /// [`MAX_RANGE_EXPR_CHUNKS`] runs (for example 50,001 values no three
+    /// of which, consecutive in sorted order, are equally spaced).
     pub fn from_values(mut values: Vec<i64>) -> Result<Self, ExpressionError> {
         for v in &values {
             check_range_value(*v)?;
@@ -538,7 +575,7 @@ impl RangeExpr {
         values.dedup();
         // A Vec holds at most isize::MAX values, within MAX_RANGE_EXPR_LEN.
         let singles: Vec<IntRange> = values.into_iter().map(IntRange::single).collect();
-        Ok(Self::from_increasing(&singles))
+        Self::from_increasing(&singles)
     }
 
     /// Create from pre-built `IntRange`s in any order. Sorts them,
@@ -588,18 +625,9 @@ impl RangeExpr {
                 .filter(|&t| t <= MAX_RANGE_EXPR_LEN)
                 .ok_or_else(too_many_values)?;
         }
-        let result = Self::from_increasing(&ranges);
-        // The canonical form can have up to two runs per input range, so
-        // cap it as well: then the canonical form of every value accepted
-        // here is itself accepted here, by `parse` and by `Deserialize`.
-        if result.ranges.len() > MAX_RANGE_EXPR_CHUNKS {
-            return Err(ExpressionError::parse_error(format!(
-                "Range expression has too many sub-ranges in canonical form ({}); maximum is {}",
-                result.ranges.len(),
-                MAX_RANGE_EXPR_CHUNKS,
-            )));
-        }
-        Ok(result)
+        // The canonical form can have up to two runs per input range;
+        // `from_increasing` caps it.
+        Self::from_increasing(&ranges)
     }
 
     /// Total number of integers across all sub-ranges.
@@ -698,6 +726,14 @@ impl RangeExpr {
     /// For negative step (reverse slices), callers should use `get()` to
     /// collect elements into a list, since `RangeExpr` cannot represent
     /// descending sequences.
+    ///
+    /// Returns an error if the canonical form of the result has more than
+    /// [`MAX_RANGE_EXPR_CHUNKS`] runs. A slice can have more runs than the
+    /// value it slices: with step 1 at most two more (cutting a run of three
+    /// values to two leaves two single-value runs), and with a larger step
+    /// up to about as many runs as selected values (taking every second
+    /// value of runs of three values each leaves one and a half
+    /// single-value runs per run).
     pub fn slice(&self, start: i64, stop: i64, step: i64) -> Result<RangeExpr, ExpressionError> {
         if step <= 0 {
             return Err(ExpressionError::parse_error(
@@ -777,7 +813,7 @@ impl RangeExpr {
 
         // The selected values are a subset of this range's, so they are
         // increasing and number at most MAX_RANGE_EXPR_LEN.
-        Ok(Self::from_increasing(&selected))
+        Self::from_increasing(&selected)
     }
 
     /// Heap allocation size (for memory tracking).

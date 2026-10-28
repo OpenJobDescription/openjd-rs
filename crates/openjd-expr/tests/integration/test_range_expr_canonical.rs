@@ -526,7 +526,7 @@ fn int_range_with_more_than_max_len_values_rejected() {
 
 #[test]
 fn many_elements_canonicalize_in_linear_time() {
-    // 10,000 elements (the element cap) forming one run: the work is
+    // 50,000 elements (the element cap) forming one run: the work is
     // proportional to the number of elements.
     let text = (0..openjd_expr::MAX_RANGE_EXPR_CHUNKS as i64)
         .map(|i| {
@@ -541,7 +541,7 @@ fn many_elements_canonicalize_in_linear_time() {
     within_deadline(Duration::from_secs(10), move || {
         let started = Instant::now();
         let r: RangeExpr = text.parse().unwrap();
-        assert_eq!(r.to_string(), "0-9999999999999999");
+        assert_eq!(r.to_string(), "0-49999999999999999");
         assert_eq!(r.ranges().len(), 1);
         assert!(
             started.elapsed() < Duration::from_secs(2),
@@ -551,60 +551,276 @@ fn many_elements_canonicalize_in_linear_time() {
     });
 }
 
-// ── The element cap applies to the canonical form too ──
+// ── One cap on elements and runs, enforced by every constructor ──
 
-#[test]
-fn canonical_form_within_the_element_cap_round_trips() {
-    // 5,000 two-value elements are 10,000 runs in canonical form: the cap.
-    let text = (0..5_000i64)
+const CAP: usize = openjd_expr::MAX_RANGE_EXPR_CHUNKS;
+
+/// `n` two-value elements `"0-1,3-4,6-7,..."`: `2 * n` runs in canonical
+/// form.
+fn two_value_elements(n: i64) -> String {
+    (0..n)
         .map(|i| format!("{}-{}", 3 * i, 3 * i + 1))
         .collect::<Vec<_>>()
-        .join(",");
-    let r: RangeExpr = text.parse().unwrap();
-    assert_eq!(r.ranges().len(), openjd_expr::MAX_RANGE_EXPR_CHUNKS);
+        .join(",")
+}
+
+/// The canonical form and the serialized form of `r` are accepted again,
+/// as the same value.
+fn assert_round_trips(r: &RangeExpr) {
     let printed = r.to_string();
-    assert!(printed.starts_with("0,1,3,4,6,7,"), "{}", &printed[..40]);
-    let reparsed: RangeExpr = printed.parse().unwrap();
-    assert_eq!(reparsed, r);
+    let reparsed: RangeExpr = printed
+        .parse()
+        .unwrap_or_else(|e| panic!("canonical form of {} runs: {e}", r.ranges().len()));
+    assert_eq!(&reparsed, r);
     assert_eq!(reparsed.to_string(), printed);
-    let json = serde_json::to_string(&r).unwrap();
-    let deserialized: RangeExpr = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized, r);
+    let json = serde_json::to_string(r).unwrap();
+    let deserialized: RangeExpr = serde_json::from_str(&json)
+        .unwrap_or_else(|e| panic!("serialized form of {} runs: {e}", r.ranges().len()));
+    assert_eq!(&deserialized, r);
 }
 
 #[test]
-fn canonical_form_beyond_the_element_cap_is_rejected() {
-    // 5,001 two-value elements are within the element cap, but their
-    // canonical form has 10,002 runs, which would not parse back.
-    let text = (0..5_001i64)
-        .map(|i| format!("{}-{}", 3 * i, 3 * i + 1))
-        .collect::<Vec<_>>()
-        .join(",");
-    let err = text.parse::<RangeExpr>().unwrap_err().to_string();
+fn the_cap_is_50000() {
+    assert_eq!(CAP, 50_000);
+}
+
+#[test]
+fn inputs_accepted_before_the_canonical_form_are_still_accepted() {
+    // Before range expressions were stored in canonical form, the only cap
+    // was 10,000 elements. Every such input has at most 20,000 runs, so it
+    // is still accepted: 5,001 two-value elements (10,002 runs) and 10,000
+    // (20,000 runs).
+    for n in [5_001, 10_000] {
+        let r: RangeExpr = two_value_elements(n).parse().unwrap();
+        assert_eq!(r.ranges().len(), 2 * n as usize);
+        assert!(r.to_string().starts_with("0,1,3,4,6,7,"));
+        assert_round_trips(&r);
+    }
+}
+
+#[test]
+fn canonical_form_at_the_cap_round_trips() {
+    // 25,000 two-value elements are 50,000 runs in canonical form: the cap.
+    let r: RangeExpr = two_value_elements(25_000).parse().unwrap();
+    assert_eq!(r.ranges().len(), CAP);
+    assert_round_trips(&r);
+}
+
+#[test]
+fn canonical_form_beyond_the_cap_is_rejected_by_parse_and_from_ranges() {
+    // 25,001 two-value elements are within the element cap, but their
+    // canonical form has 50,002 runs.
+    let err = two_value_elements(25_001)
+        .parse::<RangeExpr>()
+        .unwrap_err()
+        .to_string();
     assert_eq!(
         err,
-        "Range expression has too many sub-ranges in canonical form (10002); maximum is 10000"
+        "Range expression has too many sub-ranges in canonical form (50002); maximum is 50000"
     );
-    let ranges = (0..5_001i64)
+    let ranges = (0..25_001i64)
         .map(|i| IntRange::new(3 * i, 3 * i + 1, 1).unwrap())
         .collect();
     assert_eq!(
         RangeExpr::from_ranges(ranges).unwrap_err().to_string(),
-        "Range expression has too many sub-ranges in canonical form (10002); maximum is 10000"
+        "Range expression has too many sub-ranges in canonical form (50002); maximum is 50000"
     );
-    // So is the serialized form of such a value (built here from values,
-    // which are not capped).
-    let values = (0..5_001i64).flat_map(|i| [3 * i, 3 * i + 1]).collect();
-    let computed = RangeExpr::from_values(values).unwrap();
-    assert_eq!(computed.ranges().len(), 10_002);
-    let json = serde_json::to_string(&computed).unwrap();
+}
+
+#[test]
+fn serialized_form_beyond_the_cap_is_rejected_by_deserialize() {
+    // No `RangeExpr` has more than CAP runs, so write the serialized form by
+    // hand: 50,001 runs.
+    let runs = (0..=CAP as i64)
+        .map(|i| format!(r#"{{"start":{0},"end":{0},"step":1}}"#, i * i))
+        .collect::<Vec<_>>()
+        .join(",");
+    let json = format!(r#"{{"ranges":[{runs}]}}"#);
     let err = serde_json::from_str::<RangeExpr>(&json)
         .unwrap_err()
         .to_string();
     assert_eq!(
         err,
-        "Range expression has too many sub-ranges (10002); maximum is 10000"
+        "Range expression has too many sub-ranges (50001); maximum is 50000"
     );
+}
+
+/// The squares `0, 1, 4, 9, ...`: no three consecutive squares are equally
+/// spaced, so `n` of them are `n` runs.
+fn squares(n: usize) -> Vec<i64> {
+    (0..n as i64).map(|i| i * i).collect()
+}
+
+#[test]
+fn from_values_is_capped() {
+    let at_cap = RangeExpr::from_values(squares(CAP)).unwrap();
+    assert_eq!(at_cap.ranges().len(), CAP);
+    assert_round_trips(&at_cap);
+    assert_eq!(
+        RangeExpr::from_values(squares(CAP + 1))
+            .unwrap_err()
+            .to_string(),
+        "Range expression has too many sub-ranges in canonical form (50001); maximum is 50000"
+    );
+}
+
+#[test]
+fn from_values_beyond_the_cap_does_not_store_the_extra_runs() {
+    // Two million isolated values are rejected without building two
+    // million runs; the error still counts them.
+    let err = within_deadline_result(Duration::from_secs(10), || {
+        RangeExpr::from_values(squares(2_000_000))
+            .unwrap_err()
+            .to_string()
+    });
+    assert_eq!(
+        err,
+        "Range expression has too many sub-ranges in canonical form (2000000); maximum is 50000"
+    );
+}
+
+/// Like [`within_deadline`], returning `f`'s result.
+fn within_deadline_result<T: Send + 'static, F: FnOnce() -> T + Send + 'static>(
+    limit: Duration,
+    f: F,
+) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    within_deadline(limit, move || {
+        let _ = tx.send(f());
+    });
+    rx.recv().unwrap()
+}
+
+/// 50,000 runs: `0-2`, then 49,998 isolated values, then a run of three
+/// far away. Cutting a value off either end leaves two values of a run of
+/// three, which the canonical form writes as two runs.
+fn cap_runs_with_three_value_ends() -> RangeExpr {
+    let mut values = vec![0, 1, 2];
+    values.extend((1..=CAP as i64 - 2).map(|k| 100 + k * k));
+    let far = values[values.len() - 1] + 1_000_000_000;
+    values.extend([far, far + 1, far + 2]);
+    let r = RangeExpr::from_values(values).unwrap();
+    assert_eq!(r.ranges().len(), CAP);
+    r
+}
+
+#[test]
+fn a_contiguous_slice_has_at_most_two_more_runs() {
+    let r = cap_runs_with_three_value_ends();
+    let len = r.len() as i64;
+    for (start, stop, runs) in [
+        (1, len, CAP + 1),
+        (0, len - 1, CAP + 1),
+        (1, len - 1, CAP + 2),
+    ] {
+        assert_eq!(
+            r.slice(start, stop, 1).unwrap_err().to_string(),
+            format!(
+                "Range expression has too many sub-ranges in canonical form ({runs}); maximum is 50000"
+            ),
+            "[{start}:{stop}]"
+        );
+    }
+    // Slices that do not cut a run of three to two values fit.
+    for (start, stop) in [(0, len), (3, len), (0, len - 3), (2, len - 2)] {
+        let sliced = r.slice(start, stop, 1).unwrap();
+        assert!(sliced.ranges().len() <= CAP);
+        assert_round_trips(&sliced);
+    }
+}
+
+/// `runs` runs of three values each, `10*k*k` to `10*k*k + 2`. Every second
+/// value of them is one and a half isolated values per run.
+fn three_value_runs(runs: i64) -> RangeExpr {
+    let ranges = (0..runs)
+        .map(|k| IntRange::new(10 * k * k, 10 * k * k + 2, 1).unwrap())
+        .collect();
+    RangeExpr::from_ranges(ranges).unwrap()
+}
+
+#[test]
+fn a_stepped_slice_can_have_more_runs_than_its_value() {
+    // 33,333 runs give 50,000 selected values, each a run: at the cap.
+    let r = three_value_runs(33_333);
+    let at_cap = r.slice(0, r.len() as i64, 2).unwrap();
+    assert_eq!(at_cap.ranges().len(), CAP);
+    assert_round_trips(&at_cap);
+    // 40,000 runs give 60,000.
+    let r = three_value_runs(40_000);
+    assert_eq!(
+        r.slice(0, r.len() as i64, 2).unwrap_err().to_string(),
+        "Range expression has too many sub-ranges in canonical form (60000); maximum is 50000"
+    );
+}
+
+#[test]
+fn a_window_has_at_most_two_more_runs_than_the_runs_it_intersects() {
+    // The bound `NONCONTIGUOUS` chunking relies on
+    // (specs/model/parameter-space.md): the canonical form of a contiguous
+    // window of a value's values has at most two more runs than the value's
+    // runs that the window intersects. The bound is reached.
+    let r = RangeExpr::from_values(vec![0, 1, 2, 4, 5, 6]).unwrap();
+    assert_eq!(r.to_string(), "0-2,4-6");
+    assert_eq!(r.slice(1, 5, 1).unwrap().to_string(), "1,2,4,5");
+
+    let mut rng = Rng(0x2545_F491_4F6C_DD1D);
+    for _ in 0..3_000 {
+        let n = 1 + rng.below(16) as usize;
+        let mut values: Vec<i64> = (0..n).map(|_| rng.below(40) as i64).collect();
+        values.sort_unstable();
+        values.dedup();
+        let r = RangeExpr::from_values(values.clone()).unwrap();
+        let cumulative = r.cumulative_lengths();
+        // The run holding value index `i`.
+        let run_of = |i: usize| cumulative.partition_point(|&c| c <= i as u64);
+        for a in 0..values.len() {
+            for b in a + 1..=values.len() {
+                let window = r.slice(a as i64, b as i64, 1).unwrap();
+                assert_eq!(window.to_vec(), values[a..b]);
+                let intersected = run_of(b - 1) - run_of(a) + 1;
+                assert!(
+                    window.ranges().len() <= intersected + 2,
+                    "{values:?}[{a}:{b}] = {window} has {} runs; it intersects {intersected} of {r}",
+                    window.ranges().len()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn evaluated_values_beyond_the_cap_are_errors() {
+    let assert_err = |expr: &str, expected: &[&str]| {
+        let e = ParsedExpression::new(expr)
+            .and_then(|p| p.evaluate(&SymbolTable::new()))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(e, expected.concat());
+    };
+    let caret = |expr: &str| format!("  {}", "^".to_string() + &"~".repeat(expr.len() - 1));
+    let list = "range_expr([i * i for i in range(50001)])";
+    assert_err(
+        list,
+        &[
+            "Range expression has too many sub-ranges in canonical form (50001); maximum is 50000\n",
+            &format!("  {list}\n"),
+            &caret(list),
+        ],
+    );
+    let slice = "range_expr([10 * (i // 3) * (i // 3) + i % 3 for i in range(120000)])[::2]";
+    assert_err(
+        slice,
+        &[
+            "Range expression has too many sub-ranges in canonical form (60000); maximum is 50000\n",
+            &format!("  {slice}\n"),
+            // A subscript error points at the `[`.
+            "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~",
+        ],
+    );
+    // At the cap, both evaluate, and the result round-trips through its
+    // canonical form.
+    let at_cap = eval("range_expr([i * i for i in range(50000)])");
+    assert_eq!(canonical(&at_cap), at_cap);
 }
 
 // ── Differential test against the definition ──

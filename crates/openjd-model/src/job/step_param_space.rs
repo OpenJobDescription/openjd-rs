@@ -18,7 +18,7 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use openjd_expr::{ExprValue, RangeExpr};
+use openjd_expr::{ExprValue, RangeExpr, MAX_RANGE_EXPR_CHUNKS};
 
 use crate::error::ModelError;
 use crate::job;
@@ -129,11 +129,14 @@ fn chunk_values_to_range_expr(vals: &[i64], constraint: &RangeConstraint) -> Ran
                 .expect("range string built from valid integers")
                 .with_contiguous(true)
         }
-        // Chunk values are checked against the range value bound at job
-        // creation (see create_job/ranges.rs), so from_values cannot fail.
-        RangeConstraint::Noncontiguous => {
-            RangeExpr::from_values(vals.to_vec()).expect("chunk values validated at job creation")
-        }
+        // Chunk values are within the range value bound (checked by
+        // `StepParameterSpaceIterator::new_inner`), and every chunk built
+        // here fits MAX_RANGE_EXPR_CHUNKS runs: static chunks are checked by
+        // `check_noncontiguous_chunks_fit`, and adaptive chunks are
+        // shortened by `AdaptiveChunkIterator::next`. So from_values cannot
+        // fail.
+        RangeConstraint::Noncontiguous => RangeExpr::from_values(vals.to_vec())
+            .expect("chunk values within the value bound and the run cap"),
     }
 }
 
@@ -163,6 +166,79 @@ fn build_chunk_range_expr(
             build(&vals)
         }
         job::TaskParamRange::List(values) => build(&values[offset..offset + size]),
+    }
+}
+
+/// Reject static NONCONTIGUOUS chunking with a chunk whose canonical form
+/// has more than [`MAX_RANGE_EXPR_CHUNKS`] runs, which no `RangeExpr` can
+/// hold. Chunks are built during iteration, which cannot return an error,
+/// so this runs when the node is built.
+///
+/// A chunk of `n` values has at most `n` runs, so chunks of at most
+/// `MAX_RANGE_EXPR_CHUNKS` values always fit. Otherwise:
+///
+/// - For a range expression with `R` runs, a chunk is a window of its
+///   values, and a window has at most two more runs than the runs of the
+///   range it intersects (see `specs/model/parameter-space.md`, Noncontiguous
+///   Static Chunking). With `R <= MAX_RANGE_EXPR_CHUNKS - 2` every chunk
+///   fits. Otherwise a chunk that does not fit intersects at least
+///   `MAX_RANGE_EXPR_CHUNKS - 1 >= R - 1` runs, so it contains the first
+///   value of run 2; only that chunk is checked, with `RangeExpr::slice`,
+///   in O(R) without listing its values.
+/// - A list is already held in memory, so every chunk is checked.
+fn check_noncontiguous_chunks_fit(
+    name: &str,
+    range: &job::TaskParamRange<i64>,
+    num_chunks: usize,
+    small: usize,
+    leftovers: usize,
+) -> Result<(), ModelError> {
+    let largest = small + usize::from(leftovers > 0);
+    if largest <= MAX_RANGE_EXPR_CHUNKS {
+        return Ok(());
+    }
+    // Names the chunk by its index and its first and last values.
+    let chunk_error = |i: usize, first: i64, last: i64, e: openjd_expr::ExpressionError| {
+        ModelError::DecodeValidation(format!(
+            "Task parameter '{name}': chunk {i} (values {first} to {last}): {e}"
+        ))
+    };
+    // Chunk `i` covers indices `offset..offset + size` of the range.
+    let bounds = |i: usize| {
+        let size = small + usize::from(i < leftovers);
+        let offset = i * small + i.min(leftovers);
+        (offset, size)
+    };
+    match range {
+        job::TaskParamRange::RangeExpr(r) => {
+            if r.ranges().len() + 2 <= MAX_RANGE_EXPR_CHUNKS {
+                return Ok(());
+            }
+            // Here R >= MAX_RANGE_EXPR_CHUNKS - 1, so run 2 exists.
+            let first_of_run_2 = r.cumulative_lengths()[1] as usize;
+            // The larger chunks come first, so find which one holds it.
+            let larger_span = leftovers * (small + 1);
+            let i = if first_of_run_2 < larger_span {
+                first_of_run_2 / (small + 1)
+            } else {
+                leftovers + (first_of_run_2 - larger_span) / small
+            };
+            let (offset, size) = bounds(i);
+            // Chunk offsets and sizes are within the range's length, at most
+            // i64::MAX.
+            let (start, stop) = (offset as i64, (offset + size) as i64);
+            r.slice(start, stop, 1).map(|_| ()).map_err(|e| {
+                let value = |k: i64| r.get(k).expect("chunk index within the range");
+                chunk_error(i, value(start), value(stop - 1), e)
+            })
+        }
+        job::TaskParamRange::List(values) => (0..num_chunks).try_for_each(|i| {
+            let (offset, size) = bounds(i);
+            let chunk = &values[offset..offset + size];
+            RangeExpr::from_values(chunk.to_vec())
+                .map(|_| ())
+                .map_err(|e| chunk_error(i, chunk[0], chunk[size - 1], e))
+        }),
     }
 }
 
@@ -1295,9 +1371,24 @@ impl NodeIterator for AdaptiveChunkIterator {
             }
             RangeConstraint::Noncontiguous => {
                 let end = (self.cursor + chunk_size).min(self.values.len());
-                let slice = &self.values[self.cursor..end];
-                self.cursor = end;
-                self.make_chunk(slice)
+                match RangeExpr::from_values(self.values[self.cursor..end].to_vec()) {
+                    Ok(chunk) => {
+                        self.cursor = end;
+                        chunk
+                    }
+                    // The values are within the range value bound (checked
+                    // by `StepParameterSpaceIterator::new_inner`), so the
+                    // error is the run cap: these values' canonical form has
+                    // more than MAX_RANGE_EXPR_CHUNKS runs, which takes more
+                    // than MAX_RANGE_EXPR_CHUNKS values. Shorten the chunk
+                    // to MAX_RANGE_EXPR_CHUNKS values, which always fit.
+                    Err(_) => {
+                        let end = self.cursor + MAX_RANGE_EXPR_CHUNKS;
+                        let slice = &self.values[self.cursor..end];
+                        self.cursor = end;
+                        self.make_chunk(slice)
+                    }
+                }
             }
         };
         result.insert(
@@ -1875,6 +1966,7 @@ fn make_chunk_node(
     let chunk_count = total_len.div_ceil(default_task_count);
     let small = total_len / chunk_count;
     let leftovers = total_len % chunk_count;
+    check_noncontiguous_chunks_fit(name, range, chunk_count, small, leftovers)?;
 
     Ok(Box::new(StaticChunkNode {
         name: name.to_string(),

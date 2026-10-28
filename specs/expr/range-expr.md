@@ -101,6 +101,9 @@ Per constructor:
   (two single values when two selected values are further apart than `i64::MAX`), then
   O(m) to canonicalize.
 
+Each of these also rejects a value with more than `MAX_RANGE_EXPR_CHUNKS` runs (see
+Defensive Caps), within the same bounds.
+
 Differences between consecutive values are computed as `u64` (`abs_diff`), since two
 values can be up to 2^64 - 2 apart. The step of a run of three or more values is at most
 half its span, so it always fits `i64`.
@@ -153,20 +156,57 @@ Language §1.2.5), which defines both by value.
 
 ## Defensive Caps
 
-`RangeExpr::from_str` and `RangeExpr::from_ranges` enforce a cap on the
-number of comma-separated sub-ranges, intended as defense-in-depth against
-pathological inputs. A parameter value flowing through `from_str_coerce` is
-not protected by the evaluator's memory limit, so an unbounded input here
-would allocate proportional memory before evaluation begins.
+One cap, `MAX_RANGE_EXPR_CHUNKS`, bounds a `RangeExpr` two ways, as defense in depth
+against pathological inputs. A parameter value flowing through `from_str_coerce` is not
+protected by the evaluator's memory limit, so an unbounded input here would allocate
+proportional memory before evaluation begins.
 
 | Constant | Value | Check |
 |---|---|---|
-| [`MAX_RANGE_EXPR_CHUNKS`](../../crates/openjd-expr/src/range_expr.rs) | 10,000 | Count of comma-separated sub-ranges |
+| [`MAX_RANGE_EXPR_CHUNKS`](../../crates/openjd-expr/src/range_expr.rs) | 50,000 | Count of comma-separated elements parsed or passed to `from_ranges`; count of runs in the canonical form of every value |
 
-The chunk cap is checked twice: inside `parse_range_expr` as each sub-range
-is appended (so an attacker cannot force the parser to consume gigabytes of
-comma-separated source text), and again inside `from_ranges` after parsing
-completes (so direct callers of `from_ranges` cannot bypass the cap).
+**Elements.** `parse_range_expr` checks the element count as each element is appended,
+before normalization (so an attacker cannot force the parser to consume gigabytes of
+comma-separated source text), and `from_ranges` checks it again (so direct callers of
+`from_ranges` cannot bypass the cap).
+
+**Runs.** Canonicalization can split an element into two runs (`"0-1,3-4"` is
+`"0,1,3,4"`), and values computed by `from_values` (`range_expr(list)`) and `slice` can
+have many runs, so every constructor also rejects a value whose canonical form has more
+than `MAX_RANGE_EXPR_CHUNKS` runs: `from_str`, `from_ranges`, deserialization (which goes
+through `from_ranges`), `from_values`, and `slice`. They share one check, in
+`from_increasing`, through which every computed value is built (the empty value of an
+empty slice has no runs). The error is `Range expression has too many sub-ranges in
+canonical form (50002); maximum is 50000`, with the count of runs. `canonical_runs` counts
+the runs beyond the cap but does not store them, so the check stays O(number of
+progressions) in time and allocates at most `MAX_RANGE_EXPR_CHUNKS` runs; it never lists
+values. In the expression language the error carries the caret of the `range_expr` call or
+the subscript that computed the value.
+
+So **every `RangeExpr` has at most `MAX_RANGE_EXPR_CHUNKS` runs**, and its canonical form
+(`Display`) and its serialized form are always accepted again, as an equal value. That
+holds for computed values too: a value the evaluator produces survives serde transport (a
+serialized `StepParameterSpace`, or `SerializedSymbolTable::to_symtab`, which re-parses the
+canonical string). The tests in `test_range_expr_canonical.rs` check this round trip at the
+cap for each constructor.
+
+An input of at most 25,000 elements has at most 50,000 runs, so it is always accepted. In
+particular every input of at most 10,000 elements, the only cap before range expressions
+were stored in canonical form, is still accepted: 5,001 and 10,000 two-value elements
+(10,002 and 20,000 runs) both parse.
+
+A computed value can have more runs than the value it came from, so these are the callers
+that can reach the run cap with inputs that are themselves within it:
+
+- `range_expr(list)` with more than 50,000 values no three of which (consecutive in
+  sorted order) are equally spaced, for example `range_expr([i * i for i in range(50001)])`.
+- A slice. With step 1 (a window of consecutive values) the canonical form has at most
+  two more runs than the runs of the source that the window intersects: cutting a run
+  of three values to two leaves two runs, at each end (`"0-2,4-6"[1:5]` is `"1,2,4,5"`).
+  With a larger step it can have up to about as many runs as selected values: every
+  second value of runs of three values each is one and a half runs per run.
+- `NONCONTIGUOUS` chunking in openjd-model, whose chunks are windows of the range (see
+  `specs/model/parameter-space.md`, Noncontiguous Static Chunking and Adaptive Chunking).
 
 The cap targets the **source-text and heap dimensions** of a `RangeExpr`.
 It does not bound the logical element count of any single chunk: `RangeExpr`
@@ -179,28 +219,17 @@ over the range) is already bounded by the evaluator's per-element operation
 charge and memory limit. (The count is bounded only by `MAX_RANGE_EXPR_LEN`; see Value
 Bounds.)
 
-Canonicalization can split an element into two runs (`"0-1,3-4"` is `"0,1,3,4"`), so
-`from_ranges` (and so `from_str` and deserialization) also rejects a value whose canonical
-form has more than `MAX_RANGE_EXPR_CHUNKS` runs, with `Range expression has too many
-sub-ranges in canonical form (20000); maximum is 10000`. Every value these constructors
-accept therefore has a canonical form, and a serialized form, that they accept again. Values
-computed by `from_values` (`range_expr(list)`) and `slice` are not capped this way: their
-size is bounded by the evaluator's memory limit, and a computed value with more than
-`MAX_RANGE_EXPR_CHUNKS` runs (for example `range_expr([i*i for i in range(15000)])`) has a
-canonical form that `from_str` rejects. Its serialized form is likewise rejected by
-`Deserialize`, so such a value does not survive serde transport (a serialized
-`StepParameterSpace`, or `SerializedSymbolTable::to_symtab`, which re-parses the canonical
-string).
-
-**Divergence from the Python reference and the specification:** both caps are
-implementation limits. Template Schemas §3.4.1.1.1 places no limit on the number of
-elements of a range expression, and openjd-model-for-python's `IntRangeExpr.from_str`
-(0.13.0) has none: it accepts 10,001 elements, and 6,000 two-value elements
-(`"0-1,4-5,..."`, 12,000 runs in canonical form), both of which openjd-rs rejects.
+**Divergence from the Python reference and the specification:** the cap is an
+implementation limit. Template Schemas §3.4.1.1.1 places no limit on the number of
+elements of a range expression or of runs in its canonical form, and openjd-model-for-python
+(0.13.0) has none: its `IntRangeExpr.from_str` accepts 50,001 elements and 30,000
+two-value elements (`"0-1,3-4,..."`, 60,000 runs in canonical form), and its
+`IntRangeExpr.from_list` accepts 60,000 isolated values (the squares), all of which
+openjd-rs rejects.
 
 This cap is orders of magnitude above any realistic render-farm frame
 range: real multi-chunk inputs select frames from a handful of shots, well
-under 10,000 chunks. Hitting the cap means either a malicious input or a
+under 50,000 chunks. Hitting the cap means either a malicious input or a
 codegen bug upstream — both warrant failing loudly.
 
 Exceeding the cap produces an `ExpressionError` whose message names the
@@ -316,6 +345,9 @@ and equals `range_expr("1,3,5,7,9")`. Step must be positive.
 When a slice selects exactly two values from one run and their spacing
 (`run_step × slice_step`) exceeds `i64::MAX`, they are passed to canonicalization as two
 single values, since the combined step does not fit an `IntRange` step.
+
+A slice can have more runs than the value it slices, so it fails if its canonical form
+has more than `MAX_RANGE_EXPR_CHUNKS` runs (see Defensive Caps).
 
 ## Containment
 
