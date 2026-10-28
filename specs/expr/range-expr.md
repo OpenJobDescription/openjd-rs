@@ -117,7 +117,8 @@ expression value as a string goes through it: `string(r)`, `+` with a string,
 format-string interpolation, `repr_py`/`repr_json`/`repr_pwsh`, the JSON and display forms
 of a list containing a range, and the model, sessions, and CLI layers that print task
 parameter values. The canonical form parses back to the same value and prints the same
-string again, for a nonempty value within the run cap of Defensive Caps. (The empty value,
+string again, for every nonempty value (every value is within the run cap of Defensive
+Caps). (The empty value,
 from an empty list or an empty slice, writes `""`, which does not parse: the canonical
 form is defined for one or more values, and a range expression cannot be empty.) The only other form is the contiguous chunk form (see Contiguous Display
 Mode).

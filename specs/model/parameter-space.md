@@ -239,13 +239,16 @@ canonical algorithm produces on the suffix `T[q..]`:
    reaches two values either way, so `T[q]` is again alone. The rest of `T[j - 1]`'s run is
    part of an arithmetic progression: one run with three or more values, otherwise one run
    per value.
-2. *Lemma: `g(q) <= g(q + 1) + 1` for every `q`.* By induction from the right (`g` of an
-   empty suffix is 0). If the greedy run at `q` is `T[q]` alone, `g(q) = 1 + g(q + 1)`. If
-   it is `T[q..=f]` with `f >= q + 3`, the greedy run at `q + 1` is `T[q + 1..=f]` (the same
-   step and the same stopping test), so `g(q + 1) = 1 + g(f + 1) = g(q)`. If `f = q + 2`,
-   the extension at `q + 1` reaches only two values (the difference after `T[q + 2]` is not
-   the step, or the run at `q` would have continued), so `T[q + 1]` is alone and
-   `g(q + 1) = 1 + g(q + 2) >= g(q + 3) = g(q) - 1`, by the lemma at `q + 2`.
+2. *Lemma: `g(q) <= g(q + 1) + 1` and `g(q + 1) <= g(q) + 1` for every `q`.* Both by one
+   induction from the right (`g` of an empty suffix is 0). If the greedy run at `q` is
+   `T[q]` alone, `g(q) = 1 + g(q + 1)`, which gives both. If it is `T[q..=f]` with
+   `f >= q + 3`, the greedy run at `q + 1` is `T[q + 1..=f]` (the same step and the same
+   stopping test), so `g(q + 1) = 1 + g(f + 1) = g(q)`. If `f = q + 2`, the extension at
+   `q + 1` reaches only two values (the difference after `T[q + 2]` is not the step, or the
+   run at `q` would have continued), so `T[q + 1]` is alone: `g(q) = 1 + g(q + 3)` and
+   `g(q + 1) = 1 + g(q + 2)`. The second half of the lemma at `q + 2`,
+   `g(q + 3) <= g(q + 2) + 1`, gives `g(q) <= g(q + 1) + 1`; its first half,
+   `g(q + 2) <= g(q + 3) + 1`, gives `g(q + 1) <= g(q) + 1`.
 3. *Suffixes.* Let `T[i]` fall in the run `T[p..=e]` of `G(T)`, so `g(p) = 1 + g(e + 1)`.
    If `T[i..=e]` has three or more values, the greedy run at `i` also ends at `e`, so
    `g(i) = g(p)`. If it has two, the extension at `e - 1` reaches two values, so

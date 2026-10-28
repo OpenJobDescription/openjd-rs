@@ -1153,7 +1153,15 @@ impl StepParameterSpaceIterator {
     /// `CHUNK[INT]` parameter's range (a list or a range expression) has a
     /// value of magnitude 2^62 or more (see parameter-space.md "Chunking");
     /// `ModelError::DecodeValidation` also when the combination expression
-    /// does not fit the parameters or the task count overflows `usize`.
+    /// does not fit the parameters or the task count overflows `usize`;
+    /// and `ModelError::DecodeValidation` naming the parameter and the
+    /// chunk when static `NONCONTIGUOUS` chunking would build a chunk with
+    /// more than `openjd_expr::MAX_RANGE_EXPR_CHUNKS` runs in canonical
+    /// form, e.g. `Task parameter 'F': chunk 1 (values 50004 to
+    /// 3499850112): Range expression has too many sub-ranges in canonical
+    /// form (50001); maximum is 50000` (see parameter-space.md
+    /// "Noncontiguous Static Chunking"). Adaptive chunks never fail this
+    /// way: one that would exceed the cap is shortened.
     pub fn new(space: &job::StepParameterSpace) -> Result<Self, ModelError>;
 
     /// Build with a one-task-per-chunk override. `Some(1)` disables

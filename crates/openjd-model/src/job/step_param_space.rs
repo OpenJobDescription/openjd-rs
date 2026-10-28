@@ -214,14 +214,16 @@ fn check_noncontiguous_chunks_fit(
             if r.ranges().len() + 2 <= MAX_RANGE_EXPR_CHUNKS {
                 return Ok(());
             }
-            // Here R >= MAX_RANGE_EXPR_CHUNKS - 1, so run 2 exists.
-            let first_of_run_2 = r.cumulative_lengths()[1] as usize;
+            // Here R >= MAX_RANGE_EXPR_CHUNKS - 1, so run 2 exists. (An
+            // index beyond usize, on a 32-bit target, saturates like the
+            // range's `len()`.)
+            let first_of_run_2 = usize::try_from(r.cumulative_lengths()[1]).unwrap_or(usize::MAX);
             // The larger chunks come first, so find which one holds it.
             let larger_span = leftovers * (small + 1);
             let i = if first_of_run_2 < larger_span {
                 first_of_run_2 / (small + 1)
             } else {
-                leftovers + (first_of_run_2 - larger_span) / small
+                (leftovers + (first_of_run_2 - larger_span) / small).min(num_chunks - 1)
             };
             let (offset, size) = bounds(i);
             // Chunk offsets and sizes are within the range's length, at most
@@ -1426,6 +1428,11 @@ pub struct StepParameterSpaceIterator {
 
 impl StepParameterSpaceIterator {
     /// Construct from a resolved `StepParameterSpace`.
+    ///
+    /// Among other errors, fails when static `NONCONTIGUOUS` chunking would
+    /// build a chunk with more than [`openjd_expr::MAX_RANGE_EXPR_CHUNKS`]
+    /// runs in canonical form, which no `RangeExpr` can hold; the error
+    /// names the parameter and the chunk.
     pub fn new(space: &job::StepParameterSpace) -> Result<Self, ModelError> {
         Self::new_inner(space, None)
     }

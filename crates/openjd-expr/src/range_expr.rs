@@ -507,7 +507,8 @@ fn canonical_runs(progressions: &[IntRange]) -> Result<Vec<IntRange>, Expression
     if run_count > MAX_RANGE_EXPR_CHUNKS {
         return Err(too_many_runs(run_count));
     }
-    // The capacity is one per progression; a value keeps only its runs.
+    // The capacity is one per progression, up to the cap; a value keeps
+    // only its runs.
     runs.shrink_to_fit();
     Ok(runs)
 }
