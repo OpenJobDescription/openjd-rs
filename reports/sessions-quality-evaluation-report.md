@@ -275,13 +275,13 @@ Ordered by estimated impact:
 | 3 | `action_filter.rs:465-…` | `redact_openjd_redacted_env_requests(command)` iterates all redaction values per command formatted for log. Same concern as (1). | O(V × L) |
 | 4 | `subprocess.rs:611-1041` `run_subprocess` | For every stdout line, `truncate_line` → `decode_backslashreplace` → to-string → filter → potential redact → format-string log. Most steps allocate (`decode_backslashreplace` borrows when the line is valid UTF-8, so it does not). A tight subprocess with megabytes/sec of stdout will amplify this. | O(L) per line, high constant |
 | 5 | `action_filter.rs` `filter_message` | Every call rebuilds `msg = message.to_string()` up front even for lines that won't be modified. A `Cow<str>` would avoid allocation on the common-case pass-through. | O(L) per line |
-| 6 | `session.rs:1450-…` `build_symbol_table` | Walks all `job_parameter_values` entries and path-maps each `PATH`/`LIST_PATH` value. For large list parameters (hundreds of entries), the inner loop applies all rules per element. The rules are already sorted by source-path length, so an Aho-Corasick-style index over source paths would let mapping be O(L) per element instead of O(R × L) where R is the rule count. | O(R × L × N) |
+| 6 | `session.rs:1450-…` `build_symbol_table` | ~~Walks all `job_parameter_values` entries and path-maps each `PATH`/`LIST_PATH` value. For large list parameters (hundreds of entries), the inner loop applies all rules per element. The rules are already sorted by source-path length, so an Aho-Corasick-style index over source paths would let mapping be O(L) per element instead of O(R × L) where R is the rule count.~~ **Resolved** — the session maps through a `PathMapper` trie, so each element costs O(L) whatever the rule count. | O(R × L × N) |
 | 7 | `cross_user_helper.rs` `run_via_helper` | Blocking stdin/stdout read loop; fine for the helper's synchronous design but the main helper IPC marshals JSON on every message. For high-frequency actions a length-prefixed binary protocol would be faster. This is a design choice, not a bug — flag for future perf work. | N/A |
 
 ### No O(N²) issues found in the hot path
 
 The state-machine transitions are O(1). Environment entry/exit stack is a `Vec`.
-Path-mapping rule sort is O(R log R) once per `with_path_mapping` or `extend_path_mapping_rules` call.
+Building the `PathMapper` (trie insertion plus an O(R log R) precedence sort) happens once per `with_config`, `with_path_mapping` or `extend_path_mapping_rules` call.
 
 ---
 

@@ -1170,6 +1170,44 @@ mod apply_unit {
     }
 
     #[test]
+    fn rules_by_precedence_first_match_equals_apply() {
+        // Four rules with two names each: WINDOWS before POSIX before URI,
+        // and the POSIX rules (different locations) later first.
+        let w = windows_rule("\\\\srv\\share", "/w");
+        let p = posix_rule("/srv/share", "/p");
+        let u = uri_rule("s3://b/x", "/u");
+        let q = posix_rule("/q/r", "/q");
+        for (rules, expected) in [
+            (
+                vec![w.clone(), p.clone(), u.clone(), q.clone()],
+                ["/w", "/q", "/p", "/u"],
+            ),
+            (vec![q, p, u, w], ["/w", "/p", "/q", "/u"]),
+        ] {
+            let m = mapper(rules);
+            let listed: Vec<&PathMappingRule> = m.rules_by_precedence().collect();
+            let order: Vec<&str> = listed.iter().map(|r| r.destination_path.as_str()).collect();
+            assert_eq!(order, expected);
+            for path in [
+                "//srv/share/f",
+                "/srv/share/f",
+                "s3://b/x/f",
+                "/q/r/f",
+                "/none",
+            ] {
+                let first_match = listed
+                    .iter()
+                    .find_map(|r| ApplyOne::apply_with_format(*r, path, PathFormat::Posix));
+                assert_eq!(
+                    first_match,
+                    m.apply_with_format(path, PathFormat::Posix),
+                    "{path}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn no_match_returns_original() {
         let m = mapper(vec![posix_rule("/a", "/b")]);
         assert_eq!(

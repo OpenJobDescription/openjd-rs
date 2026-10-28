@@ -388,8 +388,6 @@ impl PathMapper {
     /// The first rule in this order that matches a path is the one
     /// [`apply`](PathMapper::apply) uses, and a mapper built from these
     /// rules, in any order, maps every path the same way.
-    /// Applying the first rule in this order that matches a path gives the
-    /// same result as [`apply`](PathMapper::apply).
     pub fn rules_by_precedence(&self) -> impl Iterator<Item = &PathMappingRule> + '_ {
         self.precedence.iter().map(|&i| &self.rules[i])
     }
