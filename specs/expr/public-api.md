@@ -1613,6 +1613,15 @@ pub fn default_library::register_host_context_functions(
     lib: &mut FunctionLibrary, mapper: Arc<PathMapper>,
 );
 
+/// The `apply_path_mapping` implementation that
+/// `register_host_context_functions` registers: maps a `string` argument
+/// through `mapper` with the evaluator's path format, charging the input
+/// length and, when a rule applies, the result length as string operations.
+pub fn functions::path::make_apply_path_mapping_fn(
+    mapper: Arc<PathMapper>,
+) -> impl Fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>
+    + Send + Sync + 'static;
+
 /// Register host-context signatures with stub implementations that
 /// return `Unresolved(T)`. Used at template-validation time when real
 /// host state is not yet available but signatures must be known for

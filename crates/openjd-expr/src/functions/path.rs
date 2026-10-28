@@ -639,11 +639,18 @@ pub fn make_apply_path_mapping_fn(
     move |ctx, a| {
         let (path_str, fmt) = get_path(&a[0], ctx)?;
         // `PathMapper` walks the path's components down each source
-        // format's trie once, so the work is linear in the path length
-        // whatever the number of rules. Budget it by the input length,
-        // which the caller controls.
+        // format's trie once, so matching is linear in the path length
+        // whatever the number of rules. Building the result copies the
+        // rule's destination and the rest of the path, which is linear in
+        // the result's length. Charge both.
         ctx.count_string_ops(path_str.len())?;
-        let mapped = mapper.map_with_format(&path_str, ctx.path_format());
+        let mapped = match mapper.apply_with_format(&path_str, ctx.path_format()) {
+            Some(mapped) => {
+                ctx.count_string_ops(mapped.len())?;
+                mapped
+            }
+            None => path_str,
+        };
         Ok(ExprValue::new_path(mapped, fmt))
     }
 }

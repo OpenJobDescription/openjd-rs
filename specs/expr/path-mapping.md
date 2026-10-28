@@ -103,10 +103,10 @@ keyed by path component. A rule's source path is stored at the node reached
 by its components. To map a path, the mapper splits it once per source format
 and walks its components down that format's trie, remembering the deepest
 node that holds a rule. The work is linear in the length of the path,
-whatever the number of rules, so `apply_path_mapping` charges
-`path.len()` string operations (see
-[function-library.md](function-library.md), which describes
-`count_string_ops`). This port follows the trie in
+whatever the number of rules. `apply_path_mapping` charges `path.len()`
+string operations for the match and, when a rule applies, the length of the
+result for building it (see [function-library.md](function-library.md), which
+describes `count_string_ops`). This port follows the trie in
 [deadline-cloud-job-attachments `_PathMappingRuleApplier`](https://github.com/aws-deadline/deadline-cloud-job-attachments/blob/2ae3635c6f5642846e9a98cdf1075f867886133a/src/deadline/job_attachments/_path_mapping.py),
 extended to URI rules and to rules of several formats at once. The tries
 are stored as one flat array of nodes that refer to each other by index, so
@@ -421,10 +421,11 @@ During template validation, when rules aren't available yet, callers build
 the profile with `HostContext::Unresolved` instead, which registers a stub
 that returns `Unresolved(path)` for type checking.
 
-The function charges `path.len()` string operations before mapping. The trie
-walk is linear in the path length whatever the number of rules, so this is
-the whole cost, unlike the earlier rule-by-rule loop whose cost also grew
-with the rule count (openjd-rs#210).
+The function charges `path.len()` string operations before mapping, and the
+result's length after a rule applies. The trie walk is linear in the path
+length whatever the number of rules, and building the result is linear in its
+length, so these cover the whole cost. The earlier rule-by-rule loop charged
+only `path.len()` while its cost also grew with the rule count (openjd-rs#210).
 
 ## Divergence from Python
 
@@ -458,7 +459,9 @@ rule, UNC anchors), with these differences:
   `destination_path` as written. Python rebuilds the result with
   `PurePath(*destination.parts, *rest)`, which normalizes the destination:
   for the destination `D:\x\`, Rust gives `D:\x\\f` and Python `D:\x\f`.
-  This predates `PathMapper`.
+  Python also reads a remaining component that looks like a drive as one:
+  with the rule `C:\a` → `D:\m`, `C:\a\b:c` gives `D:\m\b:c` in Rust and
+  `b:c` in Python. Both predate `PathMapper`.
 - **URI rules.** Python accepts a one-letter scheme (`C://data`) for a URI
   rule; Rust rejects it, because `C://data` is a Windows path (see
   [is_uri](#scheme-must-be-at-least-two-characters)). For precedence, Python

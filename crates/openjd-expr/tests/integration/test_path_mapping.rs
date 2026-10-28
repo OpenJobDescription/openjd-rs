@@ -1314,6 +1314,11 @@ mod apply_unit {
             m.apply_with_format("\\\\srv\\other\\x", PathFormat::Posix),
             None
         );
+        // The server/share boundary is part of the share: `\\a\bc` is not
+        // `\\ab\c`.
+        let m = mapper(vec![windows_rule("\\\\a\\bc", "/m")]);
+        assert_eq!(m.apply_with_format("\\\\ab\\c\\x", PathFormat::Posix), None);
+        assert_eq!(m.map_with_format("\\\\a\\bc\\x", PathFormat::Posix), "/m/x");
     }
 
     #[test]
