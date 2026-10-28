@@ -1208,6 +1208,33 @@ mod apply_unit {
     }
 
     #[test]
+    fn deep_rule_builds_maps_clones_and_drops_on_a_small_stack() {
+        // The trie is a flat arena, so nothing about a mapper recurses per
+        // component; a 50,000-component rule must not overflow a small stack.
+        let handle = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(|| {
+                let source = "/a".repeat(50_000);
+                let m = mapper(vec![posix_rule(&source, "/d")]);
+                let path = format!("{source}/f");
+                assert_eq!(m.map_with_format(&path, PathFormat::Posix), "/d/f");
+                let copy = m.clone();
+                assert!(!format!("{copy:?}").is_empty());
+                drop(copy);
+                drop(m);
+            })
+            .unwrap();
+        handle.join().expect("no stack overflow");
+    }
+
+    #[test]
+    fn posix_trailing_backslash_is_a_filename_character() {
+        // Only `/` is a POSIX trailing separator, so no `/` is added.
+        let m = mapper(vec![posix_rule("/a", "/d")]);
+        assert_eq!(m.map_with_format("/a/b\\", PathFormat::Posix), "/d/b\\");
+    }
+
+    #[test]
     fn no_match_returns_original() {
         let m = mapper(vec![posix_rule("/a", "/b")]);
         assert_eq!(

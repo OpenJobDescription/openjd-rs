@@ -278,11 +278,16 @@ fn part_key(part: &str, format: PathFormat) -> Cow<'_, str> {
 }
 
 /// A trie node: the rule whose source path ends here, if any, and the
-/// nodes for the next component.
+/// indexes in [`PathMapper::nodes`] of the nodes for the next component.
+///
+/// Nodes live in one flat `Vec` and refer to each other by index, so
+/// building, dropping, cloning and formatting a trie never recurse. A rule
+/// with tens of thousands of components would otherwise overflow the stack
+/// when the mapper is dropped.
 #[derive(Debug, Clone, Default)]
 struct TrieNode {
     rule: Option<usize>,
-    children: HashMap<String, TrieNode>,
+    children: HashMap<String, usize>,
 }
 
 /// A rule matched against a path.
@@ -324,14 +329,37 @@ struct Match<'a> {
 /// same components name the same location, and the one given last wins.
 /// Between a POSIX and a WINDOWS rule with the same number of names (both
 /// can match a path such as `//srv/share/x`), the WINDOWS rule wins.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PathMapper {
     rules: Vec<PathMappingRule>,
     precedence: Vec<usize>,
-    tries: [TrieNode; 3],
+    /// The trie nodes. The first three are the roots of the POSIX, WINDOWS
+    /// and URI tries, in [`PathFormat::trie_index`] order.
+    nodes: Vec<TrieNode>,
+}
+
+impl Default for PathMapper {
+    fn default() -> Self {
+        PathMapper {
+            rules: Vec::new(),
+            precedence: Vec::new(),
+            nodes: vec![TrieNode::default(); SOURCE_FORMATS.len()],
+        }
+    }
 }
 
 impl PathMapper {
+    /// The child of `node` for `key`, added if it does not exist yet.
+    fn child_or_insert(nodes: &mut Vec<TrieNode>, node: usize, key: String) -> usize {
+        if let Some(&child) = nodes[node].children.get(&key) {
+            return child;
+        }
+        let child = nodes.len();
+        nodes.push(TrieNode::default());
+        nodes[node].children.insert(key, child);
+        child
+    }
+
     /// Validate `rules` and build the mapper. The rules keep the order
     /// given, which decides between rules for the same location.
     ///
@@ -341,7 +369,7 @@ impl PathMapper {
     /// position, for the first rule whose `source_path` is not absolute for
     /// its format (see [`PathMappingRule::validate`]).
     pub fn new(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule> {
-        let mut tries: [TrieNode; 3] = Default::default();
+        let mut nodes = vec![TrieNode::default(); SOURCE_FORMATS.len()];
         let mut depths = Vec::with_capacity(rules.len());
         let mut replaced = vec![false; rules.len()];
         for (i, rule) in rules.iter().enumerate() {
@@ -351,18 +379,12 @@ impl PathMapper {
                 ..rule.invalid()
             })?;
             depths.push(split.anchor_depth + split.parts.len());
-            let mut node = tries[format.trie_index()]
-                .children
-                .entry(split.anchor)
-                .or_default();
+            let mut node = Self::child_or_insert(&mut nodes, format.trie_index(), split.anchor);
             for part in split.parts {
-                node = node
-                    .children
-                    .entry(part_key(part, format).into_owned())
-                    .or_default();
+                node = Self::child_or_insert(&mut nodes, node, part_key(part, format).into_owned());
             }
             // A later rule for the same location replaces an earlier one.
-            if let Some(earlier) = node.rule.replace(i) {
+            if let Some(earlier) = nodes[node].rule.replace(i) {
                 replaced[earlier] = true;
             }
         }
@@ -372,7 +394,7 @@ impl PathMapper {
         Ok(PathMapper {
             rules,
             precedence,
-            tries,
+            nodes,
         })
     }
 
@@ -448,20 +470,21 @@ impl PathMapper {
     fn find<'a>(&self, path: &'a str) -> Option<Match<'a>> {
         let mut best: Option<Match<'a>> = None;
         for format in SOURCE_FORMATS {
-            let trie = &self.tries[format.trie_index()];
-            if trie.children.is_empty() {
+            let root = &self.nodes[format.trie_index()];
+            if root.children.is_empty() {
                 continue;
             }
             let Some(split) = split_path(path, format) else {
                 continue;
             };
-            let Some(mut node) = trie.children.get(&split.anchor) else {
+            let Some(&anchor) = root.children.get(&split.anchor) else {
                 continue;
             };
+            let mut node = &self.nodes[anchor];
             let mut found = node.rule.map(|rule| (rule, 0));
             for (i, part) in split.parts.iter().enumerate() {
                 match node.children.get(part_key(part, format).as_ref()) {
-                    Some(next) => node = next,
+                    Some(&next) => node = &self.nodes[next],
                     None => break,
                 }
                 if let Some(rule) = node.rule {

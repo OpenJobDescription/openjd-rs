@@ -106,7 +106,10 @@ whatever the number of rules, so `apply_path_mapping` charges
 [function-library.md](function-library.md), which describes
 `count_string_ops`). This port follows the trie in
 [deadline-cloud-job-attachments `_PathMappingRuleApplier`](https://github.com/aws-deadline/deadline-cloud-job-attachments/blob/2ae3635c6f5642846e9a98cdf1075f867886133a/src/deadline/job_attachments/_path_mapping.py),
-extended to URI rules and to rules of several formats at once.
+extended to URI rules and to rules of several formats at once. The tries
+are stored as one flat array of nodes that refer to each other by index, so
+building, dropping, cloning or formatting a mapper never recurses, however
+many components a rule has.
 
 `apply` and `apply_with_format` return `None` when no rule matches; `map`
 and `map_with_format` return the path unchanged instead. `apply` and `map`

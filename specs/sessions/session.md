@@ -147,15 +147,18 @@ the agent would need to track and cancel each action individually.
 
 `Session::with_config(config: SessionConfig) -> Result<Self, SessionError>`:
 
-1. Creates the session root directory via `custom_gettempdir()` if not provided
-2. Creates the working directory via `TempDir::new_session_working_dir()` with the
+1. Builds the session's `PathMapper` from `config.path_mapping_rules`, failing with
+   `SessionError::InvalidPathMappingRule` before any directory is created when a rule's
+   source path is not absolute for its format
+2. Creates the session root directory via `custom_gettempdir()` if not provided
+3. Creates the working directory via `TempDir::new_session_working_dir()` with the
    session user for cross-user permissions. Its name is 8 random characters from
    `[a-z0-9_]` and carries no part of the session ID (see
    [tempdir.md](tempdir.md#session-working-directory-name))
-3. Creates the files subdirectory within the working directory
-4. Validates sticky bit on parent directories (POSIX security check)
-5. Logs host info (version, platform, architecture)
-6. Stores job parameter values, path mapping rules, and other config for later use
+4. Creates the files subdirectory within the working directory
+5. Validates sticky bit on parent directories (POSIX security check)
+6. Logs host info (version, platform, architecture)
+7. Stores job parameter values, the path mapper, and other config for later use
 
 A `Session::new_for_test(working_directory)` constructor is available when the
 `test-utils` feature is enabled or in `#[cfg(test)]` builds. It creates a minimal
@@ -370,7 +373,10 @@ path mapping rules themselves. The rules are written in precedence order
 before POSIX before URI, then the one given last first. A rule replaced by a later rule
 for the same location is left out. A reader that applies the first matching rule, or
 one that follows the specification's order (most names, then WINDOWS over POSIX, last
-rule for a location), therefore gets the same result as the session.
+rule for a location), therefore gets the same result as the session, as long as it
+splits and compares paths the same way (see
+[expr path-mapping.md § Divergence from Python](../expr/path-mapping.md#divergence-from-python)
+for where `pathlib` differs).
 
 ## Environment Variable Evaluation
 
