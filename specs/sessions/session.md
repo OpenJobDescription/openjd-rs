@@ -303,7 +303,8 @@ rebuilds the session's `PathMapper` and function library. Rules keep the order
 given. The rule whose source path has the most names wins, and between rules for
 the same location the one given last wins (see
 [expr path-mapping.md § Which rule wins](../expr/path-mapping.md#which-rule-wins)),
-so an added rule replaces an existing rule for the same source path.
+so an added rule takes precedence over an existing rule for the same location
+(`path_mapping_rules()` still returns both).
 
 Returns `SessionError::InvalidPathMappingRule`, and leaves the rules unchanged,
 when an added rule's source path is not absolute for its format. The error's

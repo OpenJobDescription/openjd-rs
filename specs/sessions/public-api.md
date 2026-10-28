@@ -90,11 +90,13 @@ files directory, a symbol table, the entered-environments stack, and
 pub struct Session { /* private fields */ }
 
 impl Session {
-    /// Primary constructor. Validates paths, creates a working directory
-    /// (via a `TempDir` that gets cleaned up on drop), materializes
-    /// path-mapping rules into a JSON file referenced by the
-    /// `Session.PathMappingRulesFile` template variable, and — for
-    /// cross-user sessions — spawns the embedded helper process.
+    /// Primary constructor. Builds the session's `PathMapper` first,
+    /// failing with `SessionError::InvalidPathMappingRule` before any
+    /// directory is created when a rule's source path is not absolute.
+    /// Then validates paths, creates a working directory (via a `TempDir`
+    /// that gets cleaned up on drop), and, for cross-user sessions, spawns
+    /// the embedded helper process. Path mapping rules are written to the
+    /// JSON file behind `Session.PathMappingRulesFile` before each action.
     pub fn with_config(config: SessionConfig) -> Result<Self, SessionError>;
 
     // ── Accessors ──
@@ -233,9 +235,9 @@ impl Session {
     pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Result<Self, SessionError>;
 
     /// Append to the existing rules (in-place). Between rules for the
-    /// same location the one given last wins, so an added rule replaces
-    /// an existing one. On `SessionError::InvalidPathMappingRule` the
-    /// rules are unchanged.
+    /// same location the one given last wins, so an added rule takes
+    /// precedence over an existing one (`path_mapping_rules()` keeps both).
+    /// On `SessionError::InvalidPathMappingRule` the rules are unchanged.
     pub fn extend_path_mapping_rules(
         &mut self, additional: Vec<PathMappingRule>,
     ) -> Result<(), SessionError>;

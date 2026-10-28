@@ -13,7 +13,8 @@ code units are equal after that mapping.
 That table is not any Unicode case mapping:
 - it maps one code unit to one code unit, so characters with multi-character
   uppercase forms (U+00DF sharp s) stay as they are;
-- it maps a lowercase letter only to an uppercase letter that maps back to it,
+- it maps a lowercase letter only to an uppercase or titlecase letter that maps
+  back to it,
   so U+0131 dotless i, U+017F long s, U+00B5 micro sign and U+03C2 final sigma
   do not fold to I, S, MU and SIGMA, and no non-ASCII character folds to an
   ASCII one (U+212A KELVIN SIGN does not match 'k');

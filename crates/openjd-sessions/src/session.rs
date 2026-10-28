@@ -843,8 +843,11 @@ impl Session {
 
     /// Extend the session's path mapping rules with additional rules,
     /// appended after the existing ones. Between rules for the same
-    /// location, the one given last wins, so an added rule replaces an
-    /// existing rule for the same source path.
+    /// location, the one given last wins, so an added rule takes precedence
+    /// over an existing rule for the same location; [`path_mapping_rules`]
+    /// still returns both.
+    ///
+    /// [`path_mapping_rules`]: Session::path_mapping_rules
     ///
     /// # Errors
     ///

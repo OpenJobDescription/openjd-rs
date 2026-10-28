@@ -217,7 +217,8 @@ Linux worker as on a Windows one.
 The table is not a Unicode case folding:
 
 - It maps one code unit to one code unit, so `ß` does not match `SS` or `ẞ`.
-- It maps a letter only to an uppercase letter that maps back to it, so the
+- It maps a letter only to an uppercase or titlecase letter that maps back to
+  it, so the
   dotless `ı` does not match `I`, the long `ſ` does not match `S`, final `ς`
   does not match `Σ`, and no non-ASCII character matches an ASCII one (the
   KELVIN SIGN `K` does not match `k`).
@@ -424,7 +425,10 @@ that returns `Unresolved(path)` for type checking.
 The function charges `path.len()` string operations before mapping, and the
 result's length after a rule applies. The trie walk is linear in the path
 length whatever the number of rules, and building the result is linear in its
-length, so these cover the whole cost. The earlier rule-by-rule loop charged
+length, so the charges grow with the whole cost. A charged operation covers 256
+bytes, and matching costs more per byte than most string functions (each
+WINDOWS component is folded before lookup), so the time per operation is
+several times that of, say, `upper()`. The earlier rule-by-rule loop charged
 only `path.len()` while its cost also grew with the rule count (openjd-rs#210).
 
 ## Divergence from Python

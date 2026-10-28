@@ -174,8 +174,18 @@ struct SplitPath<'a> {
     /// shifts every rule by the same amount; across formats it makes
     /// `/srv/share` and `\\srv\share`, which name the same two names, tie.
     anchor_depth: usize,
-    /// The components after the anchor, as written.
-    parts: Vec<&'a str>,
+    /// The text after the anchor; [`SplitPath::parts`] splits it.
+    rest: &'a str,
+    /// The format the path was split for.
+    format: PathFormat,
+}
+
+impl<'a> SplitPath<'a> {
+    /// The components after the anchor, as written, produced one at a time
+    /// so a long path is never collected.
+    fn parts(&self) -> impl Iterator<Item = &'a str> + use<'a> {
+        components(self.rest, self.format)
+    }
 }
 
 /// Whether `c` separates Windows path components.
@@ -189,12 +199,28 @@ fn fold_windows(s: &str) -> String {
     s.chars().map(crate::windows_upcase::upcase).collect()
 }
 
-/// Filesystem components after the anchor. Empty components (from repeated
-/// or trailing separators) and `.` are dropped, as `pathlib` does.
-fn filesystem_parts(rest: &str, windows: bool) -> Vec<&str> {
-    rest.split(|c| c == '/' || (windows && c == '\\'))
-        .filter(|p| !p.is_empty() && *p != ".")
-        .collect()
+/// Append `part`, folded the way Windows compares file names, to `buf`.
+fn fold_windows_into(part: &str, buf: &mut String) {
+    buf.extend(part.chars().map(crate::windows_upcase::upcase));
+}
+
+/// The components of the text after an anchor in `format`.
+///
+/// POSIX and WINDOWS drop empty components (from repeated or trailing
+/// separators) and `.`, as `pathlib` does. URI keeps every segment, empty
+/// ones included, and the text after the authority must start with `/` to
+/// have any.
+fn components(rest: &str, format: PathFormat) -> impl Iterator<Item = &str> {
+    let windows = format == PathFormat::Windows;
+    let uri = format == PathFormat::Uri;
+    let body = if uri {
+        rest.strip_prefix('/')
+    } else {
+        Some(rest)
+    };
+    body.into_iter()
+        .flat_map(move |b| b.split(move |c| c == '/' || (windows && c == '\\')))
+        .filter(move |p| uri || (!p.is_empty() && *p != "."))
 }
 
 /// Split `path` for matching against rules of `format`, or `None` when the
@@ -206,7 +232,8 @@ fn split_path(path: &str, format: PathFormat) -> Option<SplitPath<'_>> {
             Some(SplitPath {
                 anchor: "/".to_string(),
                 anchor_depth: 0,
-                parts: filesystem_parts(rest, false),
+                rest,
+                format,
             })
         }
         PathFormat::Windows => {
@@ -214,7 +241,8 @@ fn split_path(path: &str, format: PathFormat) -> Option<SplitPath<'_>> {
             Some(SplitPath {
                 anchor,
                 anchor_depth,
-                parts: filesystem_parts(rest, true),
+                rest,
+                format,
             })
         }
         PathFormat::Uri => {
@@ -225,14 +253,11 @@ fn split_path(path: &str, format: PathFormat) -> Option<SplitPath<'_>> {
             let path_start = path[authority_start..]
                 .find('/')
                 .map_or(path.len(), |i| authority_start + i);
-            let parts = match path[path_start..].strip_prefix('/') {
-                Some(segments) => segments.split('/').collect(),
-                None => Vec::new(),
-            };
             Some(SplitPath {
                 anchor: path[..path_start].to_ascii_lowercase(),
                 anchor_depth: 1,
-                parts,
+                rest: &path[path_start..],
+                format,
             })
         }
     }
@@ -301,8 +326,10 @@ struct Match<'a> {
     depth: usize,
     /// The source format of the trie that matched.
     format: PathFormat,
-    /// The path's components after the matched source path.
-    remaining: Vec<&'a str>,
+    /// The text after the path's anchor, for that format.
+    rest: &'a str,
+    /// How many of the path's components the source path covers.
+    consumed: usize,
 }
 
 /// Applies a set of [`PathMappingRule`]s to paths.
@@ -380,11 +407,14 @@ impl PathMapper {
                 index: Some(i),
                 ..rule.invalid()
             })?;
-            depths.push(split.anchor_depth + split.parts.len());
-            let mut node = Self::child_or_insert(&mut nodes, format.trie_index(), split.anchor);
-            for part in split.parts {
+            let mut node =
+                Self::child_or_insert(&mut nodes, format.trie_index(), split.anchor.clone());
+            let mut depth = split.anchor_depth;
+            for part in split.parts() {
                 node = Self::child_or_insert(&mut nodes, node, part_key(part, format).into_owned());
+                depth += 1;
             }
+            depths.push(depth);
             // A later rule for the same location replaces an earlier one.
             if let Some(earlier) = nodes[node].rule.replace(i) {
                 replaced[earlier] = true;
@@ -439,7 +469,7 @@ impl PathMapper {
         };
         let found = self.find(path)?;
         let mut result = self.rules[found.rule].destination_path.clone();
-        for part in found.remaining {
+        for part in components(found.rest, found.format).skip(found.consumed) {
             result.push(sep);
             result.push_str(part);
         }
@@ -471,6 +501,9 @@ impl PathMapper {
     /// The winning rule for `path`, if any rule matches.
     fn find<'a>(&self, path: &'a str) -> Option<Match<'a>> {
         let mut best: Option<Match<'a>> = None;
+        // Reused for each folded WINDOWS component, so the walk allocates
+        // only for the longest component.
+        let mut key = String::new();
         for format in SOURCE_FORMATS {
             let root = &self.nodes[format.trie_index()];
             if root.children.is_empty() {
@@ -484,8 +517,15 @@ impl PathMapper {
             };
             let mut node = &self.nodes[anchor];
             let mut found = node.rule.map(|rule| (rule, 0));
-            for (i, part) in split.parts.iter().enumerate() {
-                match node.children.get(part_key(part, format).as_ref()) {
+            for (i, part) in split.parts().enumerate() {
+                let lookup = if format == PathFormat::Windows {
+                    key.clear();
+                    fold_windows_into(part, &mut key);
+                    key.as_str()
+                } else {
+                    part
+                };
+                match node.children.get(lookup) {
                     Some(&next) => node = &self.nodes[next],
                     None => break,
                 }
@@ -510,7 +550,8 @@ impl PathMapper {
                     rule,
                     depth,
                     format,
-                    remaining: split.parts[consumed..].to_vec(),
+                    rest: split.rest,
+                    consumed,
                 });
             }
         }
