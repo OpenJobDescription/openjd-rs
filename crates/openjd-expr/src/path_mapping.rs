@@ -46,6 +46,19 @@ impl PathFormat {
         }
     }
 
+    /// Which format wins when rules of two formats match a path with the
+    /// same number of names (higher wins). Only POSIX and WINDOWS rules can
+    /// match the same path (`//srv/share/x`), and that spelling is the UNC
+    /// form, so WINDOWS wins. A fixed order keeps the result independent of
+    /// the order the rules are given in.
+    fn tie_priority(self) -> u8 {
+        match self {
+            PathFormat::Windows => 2,
+            PathFormat::Posix => 1,
+            PathFormat::Uri => 0,
+        }
+    }
+
     /// The position of this source format's trie in [`PathMapper`].
     fn trie_index(self) -> usize {
         match self {
@@ -309,6 +322,8 @@ struct Match<'a> {
 /// `scheme://authority` as one, and a UNC share as two (its server and
 /// share), so `/srv/share` and `\\srv\share` have two each. Rules with the
 /// same components name the same location, and the one given last wins.
+/// Between a POSIX and a WINDOWS rule with the same number of names (both
+/// can match a path such as `//srv/share/x`), the WINDOWS rule wins.
 #[derive(Debug, Clone, Default)]
 pub struct PathMapper {
     rules: Vec<PathMappingRule>,
@@ -352,7 +367,8 @@ impl PathMapper {
             }
         }
         let mut precedence: Vec<usize> = (0..rules.len()).filter(|&i| !replaced[i]).collect();
-        precedence.sort_by(|&a, &b| depths[b].cmp(&depths[a]).then(b.cmp(&a)));
+        let key = |i: usize| (depths[i], rules[i].source_path_format.tie_priority(), i);
+        precedence.sort_by_key(|&i| std::cmp::Reverse(key(i)));
         Ok(PathMapper {
             rules,
             precedence,
@@ -366,11 +382,12 @@ impl PathMapper {
     }
 
     /// The rules that can apply, in precedence order: most source path
-    /// names first (see [`PathMapper`]), and among rules with the same
-    /// number, the one given last first. A rule replaced by a later rule for
-    /// the same location is left out, so each location appears once and a
-    /// reader that takes the last of several rules for one location reads
-    /// the same rules.
+    /// names first (see [`PathMapper`]), then WINDOWS before POSIX before
+    /// URI, then the one given last first. A rule replaced by a later rule
+    /// for the same location is left out, so each location appears once.
+    /// The first rule in this order that matches a path is the one
+    /// [`apply`](PathMapper::apply) uses, and a mapper built from these
+    /// rules, in any order, maps every path the same way.
     /// Applying the first rule in this order that matches a path gives the
     /// same result as [`apply`](PathMapper::apply).
     pub fn rules_by_precedence(&self) -> impl Iterator<Item = &PathMappingRule> + '_ {
@@ -459,10 +476,12 @@ impl PathMapper {
             let depth = split.anchor_depth + consumed;
             // A path can be absolute in more than one format (`//srv/share`
             // is a POSIX path and a Windows UNC share). The deeper match
-            // wins, and between equally deep ones, the rule given last.
+            // wins, and between equally deep ones, the format with the
+            // higher tie priority. Within one trie a node holds one rule.
+            let rank = |depth: usize, format: PathFormat| (depth, format.tie_priority());
             if best
                 .as_ref()
-                .is_none_or(|b| (depth, rule) > (b.depth, b.rule))
+                .is_none_or(|b| rank(depth, format) > rank(b.depth, b.format))
             {
                 best = Some(Match {
                     rule,

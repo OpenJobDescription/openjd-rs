@@ -159,10 +159,13 @@ How an anchor counts matters only when a path matches rules of more than one
 format. Within one format it adds the same amount to every rule that can
 match a path (a path cannot match both a drive rule and a UNC rule). Across
 formats, the only overlap is a path like `//srv/share/x`, which is a POSIX
-path and a UNC path. The POSIX rule `/srv/share` and the WINDOWS rule
-`\\srv\share` name the same two names, so they tie and the rule given last
-wins; `\\srv\share` beats `/srv`; and `\\srv\share\x` beats
-`/srv/share`.
+path and a UNC path. `\\srv\share` beats `/srv`, and `\\srv\share\x` beats
+`/srv/share`. The POSIX rule `/srv/share` and the WINDOWS rule `\\srv\share`
+both have two names; between rules of different formats with the same number
+of names, the WINDOWS rule wins, because `//srv/share/...` is the UNC
+spelling. This tie is not broken by list order, because the two rules are
+different locations, so reordering the rules (as a reader of
+`rules_by_precedence()` may) must not change the result.
 
 This replaces the earlier order, "decreasing length of the source path" as a
 string (How-Jobs-Are-Run, "Applying Path Mapping Rules"). For rules spelled
@@ -173,15 +176,17 @@ the same rule. They differ for redundant spellings: string length prefers
 longer spelling instead of the rule given last.
 
 `rules()` returns the rules in the order given. `rules_by_precedence()`
-returns the rules that can apply, with the most names first and, among rules
-with the same number, the one given last first. A rule replaced by a later
+returns the rules that can apply: the most names first, then WINDOWS before
+POSIX before URI, then the one given last first. A rule replaced by a later
 rule for the same location is left out, so each location appears once.
 Applying the first rule in that order that matches a path gives the same
-result as `apply`, and so does building a new mapper from that list, because
-no two rules in it tie. A consumer that reads the rules (such as a job script
-reading `Session.PathMappingRulesFile`) therefore picks the same rule as the
-mapper whether it takes the first match or the deepest match with the last
-one winning ties, as long as it splits and compares paths the same way (see
+result as `apply`. Building a new mapper from that list, in that order or any
+other, also gives the same result: the list has no two rules for one
+location, and the remaining ties are broken by format, not by order. A
+consumer that reads the rules (such as a job script reading
+`Session.PathMappingRulesFile`) therefore picks the same rule as the mapper
+whether it takes the first match or follows these rules, as long as it splits
+and compares paths the same way (see
 [Divergence from Python](#divergence-from-python) for where pathlib differs).
 
 ### Output

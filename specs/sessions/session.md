@@ -366,11 +366,11 @@ rules applied.
 directory using the `pathmapping-1.0` format. This file is referenced by
 `Session.PathMappingRulesFile` in the symbol table, allowing actions to read and apply
 path mapping rules themselves. The rules are written in precedence order
-(`PathMapper::rules_by_precedence`): most source path names first, and between
-rules with the same number, the one given last first. A rule replaced by a later rule
+(`PathMapper::rules_by_precedence`): most source path names first, then WINDOWS
+before POSIX before URI, then the one given last first. A rule replaced by a later rule
 for the same location is left out. A reader that applies the first matching rule, or
-one that follows the specification's order (most names, last rule for a location),
-therefore gets the same result as the session.
+one that follows the specification's order (most names, then WINDOWS over POSIX, last
+rule for a location), therefore gets the same result as the session.
 
 ## Environment Variable Evaluation
 

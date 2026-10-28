@@ -1046,9 +1046,9 @@ mod apply_unit {
         assert_eq!(both_orders(&posix_srv, &unc), ["/unc/x/f", "/unc/x/f"]);
         // `\\srv\share\x` (three) beats `/srv/share` (two).
         assert_eq!(both_orders(&posix_share, &unc_x), ["/unc/f", "/unc/f"]);
-        // `/srv/share` and `\\srv\share` name the same two names: the rule
-        // given last wins.
-        assert_eq!(both_orders(&posix_share, &unc), ["/unc/x/f", "/posix/x/f"]);
+        // `/srv/share` and `\\srv\share` both have two names: the WINDOWS
+        // rule wins, whichever is given last.
+        assert_eq!(both_orders(&posix_share, &unc), ["/unc/x/f", "/unc/x/f"]);
         // `/srv/share/x/f` (four) beats `\\srv\share\x` (three).
         let m = mapper(vec![posix_rule("/srv/share/x/f", "/deep"), unc_x]);
         assert_eq!(m.map_with_format(path, PathFormat::Posix), "/deep");
@@ -1101,8 +1101,8 @@ mod apply_unit {
             .map(|r| r.destination_path.as_str())
             .collect();
         // Names: `/a/b/c` 3, `C:\\a\\b` 3 (the drive counts as one),
-        // `s3://b/x` 2 (the authority counts as one), `/a` 1. Later first
-        // among equals. `/1` is left out: `/4` replaces it.
+        // `s3://b/x` 2 (the authority counts as one), `/a` 1. WINDOWS before
+        // POSIX among equals. `/1` is left out: `/4` replaces it.
         assert_eq!(order, ["/5", "/2", "/3", "/4"]);
         let given: Vec<&str> = m
             .rules()
@@ -1110,6 +1110,63 @@ mod apply_unit {
             .map(|r| r.destination_path.as_str())
             .collect();
         assert_eq!(given, ["/1", "/2", "/3", "/4", "/5"]);
+        // A drive counts as one name: `C:\\a` (2) after `/x/y/z` (3).
+        let m = mapper(vec![
+            windows_rule("C:\\a", "/ca"),
+            posix_rule("/x/y/z", "/xyz"),
+        ]);
+        let order: Vec<&str> = m
+            .rules_by_precedence()
+            .map(|r| r.destination_path.as_str())
+            .collect();
+        assert_eq!(order, ["/xyz", "/ca"]);
+    }
+
+    #[test]
+    fn mapper_rebuilt_from_precedence_order_maps_the_same() {
+        // A reader of `rules_by_precedence()` (such as the session's rules
+        // file) gets the same mapping in either list order.
+        let rule_sets = [
+            vec![
+                posix_rule("/srv/share", "/posix"),
+                windows_rule("\\\\srv\\share", "/unc"),
+            ],
+            vec![
+                windows_rule("\\\\srv\\share", "/unc"),
+                posix_rule("/srv/share", "/posix"),
+                posix_rule("/srv/share/", "/posix2"),
+                windows_rule("//SRV/Share/", "/unc2"),
+                posix_rule("/srv", "/srv"),
+                windows_rule("\\\\srv\\share\\x", "/unc-x"),
+                uri_rule("s3://b/a", "/s3"),
+                windows_rule("C:\\a", "/c"),
+                windows_rule("c:/A/", "/c2"),
+            ],
+        ];
+        let paths = [
+            "//srv/share/x/f",
+            "//srv/share/y",
+            "//srv/other",
+            "/srv/share/z",
+            "\\\\srv\\share\\x",
+            "s3://b/a/f",
+            "C:\\a\\f",
+        ];
+        for rules in rule_sets {
+            let original = mapper(rules);
+            let listed: Vec<PathMappingRule> = original.rules_by_precedence().cloned().collect();
+            let mut reversed = listed.clone();
+            reversed.reverse();
+            for rebuilt in [mapper(listed), mapper(reversed)] {
+                for path in paths {
+                    assert_eq!(
+                        rebuilt.apply_with_format(path, PathFormat::Posix),
+                        original.apply_with_format(path, PathFormat::Posix),
+                        "{path}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
