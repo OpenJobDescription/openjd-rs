@@ -5,6 +5,20 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.4.1...openjd-cli-v0.5.0) - 2026-10-28
+
+### Bug fixes
+
+- [**breaking**] Write range expressions in canonical form and compare them by value ([#469](https://github.com/OpenJobDescription/openjd-rs/pull/469)) ([#469](https://github.com/OpenJobDescription/openjd-rs/pull/469))
+
+- Update dependencies, including serde-saphyr 2 ([#450](https://github.com/OpenJobDescription/openjd-rs/pull/450)) ([#450](https://github.com/OpenJobDescription/openjd-rs/pull/450))
+
+
+### CI
+
+- Check public API and docs mechanically; mutate with cargo-mutants ([#440](https://github.com/OpenJobDescription/openjd-rs/pull/440)) ([#440](https://github.com/OpenJobDescription/openjd-rs/pull/440))
+
+
 ## [0.4.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.4.0...openjd-cli-v0.4.1) - 2026-10-14
 
 ### Miscellaneous
