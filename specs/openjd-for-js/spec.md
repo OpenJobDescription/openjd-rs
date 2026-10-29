@@ -414,10 +414,12 @@ Measured on the release build (`npm run build`, wasm-bindgen 0.2.129, 2026-10):
 
 | Component | Raw | Gzipped |
 |-----------|-----|---------|
-| WASM binary (`openjd_for_js_bg.wasm`, not `wasm-opt`ed) | 6.3 MB | 1.9 MB |
-| JS glue code (`openjd_for_js.js`) | 61 KB | 11 KB |
-| TypeScript definitions (`openjd_for_js.d.ts`) | 21 KB | 5 KB |
-| **Total** | **6.4 MB** | **1.9 MB** |
+| WASM binary (`openjd_for_js_bg.wasm`, not `wasm-opt`ed) | 6.6 MB | 2.0 MB |
+| JS glue code (`openjd_for_js.js`) | 62 KB | 11 KB |
+| TypeScript definitions (`openjd_for_js.d.ts`) | 22 KB | 5 KB |
+| **Total** | **6.7 MB** | **2.0 MB** |
+
+Sizes are in decimal units (1 MB = 1,000,000 bytes).
 
 The early goal was ~400 KB gzipped for the WASM binary. Running `wasm-opt -Oz`, and
 size-focused release settings for this crate, are the open steps toward it.
@@ -431,9 +433,10 @@ The `.wasm` uses the WebAssembly features Rust enables by default for
 non-trapping float-to-int, and sign extension. The JS glue is an ES module
 (`--target web`) that uses `import.meta.url` and BigInt, and `FinalizationRegistry`
 when it is present.
-The minimum versions below are the first with all of these, from the
+The minimum versions below are the first with all of these wasm features, from the
 [WebAssembly feature table](https://webassembly.org/features/); the JS features are
-older than that in each. Only Node.js is tested, in CI on Node 26.
+no newer than that in each. Edge is not in that table, and its row follows Chrome,
+which shares its engine. Only Node.js is tested, in CI on Node 26.
 
 | Environment | Minimum version |
 |-------------|-----------------|
@@ -444,6 +447,10 @@ older than that in each. Only Node.js is tested, in CI on Node 26.
 | Node.js | 17.2 (tested on 26) |
 | VS Code webview | Supported (requires `wasm-unsafe-eval` in CSP) |
 | Deno | 1.16 |
+
+In Node.js, pass the `.wasm` bytes to `init({ module_or_path: bytes })` or `initSync`.
+A bare `init()` fetches the `.wasm` next to the glue by URL, and Node's `fetch` does not
+read `file:` URLs. `js-tests/helpers.js` reads the file and passes the bytes.
 
 ## Usage Example
 
@@ -699,9 +706,11 @@ The `openjd-for-js` job in `.github/workflows/ci.yml` runs on ubuntu with Node 2
    `wasm-bindgen --target web --out-dir crates/openjd-for-js/pkg target/wasm32-unknown-unknown/release/openjd_for_js.wasm`.
 4. `npx vitest run` (JS-side tests).
 
-The workspace jobs build, lint and test with `--exclude openjd-for-js`, so CI does
-not run the crate's Rust-side tests (`cargo test -p openjd-for-js`), clippy for the
-wasm32 target, `wasm-opt`, or `npm pack`. The package is not published.
+The build, test and clippy steps of the workspace jobs pass `--exclude openjd-for-js`.
+The MSRV (`cargo check --workspace`) and Documentation (`cargo doc --workspace`) jobs
+include the crate, for the host target. So CI does not run the crate's Rust-side tests
+(`cargo test -p openjd-for-js`), clippy for the wasm32 target, `wasm-opt`, or
+`npm pack`. The package is not published.
 
 ## Relationship to Other Bindings
 
