@@ -623,8 +623,9 @@ fn static_chunk(range: &job::TaskParamRange<i64>, layout: &StaticLayout, i: usiz
 ///
 /// The range's contiguous intervals are kept as [`IntervalGroup`]s (at most
 /// `3R` for a range expression of `R` runs, however many values it has), and
-/// each interval is chunked independently and arithmetically, so no path
-/// lists values or walks chunks.
+/// each interval is chunked independently and arithmetically, so for a range
+/// expression no path lists values or walks chunks. (A list is already in
+/// memory; its containment check compares each chunk.)
 struct ContiguousChunkNode {
     name: String,
     groups: Arc<[IntervalGroup]>,
@@ -2585,7 +2586,7 @@ mod tests {
         // rather than only get-versus-iterate self-consistency.
         //
         // Uneven splits, exact splits, single-chunk, chunk-per-value, and ranges with
-        // gaps and steps, since each drives a different branch of the interval walk.
+        // gaps and steps, since each drives a different branch of `interval_groups`.
         let cases: Vec<(&str, usize, Vec<&str>)> = vec![
             ("1-10", 3, vec!["1-3", "4-5", "6-8", "9-10"]),
             ("1-10", 5, vec!["1-5", "6-10"]),

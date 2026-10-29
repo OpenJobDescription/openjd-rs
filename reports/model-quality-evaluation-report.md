@@ -147,7 +147,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 | Combination expression parsing | O(T) | ✅ Optimal |
 | Validation pipeline | O(S × P × F) | ✅ Linear in template size |
 | Association containment | O(L × K) | ✅ Acceptable |
-| AdaptiveChunkNode containment | O(V + N) | ✅ O(N) via HashSet (since 7bb18c3: a run-wise subset test for a range expression) |
+| AdaptiveChunkNode containment | O(V + N) | ✅ O(N) via HashSet (since the chunking fixes that followed #470: a run-wise subset test for a range expression) |
 
 ---
 

@@ -719,3 +719,52 @@ fn static_noncontiguous_chunks_iterate_sequentially_beside_a_contiguous_one() {
     let rewalked: Vec<String> = iter.map(|s| show(&s)).collect();
     assert_eq!(rewalked, want);
 }
+
+/// 50,000 runs of three values with step 2 (`0-4:2,7-11:2,...`): 150,000
+/// values, and 150,000 contiguous intervals in 150,000 interval groups,
+/// written as text.
+fn many_groups_text() -> String {
+    (0..50_000i64)
+        .map(|k| format!("{}-{}:2", 7 * k, 7 * k + 4))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+#[test]
+fn random_access_and_containment_of_every_chunk_stay_quasilinear() {
+    // One chunk per value. Each `get` and containment check must be a
+    // binary search over the runs or groups, not a scan: a scan makes
+    // these walks quadratic (about 1e10 steps).
+    within_deadline(Duration::from_secs(20), || {
+        let range = expr(&many_groups_text());
+        for constraint in [RangeConstraint::Noncontiguous, RangeConstraint::Contiguous] {
+            let space = chunk_space(range.clone(), 1, None, constraint.clone());
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            assert_eq!(iter.len(), 150_000, "{constraint:?}");
+            for i in 0..iter.len() {
+                let set = iter.get(i).unwrap();
+                assert!(iter.contains(&set), "{constraint:?} chunk {i}");
+            }
+            // Adaptive containment is a subset test on the runs.
+            let space = chunk_space(range.clone(), 1, Some(60), constraint.clone());
+            let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+            let sets: Vec<TaskParameterSet> = iter.by_ref().collect();
+            assert_eq!(sets.len(), 150_000, "{constraint:?}");
+            assert!(sets.iter().all(|set| iter.contains(set)), "{constraint:?}");
+        }
+    });
+}
+
+#[test]
+fn adaptive_chunk_size_of_zero_acts_as_one() {
+    for (constraint, want) in [
+        (RangeConstraint::Noncontiguous, ["1", "2", "3"]),
+        (RangeConstraint::Contiguous, ["1-1", "2-2", "3-3"]),
+    ] {
+        let space = chunk_space(expr("1-3"), 2, Some(60), constraint.clone());
+        let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+        iter.set_chunks_default_task_count(0);
+        let chunks: Vec<String> = iter.take(4).map(|s| chunk_of(&s)).collect();
+        assert_eq!(chunks, want, "{constraint:?}");
+    }
+}
