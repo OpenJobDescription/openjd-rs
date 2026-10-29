@@ -1199,7 +1199,9 @@ impl StepParameterSpaceIterator {
     /// is a no-op for a non-adaptive space. Any value is accepted: 0 acts
     /// as 1, and a size beyond the values that remain (up to usize::MAX)
     /// makes the next chunk take all of them (for CONTIGUOUS, the rest of
-    /// its interval).
+    /// its interval). The exception is a NONCONTIGUOUS chunk whose canonical
+    /// form would have more than 50,000 runs: it is shortened to 50,000
+    /// values.
     pub fn set_chunks_default_task_count(&mut self, value: usize);
 
     /// Rewind the iterator so a fresh `Iterator::next` walk yields the
