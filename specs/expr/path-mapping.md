@@ -237,9 +237,12 @@ and compares paths the same way (see
 
 The result is `destination_path`, as written, followed by the path's
 components after the matched source path, each preceded by the output
-separator. Components keep the case they have in the input. A trailing
-separator on the input (`/` for POSIX and URI, `\` or `/` for WINDOWS) is
-kept, unless the result already ends with the output separator.
+separator. When `destination_path` already ends with a separator (`\` or `/`
+for WINDOWS output, `/` otherwise), the first component reuses it, so
+`/local/` and `/mnt/a` give `/local/a`, not `/local//a`. Components keep the
+case they have in the input. A trailing separator on the input (`/` for
+POSIX and URI, `\` or `/` for WINDOWS) is kept, unless the result already
+ends with a separator.
 
 ### Windows case
 
@@ -501,9 +504,10 @@ rule, UNC anchors), with these differences:
   last. Python sorts rules by component count, and among rules for the same
   location takes the one given first.
 - **Destination.** Rust appends the remaining components to
-  `destination_path` as written. Python rebuilds the result with
-  `PurePath(*destination.parts, *rest)`, which normalizes the destination:
-  for the destination `D:\x\`, Rust gives `D:\x\\f` and Python `D:\x\f`.
+  `destination_path` as written, reusing a separator it ends with. Python
+  rebuilds the result with `PurePath(*destination.parts, *rest)`, which also
+  normalizes the rest of the destination: for the destination `D:\x\\y`,
+  Rust gives `D:\x\\y\f` and Python `D:\x\y\f`.
   Python also reads a remaining component that looks like a drive as one:
   with the rule `C:\a` → `D:\m`, `C:\a\b:c` gives `D:\m\b:c` in Rust and
   `b:c` in Python. Both predate `PathMapper`.

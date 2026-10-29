@@ -342,7 +342,9 @@ Populates a `SymbolTable` with:
 | `Task.RawParam.<name>` | Task parameter value (no path mapping) | `run_task()` call |
 
 PATH-type parameters have path mapping rules applied. LIST_PATH parameters have rules
-applied to each element. A PATH or LIST_PATH value longer than 32 KiB
+applied to each element, whether the value is a list of strings, a list of paths, or a
+single path, and the same way whether or not a base symbol table (`resolved_symtab`)
+is given. A PATH or LIST_PATH value longer than 32 KiB
 (`openjd_expr::path_mapping::MAX_PATH_LEN`) fails symbol table construction with
 `SessionError::Runtime`: `Failed to apply path mapping to <key>: the path is <n>
 bytes long, more than the limit of 32768 bytes`, as `apply_path_mapping` does. The

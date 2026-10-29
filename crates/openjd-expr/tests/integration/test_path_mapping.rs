@@ -308,6 +308,56 @@ fn posix_no_match_different_path() {
     let r = eval_with_rules("P.apply_path_mapping()", vec![rule], &st);
     assert_eq!(r.to_display_string(), "/other/path");
 }
+#[test]
+fn destination_ending_in_a_separator_is_not_doubled() {
+    use PathFormat::{Posix, Uri, Windows};
+    let rule = |format, src: &str, dst: &str| PathMappingRule {
+        source_path_format: format,
+        source_path: src.into(),
+        destination_path: dst.into(),
+    };
+    for (rule, path, output, expected) in [
+        (rule(Posix, "/mnt", "/local/"), "/mnt/a", Posix, "/local/a"),
+        (rule(Posix, "/mnt", "/"), "/mnt/a/b", Posix, "/a/b"),
+        (
+            rule(Posix, "/mnt", "/local/"),
+            "/mnt/a/",
+            Posix,
+            "/local/a/",
+        ),
+        (rule(Posix, "/mnt", "/local/"), "/mnt", Posix, "/local/"),
+        (rule(Posix, "/mnt", "C:\\"), "/mnt/a", Windows, "C:\\a"),
+        (rule(Posix, "/mnt", "C:/x/"), "/mnt/a/", Windows, "C:/x/a\\"),
+        (
+            rule(Windows, "D:\\x", "D:\\y\\"),
+            "d:\\X\\f",
+            Windows,
+            "D:\\y\\f",
+        ),
+        (
+            rule(Windows, "D:\\x", "/local/"),
+            "D:\\x\\f",
+            Posix,
+            "/local/f",
+        ),
+        (rule(Uri, "s3://b", "s3://c/"), "s3://b/a", Uri, "s3://c/a"),
+        // Only the destination's separator is reused: an empty URI
+        // segment after it keeps its own.
+        (
+            rule(Uri, "s3://b", "s3://c/"),
+            "s3://b//a",
+            Uri,
+            "s3://c//a",
+        ),
+        (rule(Uri, "s3://b", "s3://c"), "s3://b//a", Uri, "s3://c//a"),
+    ] {
+        assert_eq!(
+            rule.apply_with_format(path, output).as_deref(),
+            Some(expected),
+            "{rule:?} {path}"
+        );
+    }
+}
 
 #[test]
 fn unmapped_posix_path_normalized_to_windows_format() {

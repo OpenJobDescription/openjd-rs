@@ -2575,30 +2575,20 @@ impl Session {
                         .map_err(|e| SessionError::Runtime(format!("Failed to set {key}: {e}")))?;
                     }
                     JobParameterType::ListPath => {
-                        if let openjd_expr::ExprValue::ListString(ref elements, _) = param.value {
-                            let key = format!("Param.{name}");
-                            let mapped = elements
-                                .iter()
-                                .map(|s| {
-                                    let m = self.apply_path_mapping_to_string(&key, s)?;
-                                    Ok(openjd_expr::ExprValue::new_path(
-                                        m,
-                                        openjd_expr::path_mapping::PathFormat::host(),
-                                    ))
-                                })
-                                .collect::<Result<Vec<_>, SessionError>>()?;
-                            s.set(
-                                &key,
-                                openjd_expr::ExprValue::make_list(
-                                    mapped,
-                                    openjd_expr::ExprType::PATH,
-                                )
-                                .unwrap(),
-                            )
-                            .map_err(|e| {
-                                SessionError::Runtime(format!("Failed to set {key}: {e}"))
-                            })?;
+                        use openjd_expr::ExprValue;
+                        if !matches!(
+                            param.value,
+                            ExprValue::ListString(..)
+                                | ExprValue::ListPath(..)
+                                | ExprValue::Path { .. }
+                        ) {
+                            continue;
                         }
+                        let key = format!("Param.{name}");
+                        let mapped = self.map_list_path_param(&key, &param.value)?;
+                        s.set(&key, mapped).map_err(|e| {
+                            SessionError::Runtime(format!("Failed to set {key}: {e}"))
+                        })?;
                     }
                     _ => {}
                 }
@@ -2636,23 +2626,7 @@ impl Session {
                             openjd_expr::path_mapping::PathFormat::host(),
                         )
                     }
-                    JobParameterType::ListPath => match &param.value {
-                        openjd_expr::ExprValue::ListString(elements, _) => {
-                            let mapped = elements
-                                .iter()
-                                .map(|s| {
-                                    let m = self.apply_path_mapping_to_string(&key, s)?;
-                                    Ok(openjd_expr::ExprValue::new_path(
-                                        m,
-                                        openjd_expr::path_mapping::PathFormat::host(),
-                                    ))
-                                })
-                                .collect::<Result<Vec<_>, SessionError>>()?;
-                            openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH)
-                                .unwrap()
-                        }
-                        other => self.apply_path_mapping_to_value(&key, other)?,
-                    },
+                    JobParameterType::ListPath => self.map_list_path_param(&key, &param.value)?,
                     _ => Self::coerce_param_value(
                         &param.value,
                         &param.param_type.expr_type(),
@@ -2758,6 +2732,33 @@ impl Session {
             )));
         }
         Ok(self.path_mapper.map(path))
+    }
+
+    /// Map the value of the LIST[PATH] job parameter `key`. A list of
+    /// strings becomes a list of host-format paths; a Path or ListPath
+    /// value is mapped in place. Both branches of
+    /// [`build_symbol_table`](Session::build_symbol_table) use this, so a
+    /// value maps the same way with or without a base symbol table.
+    fn map_list_path_param(
+        &self,
+        key: &str,
+        value: &openjd_expr::ExprValue,
+    ) -> Result<openjd_expr::ExprValue, SessionError> {
+        let openjd_expr::ExprValue::ListString(elements, _) = value else {
+            return self.apply_path_mapping_to_value(key, value);
+        };
+        let mapped = elements
+            .iter()
+            .map(|s| {
+                let m = self.apply_path_mapping_to_string(key, s)?;
+                Ok(openjd_expr::ExprValue::new_path(
+                    m,
+                    openjd_expr::path_mapping::PathFormat::host(),
+                ))
+            })
+            .collect::<Result<Vec<_>, SessionError>>()?;
+        openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH)
+            .map_err(|e| SessionError::Runtime(format!("Failed to set {key}: {e}")))
     }
 
     /// Apply path mapping rules to the value of parameter `key` if it is a
