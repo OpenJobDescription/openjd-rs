@@ -792,3 +792,28 @@ fn iterating_every_chunk_of_many_interval_groups_stays_linear() {
         }
     });
 }
+
+#[test]
+fn adaptive_list_containment_of_a_huge_candidate_stops_early() {
+    // A list is checked value by value, but the candidate's values are
+    // distinct, so a candidate of a trillion values fails within the
+    // list's length plus one lookups, without listing it.
+    within_deadline(DEADLINE, || {
+        for constraint in [RangeConstraint::Noncontiguous, RangeConstraint::Contiguous] {
+            let space = chunk_space(
+                job::TaskParamRange::List((1..=10).collect()),
+                2,
+                Some(60),
+                constraint.clone(),
+            );
+            let iter = StepParameterSpaceIterator::new(&space).unwrap();
+            assert_eq!(
+                iter.validate_containment(&chunk_param(TRILLION))
+                    .unwrap_err(),
+                "Parameter 'F' value '1-1000000000000' is not a subset of the range in the \
+                 parameter space.",
+                "{constraint:?}"
+            );
+        }
+    });
+}

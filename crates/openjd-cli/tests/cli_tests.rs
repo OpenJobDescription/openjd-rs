@@ -1820,6 +1820,19 @@ steps:
             .stderr(std::process::Stdio::piped())
             .spawn()
             .expect("failed to execute openjd");
+        // Drain both pipes while waiting, so a CLI that writes more than a
+        // pipe buffer holds is not mistaken for one that does not finish.
+        let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+            std::thread::spawn(move || {
+                let mut text = String::new();
+                if let Some(mut pipe) = pipe {
+                    let _ = std::io::Read::read_to_string(&mut pipe, &mut text);
+                }
+                text
+            })
+        };
+        let stdout = drain(child.stdout.take().map(|p| Box::new(p) as _));
+        let stderr = drain(child.stderr.take().map(|p| Box::new(p) as _));
         let started = std::time::Instant::now();
         while child.try_wait().expect("try_wait").is_none() {
             if started.elapsed() > limit {
@@ -1831,11 +1844,11 @@ steps:
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        let output = child.wait_with_output().expect("wait_with_output");
+        let status = child.wait().expect("wait");
         (
-            output.status.code().unwrap_or(-1),
-            String::from_utf8_lossy(&output.stdout).to_string(),
-            String::from_utf8_lossy(&output.stderr).to_string(),
+            status.code().unwrap_or(-1),
+            stdout.join().expect("stdout reader"),
+            stderr.join().expect("stderr reader"),
         )
     }
 

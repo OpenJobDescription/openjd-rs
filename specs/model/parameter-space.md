@@ -76,8 +76,8 @@ ProductNode (cartesian product)
 | `RangeExprNode` | Integer range expression | Computed from range | O(1) via arithmetic |
 | `ProductNode` | Cartesian product (`*` operator) | Product of children (checked) | O(D) via divmod |
 | `AssociationNode` | Lockstep (`,` in parens) | Same as children | O(1) |
-| `ContiguousChunkNode` | Gap-respecting contiguous chunks | Cached exact count | O(log G) in interval groups |
-| `StaticChunkNode` | Noncontiguous chunk boundaries | Number of chunks | O(log R + runs the chunk spans) |
+| `ContiguousChunkNode` | Gap-respecting contiguous chunks | Cached exact count | O(log G) in interval groups (at most 3R for a range expression) |
+| `StaticChunkNode` | Noncontiguous chunk boundaries | Number of chunks | Range expression: O(log R + runs the chunk spans); list: O(k log k) in the chunk's k values |
 | `AdaptiveChunkNode` | Runtime-adjustable chunks | Dynamic | None (sequential only) |
 
 ### ProductNode Index Arithmetic
@@ -319,8 +319,10 @@ because chunk boundaries aren't known in advance.
 chunk is the next `chunk size` values by index, built with `noncontiguous_chunk()` like a
 static one. A CONTIGUOUS chunk is up to `chunk size` values from the current interval,
 taken from the range's interval groups (see Contiguous Chunking). Any chunk size from 1 to
-`usize::MAX` is valid: the chunk's end is `cursor.saturating_add(chunk_size)` clamped to
-the value count, so a size beyond the values that remain takes all of them. (openjd-cli's
+`usize::MAX` is valid. A NONCONTIGUOUS chunk ends at `cursor.saturating_add(chunk_size)`
+clamped to the value count, and a CONTIGUOUS chunk takes `chunk_size` clamped to the values
+left in its interval, so a size beyond the values that remain takes all of them (for
+CONTIGUOUS, the rest of the interval). (openjd-cli's
 adaptive size saturates at `usize::MAX` when a quick task has a huge
 `targetRuntimeSeconds`.)
 
