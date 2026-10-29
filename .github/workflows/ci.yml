@@ -552,6 +552,9 @@ jobs:
   openjd-for-js:
     name: openjd-for-js (WASM + JS tests)
     runs-on: ubuntu-latest
+    env:
+      # Must match the wasm-bindgen crate version in Cargo.lock exactly.
+      WASM_BINDGEN_VERSION: 0.2.129
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Install rust stable with wasm32 target
@@ -562,7 +565,7 @@ jobs:
           rustup target add wasm32-unknown-unknown
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 26
       # Restore on every run, save only on pushes to main (see build-test).
       - name: Restore cargo cache
         id: cache
@@ -572,9 +575,14 @@ jobs:
             ~/.cargo/bin/wasm-bindgen
             ~/.cargo/registry
             target
-          key: wasm-${{ hashFiles('Cargo.lock') }}
+          key: wasm-${{ env.WASM_BINDGEN_VERSION }}-${{ hashFiles('Cargo.lock') }}
+      # A cached binary of another version is replaced, not reused.
       - name: Install wasm-bindgen-cli
-        run: which wasm-bindgen || cargo install wasm-bindgen-cli --version 0.2.128
+        run: |
+          if [ "$(wasm-bindgen --version 2>/dev/null)" != "wasm-bindgen $WASM_BINDGEN_VERSION" ]; then
+            cargo install --force wasm-bindgen-cli --version "$WASM_BINDGEN_VERSION"
+          fi
+          wasm-bindgen --version
       - name: Install JS deps
         run: cd crates/openjd-for-js && npm install
       - name: Build WASM + generate JS bindings
