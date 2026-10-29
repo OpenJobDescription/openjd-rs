@@ -671,3 +671,51 @@ fn walking_every_chunk_of_a_range_with_many_runs_stays_linear() {
         assert_eq!(walked[49_998], last);
     });
 }
+
+#[test]
+fn static_noncontiguous_chunks_iterate_sequentially_beside_a_contiguous_one() {
+    // A CONTIGUOUS chunk parameter makes the space iterate through its node
+    // iterators, so a static NONCONTIGUOUS one beside it is walked by its
+    // own iterator rather than by `get`. Templates allow one CHUNK[INT] per
+    // step, but a `StepParameterSpace` built through the public API can
+    // hold two.
+    let mut defs = IndexMap::new();
+    for (name, range, constraint) in [
+        ("A", "1-4", RangeConstraint::Noncontiguous),
+        ("B", "10-13", RangeConstraint::Contiguous),
+    ] {
+        defs.insert(
+            name.to_string(),
+            job::TaskParameter::ChunkInt {
+                range: expr(range),
+                chunks: job::ResolvedChunks {
+                    default_task_count: 2,
+                    target_runtime_seconds: None,
+                    range_constraint: constraint,
+                },
+            },
+        );
+    }
+    let space = job::StepParameterSpace {
+        task_parameter_definitions: defs,
+        combination: None,
+    };
+    let show = |set: &TaskParameterSet| {
+        let text = |name: &str| match &set[name].value {
+            ExprValue::RangeExpr(r) => r.to_string(),
+            other => panic!("expected a chunk, got {other:?}"),
+        };
+        format!("{}|{}", text("A"), text("B"))
+    };
+    let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+    let want = ["1,2|10-11", "1,2|12-13", "3,4|10-11", "3,4|12-13"];
+    let by_index: Vec<String> = (0..iter.len())
+        .map(|i| show(&iter.get(i).unwrap()))
+        .collect();
+    assert_eq!(by_index, want);
+    let walked: Vec<String> = iter.by_ref().map(|s| show(&s)).collect();
+    assert_eq!(walked, want);
+    iter.reset();
+    let rewalked: Vec<String> = iter.map(|s| show(&s)).collect();
+    assert_eq!(rewalked, want);
+}
