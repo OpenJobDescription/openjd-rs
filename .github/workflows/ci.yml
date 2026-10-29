@@ -192,7 +192,7 @@ jobs:
       # feature-unified dep graph. This also produces the release binary
       # at target/release/openjd as a side effect, so no explicit
       # `cargo build` step is needed before uploading the artifact.
-      # openjd-for-js is a wasm32 crate built in its own job below; compiling
+      # openjd-for-js is a wasm32 crate built, linted and tested in its own job below; compiling
       # it natively here wastes ~45-60s recompiling wasm-bindgen, js-sys,
       # web-sys, and serde-wasm-bindgen.
       - name: Restore helper manifest
@@ -558,7 +558,7 @@ jobs:
       WASM_BINDGEN_VERSION: 0.2.129
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: Install rust stable with wasm32 target
+      - name: Install rust stable with wasm32 target and clippy
         shell: bash
         run: |
           rustup toolchain install stable --profile minimal --component clippy
@@ -576,7 +576,7 @@ jobs:
             ~/.cargo/bin/wasm-bindgen
             ~/.cargo/registry
             target
-          key: wasm-${{ env.WASM_BINDGEN_VERSION }}-${{ hashFiles('Cargo.lock') }}
+          key: wasm-rs-${{ env.WASM_BINDGEN_VERSION }}-${{ hashFiles('Cargo.lock') }}
       # A cached binary of another version is replaced, not reused.
       - name: Install wasm-bindgen-cli
         run: |
