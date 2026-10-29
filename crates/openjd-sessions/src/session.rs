@@ -2761,28 +2761,28 @@ impl Session {
     }
 
     /// Apply path mapping rules to the value of parameter `key` if it is a
-    /// Path or ListPath value.
+    /// Path or ListPath value. The result is in the host's path format, as
+    /// every other `Param.*` path value is, whether or not a rule applied.
     fn apply_path_mapping_to_value(
         &self,
         key: &str,
         value: &openjd_expr::ExprValue,
     ) -> Result<openjd_expr::ExprValue, SessionError> {
+        let host = openjd_expr::path_mapping::PathFormat::host();
         Ok(match value {
             openjd_expr::ExprValue::Path {
-                value: path_str,
-                format,
-                ..
+                value: path_str, ..
             } => openjd_expr::ExprValue::new_path(
                 self.apply_path_mapping_to_string(key, path_str)?,
-                *format,
+                host,
             ),
-            openjd_expr::ExprValue::ListPath(elements, fmt, _) => {
+            openjd_expr::ExprValue::ListPath(elements, _, _) => {
                 let mapped = elements
                     .iter()
                     .map(|s| {
                         Ok(openjd_expr::ExprValue::new_path(
                             self.apply_path_mapping_to_string(key, s)?,
-                            *fmt,
+                            host,
                         ))
                     })
                     .collect::<Result<Vec<_>, SessionError>>()?;

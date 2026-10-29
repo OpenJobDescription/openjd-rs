@@ -2708,7 +2708,8 @@ async fn test_with_path_mapping_rejects_relative_source() {
 // Path mapping: function library rebuild and LIST[PATH] mapping
 // ══════════════════════════════════════════════════════════════
 
-/// Run `echo` with one argument through the session and return stdout.
+/// Print one argument through the session and return stdout. `printf`
+/// prints it as is, where `echo` in some shells reads backslash escapes.
 async fn echo_arg(s: &mut Session, arg: &str) -> String {
     use openjd_expr::format_string::FormatString;
     use openjd_model::job::{Action, StepActions, StepScript};
@@ -2716,10 +2717,11 @@ async fn echo_arg(s: &mut Session, arg: &str) -> String {
         let_bindings: None,
         actions: StepActions {
             on_run: Action {
-                command: FormatString::new("python").unwrap(),
+                command: FormatString::new("sh").unwrap(),
                 args: Some(vec![
                     FormatString::new("-c").unwrap(),
-                    FormatString::new("import sys; print(sys.argv[1])").unwrap(),
+                    FormatString::new("printf '%s\\n' \"$1\"").unwrap(),
+                    FormatString::new("sh").unwrap(),
                     FormatString::new(arg).unwrap(),
                 ]),
                 timeout: None,
