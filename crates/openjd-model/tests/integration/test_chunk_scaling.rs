@@ -768,3 +768,27 @@ fn adaptive_chunk_size_of_zero_acts_as_one() {
         assert_eq!(chunks, want, "{constraint:?}");
     }
 }
+
+#[test]
+fn iterating_every_chunk_of_many_interval_groups_stays_linear() {
+    // Static iteration goes through the node iterators, which must take
+    // O(1) per chunk; recomputing the position from the first group per
+    // chunk makes this walk quadratic (about 1e10 group visits).
+    within_deadline(DEADLINE, || {
+        let range = expr(&many_groups_text());
+        for constraint in [RangeConstraint::Contiguous, RangeConstraint::Noncontiguous] {
+            let space = chunk_space(range.clone(), 1, None, constraint.clone());
+            let walked: Vec<String> = StepParameterSpaceIterator::new(&space)
+                .unwrap()
+                .map(|s| chunk_of(&s))
+                .collect();
+            assert_eq!(walked.len(), 150_000, "{constraint:?}");
+            let last = 7 * 49_999 + 4;
+            let want = match constraint {
+                RangeConstraint::Contiguous => format!("{last}-{last}"),
+                RangeConstraint::Noncontiguous => last.to_string(),
+            };
+            assert_eq!(walked[149_999], want, "{constraint:?}");
+        }
+    });
+}

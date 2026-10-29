@@ -2801,8 +2801,9 @@ mod tests {
     fn test_many_interval_iteration_stays_linear() {
         // A stepped range makes every value its own interval, the shape that went
         // quadratic when locating a chunk walked the intervals before it. Its 20k
-        // intervals are one `IntervalGroup::Singles` group, so both iteration and
-        // random access stay linear.
+        // intervals are three interval groups (the inner values are one
+        // `IntervalGroup::Singles` group), so this checks the values, not the cost
+        // per group; `test_chunk_scaling` checks that cost over 150,000 groups.
         let space = make_space(vec![("Frame", static_chunk_param("1-40000:2", 1))], None);
         let iter = StepParameterSpaceIterator::new(&space).unwrap();
         assert_eq!(iter.len(), 20_000);
