@@ -36,6 +36,11 @@ spec in ECMAScript.
 
 ## Build
 
+Prerequisites: Node.js `^22.12`, `^24`, or `>=26` (vitest 5's range; CI uses Node 26),
+the `wasm32-unknown-unknown` Rust target, and `wasm-bindgen-cli` at the same version as
+the `wasm-bindgen` crate in `Cargo.lock` (`WASM_BINDGEN_VERSION` in
+`.github/workflows/ci.yml`).
+
 ```sh
 # From the workspace root:
 cd crates/openjd-for-js

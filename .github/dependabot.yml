@@ -37,3 +37,19 @@ updates:
         update-types:
           - "minor"
           - "patch"
+  # The openjd-for-js dev dependencies (vitest). Node itself, set by
+  # `node-version` in ci.yml, is not covered and is bumped by hand.
+  - package-ecosystem: "npm"
+    directory: "/crates/openjd-for-js"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(deps):"
+    groups:
+      npm-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"

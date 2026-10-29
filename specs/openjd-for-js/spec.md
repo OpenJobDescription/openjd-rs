@@ -55,11 +55,13 @@ openjd-rs/
 ### Build Pipeline
 
 ```
-Rust source → cargo build --target wasm32-unknown-unknown
+Rust source → cargo build --target wasm32-unknown-unknown --release
            → wasm-bindgen --target web → .wasm + .js + .d.ts
-           → wasm-opt -Oz → optimized .wasm (~400KB gzipped)
-           → npm package in crates/openjd-for-js/
+           → package in crates/openjd-for-js/pkg/
 ```
+
+`npm run build` runs both steps. The `.wasm` is not run through `wasm-opt`
+yet; see [Size Budget](#size-budget).
 
 ### Binding Pattern
 
@@ -408,26 +410,47 @@ Sessions are excluded because they manage OS processes and filesystem I/O, which
 
 ## Size Budget
 
-| Component | Estimated size (gzipped) |
-|-----------|-------------------------|
-| WASM binary (optimized) | ~400KB |
-| JS glue code | ~15KB |
-| TypeScript definitions | ~5KB |
-| **Total** | **~420KB** |
+Measured on the release build (`npm run build`, wasm-bindgen 0.2.129, 2026-10):
+
+| Component | Raw | Gzipped |
+|-----------|-----|---------|
+| WASM binary (`openjd_for_js_bg.wasm`, not `wasm-opt`ed) | 6.6 MB | 2.0 MB |
+| JS glue code (`openjd_for_js.js`) | 62 KB | 11 KB |
+| TypeScript definitions (`openjd_for_js.d.ts`) | 22 KB | 5 KB |
+| **Total** | **6.7 MB** | **2.0 MB** |
+
+Sizes are in decimal units (1 MB = 1,000,000 bytes).
+
+The early goal was ~400 KB gzipped for the WASM binary. Running `wasm-opt -Oz`, and
+size-focused release settings for this crate, are the open steps toward it.
 
 For comparison: pako (zlib) is ~45KB, js-yaml is ~50KB. The WASM module is larger because it includes the full expression parser (ruff_python_parser for EXPR extension support).
 
 ## Browser & Runtime Compatibility
 
-| Environment | Support |
-|-------------|---------|
-| Chrome 57+ | ✅ |
-| Firefox 52+ | ✅ |
-| Safari 11+ | ✅ |
-| Edge 16+ | ✅ |
-| Node.js 8+ | ✅ |
-| VS Code webview | ✅ (requires `wasm-unsafe-eval` in CSP) |
-| Deno | ✅ |
+The `.wasm` uses the WebAssembly features Rust enables by default for
+`wasm32-unknown-unknown`: bulk memory, multi-value, mutable globals, reference types,
+non-trapping float-to-int, and sign extension. The JS glue is an ES module
+(`--target web`) that uses `import.meta.url` and BigInt, and `FinalizationRegistry`
+when it is present.
+The minimum versions below are the first with all of these wasm features, from the
+[WebAssembly feature table](https://webassembly.org/features/); the JS features are
+no newer than that in each. Edge is not in that table, and its row follows Chrome,
+which shares its engine. Only Node.js is tested, in CI on Node 26.
+
+| Environment | Minimum version |
+|-------------|-----------------|
+| Chrome | 96 |
+| Firefox | 79 |
+| Safari | 15 |
+| Edge | 96 |
+| Node.js | 17.2 (tested on 26) |
+| VS Code webview | Supported (requires `wasm-unsafe-eval` in CSP) |
+| Deno | 1.16 |
+
+In Node.js, pass the `.wasm` bytes to `init({ module_or_path: bytes })` or `initSync`.
+A bare `init()` fetches the `.wasm` next to the glue by URL, and Node's `fetch` does not
+read `file:` URLs. `js-tests/helpers.js` reads the file and passes the bytes.
 
 ## Usage Example
 
@@ -479,7 +502,7 @@ console.log(fmt.resolve(symbols)); // "/renders/shot01/frame.####.exr"
 - `decodeJobTemplateFromObject`, `decodeEnvironmentTemplateFromObject`
 - `JobTemplate`, `EnvironmentTemplate` wrapper types with getters
 - Error types
-- Build pipeline (cargo + wasm-bindgen + wasm-opt)
+- Build pipeline (cargo + wasm-bindgen; wasm-opt still to do)
 - npm package structure
 
 ### Phase 2: Job Creation
@@ -673,30 +696,21 @@ describe('memory management', () => {
 
 ## CI/CD Pipeline
 
-```
-┌─────────────┐    ┌──────────────┐    ┌─────────────┐    ┌──────────┐
-│ cargo build  │ →  │ wasm-bindgen │ →  │ wasm-opt    │ →  │ npm pack │
-│ --target     │    │ --target web │    │ -Oz         │    │          │
-│ wasm32       │    │              │    │             │    │          │
-└─────────────┘    └──────────────┘    └─────────────┘    └──────────┘
-       │                                                        │
-       ▼                                                        ▼
-┌─────────────┐                                          ┌──────────┐
-│ cargo test  │                                          │ vitest   │
-│ (Rust unit) │                                          │ (JS e2e) │
-└─────────────┘                                          └──────────┘
-```
+The `openjd-for-js` job in `.github/workflows/ci.yml` runs on ubuntu with Node 26:
 
-### CI Steps
+1. Install `wasm-bindgen-cli` at `WASM_BINDGEN_VERSION`, which must equal the
+   `wasm-bindgen` crate version in `Cargo.lock`.
+2. `cd crates/openjd-for-js && npm install`
+3. `npm run build`, which runs
+   `cargo build --target wasm32-unknown-unknown -p openjd-for-js --release` and then
+   `wasm-bindgen --target web --out-dir crates/openjd-for-js/pkg target/wasm32-unknown-unknown/release/openjd_for_js.wasm`.
+4. `npx vitest run` (JS-side tests).
 
-1. `cargo build --target wasm32-unknown-unknown -p openjd-for-js --release`
-2. `wasm-bindgen --target web --out-dir crates/openjd-for-js/pkg target/wasm32-unknown-unknown/release/openjd_for_js.wasm`
-3. `wasm-opt -Oz crates/openjd-for-js/pkg/openjd_for_js_bg.wasm -o crates/openjd-for-js/pkg/openjd_for_js_bg.wasm`
-4. `cargo test -p openjd-for-js` (Rust-side tests)
-5. `cd crates/openjd-for-js && npm install && npx vitest run` (JS-side tests)
-6. `cd crates/openjd-for-js && npm pack` (produce distributable)
-
-Steps 1–3 are combined into `npm run build` when invoked from `crates/openjd-for-js/`.
+The build, test and clippy steps of the workspace jobs pass `--exclude openjd-for-js`.
+The MSRV (`cargo check --workspace`) and Documentation (`cargo doc --workspace`) jobs
+include the crate, for the host target. So CI does not run the crate's Rust-side tests
+(`cargo test -p openjd-for-js`), clippy for the wasm32 target, `wasm-opt`, or
+`npm pack`. The package is not published.
 
 ## Relationship to Other Bindings
 
