@@ -1228,13 +1228,23 @@ describe("task counts above 2^32 (wasm32)", () => {
   it("enforces maxTaskCount on 1-5000000000", () => {
     expect(() =>
       withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), { maxTaskCount: 1000000n }, () => {})
-    ).toThrow("Total task count (5000000000) exceeds caller limit of 1000000.");
+    ).toThrow(
+      new Error(
+        "Model validation error: 1 validation error for Template\n" +
+          "Template: Total task count (5000000000) exceeds caller limit of 1000000."
+      )
+    );
   });
 
   it("enforces maxTaskCount on 1-4294967296", () => {
     expect(() =>
       withJob(chunkTemplate("1-4294967296", 1, "CONTIGUOUS"), { maxTaskCount: 1000000n }, () => {})
-    ).toThrow("Total task count (4294967296) exceeds caller limit of 1000000.");
+    ).toThrow(
+      new Error(
+        "Model validation error: 1 validation error for Template\n" +
+          "Template: Total task count (4294967296) exceeds caller limit of 1000000."
+      )
+    );
   });
 
   it("accepts a maxTaskCount equal to the exact task count", () => {

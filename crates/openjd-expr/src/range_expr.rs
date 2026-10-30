@@ -642,9 +642,11 @@ impl RangeExpr {
 
     /// [`len`](Self::len) as a `usize` for charging an operation or memory
     /// budget, saturating at `usize::MAX`. Budgets are `usize`, and a count
-    /// that does not fit one (on a 32-bit target) exceeds every budget, so
-    /// saturating keeps the charge over the limit; wrapping or truncating
-    /// would let it through. Not a count: use `len` for that.
+    /// that does not fit one (on a 32-bit target) exceeds every budget
+    /// below `usize::MAX`, so saturating keeps the charge over such a
+    /// limit; wrapping or truncating would let it through. (A limit of
+    /// `usize::MAX` admits any charge, on every target.) Not a count: use
+    /// `len` for that.
     pub(crate) fn len_saturating(&self) -> usize {
         saturating_count(self.len(), usize::MAX)
     }
