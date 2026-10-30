@@ -1250,6 +1250,49 @@ describe("task counts above 2^32 (wasm32)", () => {
     });
   });
 
+  it("counts a product of parameters beyond 2^32", () => {
+    // 100000 x 100000 tasks: a 32-bit usize product overflowed here.
+    const template = mod.decodeJobTemplate(
+      JSON.stringify({
+        specificationVersion: "jobtemplate-2023-09",
+        name: "T",
+        steps: [
+          {
+            name: "S",
+            parameterSpace: {
+              taskParameterDefinitions: [
+                { name: "A", type: "INT", range: "1-100000" },
+                { name: "B", type: "INT", range: "1-100000" },
+              ],
+            },
+            script: { actions: { onRun: { command: "x" } } },
+          },
+        ],
+      })
+    );
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    try {
+      const job = mod.createJob(template, {}, opts);
+      const iter = new mod.StepParameterSpaceIterator(job, "S");
+      expect(iter.count).toBe(10000000000n);
+      const last = iter.get(9999999999n);
+      expect([last.get("A"), last.get("B")]).toEqual(["100000", "100000"]);
+      const middle = iter.get(4294967296n);
+      expect([middle.get("A"), middle.get("B")]).toEqual(["42950", "67297"]);
+      iter.free();
+      job.free();
+      expect(() => mod.createJob(template, {}, opts, { maxTaskCount: 1000000n })).toThrow(
+        new Error(
+          "Model validation error: 1 validation error for Template\n" +
+            "Template: Total task count (10000000000) exceeds caller limit of 1000000."
+        )
+      );
+    } finally {
+      opts.free();
+      template.free();
+    }
+  });
+
   it("enforces maxTaskCount on 1-5000000000", () => {
     expect(() =>
       withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), { maxTaskCount: 1000000n }, () => {})
@@ -1327,6 +1370,29 @@ describe("task counts above 2^32 (wasm32)", () => {
           "Expression operation count (at least 4294967295) exceeded limit (10000000)\n" +
             "  range_expr('1-2147483648') + range_expr('1-2147483648')\n" +
             "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+        )
+      );
+    } finally {
+      st.free();
+    }
+  });
+
+  it("rejects a saturated memory projection under the largest limits", () => {
+    // 2^27 values fit the operation limit but not the memory limit: the
+    // projected size saturates at usize::MAX, which is over every limit.
+    // Without that rule this trapped.
+    const st = new mod.SymbolTable();
+    try {
+      expect(() =>
+        mod.evaluateExpression("list(range_expr('1-134217728'))", st, undefined, {
+          operationLimit: 4294967295,
+          memoryLimit: 4294967295,
+        })
+      ).toThrow(
+        new Error(
+          "Expression memory usage (at least 4294967295 bytes) exceeded limit (4294967295 bytes)\n" +
+            "  list(range_expr('1-134217728'))\n" +
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
         )
       );
     } finally {

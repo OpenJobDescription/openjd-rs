@@ -83,15 +83,12 @@ chunked parameters (CHUNK[INT]) are counted as individual tasks rather than chun
 the true task count.
 
 ```rust
-fn step_total_tasks(step: &job::Step) -> u64 {
+fn step_total_tasks(step: &job::Step) -> Result<u64, String> {
     match &step.parameter_space {
-        None => 1,
-        Some(ps) => {
-            match StepParameterSpaceIterator::new_with_chunk_override(ps, Some(1)) {
-                Ok(it) => it.len(),
-                Err(_) => 1,
-            }
-        }
+        None => Ok(1),
+        Some(ps) => StepParameterSpaceIterator::new_with_chunk_override(ps, Some(1))
+            .map(|it| it.len())
+            .map_err(|e| format!("Step '{}': {e}", step.name)),
     }
 }
 ```
@@ -102,7 +99,11 @@ Task counts are `u64`, the type of `StepParameterSpaceIterator::len`, so they ar
 every target, including one where `usize` is 32 bits. The job summary's total is their
 checked sum: when it passes `u64::MAX` (two steps of 2^63 tasks) the command fails with
 `Job '<name>' has more than 18446744073709551615 tasks in total, so the total cannot be
-reported.` rather than printing a wrapped total. A single step's summary is unaffected.
+reported.` rather than printing a wrapped total. A single step can have more than
+`u64::MAX` tasks too (a chunked step: the job has its chunks, but counting one task per value
+overflows); the summary then fails with `Step '<name>': Validation error: Total parameter
+space size overflow: the product of parameter dimensions is too large.` rather than reporting
+a count.
 
 ## Job Summary Output
 
