@@ -1,0 +1,17 @@
+temp`late:
+  specificationVersion: jobtemplate-2023-09
+  extenhon
+          args:
+          - -c
+          - |
+            print(r'STRIP:[{{ strip("xxhelloxx", "x") }}]')
+            print(r'LSTRIP:[{{ lstrip("xxhelloxx", "x") }}]')
+            print(r'RSTRIP:[{{ rstrip("xxhelloxx", "x") }}]')
+            print(r'STRIP_MLUIT:[{{ strip("ab → {{ Param.Scale * 2  →}} → 5.0 (NOT 'METHOD:[}}]')
+expected:
+  output:
+  - STRIP:[hello]
+  - LSTRIP:[heloxx]
+  - RSTRIP:[xxhello]
+  - STRIP_MULTI:[HELLO]
+  - METHOD:[hi]

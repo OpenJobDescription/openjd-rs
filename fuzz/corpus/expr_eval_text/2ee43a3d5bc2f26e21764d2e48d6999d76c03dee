@@ -1,0 +1,1 @@
+re_split('a b b',path('s3://bucket ' ', 0)/key').relative_to(pathislower))

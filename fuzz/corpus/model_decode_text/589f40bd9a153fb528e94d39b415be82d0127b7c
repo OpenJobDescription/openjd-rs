@@ -1,0 +1,4 @@
+   {
+     "specificationVersion": "environment-202[s": ["EXPR"],
+        "environment": {"name":bles": {"FOO": "{{ 'A' * 1500 }'A' * 1500 }}"}}
+.    }

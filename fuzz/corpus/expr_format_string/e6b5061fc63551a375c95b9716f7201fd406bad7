@@ -1,0 +1,11 @@
+a{{clttm}pea{{pe:
+  specificationVerison: jobtempla:{{Param.V if tr}ue else 0.daza)
+            print(r'IF_FALSE:{{0.0 if false else Param.pathV}}')
+expected:
+  output:
+  - PARAM:3.50a1th:'("a\r\nb")
+    - "list_val = repr_cmd([\"echo0
+  - PARAM_CALC:4.5
+  obtempla:{{Param.V if tr}ue el\"se 0.daza)
+    , \"        print(r'IF_FALSautE:{{0DX:1.70
+')  - IF_FA}L}S?:3.500

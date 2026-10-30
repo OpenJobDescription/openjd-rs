@@ -1,0 +1,5 @@
+{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "steps": [{"nae" :"mS", "node": {"script":roundsole6log('hello')"}}]
+    }

@@ -1,0 +1,7 @@
+#vers: if, de,f else, and, or, Anojobtemplate-2022-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefinombined runnableword operators
+          print(r'{{ Param.if if PParam.flag else Param.elram.or }}')
+          print(r'{{ Param.not if not false else Param.None }}')

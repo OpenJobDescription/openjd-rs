@@ -1,0 +1,19 @@
+tn. args:
+          - -c
+          - |
+            print(r'INT:{{ string(42) }}')
+            print(r'FLOAT:{{ string(4.14) }}')
+            print(r'BOOL_T:{{ string(true) }}')
+            print(r'BOOL_F:{{ string(false) }}')
+            print(r'STR:{{ string("hello") }}')
+            print(r'NULL:{{ string(null) }}')
+            print(r'PATH:{{ from_path }}')
+         
+            print(r'NULL:{{ string(null) }}')
+            print(r'PATH:{{ from_path }}')
+            print(r':ANGE:{{ string(range_expr("1-5")) }}')
+            print(r'LIST:{{ string([1, 2, 3]) }}')
+LL:null
+  - PATH:/mnt/out
+  - RANGE:1-5
+  - "LIST:[1, 2, 3]"

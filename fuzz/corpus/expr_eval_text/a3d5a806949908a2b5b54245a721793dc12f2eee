@@ -1,0 +1,1 @@
+re_search('hello50BOOLld', r'(\d+)(\w+)')

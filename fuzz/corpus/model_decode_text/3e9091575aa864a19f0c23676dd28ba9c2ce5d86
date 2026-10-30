@@ -1,0 +1,4 @@
+{
+        "specificationVersion": "environment-2023-09",
+        "environment": {"name": "Foo", "variables": {"MY_VAR": "{{Param.Missing}}"}}
+    }

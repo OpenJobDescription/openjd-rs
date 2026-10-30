@@ -1,0 +1,2 @@
+specificati}onRersion: jobtemplat  modec
+        - "print(r\"{{ re_sub('hello', '(h)', '$1') }} "0"

@@ -1,0 +1,1 @@
+min(Task.Param.Frame + Param.Frak, Param.FrameEnd) - 1

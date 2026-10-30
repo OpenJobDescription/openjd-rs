@@ -1,0 +1,310 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
+//! Fuzz harness for openjd-rs.
+//!
+//! Every fuzz target is a plain `fn(&[u8])` in [`targets`], listed in
+//! [`targets::TARGETS`]. The libFuzzer binaries in `fuzz_targets/` call them,
+//! and `tests/replay.rs` replays the committed corpus through them on stable.
+//! A target signals a finding by panicking — either a panic inside the code
+//! under test, or an [`oracle!`] violation: a property the input must satisfy
+//! (type soundness, round trips, redaction, containment, ...) that did not
+//! hold. See `fuzz/README.md` for the target catalogue and the bug classes
+//! each oracle encodes.
+
+// Overflow checks follow debug assertions unless a profile turns them off,
+// and this crate's profiles turn both on. Refuse to build otherwise: a fuzz
+// build without overflow checks silently wraps the arithmetic bugs most of
+// these targets exist to catch.
+#[cfg(not(debug_assertions))]
+compile_error!(
+    "openjd-fuzz must be built with debug assertions (and overflow checks). \
+     Use `cargo fuzz build` / `cargo test` with this crate's profiles."
+);
+
+pub mod alloc;
+pub mod gen;
+pub mod targets;
+
+/// The CLI's argument parsers live in the `openjd` bin crate, which has no
+/// library target. Include their source directly (the same `#[path]`
+/// technique openjd-sessions uses for the helper's framer). `params.rs`
+/// refers to `crate::common`, which resolves to the module below.
+#[path = "../../crates/openjd-cli/src/common.rs"]
+#[allow(dead_code, clippy::all)]
+pub mod common;
+
+/// See [`common`].
+#[path = "../../crates/openjd-cli/src/run/params.rs"]
+#[allow(dead_code, clippy::all)]
+pub mod cli_params;
+
+/// The cross-user helper's line framer (std + serde_json only).
+#[path = "../../crates/openjd-sessions/src/helper/src/framer.rs"]
+#[allow(dead_code, clippy::all)]
+pub mod helper_framer;
+
+/// The cross-user helper's wire protocol.
+#[path = "../../crates/openjd-sessions/src/helper/src/protocol.rs"]
+#[allow(dead_code, clippy::all)]
+pub mod helper_protocol;
+
+/// Report an oracle violation: a property that must hold for every input did
+/// not. Panics, which libFuzzer records as a crash with the input attached.
+#[macro_export]
+macro_rules! oracle {
+    ($cond:expr, $($fmt:tt)+) => {
+        if !$cond {
+            panic!("ORACLE VIOLATION [{}]: {}", stringify!($cond), format!($($fmt)+));
+        }
+    };
+}
+
+/// An oracle for a bug that is known and not yet fixed. A violation is
+/// ignored unless `OPENJD_FUZZ_KNOWN=1`, in which case it panics like
+/// [`oracle!`]. Each id must be listed in [`known::KNOWN_ISSUES`]; when the
+/// bug is fixed, replace the `known_issue!` with `oracle!` and delete the
+/// entry, so the fuzzer guards the fix.
+#[macro_export]
+macro_rules! known_issue {
+    ($id:literal, $cond:expr, $($fmt:tt)+) => {
+        if !$cond {
+            $crate::known::hit($id, || format!($($fmt)+));
+        }
+    };
+}
+
+pub mod known {
+    //! Bugs the fuzzer has found that are not fixed yet. Each one is
+    //! reproducible from `regressions/known/<id>` with
+    //! `OPENJD_FUZZ_KNOWN=1`, and documented in `fuzz/README.md`.
+
+    /// `(id, summary)` for every open known issue.
+    pub const KNOWN_ISSUES: &[(&str, &str)] = &[
+        (
+            "expr-parser-exponential-recovery",
+            "Parsing doubles in time per level of unclosed bracket nesting inside \
+             ruff_python_parser's error recovery: `\"[i f(\" * 20 + \"x\"` (101 bytes) takes \
+             0.8 s in release, so a ~150-byte template field stalls `openjd check` for minutes; 363 bytes \
+             of mostly `.` takes 1.6 s \
+             (denial of service). Text targets skip such inputs (see \
+             `skip_deep_unclosed_brackets`).",
+        ),
+        (
+            "model-param-type-serde-spelling",
+            "`JobParameterType` serializes with serde's variant names (`\"Int\"`, \
+             `\"ListListInt\"`) while its `Display` and the template spelling are `\"INT\"`, \
+             `\"LIST[LIST[INT]]\"`, so a serialized `Job`'s `parameters[*].paramType` (and \
+             openjd-for-js, which uses `{:?}`) does not use the spec spelling.",
+        ),
+        (
+            "expr-static-fold-host-path-format",
+            "Template validation folds path operations on literals in the validating host's \
+             path format, so a format-dependent condition (`is_absolute(path('../a') / \
+             path('C:\\\\'))`) is folded for the submitting machine, not the worker: an \
+             expression typed `list[nulltype]` (always empty) on Linux yields a non-empty list \
+             on a Windows worker.",
+        ),
+        (
+            "expr-conditional-list-element-join",
+            "A list element whose type depends on a conditional is typed with the numeric \
+             join of its branches, dropping the others: `[1 if c else (2.5 if d else 'a') for x \
+             in xs]` is `list[float | int]` statically, and the elements mix (`make_list \
+             expected float element, got string`) at run time.",
+        ),
+        (
+            "expr-listcomp-non-iterable-runtime-check",
+            "An unresolved iterable whose type cannot be iterated binds `any` (#462, \
+             specs/expr/evaluator.md: a type from an operation on unknown values may be \
+             imprecise), so `[x for x in Task.Param.I]` with an INT task parameter validates \
+             and then fails every run with `Cannot iterate over int`, even though a declared \
+             parameter's type is exact.",
+        ),
+        (
+            "expr-ordering-runtime-type-check",
+            "The ordering operators are registered `(T1, T2) -> bool` and refuse mismatched \
+             operand types only at run time (`do_compare`; documented in \
+             specs/expr/function-library.md), so `Param.Path < 1`, `A > 5 > 5` with a BOOL \
+             parameter, or two `range_expr`s validate and then fail on the worker.",
+        ),
+        (
+            "expr-boolop-static-type",
+            "(The result typing of `a or b` after an unresolved operand was fixed in #435, and \
+             name errors there in #462.) Type errors in operands after an unresolved one are \
+             still absorbed as if value-dependent: `Param.F or len([1] + ['a']) > 0` passes \
+             validation, though `[1] + ['a']` alone is refused, and fails at run time with \
+             `Cannot concatenate list[int] and list[string]`.",
+        ),
+        (
+            "expr-unbound-return-typevar",
+            "Signatures whose return type variable no parameter binds (`__add__: (list[T1], \
+             list[T2]) -> list[T3]`, `(list[T1], range_expr) -> list[T2]`) lose the element type \
+             statically and admit mismatched operands: `[False] + Param.R` with a `range_expr` \
+             parameter is `list[T2]` statically and fails at run time with `Cannot concatenate \
+             list[bool] and range_expr`.",
+        ),
+        (
+            "expr-union-arg-overload",
+            "With a union-typed argument (from a conditional or a union-returning function) \
+             static dispatch can pick one overload's return type. The original examples \
+             (`(a if c else re_findall(..)) * 28`, `L[::z]` on a `range_expr`) were fixed in \
+             #462; regressions/expr_eval_gen/known-expr-union-arg-overload still mismatches.",
+        ),
+        (
+            "expr-dispatch-derive-mismatch",
+            "`derive_return_type` and run-time dispatch can pick different overloads when an \
+             argument coerces: `path + path` derives `string` (via `(string, string)`) but \
+             dispatches `(path, string) -> path`, so validation and run time disagree on the type. \
+             Overloads with identical parameters (`re_findall: (string, string) -> list[string]` \
+             and `-> list[list[string]]`) derive the first but may return the second.",
+        ),
+        (
+            "expr-float64-serde-precision",
+            "`Float64` serializes as a JSON number, and serde_json without its `float_roundtrip` \
+             feature can reparse it one ULP off, so a job's floats do not round-trip through JSON.",
+        ),
+        (
+            "expr-empty-range-transport",
+            "An empty `range_expr` (e.g. `range_expr('1-3')[5:9]`) transports as \"\", which \
+             does not decode, so it cannot cross the template → session boundary.",
+        ),
+        (
+            "model-float-range-unchecked-scope",
+            "FLOAT task-parameter ranges skip the symbol-scope check INT/STRING/PATH ranges get: \
+             `[1.5, \"{{Param.X}}\"]` with no `X` passes validation and fails in create_job. \
+             Existing tests assert the current behavior; needs a spec/Python parity decision.",
+        ),
+        (
+            "model-preprocess-path-idempotence",
+            "`preprocess_job_parameters` is not idempotent for PATH / LIST[PATH] values (open \
+             #388 family): under the Windows path format a URI element `s3://bucket/x` is \
+             normalized to `s3:\\bucket\\x`, which a second pass treats as relative and joins \
+             to the working directory.",
+        ),
+        (
+            "snapshots-type-change-diff",
+            "`diff_snapshots` on a file → directory change emits a deleted file and a new dir at \
+             the same path, which the diff's own `validate()` rejects as a duplicate path.",
+        ),
+        (
+            "snapshots-file-as-ancestor",
+            "`Manifest::validate()` accepts a file that is also the ancestor of another entry \
+             (`/a` and `/a/b`, including entries beneath a symlink); diff/compose then treat \
+             the file's deletion as deleting the subtree, so `compose(a, [diff(a, b)]) != b`, \
+             and `subtree_snapshot` with symlink collapsing emits duplicate paths.",
+        ),
+        (
+            "snapshots-collapse-nested-symlink",
+            "`subtree_snapshot` with a collapsing symlink policy pulls a symlinked directory's \
+             contents into the subtree but leaves a nested symlink's absolute target as-is, so \
+             the relative result fails `validate()` (`symlink_target path style mismatch`).",
+        ),
+        (
+            "snapshots-v2025-symlink-target-dirs",
+            "The v2025 encoder emits directory entries for a symlink target's ancestors; when \
+             one of those is a file (e.g. `/r/a` is a file and `/r/x -> /r/a/c`, or `/r/b -> \
+             /r/b/b`), the encoded manifest fails to decode with a duplicate path, though the \
+             input passed `validate()`.",
+        ),
+        (
+            "snapshots-compose-dirs",
+            "`compose_snapshot_with_diffs` / `compose_diffs` synthesize ancestor dirs (\"/\" can \
+             appear twice), mark deleted files as deleted dirs, and composing diffs first does not \
+             always equal applying them in sequence.",
+        ),
+    ];
+
+    /// Known issue `expr-parser-exponential-recovery`: should a text target
+    /// skip this expression text? On malformed input ruff's error recovery
+    /// grows exponentially with the number of brackets left open, so the
+    /// fuzzer would otherwise spend its time rediscovering the slowdown. A
+    /// timeout cannot be gated like an oracle, so the input is skipped
+    /// instead; `OPENJD_FUZZ_KNOWN=1` disables the skip.
+    ///
+    /// Measured (release build) over the corpus: every parse over 50 ms had
+    /// at least 6 brackets still open and over 200 bytes, or nesting deeper
+    /// than 12; length alone is not the cause (a 450-byte balanced input
+    /// parses in microseconds), but with a few open brackets parse time still
+    /// grows with length (~1.4 s at 4 KiB, opt-level 3, no sanitizer), so
+    /// inputs over 1 KiB are skipped too.
+    pub fn skip_deep_unclosed_brackets(text: &str) -> bool {
+        if std::env::var_os("OPENJD_FUZZ_KNOWN").is_some_and(|v| v == "1") {
+            return false;
+        }
+        // A closer only closes its own kind of opener: `[ ... )` leaves the
+        // `[` open for the parser, so it stays open here too.
+        let mut stack: Vec<char> = Vec::new();
+        let mut max_depth = 0usize;
+        for c in text.chars() {
+            let opener = match c {
+                '(' | '[' | '{' => {
+                    stack.push(c);
+                    max_depth = max_depth.max(stack.len());
+                    continue;
+                }
+                ')' => '(',
+                ']' => '[',
+                '}' => '{',
+                _ => continue,
+            };
+            if stack.last() == Some(&opener) {
+                stack.pop();
+            }
+        }
+        let depth = stack.len();
+        let skip = max_depth > 12 || (depth >= 6 && text.len() > 200) || text.len() > 1024;
+        if skip {
+            record("expr-parser-exponential-recovery");
+        }
+        skip
+    }
+
+    /// [`skip_deep_unclosed_brackets`] applied to each `{{ ... }}`
+    /// interpolation of a format string or template document only, so deep
+    /// but harmless JSON/YAML nesting is still fuzzed.
+    pub fn skip_deep_interpolations(text: &str) -> bool {
+        let mut rest = text;
+        while let Some(a) = rest.find("{{") {
+            let after = &rest[a + 2..];
+            let end = after.find("}}").unwrap_or(after.len());
+            if skip_deep_unclosed_brackets(&after[..end]) {
+                return true;
+            }
+            rest = &after[end.min(after.len())..];
+        }
+        false
+    }
+
+    thread_local! {
+        static RECORDED: std::cell::RefCell<std::collections::BTreeSet<String>> =
+            const { std::cell::RefCell::new(std::collections::BTreeSet::new()) };
+    }
+
+    fn record(id: &str) {
+        assert!(
+            KNOWN_ISSUES.iter().any(|(k, _)| *k == id),
+            "known_issue! id {id:?} is not listed in KNOWN_ISSUES"
+        );
+        RECORDED.with(|r| {
+            if !r.borrow().contains(id) {
+                r.borrow_mut().insert(id.to_string());
+            }
+        });
+    }
+
+    /// The known-issue ids hit on this thread since the last call (a set,
+    /// so it stays bounded over a long fuzzing run). The replay tests use
+    /// it to check that each `known-<id>` reproducer still reproduces.
+    pub fn take_recorded() -> std::collections::BTreeSet<String> {
+        RECORDED.with(|r| std::mem::take(&mut *r.borrow_mut()))
+    }
+
+    /// Record a known-issue violation; with `OPENJD_FUZZ_KNOWN=1`, fail.
+    pub fn hit(id: &str, msg: impl FnOnce() -> String) {
+        record(id);
+        if std::env::var_os("OPENJD_FUZZ_KNOWN").is_some_and(|v| v == "1") {
+            panic!("KNOWN ISSUE [{id}]: {}", msg());
+        }
+    }
+}

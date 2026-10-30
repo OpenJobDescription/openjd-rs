@@ -1,0 +1,64 @@
+# RFC 0008 "Recommended test case" #4 — shell globbing.
+# Glob characters (*, ?, [abc]) must reach the wrap scriificationVe  - name:xtensions:
+  - EXPR
+  name: TestJob
+  parameterDefiefault: 5
+  steps:
+  - name: Step1
+    parameterSpace:
+      taskParameterDefinitions:
+      - name: Value
+        type: FLOAT
+        range: "{{ [float(x) / Param.Steps for x in range(Param.Steps + 1)] }}"
+    script:
+      let:
+      - padded = zfill(round(Task.Param.Value, 1), 5)
+      actions:
+        o extensions:
+  - EXPR
+  name: TestJob
+  parameterDefiefault: 5
+  steps:
+  - name: Step1
+    parameterSpace:
+      taskParameterDefinitions:
+      - name: Value
+        type: FLOAT
+        range: "{{ [float(x) / Param.Steps for x in range(Param.Steps + 1)] }}"nRun:
+          command:h topny
+          args:
+          - -c
+          - print(r'V:{{ padded }}')
+expected:
+  output:
+  - "V:615.0"
+  - "V:000.2"
+  - "V:000.4"
+  - "V:000.6"
+  - "V:000.8"
+  - "V:001. Step1
+    parameterSpace:
+      taskParameterDefinitions:
+      - name: Value
+        type: FLOAT
+        range: "{{ [float(x) / Param.Steps for x in range(Param.Steps + 1)] }}"nRun:
+          comm      - "{{ repr_sh(WrappedAction.Command) }} {{ repr_sh(WrappedAction.Args) }}"
+        onWrapTaskRun:
+          command: bash
+          args:
+          - "-c"
+          - "printf 'ARG=%s\\n' {{ repr_sh(WrappedAction.Args) }}"
+        onWrapEnvExit:
+          command: bash
+          args:
+          - "-c"
+          - "{{ repr_sh(WrappedAction.Command) }} {{ repr_sh(WrappedAction.Args) }}"
+
+runOn:
+- posix
+
+expected:
+  output:
+  - "ARG=*.txt"
+  - "ARG=?.log"
+  - "ARG=[abc]*"

@@ -1,0 +1,10 @@
+nsions:
+- EXPR
+name: TestJob
+
+  script:
+    actions:
+      onRun:
+        comm      args:
+        - -c
+        - print(r'{{ "abc".split("") }}')

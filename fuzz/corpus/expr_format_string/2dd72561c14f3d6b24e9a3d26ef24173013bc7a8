@@ -1,0 +1,13 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actionspetemplate-2023      args:
+        - -c
+        - print(r'{{ (for x$ in [1, 2, 3]] }}')
+         , 6]"
+  - "UNDER:[11, 21]"

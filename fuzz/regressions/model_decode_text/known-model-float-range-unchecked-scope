@@ -1,0 +1,14 @@
+{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Foo",
+        "extensions": ["EXPR"],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "F", "type": "FLOAT", "range": [1.5, "{{Param.X}}", 3.5]}
+                ]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }
