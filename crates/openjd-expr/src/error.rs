@@ -378,6 +378,16 @@ impl std::error::Error for ExpressionError {
     }
 }
 
+/// A budget counter for an error message: `usize::MAX` means the counter
+/// saturated, so the true count is at least that.
+fn saturated_count(n: usize) -> String {
+    if n == usize::MAX {
+        format!("at least {n}")
+    } else {
+        n.to_string()
+    }
+}
+
 /// Render a caret-annotation line matching the format used by
 /// [`ExpressionError`]'s `Display` impl: `col` leading spaces, then
 /// `caret_idx` tildes, then `^`, then trailing tildes to cover
@@ -393,16 +403,6 @@ impl std::error::Error for ExpressionError {
 /// crate — `Display for ExpressionError`, `message_with_expr_prefix`,
 /// and the if/else both-branches-fail renderer in `eval_ifexp` all call
 /// it to guarantee identical output.
-/// A budget counter for an error message: `usize::MAX` means the counter
-/// saturated, so the true count is at least that.
-fn saturated_count(n: usize) -> String {
-    if n == usize::MAX {
-        format!("at least {n}")
-    } else {
-        n.to_string()
-    }
-}
-
 pub(crate) fn write_caret_line(
     w: &mut dyn std::fmt::Write,
     col: usize,
