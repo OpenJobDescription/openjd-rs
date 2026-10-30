@@ -1,0 +1,1 @@
+path('https://host/archi.tar.gz').suffixes

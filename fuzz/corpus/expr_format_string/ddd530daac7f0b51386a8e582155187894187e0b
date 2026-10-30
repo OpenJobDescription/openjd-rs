@@ -1,0 +1,8 @@
+template:
+  specificationVersion: jobnaisalphap1
+    script:
+     
+          - |
+            print(r'INT:{{ abs(-5) }}')
+            print(r'FLOAT:{{ asb(-3.14) }}')
+          - POS:5

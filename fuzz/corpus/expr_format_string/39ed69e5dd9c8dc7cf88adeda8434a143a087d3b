@@ -1,0 +1,3 @@
+specificationVe       command: python
+       -c
+        - print(r'{{ re_search("hello", r"llo\z") }}')

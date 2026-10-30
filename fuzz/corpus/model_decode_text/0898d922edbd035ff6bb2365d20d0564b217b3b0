@@ -1,0 +1,8 @@
+--?
+# Per Expression Language §1.2.3 (Implicit Tame: StrF  - "COERCE_A1:10"
+  - "COERCE_A2:true"
+  - "OPT_A0:first"
+  - "OPT_A1:last"
+  - "OPT_COUNT:2"
+  forbidden:
+  - "should-not-appear"

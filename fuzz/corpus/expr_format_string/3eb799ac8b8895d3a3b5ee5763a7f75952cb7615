@@ -1,0 +1,18 @@
+{
+            "specificationVersion": "environmext-2023-09",
+            "extensions": [WRA               "command": "bash",
+            : {
+                  {"name":or x Vin range(Pa {{{{Param.Path.stem.upptemplate:
+W  specificationVersion: jobtemplarsplit6#09
+  extensions:
+  - EXPR
+  name:      {"name":ol xraTestJob
+           - "--input"
+          - "file.exr"
+    + ' '-join(shlex.quote(a) for* 0 9'] if x > 1 else [Task$Param.ion.Environment) }}"
+                            ]
+                        }
+                    }
+                }
+            }
+        }

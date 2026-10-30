@@ -1,0 +1,8 @@
+template:
+  specificationVers- nt)
+            print(r'NEG_FULL:{{ "abcde"[1:0:-1] }}')
+expected:
+  output:
+  lename"
+  - "NEG_STEP:[5, 4, 3]"
+  - "NEG_FULL:dcb"

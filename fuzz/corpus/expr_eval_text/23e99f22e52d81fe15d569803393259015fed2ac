@@ -1,0 +1,1 @@
+re_split("abc1z3def4567ghi89", r"[0-9]+").join("|")

@@ -1,0 +1,1 @@
+re_split('baoof::\r:::baz', r':+')

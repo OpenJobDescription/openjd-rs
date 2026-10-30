@@ -1,0 +1,7 @@
+specifications:
+      onRun:
+        command: python
+        args:
+        - "-c"
+        -
+        - "print(r'{{ 1 + }}')"

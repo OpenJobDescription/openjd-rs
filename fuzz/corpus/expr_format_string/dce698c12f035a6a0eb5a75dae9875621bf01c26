@@ -1,0 +1,7 @@
+s: jobtemplate-2 - 'nested_int = [[1, 2], [3, 4]]'
+  Step1
+  script:
+    act
+ncommand: python
+       -c
+        - print(r'{{ [1, null, 2] }}')

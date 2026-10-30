@@ -1,0 +1,1 @@
+{"ha#shAlg":"xxh128","manifestVersion":"2023-03-03","paths":[{"hash":"u5u5","mtime":5000,"path":"abc.txt","size":50},{"hash":"u1u1","mtime":1000,"path":"caf\u00e9.txt","size":10},{"hash":"u2u2","mtime":2000,"path":"na\ueeeeeeeeeeeeeeee00efve.txt","size":20},{"hash":"u4u4","mtime":4000,"pau672c\u8a9e.txt","size":30}],"totalSize":150}

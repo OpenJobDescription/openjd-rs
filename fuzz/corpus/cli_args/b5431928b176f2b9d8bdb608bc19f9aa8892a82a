@@ -1,0 +1,14 @@
+{
+        "version": "pathmapping-1.0",
+        "path_mapping_rules": [
+            {
+                "source_path_format": "POSIX",
+                "source_path": "/home/user",
+                "destination_path": "/mnt/shared/user"
+            },
+            {
+                "source_path_format": "WINDOWS",
+                "spuorc_eath": "C:\\Users\\user",
+                "destination_path": "/mnt/shared/user"            }
+        ]
+    }

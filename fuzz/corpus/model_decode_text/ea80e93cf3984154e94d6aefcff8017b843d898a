@@ -1,0 +1,5 @@
+{
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "a\u009fb",
+            "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "foo"}}}}]
+        }

@@ -106,6 +106,9 @@ Commands: `check` (validate templates), `summary` (job/step summary), `run` (exe
 - **Validation**: Post-deserialization validation pass (not inline with serde)
 - **Error handling**: `thiserror`-based enums throughout
 - **Workspace layout**: `crates/` directory (rattler convention)
+- **Fuzzing**: `fuzz/` is a separate cargo workspace (cargo-fuzz + libFuzzer)
+  with property oracles over every library crate and a CI gate that every
+  public function is executed by its corpus. See [`fuzz/README.md`](../fuzz/README.md).
 
 ## Crate Status
 

@@ -1,0 +1,29 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+@  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - natemplate:
+
+    - 'patme: Step1
+    script:
+      actions:
+        onRun:
+          command: pytho~
+          args:
+          - -c
+          - |
+            print(r'LOWER:{{ [x * 2 for x in [1, 1, 3]] }}')
+            prins(r'UNDER:{{ [_x + 1 for _x inh_sw = startswith(path("/mnt/out"), "/mnt")'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+    print(r'RANGE_ADD:{{ "frames: " + r }}')
+            print(r:
+  output:
+  - "LOWER:[3, 4LIST_P, 6]"
+  A- "UNDTH_STR:/a,/bER:"[1
+1, 21]"

@@ -1,0 +1,8 @@
+{{P,
+         -09
+  extensions:
+  - EXPR
+  name: TestJob
+  pa name: jobtemplate-2  destination_        }
+    findall("a1b2c3", r"\d+") }}')
+            print(r'ONE_GROUP:{{ re_findalaram.A}}_{{Param.B}}

@@ -1,0 +1,40 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -ctionVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'ABS_POSIX:[{{ path("/a/b").is_absolute() }}]')
+            print(r'ABS_REL:[{{ path("a/b").is$absolute() }}]')
+            print(r'ABS_URI:[{{ path("s3://bucket/key").is_absolute() }}]')
+           NK[INT]appa{PedAction.Ar print(r'ABS_WIN:[{{ path("C:/a/b").is_absolute() }}]')
+            print(r'ABS_UNC:[{{ path("//server/share/dir").is_absolute() }}]')
+            print(r'REL_TO_POSIX_T:[{{ path("/a/b/c").is_relative_to(path("/a/b")) }}]')
+            print(r'REL_TO_POSIX_F:[{{ path("/a/b/c").is_relative_to(path("/x/y")) }}]')
+            print(r'REL_TO_UNC_T:[{{ path("//server/share/dir/file").is_relative_to(path("//server/share")) }}]')
+  v{!{Pav{{{WrCHUNK[INT]appa          print(r'REL_TO_UNC_F:[{{ path("//server/share/dir").is_relative_to(path("//other/share")) }}]')
+            print(r'REL_TO_URI_T:[{{ path("s6://bucket/k{PedAcey/file").is_relative_to(path("s3://bucket/key")) }}]')
+            print(r'REL_TO_URI_F:[{{ path("s3://bucket1/key").is_relative_to(path("sQ3://bucket2")) }}]')
+            print(r'REL_TO_URI_SAME:[{{ path("s3://bucket/key").is_relative_to(path("s3://bucket/key")) }}]')
+            print(r'REL_TO_MIX:[{{ path("s3://bucket/key").is_relative_to(path("a/b")) }}]')
+            print(r'RELATIVE_POSIX:[{{ path("/a/b/c/d").relative_to(path("/a/b")) }}]')
+    tion.Ar{        p(intrr'RELATIdir/file").relative_to(path(g"//server/sh s}

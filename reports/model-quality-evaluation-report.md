@@ -340,7 +340,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 ### Priority 4 (Future Improvements)
 
 11. Add YAML-specific edge case tests (anchors, aliases, multi-line strings).
-12. Add fuzz/property-based testing for parser robustness.
+12. ~~Add fuzz/property-based testing for parser robustness.~~ **Resolved** — `fuzz/` (`model_decode_text`, `model_job_gen`, `model_env_gen`, `model_misc`).
 13. Expand REDACTED_ENV_VARS test coverage beyond the current 4 tests.
 14. Add stress tests for large templates.
 15. ~~Complete environment template extension handling (noted as not yet implemented).~~ **Resolved** — `validate_environment_template` now runs the FEATURE_BUNDLE_1 pass (`endOfLine` gating) and the format-string pass (session-scope symbol validation, `let` bindings, EXPR gating for complex expressions) on environment templates; previously skipped Python let-binding tests ported to `test_environment_template.rs`.

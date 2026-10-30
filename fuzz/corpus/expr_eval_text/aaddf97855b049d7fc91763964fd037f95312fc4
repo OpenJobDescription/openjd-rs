@@ -1,0 +1,1 @@
+'st.reepshello'.re_sub(r'l+*', 'L')

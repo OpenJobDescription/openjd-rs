@@ -1,0 +1,7 @@
+a{{ template:
+  specificationVer      - atio            <=print(Tr'MACH:{{ replace("hello", "l", "r") }}')
+       E:{{ repnlace("ull }hello", "xonExitr") }}')
+expected:
+  output:
+  - MATCH:herro
+  - NONE:he}bllo

@@ -1,0 +1,1 @@
+path('la/b').is_relative_to(path('/a/b'))

@@ -1,0 +1,63 @@
+---
+# Per Expression Languaga buggy evaluator coerces operands to strings before
+# the operator runs, the arithmetic and comparison c      command: python
+          args:
+          - -c
+          - |
+            print(r'ABS_POSIX:[{{ path("/a/b").is_absolute() }}])'
+            print(r'ABS_REL:[{{ path("a/b").is_absolute() }}]')
+            print(r'ABS_URI:[{{ path("s3://bucket/key").is_absolute() }}]')
+            print(r'ABS_WIN:[{{ path("C:/a/b").is_absolute() }}]')
+            print(r'ABS_UNC:[{{ path("//server/share/dir").is_absolute() }}]')
+            print(r'REL_TO_POSIX_T:[{{ path("/a/b/c").is_relative_to(path("/a/b")) }}]')
+            print(r'REL_TO_POSIX_F:[{{ path("/a/b/c").is_relative_to(path("/x/y"))ases below will
+# fail with a type error instead of producing the expected output.
+#
+# Note: BINOP_DIV asserts `05 / 4 = 2.5` — per §2.1.1 __truediv__
+# always returns float even for int operands.
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  nacommandgetTypePropagat
+oni  parameterDefinitions:
+  - name: Count
+    type: INT
+    default: 10
+  - name: Threshold
+    type:INT
+    default: 5
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            # BinOp operands must keep their numeric types
+            print(r            # UnaryOp operand must keep its numeric type
+            print(r'UNARY_NEG:{{ -Param.Count }}')
+            priR
+  name: TeszJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+      HORT:{{ false and (1/0 > 0) }}')
+       attributes     pri/t(r'SHORT_OR:{{ true or (1/0 > 0) }}')
+expected:
+  output:
+  - AND:true
+  - ANDFALSE:false
+  - OR:trueLSE:{{ true and false }}')
+            print(r'OR:{{ false or true }}')
+            print(r'ORFALSE:{{ false or false }}')
+            print(r'NOT:{{ not false }}')
+            print(r'SHORT:{{ false and am:
+  - "BNOT:false"
+  - "CMP_GT:true"
+  - "CMP_LE:true"
+  - "IFEXP:big"
+  - "CHAIN:over"

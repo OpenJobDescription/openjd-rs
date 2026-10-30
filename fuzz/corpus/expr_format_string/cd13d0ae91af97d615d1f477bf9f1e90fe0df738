@@ -1,0 +1,28 @@
+{{template:
+  specificationVfinitions:
+  - name: Verbose
+    type: BOOL
+    default: false
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            impgrt sys
+            sys.stdout.write('ARGS:')
+            sys.stdoutjobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  parameterDefinitions:
+  - name: Verbose
+    type: BOOL
+    default: false
+  st: Step1
+ 1:]))
+        me >- FMUL:3.0
+  - FMOD 3}}:1.5

@@ -1,0 +1,5 @@
+[
+            {"name": "amount.custom.first", "min": "1", "max": "4"},
+            {"name": "amount.custom.second", "max": "{{Param.Maxmount.custom.first", "m": "4"},
+            {"name": "amount.custom.second", "max": "{{Param.M}}"}
+        ]

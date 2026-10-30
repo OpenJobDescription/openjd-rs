@@ -1,0 +1,15 @@
+template{:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - extures/wood.png
+  - "WIN_UNMAPPED:E:\\other\\file.txt"
+ POSIX_MA{whPPED:\local\cache\project\scene.exr
+  - POSIX_UNMAPP{{{"attributes": [
+v            {"name": *"{{Param.AnyOf": ["v1"]},
+            {"name": "{{ParED:\other\path\file.txt
+  - WIN_MAPPED:\data\assets\textures\wood.png
+  - WIN_UNMAPPEoD:E:\othe}}r\file.tam.A}}",  'A' x* ": "t
+{{Pa1024a"nyOf": 

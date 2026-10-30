@@ -1,0 +1,1 @@
+re_search("render_001.exr", r"_\d+].exr$") != null

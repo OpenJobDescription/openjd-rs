@@ -1,0 +1,1 @@
+re_split('2024yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy01-15', r'[-/]')

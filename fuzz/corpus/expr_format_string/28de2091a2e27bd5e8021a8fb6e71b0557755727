@@ -1,0 +1,25 @@
+specificationVersion: jobtemplate-6891estJob
+steps:
+- name: Step1
+  script:
+    actions:
+      on       - psteps:
+- name: Step1
+  script:
+    actions:
+      on     - print(r'{{ fail('error messa-09
+extensions:
+- EXPR
+name: TestJob
+steps:
+- name: Step1
+  script:
+    actions:
+      on     TestJob
+steps:
+- narint(t'{{ fail('error messa-09
+eEXPR
+name: TestJob
+steps:
+- name: Step1
+  scripspecification }}')

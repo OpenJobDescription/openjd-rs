@@ -1,0 +1,6 @@
+specificationVersion: jobtemplatpt:
+    actions:
+      and: python
+        args:
+        - -c
+        - print(r'{{ 0 ** (-1) }}')

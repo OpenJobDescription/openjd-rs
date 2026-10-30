@@ -167,6 +167,6 @@ Additional note for spec cross-check: `cmd_quote` does not double backslashes pr
 ### Priority 4 — Tests and robustness
 
 19. **Upgrade the 29 statement-rejection tests in `test_evaluation.rs` to full-message assertions**; tighten `test_regex_validation.rs` and the four bare `is_err()` checks in `test_path_mapping.rs`; pin the behavior in `test_unresolved_eval.rs:256`.
-20. **Add a property-based/fuzz harness** (proptest or cargo-fuzz) asserting the evaluator never panics on arbitrary input — it would have caught X1–X8 mechanically; port the spirit of Python's `test_fuzz.py`.
+20. ~~**Add a property-based/fuzz harness** (proptest or cargo-fuzz) asserting the evaluator never panics on arbitrary input — it would have caught X1–X8 mechanically; port the spirit of Python's `test_fuzz.py`.~~ **Resolved** — `fuzz/` (cargo-fuzz), with type-soundness, round-trip, and allocation-budget oracles beyond never-panic.
 21. **Extract a shared `tests/integration/common.rs`** for the copy-pasted eval/assert helpers; remove the duplicated `basic_types` unit test and redundant `eval_fails` twins.
 22. **Move the format-string segment cap inside the parse loop**; ~~replace `mul_list`'s per-element `count_op` loop with a single `count_ops(n)`~~ **Resolved** — list multiplication now bulk-meters the checked result length; add list-comparison fast paths that avoid per-element `String` clones.

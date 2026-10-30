@@ -1,0 +1,242 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# Copyright by contributors to this project.
+# SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
+# Fuzz harness for openjd-rs. See README.md.
+#
+# One crate, two consumers:
+#   - `cargo fuzz` (nightly, libFuzzer + sanitizers) builds the bins in
+#     `fuzz_targets/`, each a one-line shim over `openjd_fuzz::targets::*`.
+#   - `cargo test` (stable, any OS) replays the committed corpus and
+#     regressions through the same target functions (`tests/replay.rs`), so
+#     every recorded input is re-checked on Linux, macOS, and Windows without
+#     a nightly toolchain.
+#
+# The crate is its own workspace (the empty `[workspace]` table) so it never
+# joins the root workspace's lockfile, release-plz, cargo-deny, or MSRV checks.
+
+[package]
+name = "openjd-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "(Apache-2.0 OR MIT)"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[features]
+default = ["libfuzzer"]
+# The libFuzzer runtime. `cargo fuzz` needs it; the stable replay tests run
+# with `--no-default-features` so they never compile libFuzzer's C++.
+libfuzzer = ["dep:libfuzzer-sys"]
+
+[dependencies]
+libfuzzer-sys = { version = "0.4", optional = true }
+arbitrary = { version = "1", features = ["derive"] }
+indexmap = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde-saphyr = "2"
+openjd-expr = { path = "../crates/openjd-expr" }
+openjd-model = { path = "../crates/openjd-model" }
+openjd-sessions = { path = "../crates/openjd-sessions", features = ["fuzzing", "test-utils"] }
+openjd-snapshots = { path = "../crates/openjd-snapshots" }
+
+[dev-dependencies]
+# `examples/demangle.rs`, used by scripts/check_fuzz_api_coverage.py.
+rustc-demangle = "0.1"
+
+[lib]
+# The lib `#[path]`-includes source files from other crates whose own
+# `#[cfg(test)]` modules reference items that only exist there. Never build
+# the lib as a unit-test target; the integration tests in `tests/` cover it.
+test = false
+doctest = false
+
+# Fuzz builds: keep debug assertions and overflow checks on. Most of the bugs
+# this harness exists to catch were `attempt to add with overflow` panics,
+# which a plain release build silently wraps. `targets::init` verifies at
+# startup that overflow checks really are on, so a profile change that turns
+# them off fails loudly instead of quietly disarming every target.
+[profile.release]
+debug = 1
+debug-assertions = true
+overflow-checks = true
+
+# Replay tests: overflow checks are on by default in dev; opt-level 1 keeps
+# the expression evaluator fast enough to replay the corpus in seconds.
+[profile.dev]
+opt-level = 1
+
+# One libFuzzer binary per entry in `targets::TARGETS` (checked by tests/replay.rs).
+
+[[bin]]
+name = "expr_parse"
+path = "fuzz_targets/expr_parse.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "expr_eval_text"
+path = "fuzz_targets/expr_eval_text.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "expr_eval_gen"
+path = "fuzz_targets/expr_eval_gen.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "expr_format_string"
+path = "fuzz_targets/expr_format_string.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "expr_range"
+path = "fuzz_targets/expr_range.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "expr_int_range"
+path = "fuzz_targets/expr_int_range.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "expr_type"
+path = "fuzz_targets/expr_type.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "expr_value"
+path = "fuzz_targets/expr_value.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "expr_function_call"
+path = "fuzz_targets/expr_function_call.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "expr_path"
+path = "fuzz_targets/expr_path.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "expr_symbol_table"
+path = "fuzz_targets/expr_symbol_table.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "model_decode_text"
+path = "fuzz_targets/model_decode_text.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "model_job_gen"
+path = "fuzz_targets/model_job_gen.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "model_env_gen"
+path = "fuzz_targets/model_env_gen.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "model_misc"
+path = "fuzz_targets/model_misc.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "sessions_directives"
+path = "fuzz_targets/sessions_directives.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "sessions_framer"
+path = "fuzz_targets/sessions_framer.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "sessions_embedded_files"
+path = "fuzz_targets/sessions_embedded_files.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "snapshots_decode_text"
+path = "fuzz_targets/snapshots_decode_text.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "snapshots_ops_gen"
+path = "fuzz_targets/snapshots_ops_gen.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
+name = "cli_args"
+path = "fuzz_targets/cli_args.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]

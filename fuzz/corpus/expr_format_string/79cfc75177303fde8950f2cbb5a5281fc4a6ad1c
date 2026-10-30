@@ -1,0 +1,23 @@
+, "min": "{{len(apply_path_mapping(Param.Val))ing(Parat: def_val
+- name: "else"
+  type: STRING
+  default: else_val
+- name: "and"
+  type: STRING
+  default: and_val
+- name: "or"
+  tfor, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefile keyword attype: STRING
+  defauTt: or_val
+- name: "not"
+  type: STRING
+  defau for, in, True, False, None
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameterDefile keyword attribum.Val))}}"}]}}"}]}

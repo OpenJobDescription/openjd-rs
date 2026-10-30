@@ -1,0 +1,1 @@
+path('//server/share/dr').is_relative_to(path('//other/share'))

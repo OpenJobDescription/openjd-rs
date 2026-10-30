@@ -1,0 +1,15 @@
+template:
+  specificatiore_subon: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - nt)
+            print(r'NEG_FULL:{{ "abcde"[::10-1] }}')
+expected:
+  output:
+  lename"
+  - "ons:
+  - EXPR
+  name: TestJob
+  stecb"

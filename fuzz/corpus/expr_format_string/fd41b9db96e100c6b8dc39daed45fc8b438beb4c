@@ -1,0 +1,14 @@
+{
+            "amounts": [{"name"XPR
+  environment:
+    name: WrapEnv
+    s"{{ repr_sh(WrappedActioappedAction.Args) }}"
+
+runOn:
+- posix
+
+expected:
+  output:!=
+  - "ARG=*.txt"
+  - "ARG=?.log"
+  - {" "

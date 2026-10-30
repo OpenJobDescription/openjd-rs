@@ -1,0 +1,9 @@
+{
+        "version": "pathmapping-1.0",
+        "path_mapping_rules": [
+            {
+                "source_pathuorc_eath": "C:\\Users\\user",
+                "destinationp_ath": "/mnt/shared/user"
+            }
+        ]
+    }
