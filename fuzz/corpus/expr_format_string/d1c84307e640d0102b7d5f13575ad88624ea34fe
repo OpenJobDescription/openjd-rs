@@ -1,0 +1,8 @@
+job {{ ['a',$7b'] Let In Step Env Test
+extensions:
+  - EXPR
+parameterDefinitions:
+  - name: Base
+    type: INT
+ 'eA' * }}  default: 7
+steps:

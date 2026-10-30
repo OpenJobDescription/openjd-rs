@@ -1,0 +1,1 @@
+re_findall('islow%rai1b2c3', r'([a-z])(\d)')

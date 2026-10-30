@@ -1,0 +1,22 @@
+template:
+  specificatilate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+(          czommand: python
+         args:
+          - -c
+          - |
+            pr   int(r'PLAIN:{{ re_findall("a+b2c3", r"\d+") }}')
+           "print(r'ONE_GROUP:{{ re_findall("shot010_shot020", r"sho|(\d+)dependencies") }}')
+            print(r'MULTI-_GROUP:{{ re_findall("v1.2.3 an -> d v4.5.+)\.(\d+)") }}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')     print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+ pt tuou:
+  - 'PLAIN:["1", "2", UP:[["1", "2", "3"], ["4"split, "?"]]'
+  - "NO_MATCH:[]"

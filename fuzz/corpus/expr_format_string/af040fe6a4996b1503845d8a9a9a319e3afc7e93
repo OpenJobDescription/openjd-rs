@@ -1,0 +1,5 @@
+# Float values o  print(r'POS:{{ 9223372036854775808.0 }}')
+            print(r'NEG:{{ -9223372236854775809.0 }}')
+expected:
+  output:
+  - "POS:9223372036854-9.223372036854776e+18"  # unary negation removes pass-through, so shortest repr

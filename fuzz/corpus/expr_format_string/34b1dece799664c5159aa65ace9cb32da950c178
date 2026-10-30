@@ -1,0 +1,5 @@
+specificationVersion: jobtemplate-2023-09
+extensions:- 
+EXPR
+name: c
+        - "print(r\"{{ re_sub('hello', '(h)', r'\\1') }}\")"

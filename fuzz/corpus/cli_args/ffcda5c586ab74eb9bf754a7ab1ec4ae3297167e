@@ -1,0 +1,8 @@
+{{    "variables": {{"FOO": "{}", "BAR"ript": {{
+                "let": ["q = 1 / int(Param.X)", "r = q + 1"],
+                "actions": {{"onEnt": {{"co         / int(Param.X)", "r = q + 1"],
+                "actions": {{"onEnter": {{"command": "echo"}}}}
+            }}
+        }}],
+        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}}}]
+    }}

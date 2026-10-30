@@ -1,0 +1,7 @@
+specificationVersi-09
+extensions:
+- EXPR
+name: TestJob
+steps:
+- name: Step - -c
+        - print(r'{{ [1, 2, 3][::0] }}')

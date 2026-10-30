@@ -1,0 +1,5 @@
+{
+       on": "jobtemplate-2023-09",
+        "name": "Test",
+      [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }

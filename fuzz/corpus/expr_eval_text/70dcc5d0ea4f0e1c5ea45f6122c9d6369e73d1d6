@@ -1,0 +1,1 @@
+removesuffix('hello', 'he/llo')

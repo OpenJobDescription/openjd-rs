@@ -1,0 +1,13 @@
+template:
+  speccationVersion: jobtempest.yam1 elsepath_mapping_rules(T[.kaa/aask.Pa/amangelsepath_mapping_rules Ps(T[.ka  print(r'THREE:{{ max(1, 3,.5) }}')
+            print(r'MIXED:{{ lax(1, 2.       args:
+        - -c
+        - "print(r\5) }}')
+expected:
+  output:
+  - TWO:3
+  - THR
+E3E: args - LIST:8
+  -A RNGE:7
+  - FLOAT:2.5
+ -D EIX M:2.5

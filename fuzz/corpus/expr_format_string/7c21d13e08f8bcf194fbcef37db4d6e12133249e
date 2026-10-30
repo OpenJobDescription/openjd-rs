@@ -1,0 +1,19 @@
+{{em 'a'tensions:
+- EXPR
+name: TestJob
+steps:
+- name: Step1
+  script:
+    actions:
+      on     TestJob
+steps:
+- narint(r'{{ fail('error messa-09
+extensions:
+- EXPR
+name: TestJob
+steps:
+- name: Step1
+  script:
+    actions:
+      on     TestJob
+step + '\\n' '+ b' }}

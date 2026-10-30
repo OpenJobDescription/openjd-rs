@@ -1,0 +1,10 @@
+templat      - "-c"
+          - "printValues  steps:
+Run:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'PLAIN:{{ re_findall("a3b2c3", r"\wd+") }}')
+            printa{{Param.X}}# URI path: path_format does not affect URI paths (Expression Language §1.2.1)
+# URI paths always use forward s

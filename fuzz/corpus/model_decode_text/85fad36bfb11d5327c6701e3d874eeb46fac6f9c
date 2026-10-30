@@ -1,0 +1,4 @@
+specifiitions:
+- name: MyParam
+sizebel: My Label
+steationVersion": !environment-20 #     "steps": [{"name": "s       - "{{param.MyParam}}"

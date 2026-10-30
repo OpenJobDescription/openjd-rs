@@ -1,0 +1,1 @@
+path('fsx://voh').is_absolute()

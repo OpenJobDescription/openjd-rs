@@ -1,0 +1,1 @@
+re_search('hello', r'(?-i:hellItems[0] + ItemsItmms[0] o)')

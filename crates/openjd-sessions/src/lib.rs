@@ -42,6 +42,56 @@ pub mod win32_permissions;
 #[path = "helper/src/framer.rs"]
 mod helper_framer;
 
+/// Crate-internal parsers exposed for the fuzz harness in `fuzz/`.
+///
+/// Subprocess stdout is the most attacker-controlled input the session
+/// runtime sees, but the code that parses it is crate-private. This module
+/// re-exports exactly that code so `fuzz/` can drive it directly instead of
+/// spawning a process per input. Not part of the public API; it exists only
+/// under the `fuzzing` feature and may change without notice.
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub mod fuzzing {
+    pub use crate::action_filter::{
+        redact_openjd_redacted_env_requests, ActionFilter, ActionMessageKind, ActionMessageValue,
+        FilterCallback,
+    };
+
+    /// Max bytes of one subprocess output line (`subprocess::LOG_LINE_MAX_LENGTH`).
+    pub const LOG_LINE_MAX_LENGTH: usize = crate::subprocess::LOG_LINE_MAX_LENGTH;
+
+    /// `subprocess::decode_backslashreplace`: decode raw child output bytes.
+    pub fn decode_backslashreplace(bytes: &[u8]) -> std::borrow::Cow<'_, str> {
+        crate::subprocess::decode_backslashreplace(bytes)
+    }
+
+    /// `subprocess::truncate_line`: cap a line at `LOG_LINE_MAX_LENGTH` bytes.
+    pub fn truncate_line(line: &str) -> &str {
+        crate::subprocess::truncate_line(line)
+    }
+
+    /// `subprocess::process_line`: run one decoded output line through the
+    /// filter exactly as the subprocess reader does. Returns the display
+    /// line, whether it passes through to the log, every `ActionMessage`
+    /// the line produced, and whether it reported `openjd_fail`.
+    pub fn process_line(
+        line: &str,
+        filter: &mut ActionFilter,
+        session_id: &str,
+    ) -> (String, bool, Vec<crate::ActionMessage>, bool) {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut saw_fail = false;
+        let (display, pass_through) =
+            crate::subprocess::process_line(line, filter, session_id, &tx, &mut saw_fail);
+        drop(tx);
+        let mut messages = Vec::new();
+        while let Ok(m) = rx.try_recv() {
+            messages.push(m);
+        }
+        (display, pass_through, messages, saw_fail)
+    }
+}
+
 // Re-export path mapping from openjd-expr (mirrors Python where sessions re-exports from expr)
 pub use openjd_expr::path_mapping;
 

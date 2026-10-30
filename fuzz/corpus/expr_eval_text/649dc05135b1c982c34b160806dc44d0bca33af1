@@ -1,0 +1,1 @@
+path('s3<=://bucket/dir') / path('/local/path')

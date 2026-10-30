@@ -1,0 +1,3 @@
+# Subtraction overflow: min - 1
+specificationVersion: joc"
+        - "print(r'{{ -9223372036854775808 - 1 }}')"

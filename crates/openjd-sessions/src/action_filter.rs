@@ -13,29 +13,49 @@ use std::sync::LazyLock;
 /// The kind of an openjd directive message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionMessageKind {
+    /// `openjd_progress`: the action's percent complete.
     Progress,
+    /// `openjd_status`: a status message.
     Status,
+    /// `openjd_fail`: a failure message.
     Fail,
+    /// `openjd_env`: set an environment variable.
     Env,
+    /// `openjd_redacted_env`: set an environment variable and redact its value.
     RedactedEnv,
+    /// `openjd_unset_env`: unset an environment variable.
     UnsetEnv,
+    /// `openjd_session_runtime_loglevel`: change the session's log level.
     SessionRuntimeLoglevel,
 }
 
 /// The value associated with a directive callback.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ActionMessageValue {
+    /// A progress percentage.
     Float(f64),
+    /// A message, the name of a variable to unset, or the error that
+    /// canceled a malformed directive.
     String(String),
-    EnvVar { name: String, value: String },
+    /// A variable to set.
+    EnvVar {
+        /// The variable's name.
+        name: String,
+        /// The variable's value.
+        value: String,
+    },
+    /// A log level.
     LogLevel(u32),
 }
 
 /// A parsed callback from the filter.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilterCallback {
+    /// The directive.
     pub kind: ActionMessageKind,
+    /// The directive's argument.
     pub value: ActionMessageValue,
+    /// Whether the directive was malformed, so the action is canceled.
     pub cancel: bool,
 }
 
@@ -98,6 +118,10 @@ pub struct ActionFilter {
 }
 
 impl ActionFilter {
+    /// A filter for `session_id`'s action output. `echo_openjd_directives`
+    /// keeps directive lines in the log; `redactions_enabled` is whether the
+    /// `REDACTED_ENV_VARS` extension is enabled (a malformed
+    /// `openjd_redacted_env` then warns instead of canceling the action).
     pub fn new(session_id: &str, echo_openjd_directives: bool, redactions_enabled: bool) -> Self {
         Self {
             session_id: session_id.to_string(),
@@ -246,11 +270,16 @@ impl ActionFilter {
             if value.is_empty() {
                 continue;
             }
+            // Step past the match's first char, not one byte: a value that
+            // starts with a multibyte char would put `start` mid-char and
+            // panic the slice. Stepping one char still finds overlapping
+            // matches.
+            let first_len = value.chars().next().map_or(1, char::len_utf8);
             let mut start = 0;
             while let Some(pos) = message[start..].find(value.as_str()) {
                 let abs_pos = start + pos;
                 segments.push((abs_pos, abs_pos + value.len()));
-                start = abs_pos + 1;
+                start = abs_pos + first_len;
             }
         }
 
@@ -514,6 +543,18 @@ mod tests {
     }
 
     // === directives suppressed when echo_openjd_directives=false ===
+
+    /// A redacted value starting with a multibyte char panicked the scan
+    /// (it stepped one byte into the char). Found by the
+    /// `sessions_directives` fuzz target.
+    #[test]
+    fn test_redaction_of_multibyte_leading_value() {
+        let mut f = make_filter(true, true);
+        let (_, _, msg) = f.filter_message("openjd_redacted_env: K=éé", "foo");
+        assert_eq!(msg, "openjd_redacted_env: K=********");
+        let (_, _, msg) = f.filter_message("aééé é", "foo");
+        assert_eq!(msg, "a******** é");
+    }
 
     #[test]
     fn test_directives_suppressed_when_echo_false_progress() {

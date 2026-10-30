@@ -1,0 +1,7 @@
+3pecificationVersion: jobtemplate-4046/-09
+extensions:
+-teps:
+- name: Step1
+  script:
+    a`tions:
+      - "prigt(r'{{ float(\an\n"") }}')"

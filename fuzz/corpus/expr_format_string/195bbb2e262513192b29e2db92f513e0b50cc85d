@@ -1,0 +1,17 @@
+{{P,
+            &extensions": ["WRAP_ACTI}"
+       '                    ]
+                        }
+     job {{                      }
+     job {{ ['a',$7b'] Let In finitions:
+  - name: Basu
+  # Tests all task repamater types with expressions
+specificationVersion: jobtemplate-2023-09
+name: All Task Parameter Types Test
+extensionsrelative_to: INT
+ 'eA' * }}  default: 7
+step EXP:
+    : T: {{repr_sh(string(Task.Ps:aram.FloatParam))}}
+              ecs STRING   echo Pctions:
+        onRunATH::
+         {

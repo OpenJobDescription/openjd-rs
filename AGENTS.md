@@ -271,6 +271,20 @@ PRs run these checks (all must pass):
 | **Cross-User (Linux)** | Docker-based cross-user tests: localuser and LDAP variants |
 | **Cross-User (Windows)** | Windows cross-user and permissions tests with a temporary test user |
 | **openjd-for-js** | Builds the wasm32 crate with `wasm-bindgen` and runs the vitest suite |
+| **Fuzz** (`fuzz.yml`) | Corpus replay on all three platforms; libFuzzer under ASan per target group (short on PRs, long nightly, corpus cached across runs); public-API fuzz-coverage gate |
+
+### Fuzzing
+
+`fuzz/` holds the fuzz harness (see `fuzz/README.md`). When you change a
+crate's behavior or public API:
+
+- `cargo test --manifest-path fuzz/Cargo.toml --no-default-features` must pass
+  (it replays the committed corpus and every `fuzz/regressions/` input).
+- A bug found by the fuzzer gets a unit test in its crate and its input in
+  `fuzz/regressions/<target>/`.
+- A new public function must be reached by a fuzz target's corpus, or be
+  listed with a reason in `fuzz/api_coverage.toml`
+  (`scripts/check_fuzz_api_coverage.py` enforces this in CI).
 
 If a dependency update bumps `wasm-bindgen`, also bump `WASM_BINDGEN_VERSION`
 in the `openjd-for-js` job in `.github/workflows/ci.yml`, which pins

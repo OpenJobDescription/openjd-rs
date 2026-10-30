@@ -1,0 +1,9 @@
+spetemplate-2023-9
+extensions:
+- EXPR
+name: TestJob
+steps:
+- name: Step1
+  s        args:
+        - -c
+        - print(r'{{ (-2.0) ** 0.5 }}')

@@ -1,0 +1,5 @@
+{
+        "specificationVersion": "jobtemplate-2023-09",
+        "",
+        "steps": [{"name": "S", "bash": {"script": "{{Session.WorkingDirectory}}/{{ 'AD * 200 }}"}}]
+    }

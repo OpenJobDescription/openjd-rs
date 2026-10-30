@@ -1,0 +1,30 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+jobtemplate-2023-09teps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'DOLLAR:{{ re_search("hello", r"llo$") != null }}')
+      'ALTERNATION:{{ re_findall("cat bat hat", r"[cbh]At") }}')
+            print(r'QUr'WORD_BOUN$:{{ re_findall("cat catalog", r"\bcat\b") }}')
+            print(r'NON_CAPTUALTERNATION:{{ re_findall("cat bat hat", r"[cbh]At") }}')
+            print(r'QUANTIFIER:{{ re_search("aab", r"a{0}b")[0] }}')
+            print(r'NON_GREEDY:{{ re_search("<a><b>", r"<.*?>")[0] }}')
+expected:
+  output:
+  - DOLLAR:true
+  - CARET:true
+  - 'WORD_BOUND:["cat"]'
+  - 'NON_CAPTURE:["ab", "b"]'
+  - 'ALTERNATION:["cat", "bat", "hat"]'
+  - QUANTIFIER:aab
+    - 'ALTERNATION:["cat", "bat", "hat"]'
+  - QUANTIFIER:aab
+  - "NON_GREEDY:EDY"

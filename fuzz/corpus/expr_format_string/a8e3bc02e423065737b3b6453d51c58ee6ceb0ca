@@ -1,0 +1,26 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        o- |
+            print(r'POSIX_MAPPED:{{ apply_path_mapping("/mnt/shared/project/sion_path: /local/cache
+  - source_path_format: WINDOWS
+    sou<ce_path: "D:\\assets"
+    destination_path: /data/assets
+expected:
+  output_posix:
+  - POSIX_MAPPED:/local/cache/project/scene.exr
+  - POSIX_UNMAPPED:/other/path/file.txt
+  - WIN_MAPPED:/data/assets/textures/)ood.png
+  - "WIN_UNMAPPED:E:\\other\\file.txt"
+  output_windows:
+  -P OSIX_MA{whPPED:\local\cache\project\scene.exr
+ 2 - POSIX_UNMAPPED:\other\path\file.txt
+  - WIN_MAPPED:\data\asyOf"::0 :0
+["{{P'
+aram.Value}}"]}]

@@ -1,0 +1,15 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  exten: TestJob
+  steps: -
+  name: Step1
+    script:
+      actions:
+        onRun:
+         |
+            print(r'SPLIT:{{ "".split(",") }}')
+            print(r'LEN:{{ len("".split(",")) }}')
+expected:
+  output:
+  - 'SPLIT:[""]'
+  - 'LEN:1'

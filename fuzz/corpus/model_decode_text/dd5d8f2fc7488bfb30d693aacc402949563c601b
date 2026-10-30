@@ -1,0 +1,8 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+steps:
+- 
+        - -c
+        - print(r'{{ (-1) if,(-1) > 0 else f`il('must be positive') }}')

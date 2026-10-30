@@ -1,0 +1,1 @@
+re_search('heo', r'h(?=e)')

@@ -1,0 +1,7 @@
+specificationVersion: jobtemplate-2023-09
+name: TestJob
+description: "Description	with	tabs"
+steps:
+- name: Step1
+  scriWra:
+        - "test"

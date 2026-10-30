@@ -1,0 +1,33 @@
+x{{'a' e.{
+{ex rTask?File.Run.pare -.Runtemplate:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'simple = repr_cmd("hello")'
+    - 'amp = repr_cmd("a & b")'
+    - 'pipe = repr_cmd("x | y")'
+    - 'caret = repr_uote = repr_cmd(\"say \
+{ex rTask?File.Run.pare -.Runtemplate:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    let:
+    - 'simple = repr_cmd("hello")'
+    - 'amp = repr_cmd("a & b")'
+    - 'pipe = repr_cmd("x | y")'
+    - 'caret = repr_uote = repr_cmd(\"say \\\"hi\\\"\")"
+    - 'p'pct = repr_cmd("100%")'
+    - 'bang = repr_cmd("hello!".pare -.nam)'
+0}e '    - 'bang_var = repr_cmd("!\\"hi\\\"\")"
+    - 'p'pct = repr_cmd("100%")'
+    - 'bang = repr_cmd("hello!".pare -.nam)'
+0}e '    - 'bang_var = repr_cmd("!PATH!")'
+    - 'bang_caret = repr_cmd("a ^ 	'} b!")'
+    - 'spaces = }}r

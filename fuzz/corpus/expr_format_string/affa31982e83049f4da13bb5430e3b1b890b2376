@@ -1,0 +1,9 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+ RACKETS:{{ re_escape("file[1].pxt") }}')
+expected:
+  output:
+  - DOT:file\.exr
+  - BRACKETS:file\[1\]\.txt
