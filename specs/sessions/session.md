@@ -83,7 +83,7 @@ execution is the **enforcement boundary** for resolved-value limits
 (`SessionLimits`, from `openjd_sessions::limits`): a worker can receive
 a job that never passed through this client's template validation or
 job creation, so the checks must hold here on the final resolved values
-regardless of what earlier stages did. The four fields mirror the
+regardless of what earlier stages did. The first four fields mirror the
 corresponding `openjd_model::CallerLimits` fields a submitting service
 would set:
 
@@ -96,9 +96,15 @@ would set:
   format-string expression evaluation the session performs (env var
   values, command/args, timeout/cancelation fields, embedded data),
   defaulting to the Expression Language spec's 100 MB / 10 M.
+- `max_path_mapping_trie_bytes` — limits the estimated size of the session's
+  path mapping trie (`PathMapper::with_max_trie_bytes`); `None` uses 30 MiB.
+  Any number of rules is allowed. It has no `CallerLimits` counterpart, and a
+  violation is `SessionError::InvalidPathMappingRule` naming the rule that passed
+  the limit.
 
-All default to `None` — no restriction beyond the spec (§5.1/§5.2/§6.1.2
-set no maxima of their own). Violations surface as
+All default to `None`. That means no restriction beyond the spec (§5.1/§5.2/§6.1.2
+set no maxima of their own), except that the path mapping trie uses its 30 MiB
+default. Violations of the first two surface as
 `SessionError::FormatString` with reason
 `resolved value is {n} characters, exceeding the maximum of {max}.`,
 following the `notifyPeriodInSeconds ≤ 600` and env-var §4.4.2
@@ -147,15 +153,18 @@ the agent would need to track and cancel each action individually.
 
 `Session::with_config(config: SessionConfig) -> Result<Self, SessionError>`:
 
-1. Creates the session root directory via `custom_gettempdir()` if not provided
-2. Creates the working directory via `TempDir::new_session_working_dir()` with the
+1. Builds the session's `PathMapper` from `config.path_mapping_rules`, failing with
+   `SessionError::InvalidPathMappingRule` before any directory is created when
+   a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit
+2. Creates the session root directory via `custom_gettempdir()` if not provided
+3. Creates the working directory via `TempDir::new_session_working_dir()` with the
    session user for cross-user permissions. Its name is 8 random characters from
    `[a-z0-9_]` and carries no part of the session ID (see
    [tempdir.md](tempdir.md#session-working-directory-name))
-3. Creates the files subdirectory within the working directory
-4. Validates sticky bit on parent directories (POSIX security check)
-5. Logs host info (version, platform, architecture)
-6. Stores job parameter values, path mapping rules, and other config for later use
+4. Creates the files subdirectory within the working directory
+5. Validates sticky bit on parent directories (POSIX security check)
+6. Logs host info (version, platform, architecture)
+7. Stores job parameter values, the path mapper, and other config for later use
 
 A `Session::new_for_test(working_directory)` constructor is available when the
 `test-utils` feature is enabled or in `#[cfg(test)]` builds. It creates a minimal
@@ -292,11 +301,20 @@ the per-action `sudo -i` overhead.
 
 ```rust
 pub fn extend_path_mapping_rules(&mut self, additional: Vec<PathMappingRule>)
+    -> Result<(), SessionError>
 ```
 
-Appends additional path mapping rules to the session's existing rules. Rules are
-re-sorted by source path length (longest first) after extending, ensuring that more
-specific rules take precedence over shorter ones.
+Appends additional path mapping rules after the session's existing rules and
+rebuilds the session's `PathMapper` and function library. Rules keep the order
+given. The rule whose source path has the most names wins, and between rules for
+the same location the one given last wins (see
+[expr path-mapping.md § Which rule wins](../expr/path-mapping.md#which-rule-wins)),
+so an added rule takes precedence over an existing rule for the same location
+(`path_mapping_rules()` still returns both).
+
+Returns `SessionError::InvalidPathMappingRule`, and leaves the rules unchanged,
+when an added rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit. The error's
+index counts from the first existing rule.
 
 Used by the worker agent when additional path mapping rules become available after
 session creation (e.g., from job attachment manifests).
@@ -324,7 +342,12 @@ Populates a `SymbolTable` with:
 | `Task.RawParam.<name>` | Task parameter value (no path mapping) | `run_task()` call |
 
 PATH-type parameters have path mapping rules applied. LIST_PATH parameters have rules
-applied to each element. All other parameter values are coerced to their declared
+applied to each element. A PATH or LIST_PATH value longer than 32 KiB
+(`openjd_expr::path_mapping::MAX_PATH_LEN`) fails symbol table construction with
+`SessionError::Runtime`: `Failed to apply path mapping to <key>: the path is <n>
+bytes long, more than the limit of 32768 bytes`, as `apply_path_mapping` does. The
+session's path mapping trie is limited by `SessionLimits::max_path_mapping_trie_bytes`
+(default 30 MiB). All other parameter values are coerced to their declared
 parameter type when seeded, for `Param.*`, `RawParam.*`, `Task.Param.*`, and
 `Task.RawParam.*` alike: values cross the language boundary as strings (an INT parameter
 arrives as `"5"`), and typed expression evaluation requires typed symbols, so the value
@@ -357,7 +380,15 @@ rules applied.
 `materialize_path_mapping()` writes the path mapping rules to a JSON file in the working
 directory using the `pathmapping-1.0` format. This file is referenced by
 `Session.PathMappingRulesFile` in the symbol table, allowing actions to read and apply
-path mapping rules themselves.
+path mapping rules themselves. The rules are written in precedence order
+(`PathMapper::rules_by_precedence`): most source path names first, then WINDOWS
+before POSIX before URI, then the one given last first. A rule replaced by a later rule
+for the same location is left out. A reader that applies the first matching rule, or
+one that follows the specification's order (most names, then WINDOWS over POSIX, last
+rule for a location), therefore gets the same result as the session, as long as it
+splits and compares paths the same way (see
+[expr path-mapping.md § Divergence from Python](../expr/path-mapping.md#divergence-from-python)
+for where `pathlib` differs).
 
 ## Environment Variable Evaluation
 
@@ -501,12 +532,14 @@ optional features before the first action:
 ### with_path_mapping
 
 ```rust
-pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Self
+pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Result<Self, SessionError>
 ```
 
-Sets the session's path mapping rules. Rules are sorted by source path length
-(longest first) so more specific rules take precedence. Called immediately after
-construction when path mapping rules are known at session creation time.
+Replaces the session's path mapping rules, keeping the order given. Fails with
+`SessionError::InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit. Called immediately after construction when path mapping rules are
+known at session creation time. `Session::with_config` builds the session's
+`PathMapper` from `SessionConfig::path_mapping_rules` the same way and fails with
+the same error.
 
 ### with_library
 
@@ -550,7 +583,7 @@ Read-only accessors on `Session`:
 | `working_directory()` | `&Path` | Path to the session's working directory |
 | `files_directory()` | `&Path` | Path to the embedded files subdirectory |
 | `environments_entered()` | `&[EnvironmentIdentifier]` | Stack of entered environment IDs (entry order) |
-| `path_mapping_rules()` | `&[PathMappingRule]` | Current path mapping rules (sorted by source path length, longest first) |
+| `path_mapping_rules()` | `&[PathMappingRule]` | Current path mapping rules, in the order given |
 | `action_status()` | `Option<ActionStatus>` | Snapshot of the current/most-recent action status. `None` if no action has run. |
 | `clone_cancel_writer()` | `Option<std::fs::File>` | Clone the cancel-info file writer for the cross-user helper. Used by PyO3 bindings to send cancel commands from a background thread. |
 | `override_action_state(state)` | `()` | Override the action state. Used by PyO3 bindings to convert Failed → Canceled when cancel was requested externally. |

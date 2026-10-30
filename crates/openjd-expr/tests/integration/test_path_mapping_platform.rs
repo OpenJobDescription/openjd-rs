@@ -4,13 +4,23 @@
 
 //! Platform-specific path mapping tests.
 //!
-//! Tests `apply()` and `apply_rules()` which use `PathFormat::host()` to pick
-//! the output separator. These tests verify that the host-native behavior is
+//! Tests `PathMapper::apply()` and `PathMapper::map()`, which use
+//! `PathFormat::host()` to pick the output separator. These tests verify that the host-native behavior is
 //! correct on each platform.
 
-use openjd_expr::path_mapping::{
-    apply_rules, apply_rules_with_format, PathFormat, PathMappingRule,
-};
+use openjd_expr::path_mapping::{PathFormat, PathMapper, PathMappingRule};
+
+fn mapper(rules: Vec<PathMappingRule>) -> PathMapper {
+    PathMapper::new(rules).expect("valid rules")
+}
+
+fn apply_rules(rules: &[PathMappingRule], path: &str) -> String {
+    mapper(rules.to_vec()).map(path)
+}
+
+fn apply_rules_with_format(rules: &[PathMappingRule], path: &str, format: PathFormat) -> String {
+    mapper(rules.to_vec()).map_with_format(path, format)
+}
 
 fn posix_rule(src: &str, dst: &str) -> PathMappingRule {
     PathMappingRule {
@@ -65,7 +75,10 @@ mod posix_host {
     #[test]
     fn apply_posix_source_exact_match() {
         let rule = posix_rule("/mnt/shared", "/local/shared");
-        assert_eq!(rule.apply("/mnt/shared"), Some("/local/shared".into()));
+        assert_eq!(
+            mapper(vec![rule.clone()]).apply("/mnt/shared"),
+            Some("/local/shared".into())
+        );
     }
 
     #[test]
@@ -73,7 +86,7 @@ mod posix_host {
         let rule = posix_rule("/mnt/shared", "/local/shared");
         // On POSIX host, child parts joined with /
         assert_eq!(
-            rule.apply("/mnt/shared/dir/file.txt"),
+            mapper(vec![rule.clone()]).apply("/mnt/shared/dir/file.txt"),
             Some("/local/shared/dir/file.txt".into())
         );
     }
@@ -82,7 +95,7 @@ mod posix_host {
     fn apply_posix_source_trailing_slash_preserved() {
         let rule = posix_rule("/mnt/shared", "/local/shared");
         assert_eq!(
-            rule.apply("/mnt/shared/dir/"),
+            mapper(vec![rule.clone()]).apply("/mnt/shared/dir/"),
             Some("/local/shared/dir/".into())
         );
     }
@@ -93,7 +106,7 @@ mod posix_host {
         // but output uses POSIX separators on a POSIX host.
         let rule = windows_rule(r"C:\projects", "/local/projects");
         assert_eq!(
-            rule.apply(r"C:\projects\scene\file.ma"),
+            mapper(vec![rule.clone()]).apply(r"C:\projects\scene\file.ma"),
             Some("/local/projects/scene/file.ma".into())
         );
     }
@@ -102,7 +115,7 @@ mod posix_host {
     fn apply_windows_source_case_insensitive_on_posix_host() {
         let rule = windows_rule(r"C:\Projects", "/local/projects");
         assert_eq!(
-            rule.apply(r"c:\projects\file.txt"),
+            mapper(vec![rule.clone()]).apply(r"c:\projects\file.txt"),
             Some("/local/projects/file.txt".into())
         );
     }
@@ -111,7 +124,7 @@ mod posix_host {
     fn apply_uri_source_on_posix_host() {
         let rule = uri_rule("s3://bucket/assets", "/local/assets");
         assert_eq!(
-            rule.apply("s3://bucket/assets/teapot.obj"),
+            mapper(vec![rule.clone()]).apply("s3://bucket/assets/teapot.obj"),
             Some("/local/assets/teapot.obj".into())
         );
     }
@@ -119,16 +132,16 @@ mod posix_host {
     #[test]
     fn apply_no_match_returns_none() {
         let rule = posix_rule("/mnt/shared", "/local/shared");
-        assert_eq!(rule.apply("/other/path"), None);
+        assert_eq!(mapper(vec![rule.clone()]).apply("/other/path"), None);
     }
 
     #[test]
-    fn apply_rules_first_match_wins() {
+    fn apply_rules_deepest_rule_wins() {
         let rules = vec![
             posix_rule("/mnt/a", "/local/a"),
             posix_rule("/mnt", "/local"),
         ];
-        // /mnt/a/file matches the first rule
+        // /mnt/a/file matches both; the rule with more components wins
         assert_eq!(apply_rules(&rules, "/mnt/a/file"), "/local/a/file");
     }
 
@@ -154,7 +167,7 @@ mod windows_host {
     fn apply_windows_source_exact_match() {
         let rule = windows_rule(r"C:\projects", r"D:\local\projects");
         assert_eq!(
-            rule.apply(r"C:\projects"),
+            mapper(vec![rule.clone()]).apply(r"C:\projects"),
             Some(r"D:\local\projects".into())
         );
     }
@@ -164,7 +177,7 @@ mod windows_host {
         let rule = windows_rule(r"C:\projects", r"D:\local\projects");
         // On Windows host, child parts joined with backslash
         assert_eq!(
-            rule.apply(r"C:\projects\scene\file.ma"),
+            mapper(vec![rule.clone()]).apply(r"C:\projects\scene\file.ma"),
             Some(r"D:\local\projects\scene\file.ma".into())
         );
     }
@@ -173,7 +186,7 @@ mod windows_host {
     fn apply_windows_source_trailing_backslash_preserved() {
         let rule = windows_rule(r"C:\projects", r"D:\local\projects");
         assert_eq!(
-            rule.apply(r"C:\projects\dir\"),
+            mapper(vec![rule.clone()]).apply(r"C:\projects\dir\"),
             Some(r"D:\local\projects\dir\".into())
         );
     }
@@ -182,7 +195,7 @@ mod windows_host {
     fn apply_windows_source_trailing_forward_slash_preserved() {
         let rule = windows_rule(r"C:\projects", r"D:\local\projects");
         assert_eq!(
-            rule.apply(r"C:\projects\dir/"),
+            mapper(vec![rule.clone()]).apply(r"C:\projects\dir/"),
             Some(r"D:\local\projects\dir\".into())
         );
     }
@@ -191,7 +204,7 @@ mod windows_host {
     fn apply_windows_source_case_insensitive() {
         let rule = windows_rule(r"C:\Projects", r"D:\local");
         assert_eq!(
-            rule.apply(r"c:\projects\file.txt"),
+            mapper(vec![rule.clone()]).apply(r"c:\projects\file.txt"),
             Some(r"D:\local\file.txt".into())
         );
     }
@@ -199,9 +212,9 @@ mod windows_host {
     #[test]
     fn apply_windows_source_mixed_separators_in_input() {
         let rule = windows_rule(r"C:\projects", r"D:\local");
-        // Input uses forward slashes — split_path_parts handles both
+        // Input uses forward slashes; Windows accepts both separators
         assert_eq!(
-            rule.apply("C:/projects/scene/file.ma"),
+            mapper(vec![rule.clone()]).apply("C:/projects/scene/file.ma"),
             Some(r"D:\local\scene\file.ma".into())
         );
     }
@@ -212,7 +225,7 @@ mod windows_host {
         // but output uses Windows separators on a Windows host.
         let rule = posix_rule("/mnt/shared", r"D:\local\shared");
         assert_eq!(
-            rule.apply("/mnt/shared/dir/file.txt"),
+            mapper(vec![rule.clone()]).apply("/mnt/shared/dir/file.txt"),
             Some(r"D:\local\shared\dir\file.txt".into())
         );
     }
@@ -221,9 +234,12 @@ mod windows_host {
     fn apply_posix_source_case_sensitive_on_windows_host() {
         // POSIX source matching is always case-sensitive, even on Windows host
         let rule = posix_rule("/mnt/Shared", r"D:\local");
-        assert_eq!(rule.apply("/mnt/shared/file.txt"), None);
         assert_eq!(
-            rule.apply("/mnt/Shared/file.txt"),
+            mapper(vec![rule.clone()]).apply("/mnt/shared/file.txt"),
+            None
+        );
+        assert_eq!(
+            mapper(vec![rule.clone()]).apply("/mnt/Shared/file.txt"),
             Some(r"D:\local\file.txt".into())
         );
     }
@@ -232,7 +248,7 @@ mod windows_host {
     fn apply_uri_source_on_windows_host() {
         let rule = uri_rule("s3://bucket/assets", r"D:\local\assets");
         assert_eq!(
-            rule.apply("s3://bucket/assets/teapot.obj"),
+            mapper(vec![rule.clone()]).apply("s3://bucket/assets/teapot.obj"),
             Some(r"D:\local\assets\teapot.obj".into())
         );
     }
@@ -241,7 +257,7 @@ mod windows_host {
     fn apply_uri_trailing_slash_uses_backslash_on_windows() {
         let rule = uri_rule("s3://bucket", r"D:\local");
         assert_eq!(
-            rule.apply("s3://bucket/dir/"),
+            mapper(vec![rule.clone()]).apply("s3://bucket/dir/"),
             Some(r"D:\local\dir\".into())
         );
     }
@@ -249,20 +265,20 @@ mod windows_host {
     #[test]
     fn apply_no_match_returns_none() {
         let rule = windows_rule(r"C:\projects", r"D:\local");
-        assert_eq!(rule.apply(r"D:\other\path"), None);
+        assert_eq!(mapper(vec![rule.clone()]).apply(r"D:\other\path"), None);
     }
 
     #[test]
     fn apply_unc_path() {
         let rule = windows_rule(r"\\server\share\assets", r"Z:\assets");
         assert_eq!(
-            rule.apply(r"\\server\share\assets\file.exr"),
+            mapper(vec![rule.clone()]).apply(r"\\server\share\assets\file.exr"),
             Some(r"Z:\assets\file.exr".into())
         );
     }
 
     #[test]
-    fn apply_rules_first_match_wins() {
+    fn apply_rules_deepest_rule_wins() {
         let rules = vec![
             windows_rule(r"C:\projects\a", r"D:\a"),
             windows_rule(r"C:\projects", r"D:\all"),

@@ -138,7 +138,7 @@ the current tree.
 
 | # | Prior claim | Verification | Status |
 |---|---|---|---|
-| 1 | `ExprProfile`, `ExprRevision`, `ExprExtension`, `HostContext` added | Present in `crates/openjd-expr/src/profile.rs`, re-exported from `lib.rs`, `ExprRevision` and `ExprExtension` both `#[non_exhaustive]`, `HostContext::{None, Unresolved, WithRules(Arc<Vec<PathMappingRule>>)}` | ✅ **Resolved** |
+| 1 | `ExprProfile`, `ExprRevision`, `ExprExtension`, `HostContext` added | Present in `crates/openjd-expr/src/profile.rs`, re-exported from `lib.rs`, `ExprRevision` and `ExprExtension` both `#[non_exhaustive]`, `HostContext::{None, Unresolved, WithRules(Arc<Vec<PathMappingRule>>)}` (now `WithRules(Arc<PathMapper>)`) | ✅ **Resolved** |
 | 2 | `FunctionLibrary::for_profile` replaces `get_default_library` | Present in `default_library.rs`. `get_default_library` removed from public surface entirely (grep of `crates/` turns up only internal usages in evaluator and JS bindings) | ✅ **Resolved** (cleaner than claimed — the deprecated alias was removed outright) |
 | 3 | Per-profile cache keyed on rules-independent key | `PROFILE_CACHE: LazyLock<Mutex<HashMap<ProfileKey, Arc<FunctionLibrary>>>>` in `default_library.rs`; `ProfileKey` excludes rules. Tests `cache_returns_same_arc_for_none_profile`, `cache_returns_same_arc_for_unresolved_profile`, `with_rules_does_not_cache_rules_variant` all pass | ✅ **Resolved** |
 | 4 | `HostContext` collapses `with_host_context` + `with_unresolved_host_context` | Single enum, applied via `profile.with_host_context(...)`. The old methods on `FunctionLibrary` are gone from public use | ✅ **Resolved** |

@@ -12,7 +12,7 @@ use openjd_expr::*;
 fn host_lib_empty() -> std::sync::Arc<FunctionLibrary> {
     FunctionLibrary::for_profile(
         &ExprProfile::current()
-            .with_host_context(HostContext::with_rules(Vec::<PathMappingRule>::new())),
+            .with_host_context(HostContext::with_rules(Vec::<PathMappingRule>::new()).unwrap()),
     )
 }
 
@@ -186,7 +186,7 @@ fn with_path_mapping_rules() {
     st.set("P", ExprValue::String("/old/file.txt".into()))
         .unwrap();
     let lib = FunctionLibrary::for_profile(
-        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule])),
+        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule]).unwrap()),
     );
     let parsed = ParsedExpression::new("P.apply_path_mapping()").unwrap();
     let symtabs = [&st];
@@ -208,7 +208,7 @@ fn unmatched_path_unchanged() {
     st.set("P", ExprValue::String("/other/file.txt".into()))
         .unwrap();
     let lib = FunctionLibrary::for_profile(
-        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule])),
+        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule]).unwrap()),
     );
     let parsed = ParsedExpression::new("P.apply_path_mapping()").unwrap();
     let symtabs = [&st];
@@ -340,7 +340,7 @@ fn function_syntax_with_path_mapping_rules() {
         destination_path: "/new/path".into(),
     };
     let lib = FunctionLibrary::for_profile(
-        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule])),
+        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule]).unwrap()),
     );
     let parsed = ParsedExpression::new("apply_path_mapping('/old/path/file.txt')").unwrap();
     let st = SymbolTable::new();
@@ -360,7 +360,7 @@ fn function_syntax_unmatched_path_unchanged() {
         destination_path: "/mapped/path".into(),
     };
     let lib = FunctionLibrary::for_profile(
-        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule])),
+        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule]).unwrap()),
     );
     let parsed = ParsedExpression::new("apply_path_mapping('/other/path/file.txt')").unwrap();
     let st = SymbolTable::new();

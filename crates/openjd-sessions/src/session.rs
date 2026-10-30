@@ -34,7 +34,7 @@ use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 
 use openjd_expr::function_library::FunctionLibrary;
-use openjd_expr::path_mapping::PathMappingRule;
+use openjd_expr::path_mapping::{PathMapper, PathMappingRule};
 use openjd_model::job::{Environment, StepScript};
 use openjd_model::symbol_table::SymbolTable;
 use openjd_model::types::JobParameterValues;
@@ -112,6 +112,12 @@ pub type SessionCallbackType = Box<dyn Fn(&str, &ActionStatus) + Send + Sync>;
 pub struct SessionConfig {
     pub session_id: String,
     pub job_parameter_values: JobParameterValues,
+    /// Path mapping rules for the session, in the order given. Between
+    /// rules for the same location, the one given last wins.
+    /// [`Session::with_config`] fails with
+    /// [`SessionError::InvalidPathMappingRule`] when a rule is invalid (see
+    /// [`PathMappingRule::validate`]) or the rules' trie would pass
+    /// [`SessionLimits::max_path_mapping_trie_bytes`](crate::SessionLimits::max_path_mapping_trie_bytes).
     pub path_mapping_rules: Option<Vec<PathMappingRule>>,
     pub retain_working_dir: bool,
     pub callback: Option<SessionCallbackType>,
@@ -484,9 +490,9 @@ struct CrossUserFields {
 /// `apply_path_mapping` always reflects the session's current rules.
 fn derive_library(
     profile: Option<&openjd_model::ModelProfile>,
-    rules: &Arc<Vec<PathMappingRule>>,
+    mapper: &Arc<PathMapper>,
 ) -> Arc<FunctionLibrary> {
-    let host = openjd_expr::HostContext::WithRules(rules.clone());
+    let host = openjd_expr::HostContext::WithRules(mapper.clone());
     let expr_profile = match profile {
         Some(p) => p.to_expr_profile(host),
         None => openjd_expr::ExprProfile::current().with_host_context(host),
@@ -527,10 +533,10 @@ pub struct Session {
     // `library` is the cached derived library, built from the session's
     // `library` is the cached derived library, built from the session's
     // `profile` (an optional `ModelProfile`) plus the current
-    // `path_mapping_rules`. Whenever either input changes, the library
+    // `path_mapper`. Whenever either input changes, the library
     // must be rebuilt via `derive_library`.
     library: Arc<FunctionLibrary>,
-    path_mapping_rules: Arc<Vec<PathMappingRule>>,
+    path_mapper: Arc<PathMapper>,
     job_parameter_values: JobParameterValues,
     // Grouped fields
     action: ActionStatusFields,
@@ -572,8 +578,8 @@ impl Session {
             env_vars: HashMap::new(),
             process_env: HashMap::new(),
             created_env_vars: HashMap::new(),
-            library: derive_library(None, &Arc::new(Vec::new())),
-            path_mapping_rules: Arc::new(Vec::new()),
+            library: derive_library(None, &Arc::new(PathMapper::default())),
+            path_mapper: Arc::new(PathMapper::default()),
             job_parameter_values: HashMap::new(),
             action: ActionStatusFields::new(),
             cancel: CancelFields::new(None),
@@ -630,6 +636,12 @@ impl Session {
 
     /// Full constructor from SessionConfig.
     pub fn with_config(mut config: SessionConfig) -> Result<Self, SessionError> {
+        // Validate the rules before creating any directory for a session
+        // that would be rejected.
+        let path_mapper = Arc::new(PathMapper::with_max_trie_bytes(
+            config.path_mapping_rules.take().unwrap_or_default(),
+            config.limits.path_mapping_trie_bytes(),
+        )?);
         let root_dir = match &config.session_root_directory {
             // Absolutize a caller-supplied root so every path derived from it
             // (working directory, embedded-files directory) is rooted. The
@@ -693,11 +705,8 @@ impl Session {
         let working_directory = working_dir.path().to_path_buf();
         let files_directory = files_dir.path().to_path_buf();
 
-        let mut path_mapping_rules = config.path_mapping_rules.unwrap_or_default();
-        path_mapping_rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
-        let path_mapping_rules = Arc::new(path_mapping_rules);
         let profile = config.profile.take();
-        let library = derive_library(profile.as_ref(), &path_mapping_rules);
+        let library = derive_library(profile.as_ref(), &path_mapper);
         let process_env = config.os_env_vars.unwrap_or_default();
 
         // Create helpers directory and spawn cross-user helper if needed.
@@ -802,7 +811,7 @@ impl Session {
             process_env,
             created_env_vars: HashMap::new(),
             library,
-            path_mapping_rules,
+            path_mapper,
             job_parameter_values: config.job_parameter_values,
             action: ActionStatusFields::new(),
             cancel: CancelFields::new(config.cancel_token),
@@ -822,30 +831,56 @@ impl Session {
         })
     }
 
-    #[allow(
-        missing_docs,
-        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-    )]
-    pub fn with_path_mapping(mut self, mut rules: Vec<PathMappingRule>) -> Self {
-        rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
-        self.path_mapping_rules = Arc::new(rules);
-        self.library = derive_library(self.profile.as_ref(), &self.path_mapping_rules);
-        self
+    /// Replace the session's path mapping rules, keeping the order given.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::InvalidPathMappingRule`] when a rule is
+    /// invalid (see [`PathMappingRule::validate`]) or the rules' trie would
+    /// pass [`SessionLimits::max_path_mapping_trie_bytes`](crate::SessionLimits::max_path_mapping_trie_bytes).
+    pub fn with_path_mapping(mut self, rules: Vec<PathMappingRule>) -> Result<Self, SessionError> {
+        self.path_mapper = Arc::new(PathMapper::with_max_trie_bytes(
+            rules,
+            self.limits.path_mapping_trie_bytes(),
+        )?);
+        self.library = derive_library(self.profile.as_ref(), &self.path_mapper);
+        Ok(self)
     }
 
-    /// Extend the session's path mapping rules with additional rules.
-    /// Rules are re-sorted by source path length (longest first) after extending.
-    pub fn extend_path_mapping_rules(&mut self, additional: Vec<PathMappingRule>) {
-        let mut rules = (*self.path_mapping_rules).clone();
+    /// Extend the session's path mapping rules with additional rules,
+    /// appended after the existing ones. Between rules for the same
+    /// location, the one given last wins, so an added rule takes precedence
+    /// over an existing rule for the same location; [`path_mapping_rules`]
+    /// still returns both.
+    ///
+    /// [`path_mapping_rules`]: Session::path_mapping_rules
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::InvalidPathMappingRule`], and leaves the
+    /// rules unchanged, when an added rule is invalid (see
+    /// [`PathMappingRule::validate`]) or the rules' trie would pass
+    /// [`SessionLimits::max_path_mapping_trie_bytes`](crate::SessionLimits::max_path_mapping_trie_bytes). The error's index
+    /// counts from the
+    /// first existing rule, so `additional[0]` is index
+    /// `path_mapping_rules().len()`.
+    pub fn extend_path_mapping_rules(
+        &mut self,
+        additional: Vec<PathMappingRule>,
+    ) -> Result<(), SessionError> {
+        let mut rules = self.path_mapper.rules().to_vec();
         rules.extend(additional);
-        rules.sort_by_key(|r| std::cmp::Reverse(r.source_path.len()));
-        self.path_mapping_rules = Arc::new(rules);
-        self.library = derive_library(self.profile.as_ref(), &self.path_mapping_rules);
+        self.path_mapper = Arc::new(PathMapper::with_max_trie_bytes(
+            rules,
+            self.limits.path_mapping_trie_bytes(),
+        )?);
+        self.library = derive_library(self.profile.as_ref(), &self.path_mapper);
+        Ok(())
     }
 
-    /// Get the current path mapping rules.
+    /// Get the current path mapping rules, in the order given.
     pub fn path_mapping_rules(&self) -> &[PathMappingRule] {
-        &self.path_mapping_rules
+        self.path_mapper.rules()
     }
 
     /// Set the [`ModelProfile`](openjd_model::ModelProfile) that drives
@@ -855,7 +890,7 @@ impl Session {
     /// sees the new profile.
     pub fn with_profile(mut self, profile: openjd_model::ModelProfile) -> Self {
         self.profile = Some(profile);
-        self.library = derive_library(self.profile.as_ref(), &self.path_mapping_rules);
+        self.library = derive_library(self.profile.as_ref(), &self.path_mapper);
         self
     }
 
@@ -2372,11 +2407,13 @@ impl Session {
 
     /// Materialize path mapping rules to a JSON file and set symbol table entries.
     fn materialize_path_mapping(&self, symtab: &mut SymbolTable) -> Result<(), SessionError> {
-        let has_rules = !self.path_mapping_rules.is_empty();
+        let has_rules = !self.path_mapper.is_empty();
         let rules_json = if has_rules {
+            // In precedence order, so a reader that applies the first
+            // matching rule gets the same result as the session.
             let rules: Vec<serde_json::Value> = self
-                .path_mapping_rules
-                .iter()
+                .path_mapper
+                .rules_by_precedence()
                 .map(|rule| {
                     serde_json::json!({
                         "source_path_format": match rule.source_path_format {
@@ -2526,8 +2563,8 @@ impl Session {
                             openjd_expr::ExprValue::Path { value, .. } => value.as_str(),
                             _ => continue,
                         };
-                        let mapped = self.apply_path_mapping_to_string(raw);
                         let key = format!("Param.{name}");
+                        let mapped = self.apply_path_mapping_to_string(&key, raw)?;
                         s.set(
                             &key,
                             openjd_expr::ExprValue::new_path(
@@ -2539,17 +2576,17 @@ impl Session {
                     }
                     JobParameterType::ListPath => {
                         if let openjd_expr::ExprValue::ListString(ref elements, _) = param.value {
-                            let mapped: Vec<openjd_expr::ExprValue> = elements
+                            let key = format!("Param.{name}");
+                            let mapped = elements
                                 .iter()
                                 .map(|s| {
-                                    let m = self.apply_path_mapping_to_string(s);
-                                    openjd_expr::ExprValue::new_path(
+                                    let m = self.apply_path_mapping_to_string(&key, s)?;
+                                    Ok(openjd_expr::ExprValue::new_path(
                                         m,
                                         openjd_expr::path_mapping::PathFormat::host(),
-                                    )
+                                    ))
                                 })
-                                .collect();
-                            let key = format!("Param.{name}");
+                                .collect::<Result<Vec<_>, SessionError>>()?;
                             s.set(
                                 &key,
                                 openjd_expr::ExprValue::make_list(
@@ -2593,7 +2630,7 @@ impl Session {
                             openjd_expr::ExprValue::Path { value, .. } => value.as_str(),
                             _ => "",
                         };
-                        let mapped = self.apply_path_mapping_to_string(raw);
+                        let mapped = self.apply_path_mapping_to_string(&key, raw)?;
                         openjd_expr::ExprValue::new_path(
                             mapped,
                             openjd_expr::path_mapping::PathFormat::host(),
@@ -2601,20 +2638,20 @@ impl Session {
                     }
                     JobParameterType::ListPath => match &param.value {
                         openjd_expr::ExprValue::ListString(elements, _) => {
-                            let mapped: Vec<openjd_expr::ExprValue> = elements
+                            let mapped = elements
                                 .iter()
                                 .map(|s| {
-                                    let m = self.apply_path_mapping_to_string(s);
-                                    openjd_expr::ExprValue::new_path(
+                                    let m = self.apply_path_mapping_to_string(&key, s)?;
+                                    Ok(openjd_expr::ExprValue::new_path(
                                         m,
                                         openjd_expr::path_mapping::PathFormat::host(),
-                                    )
+                                    ))
                                 })
-                                .collect();
+                                .collect::<Result<Vec<_>, SessionError>>()?;
                             openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH)
                                 .unwrap()
                         }
-                        other => self.apply_path_mapping_to_value(other),
+                        other => self.apply_path_mapping_to_value(&key, other)?,
                     },
                     _ => Self::coerce_param_value(
                         &param.value,
@@ -2667,7 +2704,7 @@ impl Session {
                             openjd_expr::ExprValue::Path { value, .. } => value.as_str(),
                             _ => "",
                         };
-                        let mapped = self.apply_path_mapping_to_string(s);
+                        let mapped = self.apply_path_mapping_to_string(&key, s)?;
                         openjd_expr::ExprValue::new_path(
                             mapped,
                             openjd_expr::path_mapping::PathFormat::host(),
@@ -2706,47 +2743,53 @@ impl Session {
         })
     }
 
-    /// Apply path mapping rules to a string, returning the mapped result.
-    fn apply_path_mapping_to_string(&self, path: &str) -> String {
-        for rule in self.path_mapping_rules.iter() {
-            if let Some(mapped) = rule.apply(path) {
-                return mapped;
-            }
+    /// Apply path mapping rules to the value of parameter `key`, returning
+    /// the mapped result.
+    ///
+    /// A path longer than [`MAX_PATH_LEN`](openjd_expr::path_mapping::MAX_PATH_LEN)
+    /// is an error, as it is for `apply_path_mapping`.
+    fn apply_path_mapping_to_string(&self, key: &str, path: &str) -> Result<String, SessionError> {
+        let max = openjd_expr::path_mapping::MAX_PATH_LEN;
+        if path.len() > max {
+            return Err(SessionError::Runtime(format!(
+                "Failed to apply path mapping to {key}: the path is {} bytes long, more than \
+                 the limit of {max} bytes",
+                path.len()
+            )));
         }
-        path.to_string()
+        Ok(self.path_mapper.map(path))
     }
 
-    /// Apply path mapping rules to a value if it's a Path or ListPath type.
+    /// Apply path mapping rules to the value of parameter `key` if it is a
+    /// Path or ListPath value. The result is in the host's path format, as
+    /// every other `Param.*` path value is, whether or not a rule applied.
     fn apply_path_mapping_to_value(
         &self,
+        key: &str,
         value: &openjd_expr::ExprValue,
-    ) -> openjd_expr::ExprValue {
-        match value {
+    ) -> Result<openjd_expr::ExprValue, SessionError> {
+        let host = openjd_expr::path_mapping::PathFormat::host();
+        Ok(match value {
             openjd_expr::ExprValue::Path {
-                value: path_str,
-                format,
-                ..
-            } => {
-                for rule in self.path_mapping_rules.iter() {
-                    if let Some(mapped) = rule.apply(path_str) {
-                        return openjd_expr::ExprValue::new_path(mapped, *format);
-                    }
-                }
-                value.clone()
-            }
-            openjd_expr::ExprValue::ListPath(elements, fmt, _) => {
-                let mapped: Vec<openjd_expr::ExprValue> = elements
+                value: path_str, ..
+            } => openjd_expr::ExprValue::new_path(
+                self.apply_path_mapping_to_string(key, path_str)?,
+                host,
+            ),
+            openjd_expr::ExprValue::ListPath(elements, _, _) => {
+                let mapped = elements
                     .iter()
                     .map(|s| {
-                        let mapped_s =
-                            openjd_expr::path_mapping::apply_rules(&self.path_mapping_rules, s);
-                        openjd_expr::ExprValue::new_path(mapped_s, *fmt)
+                        Ok(openjd_expr::ExprValue::new_path(
+                            self.apply_path_mapping_to_string(key, s)?,
+                            host,
+                        ))
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>, SessionError>>()?;
                 openjd_expr::ExprValue::make_list(mapped, openjd_expr::ExprType::PATH).unwrap()
             }
             _ => value.clone(),
-        }
+        })
     }
 
     // ────────────────────────────────────────────────────────────────

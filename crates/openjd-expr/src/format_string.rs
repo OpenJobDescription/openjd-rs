@@ -1189,10 +1189,12 @@ mod tests {
     #[test]
     fn validate_catches_unknown_func() {
         let fs = FormatString::new("{{ bad_func(1) }}").unwrap();
-        let host_lib =
-            crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
-                crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
-            ));
+        let host_lib = crate::FunctionLibrary::for_profile(
+            &crate::ExprProfile::current().with_host_context(
+                crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new())
+                    .unwrap(),
+            ),
+        );
         assert!(fs
             .validate_expressions(
                 &SymbolTable::new(),
@@ -1212,10 +1214,12 @@ mod tests {
             result.map(|v| v.to_display_string())
         );
 
-        let host_lib =
-            crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
-                crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
-            ));
+        let host_lib = crate::FunctionLibrary::for_profile(
+            &crate::ExprProfile::current().with_host_context(
+                crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new())
+                    .unwrap(),
+            ),
+        );
         let fs = FormatString::new("{{ re_replace('hello', '', 'x') }}").unwrap();
         let result = fs.validate_expressions(
             &SymbolTable::new(),
@@ -1256,10 +1260,12 @@ mod tests {
             crate::ExprValue::unresolved(crate::ExprType::list(crate::ExprType::INT)),
         )
         .unwrap();
-        let host_lib =
-            crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
-                crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
-            ));
+        let host_lib = crate::FunctionLibrary::for_profile(
+            &crate::ExprProfile::current().with_host_context(
+                crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new())
+                    .unwrap(),
+            ),
+        );
         assert!(fs
             .validate_expressions(&st, &FormatStringOptions::new().with_library(&*host_lib))
             .is_ok());
@@ -1273,10 +1279,12 @@ mod tests {
             crate::ExprValue::unresolved(crate::ExprType::INT),
         )
         .unwrap();
-        let host_lib =
-            crate::FunctionLibrary::for_profile(&crate::ExprProfile::current().with_host_context(
-                crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new()),
-            ));
+        let host_lib = crate::FunctionLibrary::for_profile(
+            &crate::ExprProfile::current().with_host_context(
+                crate::HostContext::with_rules(Vec::<crate::path_mapping::PathMappingRule>::new())
+                    .unwrap(),
+            ),
+        );
         assert!(fs
             .validate_expressions(&st, &FormatStringOptions::new().with_library(&*host_lib))
             .is_ok());

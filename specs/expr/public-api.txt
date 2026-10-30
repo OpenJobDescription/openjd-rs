@@ -1,6 +1,6 @@
 pub mod openjd_expr
 pub mod openjd_expr::default_library
-pub fn openjd_expr::default_library::register_host_context_functions(&mut openjd_expr::function_library::FunctionLibrary, alloc::sync::Arc<alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>>)
+pub fn openjd_expr::default_library::register_host_context_functions(&mut openjd_expr::function_library::FunctionLibrary, alloc::sync::Arc<openjd_expr::path_mapping::PathMapper>)
 pub fn openjd_expr::default_library::register_unresolved_host_context_functions(&mut openjd_expr::function_library::FunctionLibrary)
 pub mod openjd_expr::error
 #[non_exhaustive] pub enum openjd_expr::error::ExpressionErrorKind
@@ -327,7 +327,7 @@ pub fn openjd_expr::functions::path::is_absolute(&str, openjd_expr::path_mapping
 pub fn openjd_expr::functions::path::is_absolute_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::functions::path::is_relative_to_fn(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::functions::path::join(&str, &str, openjd_expr::path_mapping::PathFormat) -> alloc::string::String
-pub fn openjd_expr::functions::path::make_apply_path_mapping_fn(alloc::sync::Arc<alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>>) -> impl core::ops::function::Fn(&mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError> + core::marker::Send + core::marker::Sync + 'static
+pub fn openjd_expr::functions::path::make_apply_path_mapping_fn(alloc::sync::Arc<openjd_expr::path_mapping::PathMapper>) -> impl core::ops::function::Fn(&mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError> + core::marker::Send + core::marker::Sync + 'static
 pub fn openjd_expr::functions::path::non_uri_join(&str, &str, openjd_expr::path_mapping::PathFormat) -> alloc::string::String
 pub fn openjd_expr::functions::path::prop_name(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::functions::path::prop_parent(&'_ mut dyn openjd_expr::function_library::EvalContext, &[openjd_expr::value::ExprValue]) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
@@ -417,23 +417,58 @@ impl serde_core::ser::Serialize for openjd_expr::path_mapping::PathFormat
 pub fn openjd_expr::path_mapping::PathFormat::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::path_mapping::PathFormat
 pub fn openjd_expr::path_mapping::PathFormat::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+#[non_exhaustive] pub struct openjd_expr::path_mapping::InvalidPathMappingRule
+pub openjd_expr::path_mapping::InvalidPathMappingRule::index: core::option::Option<usize>
+pub openjd_expr::path_mapping::InvalidPathMappingRule::reason: alloc::string::String
+impl core::clone::Clone for openjd_expr::path_mapping::InvalidPathMappingRule
+pub fn openjd_expr::path_mapping::InvalidPathMappingRule::clone(&self) -> openjd_expr::path_mapping::InvalidPathMappingRule
+impl core::cmp::Eq for openjd_expr::path_mapping::InvalidPathMappingRule
+impl core::cmp::PartialEq for openjd_expr::path_mapping::InvalidPathMappingRule
+pub fn openjd_expr::path_mapping::InvalidPathMappingRule::eq(&self, &openjd_expr::path_mapping::InvalidPathMappingRule) -> bool
+impl core::error::Error for openjd_expr::path_mapping::InvalidPathMappingRule
+impl core::fmt::Debug for openjd_expr::path_mapping::InvalidPathMappingRule
+pub fn openjd_expr::path_mapping::InvalidPathMappingRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::path_mapping::InvalidPathMappingRule
+pub fn openjd_expr::path_mapping::InvalidPathMappingRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_expr::path_mapping::InvalidPathMappingRule
+pub struct openjd_expr::path_mapping::PathMapper
+impl openjd_expr::path_mapping::PathMapper
+pub fn openjd_expr::path_mapping::PathMapper::apply(&self, &str) -> core::option::Option<alloc::string::String>
+pub fn openjd_expr::path_mapping::PathMapper::apply_with_format(&self, &str, openjd_expr::path_mapping::PathFormat) -> core::option::Option<alloc::string::String>
+pub fn openjd_expr::path_mapping::PathMapper::is_empty(&self) -> bool
+pub fn openjd_expr::path_mapping::PathMapper::map(&self, &str) -> alloc::string::String
+pub fn openjd_expr::path_mapping::PathMapper::map_with_format(&self, &str, openjd_expr::path_mapping::PathFormat) -> alloc::string::String
+pub fn openjd_expr::path_mapping::PathMapper::new(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> core::result::Result<Self, openjd_expr::path_mapping::InvalidPathMappingRule>
+pub fn openjd_expr::path_mapping::PathMapper::rules(&self) -> &[openjd_expr::path_mapping::PathMappingRule]
+pub fn openjd_expr::path_mapping::PathMapper::rules_by_precedence(&self) -> impl core::iter::traits::iterator::Iterator<Item = &openjd_expr::path_mapping::PathMappingRule> + '_
+pub fn openjd_expr::path_mapping::PathMapper::trie_bytes(&self) -> usize
+pub fn openjd_expr::path_mapping::PathMapper::with_max_trie_bytes(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>, usize) -> core::result::Result<Self, openjd_expr::path_mapping::InvalidPathMappingRule>
+impl core::clone::Clone for openjd_expr::path_mapping::PathMapper
+pub fn openjd_expr::path_mapping::PathMapper::clone(&self) -> openjd_expr::path_mapping::PathMapper
+impl core::default::Default for openjd_expr::path_mapping::PathMapper
+pub fn openjd_expr::path_mapping::PathMapper::default() -> Self
+impl core::fmt::Debug for openjd_expr::path_mapping::PathMapper
+pub fn openjd_expr::path_mapping::PathMapper::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct openjd_expr::path_mapping::PathMappingRule
 pub openjd_expr::path_mapping::PathMappingRule::destination_path: alloc::string::String
 pub openjd_expr::path_mapping::PathMappingRule::source_path: alloc::string::String
 pub openjd_expr::path_mapping::PathMappingRule::source_path_format: openjd_expr::path_mapping::PathFormat
 impl openjd_expr::path_mapping::PathMappingRule
-pub fn openjd_expr::path_mapping::PathMappingRule::apply(&self, &str) -> core::option::Option<alloc::string::String>
-pub fn openjd_expr::path_mapping::PathMappingRule::apply_with_format(&self, &str, openjd_expr::path_mapping::PathFormat) -> core::option::Option<alloc::string::String>
+pub fn openjd_expr::path_mapping::PathMappingRule::validate(&self) -> core::result::Result<(), openjd_expr::path_mapping::InvalidPathMappingRule>
 impl core::clone::Clone for openjd_expr::path_mapping::PathMappingRule
 pub fn openjd_expr::path_mapping::PathMappingRule::clone(&self) -> openjd_expr::path_mapping::PathMappingRule
+impl core::cmp::Eq for openjd_expr::path_mapping::PathMappingRule
+impl core::cmp::PartialEq for openjd_expr::path_mapping::PathMappingRule
+pub fn openjd_expr::path_mapping::PathMappingRule::eq(&self, &openjd_expr::path_mapping::PathMappingRule) -> bool
 impl core::fmt::Debug for openjd_expr::path_mapping::PathMappingRule
 pub fn openjd_expr::path_mapping::PathMappingRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_expr::path_mapping::PathMappingRule
 impl serde_core::ser::Serialize for openjd_expr::path_mapping::PathMappingRule
 pub fn openjd_expr::path_mapping::PathMappingRule::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::path_mapping::PathMappingRule
 pub fn openjd_expr::path_mapping::PathMappingRule::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-pub fn openjd_expr::path_mapping::apply_rules(&[openjd_expr::path_mapping::PathMappingRule], &str) -> alloc::string::String
-pub fn openjd_expr::path_mapping::apply_rules_with_format(&[openjd_expr::path_mapping::PathMappingRule], &str, openjd_expr::path_mapping::PathFormat) -> alloc::string::String
+pub const openjd_expr::path_mapping::DEFAULT_MAX_TRIE_BYTES: usize
+pub const openjd_expr::path_mapping::MAX_PATH_LEN: usize
 pub fn openjd_expr::path_mapping::is_uri(&str) -> bool
 pub mod openjd_expr::profile
 #[non_exhaustive] pub enum openjd_expr::profile::ExprExtension
@@ -474,11 +509,11 @@ impl core::marker::StructuralPartialEq for openjd_expr::profile::ExprRevision
 pub enum openjd_expr::profile::HostContext
 pub openjd_expr::profile::HostContext::None
 pub openjd_expr::profile::HostContext::Unresolved
-pub openjd_expr::profile::HostContext::WithRules(alloc::sync::Arc<alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>>)
+pub openjd_expr::profile::HostContext::WithRules(alloc::sync::Arc<openjd_expr::path_mapping::PathMapper>)
 impl openjd_expr::profile::HostContext
 pub fn openjd_expr::profile::HostContext::is_enabled(&self) -> bool
 pub fn openjd_expr::profile::HostContext::is_unresolved(&self) -> bool
-pub fn openjd_expr::profile::HostContext::with_rules(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> Self
+pub fn openjd_expr::profile::HostContext::with_rules(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> core::result::Result<Self, openjd_expr::path_mapping::InvalidPathMappingRule>
 impl core::clone::Clone for openjd_expr::profile::HostContext
 pub fn openjd_expr::profile::HostContext::clone(&self) -> openjd_expr::profile::HostContext
 impl core::default::Default for openjd_expr::profile::HostContext
@@ -1014,11 +1049,11 @@ pub fn openjd_expr::error::ExpressionErrorKind::fmt(&self, &mut core::fmt::Forma
 pub enum openjd_expr::HostContext
 pub openjd_expr::HostContext::None
 pub openjd_expr::HostContext::Unresolved
-pub openjd_expr::HostContext::WithRules(alloc::sync::Arc<alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>>)
+pub openjd_expr::HostContext::WithRules(alloc::sync::Arc<openjd_expr::path_mapping::PathMapper>)
 impl openjd_expr::profile::HostContext
 pub fn openjd_expr::profile::HostContext::is_enabled(&self) -> bool
 pub fn openjd_expr::profile::HostContext::is_unresolved(&self) -> bool
-pub fn openjd_expr::profile::HostContext::with_rules(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> Self
+pub fn openjd_expr::profile::HostContext::with_rules(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> core::result::Result<Self, openjd_expr::path_mapping::InvalidPathMappingRule>
 impl core::clone::Clone for openjd_expr::profile::HostContext
 pub fn openjd_expr::profile::HostContext::clone(&self) -> openjd_expr::profile::HostContext
 impl core::default::Default for openjd_expr::profile::HostContext
@@ -1275,6 +1310,20 @@ impl core::clone::Clone for openjd_expr::function_library::FunctionLibrary
 pub fn openjd_expr::function_library::FunctionLibrary::clone(&self) -> openjd_expr::function_library::FunctionLibrary
 impl core::default::Default for openjd_expr::function_library::FunctionLibrary
 pub fn openjd_expr::function_library::FunctionLibrary::default() -> openjd_expr::function_library::FunctionLibrary
+#[non_exhaustive] pub struct openjd_expr::InvalidPathMappingRule
+pub openjd_expr::InvalidPathMappingRule::index: core::option::Option<usize>
+pub openjd_expr::InvalidPathMappingRule::reason: alloc::string::String
+impl core::clone::Clone for openjd_expr::path_mapping::InvalidPathMappingRule
+pub fn openjd_expr::path_mapping::InvalidPathMappingRule::clone(&self) -> openjd_expr::path_mapping::InvalidPathMappingRule
+impl core::cmp::Eq for openjd_expr::path_mapping::InvalidPathMappingRule
+impl core::cmp::PartialEq for openjd_expr::path_mapping::InvalidPathMappingRule
+pub fn openjd_expr::path_mapping::InvalidPathMappingRule::eq(&self, &openjd_expr::path_mapping::InvalidPathMappingRule) -> bool
+impl core::error::Error for openjd_expr::path_mapping::InvalidPathMappingRule
+impl core::fmt::Debug for openjd_expr::path_mapping::InvalidPathMappingRule
+pub fn openjd_expr::path_mapping::InvalidPathMappingRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_expr::path_mapping::InvalidPathMappingRule
+pub fn openjd_expr::path_mapping::InvalidPathMappingRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_expr::path_mapping::InvalidPathMappingRule
 pub struct openjd_expr::ParsedExpression
 impl openjd_expr::ParsedExpression
 pub fn openjd_expr::ParsedExpression::accessed_symbols(&self) -> &std::collections::hash::set::HashSet<alloc::string::String>
@@ -1296,17 +1345,38 @@ impl core::clone::Clone for openjd_expr::ParsedExpression
 pub fn openjd_expr::ParsedExpression::clone(&self) -> openjd_expr::ParsedExpression
 impl core::fmt::Debug for openjd_expr::ParsedExpression
 pub fn openjd_expr::ParsedExpression::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_expr::PathMapper
+impl openjd_expr::path_mapping::PathMapper
+pub fn openjd_expr::path_mapping::PathMapper::apply(&self, &str) -> core::option::Option<alloc::string::String>
+pub fn openjd_expr::path_mapping::PathMapper::apply_with_format(&self, &str, openjd_expr::path_mapping::PathFormat) -> core::option::Option<alloc::string::String>
+pub fn openjd_expr::path_mapping::PathMapper::is_empty(&self) -> bool
+pub fn openjd_expr::path_mapping::PathMapper::map(&self, &str) -> alloc::string::String
+pub fn openjd_expr::path_mapping::PathMapper::map_with_format(&self, &str, openjd_expr::path_mapping::PathFormat) -> alloc::string::String
+pub fn openjd_expr::path_mapping::PathMapper::new(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> core::result::Result<Self, openjd_expr::path_mapping::InvalidPathMappingRule>
+pub fn openjd_expr::path_mapping::PathMapper::rules(&self) -> &[openjd_expr::path_mapping::PathMappingRule]
+pub fn openjd_expr::path_mapping::PathMapper::rules_by_precedence(&self) -> impl core::iter::traits::iterator::Iterator<Item = &openjd_expr::path_mapping::PathMappingRule> + '_
+pub fn openjd_expr::path_mapping::PathMapper::trie_bytes(&self) -> usize
+pub fn openjd_expr::path_mapping::PathMapper::with_max_trie_bytes(alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>, usize) -> core::result::Result<Self, openjd_expr::path_mapping::InvalidPathMappingRule>
+impl core::clone::Clone for openjd_expr::path_mapping::PathMapper
+pub fn openjd_expr::path_mapping::PathMapper::clone(&self) -> openjd_expr::path_mapping::PathMapper
+impl core::default::Default for openjd_expr::path_mapping::PathMapper
+pub fn openjd_expr::path_mapping::PathMapper::default() -> Self
+impl core::fmt::Debug for openjd_expr::path_mapping::PathMapper
+pub fn openjd_expr::path_mapping::PathMapper::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub struct openjd_expr::PathMappingRule
 pub openjd_expr::PathMappingRule::destination_path: alloc::string::String
 pub openjd_expr::PathMappingRule::source_path: alloc::string::String
 pub openjd_expr::PathMappingRule::source_path_format: openjd_expr::path_mapping::PathFormat
 impl openjd_expr::path_mapping::PathMappingRule
-pub fn openjd_expr::path_mapping::PathMappingRule::apply(&self, &str) -> core::option::Option<alloc::string::String>
-pub fn openjd_expr::path_mapping::PathMappingRule::apply_with_format(&self, &str, openjd_expr::path_mapping::PathFormat) -> core::option::Option<alloc::string::String>
+pub fn openjd_expr::path_mapping::PathMappingRule::validate(&self) -> core::result::Result<(), openjd_expr::path_mapping::InvalidPathMappingRule>
 impl core::clone::Clone for openjd_expr::path_mapping::PathMappingRule
 pub fn openjd_expr::path_mapping::PathMappingRule::clone(&self) -> openjd_expr::path_mapping::PathMappingRule
+impl core::cmp::Eq for openjd_expr::path_mapping::PathMappingRule
+impl core::cmp::PartialEq for openjd_expr::path_mapping::PathMappingRule
+pub fn openjd_expr::path_mapping::PathMappingRule::eq(&self, &openjd_expr::path_mapping::PathMappingRule) -> bool
 impl core::fmt::Debug for openjd_expr::path_mapping::PathMappingRule
 pub fn openjd_expr::path_mapping::PathMappingRule::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_expr::path_mapping::PathMappingRule
 impl serde_core::ser::Serialize for openjd_expr::path_mapping::PathMappingRule
 pub fn openjd_expr::path_mapping::PathMappingRule::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for openjd_expr::path_mapping::PathMappingRule

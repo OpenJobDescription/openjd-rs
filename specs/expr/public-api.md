@@ -48,7 +48,7 @@ openjd_expr                 — crate root; most commonly used items re-exported
 ├── functions               — sub-library modules (module-path-only — see below)
 │   ├── arithmetic, comparison, conversion, list, math, misc, path,
 │   │   path_parse, regex, repr, string
-├── path_mapping            — PathFormat, PathMappingRule, apply_rules*, is_uri
+├── path_mapping            — PathFormat, PathMappingRule, PathMapper, InvalidPathMappingRule, is_uri
 ├── profile                 — ExprProfile, ExprRevision, ExprExtension, HostContext
 ├── range_expr              — RangeExpr, IntRange, RangeExprError
 ├── symbol_table            — SymbolTable, SymbolTableEntry, SymbolTableError,
@@ -277,14 +277,17 @@ pub enum HostContext {
     /// Host-context signatures registered with stub implementations that
     /// return `Unresolved(T)`. Use at template-validation time.
     Unresolved,
-    /// Real implementations with path-mapping rules registered. Use at
+    /// Real implementations with a path mapper registered. Use at
     /// runtime.
-    WithRules(Arc<Vec<PathMappingRule>>),
+    WithRules(Arc<PathMapper>),
 }
 
 impl HostContext {
-    /// Construct a `WithRules` from an owned `Vec` (wraps it in an `Arc`).
-    pub fn with_rules(rules: Vec<PathMappingRule>) -> Self;
+    /// Build a `PathMapper` from `rules` and wrap it in `WithRules`.
+    /// Errors when a rule's source path is not absolute for its format, a
+    /// path is longer than `MAX_PATH_LEN`, or the rules' trie would pass
+    /// `DEFAULT_MAX_TRIE_BYTES`.
+    pub fn with_rules(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule>;
 
     pub fn is_enabled(&self) -> bool;       // true iff not None
     pub fn is_unresolved(&self) -> bool;    // true iff Unresolved
@@ -1370,8 +1373,9 @@ Path mapping rules (spec [How-Jobs-Are-Run §Path Mapping](https://github.com/Op
 let submitters say "everywhere you see source path X, replace with destination
 path Y" — essential for farms where the submitter and worker see different
 filesystem layouts. The worker agent reads the rules at session start,
-sorts them longest-source-first, and registers `apply_path_mapping` into
-the `FunctionLibrary`.
+builds a `PathMapper` from them, and registers `apply_path_mapping` into
+the `FunctionLibrary`. See [path-mapping.md](path-mapping.md) for the
+matching rules.
 
 ```rust
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -1393,39 +1397,81 @@ impl PathFormat {
 
 ```rust
 /// A path mapping rule. Field names match the spec's JSON form.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PathMappingRule {
     pub source_path_format: PathFormat,
+    /// Must be absolute for `source_path_format`.
     pub source_path: String,
     pub destination_path: String,
 }
 
-impl PathMappingRule {
-    /// Apply the rule with host-native output separators.
-    pub fn apply(&self, path: &str) -> Option<String>;
+/// The longest `source_path`, `destination_path` or input path, in bytes
+/// (32 KiB). Longer rule paths are rejected; a longer input path matches no
+/// rule, and `apply_path_mapping` raises an error for it. A mapped result
+/// can be longer (destination plus the rest of the input).
+pub const path_mapping::MAX_PATH_LEN: usize = 32768;
 
-    /// Apply with explicit output format.
-    pub fn apply_with_format(
-        &self, path: &str, output_format: PathFormat,
-    ) -> Option<String>;
+/// Default limit on `PathMapper::trie_bytes()` (30 MiB).
+pub const path_mapping::DEFAULT_MAX_TRIE_BYTES: usize = 31457280;
+
+impl PathMappingRule {
+    /// Check that `source_path` is absolute for `source_path_format` and
+    /// that neither path is longer than `MAX_PATH_LEN` bytes. The error's
+    /// `index` is `None`.
+    pub fn validate(&self) -> Result<(), InvalidPathMappingRule>;
 }
+
+/// A rule that `PathMapper::new` or `PathMappingRule::validate` rejected.
+/// Display: "path mapping rule <index>: <reason>", or "<reason>" when
+/// `index` is `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct InvalidPathMappingRule {
+    pub index: Option<usize>,
+    pub reason: String,
+}
+impl std::fmt::Display for InvalidPathMappingRule;
+impl std::error::Error for InvalidPathMappingRule;
 ```
 
-Rule-list helpers (the `apply_path_mapping` function in the library
-composes these):
-
 ```rust
-/// Apply rules in order with first-match-wins. Rules must be pre-sorted
-/// by decreasing `source_path` length so that a nested rule (`/a/b`) is
-/// tried before its parent (`/a`).
-#[must_use]
-pub fn path_mapping::apply_rules(rules: &[PathMappingRule], path: &str) -> String;
+/// Applies a validated set of rules through one trie per source format.
+/// The rule whose source path has the most names wins; then a WINDOWS rule
+/// over a POSIX one; between rules for the same location, the one given last.
+#[derive(Debug, Clone)]
+pub struct PathMapper { /* private fields */ }
 
-#[must_use]
-pub fn path_mapping::apply_rules_with_format(
-    rules: &[PathMappingRule], path: &str, output_format: PathFormat,
-) -> String;
+impl Default for PathMapper; // no rules
+
+impl PathMapper {
+    /// Errors, with the rule's index, on the first invalid rule (see
+    /// `PathMappingRule::validate`), or on the rule that takes the trie
+    /// past `DEFAULT_MAX_TRIE_BYTES`.
+    pub fn new(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule>;
+    /// As `new`, with the trie limited to `max_trie_bytes`. Any number of
+    /// rules is allowed; shared leading components share trie nodes.
+    pub fn with_max_trie_bytes(
+        rules: Vec<PathMappingRule>, max_trie_bytes: usize,
+    ) -> Result<Self, InvalidPathMappingRule>;
+    /// The estimated trie size in bytes that the limit applies to.
+    pub fn trie_bytes(&self) -> usize;
+    /// The rules in the order given.
+    pub fn rules(&self) -> &[PathMappingRule];
+    /// The rules that can apply (a rule replaced by a later one for the
+    /// same location is left out), in precedence order: first match in
+    /// this order equals `apply`.
+    pub fn rules_by_precedence(&self) -> impl Iterator<Item = &PathMappingRule> + '_;
+    pub fn is_empty(&self) -> bool;
+    /// Host-native output separator; `None` when no rule matches.
+    pub fn apply(&self, path: &str) -> Option<String>;
+    pub fn apply_with_format(&self, path: &str, output_format: PathFormat) -> Option<String>;
+    /// As `apply`, returning `path` unchanged when no rule matches.
+    #[must_use]
+    pub fn map(&self, path: &str) -> String;
+    #[must_use]
+    pub fn map_with_format(&self, path: &str, output_format: PathFormat) -> String;
+}
 
 /// True iff `path` has a `scheme://` URI prefix, where the scheme matches
 /// `^[a-zA-Z][a-zA-Z0-9+.-]+://` (at least two characters, so `C://...` is a
@@ -1582,11 +1628,20 @@ call functions through `FunctionLibrary::call` / `call_method` instead.
 
 ```rust
 /// Register host-context functions onto a library clone. Takes an `Arc`
-/// of rules so that the registered closure can share ownership of the
-/// rule set without copying.
+/// of the mapper so that the registered closure can share ownership of
+/// it without copying.
 pub fn default_library::register_host_context_functions(
-    lib: &mut FunctionLibrary, rules: Arc<Vec<PathMappingRule>>,
+    lib: &mut FunctionLibrary, mapper: Arc<PathMapper>,
 );
+
+/// The `apply_path_mapping` implementation that
+/// `register_host_context_functions` registers: maps a `string` argument
+/// through `mapper` with the evaluator's path format, charging the input
+/// length and, when a rule applies, the result length as string operations.
+pub fn functions::path::make_apply_path_mapping_fn(
+    mapper: Arc<PathMapper>,
+) -> impl Fn(&mut dyn EvalContext, &[ExprValue]) -> Result<ExprValue, ExpressionError>
+    + Send + Sync + 'static;
 
 /// Register host-context signatures with stub implementations that
 /// return `Unresolved(T)`. Used at template-validation time when real
@@ -1618,7 +1673,7 @@ pub use format_string::{
     StaticResolution,
 };
 pub use function_library::{EvalContext, FunctionLibrary};
-pub use path_mapping::{PathFormat, PathMappingRule};
+pub use path_mapping::{InvalidPathMappingRule, PathFormat, PathMapper, PathMappingRule};
 pub use profile::{ExprExtension, ExprProfile, ExprRevision, HostContext};
 pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS, MAX_RANGE_EXPR_LEN};
 pub use symbol_table::{

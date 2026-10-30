@@ -301,10 +301,16 @@ pub fn load_path_mapping_rules(
         .get("path_mapping_rules")
         .and_then(|v| v.as_array())
         .ok_or("Path mapping rules must contain a list named 'path_mapping_rules'")?;
-    rules
+    let rules: Vec<PathMappingRule> = rules
         .iter()
-        .map(|r| serde_json::from_value(r.clone()).map_err(|e| e.into()))
-        .collect()
+        .map(|r| serde_json::from_value(r.clone()))
+        .collect::<Result<_, _>>()?;
+    // Reject an invalid rule here (a relative source path, a path over
+    // MAX_PATH_LEN, or a trie over the default size limit), naming the
+    // rule, rather than when the session starts.
+    openjd_sessions::path_mapping::PathMapper::new(rules.clone())
+        .map_err(|e| format!("Invalid path mapping rules: {e}"))?;
+    Ok(rules)
 }
 
 #[cfg(test)]

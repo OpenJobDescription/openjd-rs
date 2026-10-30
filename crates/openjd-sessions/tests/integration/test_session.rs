@@ -2590,38 +2590,380 @@ async fn test_exit_environment_failure_still_pops_for_lifo() {
 // ══════════════════════════════════════════════════════════════
 
 #[tokio::test]
-async fn test_extend_path_mapping_rules_appends_and_sorts() {
+async fn test_extend_path_mapping_rules_appends_in_order() {
     use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
 
+    let posix = |src: &str, dst: &str| PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: src.into(),
+        destination_path: dst.into(),
+    };
     let tmp = TempDir::new().unwrap();
-    let mut s =
-        Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(vec![PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/short".into(),
-            destination_path: "/s".into(),
-        }]);
+    let mut s = Session::new_for_test(tmp.path().to_path_buf())
+        .with_path_mapping(vec![posix("/short", "/s")])
+        .unwrap();
 
     assert_eq!(s.path_mapping_rules().len(), 1);
 
-    s.extend_path_mapping_rules(vec![
-        PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/much/longer/path".into(),
-            destination_path: "/m".into(),
-        },
-        PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/med".into(),
-            destination_path: "/d".into(),
-        },
-    ]);
+    s.extend_path_mapping_rules(vec![posix("/much/longer/path", "/m"), posix("/med", "/d")])
+        .unwrap();
 
-    let rules = s.path_mapping_rules();
-    assert_eq!(rules.len(), 3);
-    // Sorted by source_path length descending (longest first)
-    assert_eq!(rules[0].source_path, "/much/longer/path");
-    assert_eq!(rules[1].source_path, "/short");
-    assert_eq!(rules[2].source_path, "/med");
+    let sources: Vec<&str> = s
+        .path_mapping_rules()
+        .iter()
+        .map(|r| r.source_path.as_str())
+        .collect();
+    // Kept in the order given; the trie decides precedence.
+    assert_eq!(sources, ["/short", "/much/longer/path", "/med"]);
+
+    // A rejected rule leaves the rules unchanged.
+    let err = s
+        .extend_path_mapping_rules(vec![posix("relative", "/r")])
+        .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Invalid path mapping rules: path mapping rule 3: source_path 'relative' must be an \
+         absolute POSIX path, starting with '/'"
+    );
+    assert_eq!(s.path_mapping_rules().len(), 3);
+}
+
+#[tokio::test]
+async fn test_with_config_rejects_relative_path_mapping_source() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+
+    let tmp = TempDir::new().unwrap();
+    let mut config = config_in_root(tmp.path(), "test-bad-rule");
+    config.path_mapping_rules = Some(vec![PathMappingRule {
+        source_path_format: PathFormat::Windows,
+        source_path: "\\projects".into(),
+        destination_path: "/p".into(),
+    }]);
+    let err = Session::with_config(config)
+        .err()
+        .expect("rule is rejected");
+    // Nothing is left in the session root.
+    assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
+    assert!(
+        matches!(
+            err,
+            openjd_sessions::SessionError::InvalidPathMappingRule(_)
+        ),
+        "{err:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "Invalid path mapping rules: path mapping rule 0: source_path '\\projects' must be an \
+         absolute WINDOWS path, starting with a drive such as 'C:\\' or a UNC share such as \
+         '\\\\server\\share'"
+    );
+}
+
+#[tokio::test]
+async fn test_with_config_checks_rules_before_creating_directories() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+
+    // The session root is a regular file, so creating any directory under
+    // it fails. The rule error is reported because it is checked first.
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().join("not_a_dir");
+    std::fs::write(&root, "x").unwrap();
+    let mut config = config_in_root(&root, "test-rule-first");
+    config.path_mapping_rules = Some(vec![PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "relative".into(),
+        destination_path: "/p".into(),
+    }]);
+    let err = Session::with_config(config)
+        .err()
+        .expect("rule is rejected");
+    assert_eq!(
+        err.to_string(),
+        "Invalid path mapping rules: path mapping rule 0: source_path 'relative' must be an \
+         absolute POSIX path, starting with '/'"
+    );
+}
+
+#[tokio::test]
+async fn test_with_path_mapping_rejects_relative_source() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+
+    let tmp = TempDir::new().unwrap();
+    let err = Session::new_for_test(tmp.path().to_path_buf())
+        .with_path_mapping(vec![PathMappingRule {
+            source_path_format: PathFormat::Uri,
+            source_path: "bucket/prefix".into(),
+            destination_path: "/b".into(),
+        }])
+        .err()
+        .expect("rule is rejected");
+    assert_eq!(
+        err.to_string(),
+        "Invalid path mapping rules: path mapping rule 0: source_path 'bucket/prefix' must be \
+         a URI, starting with '<scheme>://' where the scheme has at least two characters"
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Path mapping: function library rebuild and LIST[PATH] mapping
+// ══════════════════════════════════════════════════════════════
+
+/// Print one argument through the session and return stdout. `printf`
+/// prints it as is, where `echo` in some shells reads backslash escapes.
+async fn echo_arg(s: &mut Session, arg: &str) -> String {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::{Action, StepActions, StepScript};
+    let script = StepScript {
+        let_bindings: None,
+        actions: StepActions {
+            on_run: Action {
+                command: FormatString::new("sh").unwrap(),
+                args: Some(vec![
+                    FormatString::new("-c").unwrap(),
+                    FormatString::new("printf '%s\\n' \"$1\"").unwrap(),
+                    FormatString::new("sh").unwrap(),
+                    FormatString::new(arg).unwrap(),
+                ]),
+                timeout: None,
+                cancelation: None,
+            },
+        },
+        embedded_files: None,
+    };
+    let result = s.run_task("step", &script, None, None, None).await.unwrap();
+    result.stdout.trim().to_string()
+}
+
+fn expr_profile() -> openjd_model::ModelProfile {
+    openjd_model::ModelProfile::new(openjd_model::types::SpecificationRevision::V2023_09)
+        .with_extensions(
+            [openjd_model::types::ModelExtension::Expr]
+                .into_iter()
+                .collect(),
+        )
+}
+
+/// A `/`-separated path as a host-format path value displays: with `\`
+/// separators on Windows.
+fn host(path: &str) -> String {
+    if cfg!(windows) {
+        path.replace('/', "\\")
+    } else {
+        path.to_string()
+    }
+}
+
+#[tokio::test]
+async fn test_path_mapping_changes_rebuild_apply_path_mapping() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+
+    let posix = |src: &str, dst: &str| PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: src.into(),
+        destination_path: dst.into(),
+    };
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf())
+        .with_profile(expr_profile())
+        .with_path_mapping(vec![posix("/src", "/first")])
+        .unwrap();
+    let expr = "{{ apply_path_mapping('/src/a/f') }}";
+    assert_eq!(echo_arg(&mut s, expr).await, host("/first/a/f"));
+
+    // A deeper rule added later is used by `apply_path_mapping`.
+    s.extend_path_mapping_rules(vec![posix("/src/a", "/second")])
+        .unwrap();
+    assert_eq!(echo_arg(&mut s, expr).await, host("/second/f"));
+
+    // Replacing the rules replaces what `apply_path_mapping` uses.
+    let mut s = s.with_path_mapping(vec![posix("/src", "/third")]).unwrap();
+    assert_eq!(echo_arg(&mut s, expr).await, host("/third/a/f"));
+}
+
+#[tokio::test]
+async fn test_list_path_parameter_value_is_path_mapped() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+    use openjd_expr::ExprValue;
+    use openjd_model::types::{JobParameterType, JobParameterValue};
+
+    let tmp = TempDir::new().unwrap();
+    let mut config = config_in_root(tmp.path(), "test-list-path");
+    let mut params = openjd_model::types::JobParameterValues::new();
+    // A LIST[PATH] parameter whose value is a single path is mapped too.
+    params.insert(
+        "One".into(),
+        JobParameterValue {
+            param_type: JobParameterType::ListPath,
+            value: ExprValue::new_path("C:\\src\\c", PathFormat::Windows),
+        },
+    );
+    params.insert(
+        "Files".into(),
+        JobParameterValue {
+            param_type: JobParameterType::ListPath,
+            value: ExprValue::make_list(
+                vec![
+                    ExprValue::new_path("C:\\src\\a", PathFormat::Windows),
+                    ExprValue::new_path("C:\\other\\b", PathFormat::Windows),
+                ],
+                openjd_expr::ExprType::PATH,
+            )
+            .unwrap(),
+        },
+    );
+    config.job_parameter_values = params;
+    config.profile = Some(expr_profile());
+    config.path_mapping_rules = Some(vec![PathMappingRule {
+        source_path_format: PathFormat::Windows,
+        source_path: "C:\\src".into(),
+        destination_path: "/dst".into(),
+    }]);
+    let mut s = Session::with_config(config).unwrap();
+    let out = echo_arg(
+        &mut s,
+        "{{ Param.Files[0] }}|{{ Param.Files[1] }}|{{ Param.One }}",
+    )
+    .await;
+    assert_eq!(
+        out,
+        format!("{}|C:\\other\\b|{}", host("/dst/a"), host("/dst/c"))
+    );
+}
+
+#[tokio::test]
+async fn test_path_mapping_trie_limit_comes_from_session_limits() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+
+    let posix = |src: &str| PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: src.into(),
+        destination_path: "/d".into(),
+    };
+    // `/mnt` needs two nodes, `/` and `mnt`: 2 x 224 + 1 + 3 bytes.
+    let expected = |index: usize| {
+        format!(
+            "Invalid path mapping rules: path mapping rule {index}: the rules' trie would need \
+             about 452 bytes, more than the limit of 451 bytes"
+        )
+    };
+    let limits = openjd_sessions::SessionLimits {
+        max_path_mapping_trie_bytes: Some(451),
+        ..Default::default()
+    };
+    let tmp = TempDir::new().unwrap();
+    let mut config = config_in_root(tmp.path(), "test-trie-limit");
+    config.limits = limits;
+    config.path_mapping_rules = Some(vec![posix("/mnt")]);
+    let err = Session::with_config(config).err().expect("trie too large");
+    assert_eq!(err.to_string(), expected(0));
+
+    // The same limit applies when rules are extended or replaced later; a
+    // rejected extension leaves the rules unchanged.
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    s.set_limits_for_test(limits);
+    s.extend_path_mapping_rules(vec![posix("/")]).unwrap();
+    let err = s
+        .extend_path_mapping_rules(vec![posix("/mnt")])
+        .unwrap_err();
+    assert_eq!(err.to_string(), expected(1));
+    assert_eq!(s.path_mapping_rules(), [posix("/")]);
+    let err = s.with_path_mapping(vec![posix("/mnt")]).err().unwrap();
+    assert_eq!(err.to_string(), expected(0));
+}
+
+#[tokio::test]
+async fn test_path_parameter_over_the_length_limit_is_an_error() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule, MAX_PATH_LEN};
+    use openjd_expr::{ExprType, ExprValue, SerializedSymbolTable, SymbolTable};
+    use openjd_model::types::{
+        JobParameterType, JobParameterValue, TaskParameterSet, TaskParameterType,
+        TaskParameterValue,
+    };
+
+    let tmp = TempDir::new().unwrap();
+    // A session with one job parameter and the rule /mnt -> /local.
+    let session = |name: &str, param: JobParameterValue| {
+        let mut config = config_in_root(tmp.path(), name);
+        config.job_parameter_values = [("P".to_string(), param)].into_iter().collect();
+        config.path_mapping_rules = Some(vec![PathMappingRule {
+            source_path_format: PathFormat::Posix,
+            source_path: "/mnt".into(),
+            destination_path: "/local".into(),
+        }]);
+        Session::with_config(config).unwrap()
+    };
+    let at_limit = format!("/mnt/{}", "a".repeat(MAX_PATH_LEN - 5));
+    let long = format!("/mnt/{}", "a".repeat(MAX_PATH_LEN));
+    let expected = |key: &str| {
+        format!(
+            "Failed to apply path mapping to {key}: the path is {} bytes long, more than the \
+             limit of {MAX_PATH_LEN} bytes",
+            long.len()
+        )
+    };
+    let path = |v: &str| JobParameterValue {
+        param_type: JobParameterType::Path,
+        value: ExprValue::String(v.into()),
+    };
+    let list_of_strings = |v: &str| JobParameterValue {
+        param_type: JobParameterType::ListPath,
+        value: ExprValue::make_list(vec![ExprValue::String(v.into())], ExprType::STRING).unwrap(),
+    };
+    let list_of_paths = |v: &str| JobParameterValue {
+        param_type: JobParameterType::ListPath,
+        value: ExprValue::make_list(
+            vec![ExprValue::new_path(v, PathFormat::Posix)],
+            ExprType::PATH,
+        )
+        .unwrap(),
+    };
+    let base = SerializedSymbolTable::from_symtab(&SymbolTable::new());
+
+    // A path of exactly the limit is mapped (`/mnt/` -> `/local` plus the
+    // host separator), as apply_path_mapping does.
+    let st = session("at-limit", path(&at_limit))
+        .build_symbol_table(None, None)
+        .unwrap();
+    assert_eq!(
+        st.get_value("Param.P").unwrap().to_display_string().len(),
+        at_limit.len() + 2
+    );
+
+    // One byte more is an error at every place a parameter is mapped.
+    for (name, param, base) in [
+        ("path", path(&long), None),
+        ("path-base", path(&long), Some(&base)),
+        ("list", list_of_strings(&long), None),
+        ("list-base", list_of_strings(&long), Some(&base)),
+        ("list-of-paths", list_of_paths(&long), None),
+    ] {
+        let err = session(name, param)
+            .build_symbol_table(None, base)
+            .unwrap_err();
+        assert_eq!(err.to_string(), expected("Param.P"), "{name}");
+    }
+    let mut task = TaskParameterSet::new();
+    task.insert(
+        "T".into(),
+        TaskParameterValue {
+            param_type: TaskParameterType::Path,
+            value: ExprValue::String(long.clone()),
+        },
+    );
+    let err = session("task", path("/mnt/x"))
+        .build_symbol_table(Some(&task), None)
+        .unwrap_err();
+    assert_eq!(err.to_string(), expected("Task.Param.T"));
+
+    // The limit applies with no rules too, as apply_path_mapping does with
+    // an empty rule list.
+    let mut config = config_in_root(tmp.path(), "no-rules");
+    config.job_parameter_values = [("P".to_string(), path(&long))].into_iter().collect();
+    let err = Session::with_config(config)
+        .unwrap()
+        .build_symbol_table(None, None)
+        .unwrap_err();
+    assert_eq!(err.to_string(), expected("Param.P"));
 }
 
 // ══════════════════════════════════════════════════════════════

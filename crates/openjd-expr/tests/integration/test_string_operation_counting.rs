@@ -777,7 +777,7 @@ fn large_apply_path_mapping_exceeds() {
         .unwrap();
     let lib = FunctionLibrary::for_profile(
         &ExprProfile::current()
-            .with_host_context(HostContext::with_rules(Vec::<PathMappingRule>::new())),
+            .with_host_context(HostContext::with_rules(Vec::<PathMappingRule>::new()).unwrap()),
     );
     let r = openjd_expr::ParsedExpression::new("S.apply_path_mapping()")
         .unwrap()
@@ -796,4 +796,77 @@ fn large_apply_path_mapping_exceeds() {
         r.contains(".apply_path_mapping("),
         "wanted .apply_path_mapping in error: {r}"
     );
+}
+
+#[test]
+fn apply_path_mapping_charges_the_mapped_result() {
+    use openjd_expr::{ExprProfile, FunctionLibrary, HostContext, PathFormat, PathMappingRule};
+    // A short path mapped to a long destination: the input alone costs one
+    // string operation, building the 30 KB result costs about 118 more.
+    let rule = PathMappingRule {
+        source_path_format: PathFormat::Posix,
+        source_path: "/a".into(),
+        destination_path: format!("/{}", "d".repeat(30_000)),
+    };
+    let lib = FunctionLibrary::for_profile(
+        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule]).unwrap()),
+    );
+    let eval = |expr: &str, limit: usize| {
+        openjd_expr::ParsedExpression::new(expr)
+            .unwrap()
+            .with_library(&lib)
+            .with_path_format(PathFormat::Posix)
+            .with_memory_limit(100_000_000)
+            .with_operation_limit(limit)
+            .evaluate_with_metrics(&[])
+    };
+    let r = eval("apply_path_mapping('/a/x')", 100)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        r.starts_with("Expression operation count (") && r.contains("exceeded limit (100)"),
+        "expected operation-limit error, got: {r}"
+    );
+    // An unmatched path is charged by its own length only.
+    assert!(eval("apply_path_mapping('/b/x')", 100).is_ok());
+    assert!(eval("apply_path_mapping('/a/x')", 1_000).is_ok());
+}
+
+#[test]
+fn apply_path_mapping_rejects_a_path_over_the_limit() {
+    use openjd_expr::path_mapping::MAX_PATH_LEN;
+    use openjd_expr::{ExprProfile, FunctionLibrary, HostContext, PathFormat, PathMappingRule};
+    let lib = FunctionLibrary::for_profile(
+        &ExprProfile::current()
+            .with_host_context(HostContext::with_rules(Vec::<PathMappingRule>::new()).unwrap()),
+    );
+    let mut st = SymbolTable::new();
+    st.set("S", ExprValue::String("a".repeat(MAX_PATH_LEN + 1)))
+        .unwrap();
+    let err = openjd_expr::ParsedExpression::new("apply_path_mapping(S)")
+        .unwrap()
+        .with_library(&lib)
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&[&st])
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        err,
+        format!(
+            "apply_path_mapping: the path is {} bytes long, more than the limit of \
+             {MAX_PATH_LEN} bytes\n  apply_path_mapping(S)\n  ^~~~~~~~~~~~~~~~~~~~~",
+            MAX_PATH_LEN + 1
+        )
+    );
+    // A path of exactly the limit is mapped.
+    let mut st = SymbolTable::new();
+    st.set("S", ExprValue::String("a".repeat(MAX_PATH_LEN)))
+        .unwrap();
+    let ok = openjd_expr::ParsedExpression::new("apply_path_mapping(S)")
+        .unwrap()
+        .with_library(&lib)
+        .with_path_format(PathFormat::Posix)
+        .evaluate(&[&st])
+        .unwrap();
+    assert_eq!(ok.to_display_string().len(), MAX_PATH_LEN);
 }

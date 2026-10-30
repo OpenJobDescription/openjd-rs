@@ -4,7 +4,20 @@
 
 //! Tests for path mapping — mirrors Python test_path_mapping.py
 
-use openjd_sessions::path_mapping::{PathFormat, PathMappingRule};
+use openjd_sessions::path_mapping::{PathFormat, PathMapper, PathMappingRule};
+
+/// Apply one rule through a [`PathMapper`], the only way rules are applied.
+trait ApplyOne {
+    fn apply_with_format(&self, path: &str, output_format: PathFormat) -> Option<String>;
+}
+
+impl ApplyOne for PathMappingRule {
+    fn apply_with_format(&self, path: &str, output_format: PathFormat) -> Option<String> {
+        PathMapper::new(vec![self.clone()])
+            .expect("valid rule")
+            .apply_with_format(path, output_format)
+    }
+}
 
 fn posix_rule(src: &str, dst: &str) -> PathMappingRule {
     PathMappingRule {

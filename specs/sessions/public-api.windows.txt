@@ -108,6 +108,7 @@ pub openjd_sessions::error::SessionError::FormatString
 pub openjd_sessions::error::SessionError::FormatString::context: alloc::string::String
 pub openjd_sessions::error::SessionError::FormatString::reason: alloc::string::String
 pub openjd_sessions::error::SessionError::HelperCommunication(alloc::string::String)
+pub openjd_sessions::error::SessionError::InvalidPathMappingRule(openjd_expr::path_mapping::InvalidPathMappingRule)
 pub openjd_sessions::error::SessionError::InvalidState
 pub openjd_sessions::error::SessionError::InvalidState::current: openjd_sessions::session::SessionState
 pub openjd_sessions::error::SessionError::InvalidState::expected: alloc::vec::Vec<openjd_sessions::session::SessionState>
@@ -132,6 +133,8 @@ pub openjd_sessions::error::SessionError::UnknownEnvironment::identifier: alloc:
 pub openjd_sessions::error::SessionError::WorkingDirectory
 pub openjd_sessions::error::SessionError::WorkingDirectory::path: std::path::PathBuf
 pub openjd_sessions::error::SessionError::WorkingDirectory::source: core::io::error::Error
+impl core::convert::From<openjd_expr::path_mapping::InvalidPathMappingRule> for openjd_sessions::error::SessionError
+pub fn openjd_sessions::error::SessionError::from(openjd_expr::path_mapping::InvalidPathMappingRule) -> Self
 impl core::error::Error for openjd_sessions::error::SessionError
 pub fn openjd_sessions::error::SessionError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for openjd_sessions::error::SessionError
@@ -144,6 +147,7 @@ pub mod openjd_sessions::limits
 pub struct openjd_sessions::limits::SessionLimits
 pub openjd_sessions::limits::SessionLimits::max_eval_memory_bytes: core::option::Option<usize>
 pub openjd_sessions::limits::SessionLimits::max_eval_operations: core::option::Option<usize>
+pub openjd_sessions::limits::SessionLimits::max_path_mapping_trie_bytes: core::option::Option<usize>
 pub openjd_sessions::limits::SessionLimits::max_resolved_arg_len: core::option::Option<usize>
 pub openjd_sessions::limits::SessionLimits::max_resolved_data_len: core::option::Option<usize>
 impl core::clone::Clone for openjd_sessions::limits::SessionLimits
@@ -347,7 +351,7 @@ pub async fn openjd_sessions::session::Session::enter_environment_with_output(&m
 pub fn openjd_sessions::session::Session::environments_entered(&self) -> &[openjd_sessions::session::EnvironmentIdentifier]
 pub fn openjd_sessions::session::Session::evaluate_env_vars(&self, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>
 pub async fn openjd_sessions::session::Session::exit_environment(&mut self, &openjd_sessions::session::EnvironmentIdentifier, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, bool, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<alloc::string::String, openjd_sessions::error::SessionError>
-pub fn openjd_sessions::session::Session::extend_path_mapping_rules(&mut self, alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>)
+pub fn openjd_sessions::session::Session::extend_path_mapping_rules(&mut self, alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> core::result::Result<(), openjd_sessions::error::SessionError>
 pub fn openjd_sessions::session::Session::files_directory(&self) -> &std::path::Path
 pub fn openjd_sessions::session::Session::get_enabled_extensions(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn openjd_sessions::session::Session::job_parameter_values(&self) -> &openjd_model::types::JobParameterValues
@@ -359,7 +363,7 @@ pub async fn openjd_sessions::session::Session::run_task(&mut self, &str, &openj
 pub fn openjd_sessions::session::Session::session_id(&self) -> &str
 pub fn openjd_sessions::session::Session::state(&self) -> openjd_sessions::session::SessionState
 pub fn openjd_sessions::session::Session::with_config(openjd_sessions::session::SessionConfig) -> core::result::Result<Self, openjd_sessions::error::SessionError>
-pub fn openjd_sessions::session::Session::with_path_mapping(self, alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> Self
+pub fn openjd_sessions::session::Session::with_path_mapping(self, alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> core::result::Result<Self, openjd_sessions::error::SessionError>
 pub fn openjd_sessions::session::Session::with_profile(self, openjd_model::types::ModelProfile) -> Self
 pub fn openjd_sessions::session::Session::working_directory(&self) -> &std::path::Path
 impl core::ops::drop::Drop for openjd_sessions::session::Session
@@ -562,6 +566,7 @@ pub openjd_sessions::SessionError::FormatString
 pub openjd_sessions::SessionError::FormatString::context: alloc::string::String
 pub openjd_sessions::SessionError::FormatString::reason: alloc::string::String
 pub openjd_sessions::SessionError::HelperCommunication(alloc::string::String)
+pub openjd_sessions::SessionError::InvalidPathMappingRule(openjd_expr::path_mapping::InvalidPathMappingRule)
 pub openjd_sessions::SessionError::InvalidState
 pub openjd_sessions::SessionError::InvalidState::current: openjd_sessions::session::SessionState
 pub openjd_sessions::SessionError::InvalidState::expected: alloc::vec::Vec<openjd_sessions::session::SessionState>
@@ -586,6 +591,8 @@ pub openjd_sessions::SessionError::UnknownEnvironment::identifier: alloc::string
 pub openjd_sessions::SessionError::WorkingDirectory
 pub openjd_sessions::SessionError::WorkingDirectory::path: std::path::PathBuf
 pub openjd_sessions::SessionError::WorkingDirectory::source: core::io::error::Error
+impl core::convert::From<openjd_expr::path_mapping::InvalidPathMappingRule> for openjd_sessions::error::SessionError
+pub fn openjd_sessions::error::SessionError::from(openjd_expr::path_mapping::InvalidPathMappingRule) -> Self
 impl core::error::Error for openjd_sessions::error::SessionError
 pub fn openjd_sessions::error::SessionError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for openjd_sessions::error::SessionError
@@ -750,7 +757,7 @@ pub async fn openjd_sessions::session::Session::enter_environment_with_output(&m
 pub fn openjd_sessions::session::Session::environments_entered(&self) -> &[openjd_sessions::session::EnvironmentIdentifier]
 pub fn openjd_sessions::session::Session::evaluate_env_vars(&self, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> std::collections::hash::map::HashMap<alloc::string::String, core::option::Option<alloc::string::String>>
 pub async fn openjd_sessions::session::Session::exit_environment(&mut self, &openjd_sessions::session::EnvironmentIdentifier, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, bool, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<alloc::string::String, openjd_sessions::error::SessionError>
-pub fn openjd_sessions::session::Session::extend_path_mapping_rules(&mut self, alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>)
+pub fn openjd_sessions::session::Session::extend_path_mapping_rules(&mut self, alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> core::result::Result<(), openjd_sessions::error::SessionError>
 pub fn openjd_sessions::session::Session::files_directory(&self) -> &std::path::Path
 pub fn openjd_sessions::session::Session::get_enabled_extensions(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn openjd_sessions::session::Session::job_parameter_values(&self) -> &openjd_model::types::JobParameterValues
@@ -762,7 +769,7 @@ pub async fn openjd_sessions::session::Session::run_task(&mut self, &str, &openj
 pub fn openjd_sessions::session::Session::session_id(&self) -> &str
 pub fn openjd_sessions::session::Session::state(&self) -> openjd_sessions::session::SessionState
 pub fn openjd_sessions::session::Session::with_config(openjd_sessions::session::SessionConfig) -> core::result::Result<Self, openjd_sessions::error::SessionError>
-pub fn openjd_sessions::session::Session::with_path_mapping(self, alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> Self
+pub fn openjd_sessions::session::Session::with_path_mapping(self, alloc::vec::Vec<openjd_expr::path_mapping::PathMappingRule>) -> core::result::Result<Self, openjd_sessions::error::SessionError>
 pub fn openjd_sessions::session::Session::with_profile(self, openjd_model::types::ModelProfile) -> Self
 pub fn openjd_sessions::session::Session::working_directory(&self) -> &std::path::Path
 impl core::ops::drop::Drop for openjd_sessions::session::Session
@@ -788,6 +795,7 @@ pub openjd_sessions::SessionConfig::user: core::option::Option<alloc::sync::Arc<
 pub struct openjd_sessions::SessionLimits
 pub openjd_sessions::SessionLimits::max_eval_memory_bytes: core::option::Option<usize>
 pub openjd_sessions::SessionLimits::max_eval_operations: core::option::Option<usize>
+pub openjd_sessions::SessionLimits::max_path_mapping_trie_bytes: core::option::Option<usize>
 pub openjd_sessions::SessionLimits::max_resolved_arg_len: core::option::Option<usize>
 pub openjd_sessions::SessionLimits::max_resolved_data_len: core::option::Option<usize>
 impl core::clone::Clone for openjd_sessions::limits::SessionLimits

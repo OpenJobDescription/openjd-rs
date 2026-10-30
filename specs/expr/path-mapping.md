@@ -6,15 +6,16 @@ Path mapping transforms filesystem paths between different formats and locations
 is essential for render farms where jobs are authored on one OS but executed on another,
 or where storage mount points differ between submission and execution hosts.
 
-Defined in `path_mapping.rs` (PathFormat, PathMappingRule) and `uri_path.rs` (URI-aware
-path operations).
+Defined in `path_mapping.rs` (PathFormat, PathMappingRule, PathMapper,
+InvalidPathMappingRule), `windows_upcase.rs` (the Windows uppercase table) and
+`uri_path.rs` (URI-aware path operations).
 
 ## PathFormat
 
 ```rust
 pub enum PathFormat {
     Posix,    // Forward slashes, case-sensitive
-    Windows,  // Backslashes (normalized to forward), case-insensitive matching
+    Windows,  // `\` and `/` separators (`/` normalized to `\`), case-insensitive matching
     Uri,      // scheme://authority/path — no normalization
 }
 ```
@@ -29,6 +30,8 @@ bypass normalization entirely.
 ## PathMappingRule
 
 ```rust
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PathMappingRule {
     pub source_path_format: PathFormat,
     pub source_path: String,
@@ -36,44 +39,64 @@ pub struct PathMappingRule {
 }
 ```
 
-### Application
+A rule maps paths under `source_path` to the same relative location under
+`destination_path`. Rules are applied through a [`PathMapper`](#pathmapper).
 
-`rule.apply(path) -> Option<String>` returns `Some(mapped)` if `path` starts with the
-rule's `source_path` (using format-appropriate comparison), or `None` if no match.
-When matched, the source prefix is replaced with `destination_path`. Trailing
-slashes are preserved. Output separators use the host-native format — use
-`apply_with_format` for explicit control.
+### Source paths must be absolute
 
-Format-appropriate comparison means:
-- **Posix**: exact byte comparison; `/` is the only separator
-- **Windows**: case-insensitive, treats `\` and `/` interchangeably as separators
-- **URI**: scheme and authority compared case-insensitively, path compared exactly
+`source_path` must be absolute for `source_path_format`, and
+`rule.validate()` (or `PathMapper::new`) rejects one that is not:
 
-Filesystem matching (Posix and Windows) compares the path component by
-component, and mirrors Python's `PurePosixPath`/`PureWindowsPath`
-`is_relative_to` on two points that component comparison alone would miss:
+| Format | Absolute means | Rejected examples |
+|--------|----------------|-------------------|
+| `POSIX` | starts with `/` | `home/user`, `` (empty) |
+| `WINDOWS` | starts with a drive and separator (`C:\`, `c:/`) or a UNC share (`\\server\share`, either separator) | `\projects` (rooted on the current drive), `C:projects` (drive-relative), `\\server` (no share) |
+| `URI` | starts with `<scheme>://`, where the scheme is at least two characters (see [`is_uri`](#scheme-must-be-at-least-two-characters)) | `bucket/prefix`, `C://data` (a Windows path) |
 
-> **Rootedness must agree.** A relative path never matches an absolute rule and
-> an absolute path never matches a relative rule, even when every component
-> lines up. Python gets this from the root entry in `.parts`; component
-> splitting discards it, so it is compared separately. A path is rooted if it
-> starts with `/`, or — under Windows only — with `\`. Drive-anchored Windows
-> paths need no special case: `C:` is kept as the first component, so a drive
-> mismatch already fails component comparison.
->
-> **Only the format's own separators split components.** Under Windows, `\` and
-> `/` are interchangeable, so the rule `C:/Users/bob` matches the input
-> `C:\Users\bob\f.txt`. Under Posix, `\` is an ordinary filename character, so
-> `home\user` is a single component: the rule `/home/user` does **not** match
-> the input `/home\user/f`, and the rule `/home\user` matches `/home\user/f`
-> but not `/home/user/f`. This follows `PurePosixPath("/home\\user/f").parts`
-> == `('/', 'home\\user', 'f')`.
+A relative source path could only match relative input paths, and what a
+relative path refers to depends on a working directory the rule cannot know.
+Requiring absolute source paths removes that ambiguity. Input paths are not
+validated: a path that is not absolute for a format simply matches none of
+that format's rules.
 
-### apply_with_format
+The error is `InvalidPathMappingRule { index, reason }`. Its `Display` is
+`path mapping rule <index>: source_path '<path>' must be <what>` from
+`PathMapper::new`, and the same without the `path mapping rule <index>: `
+prefix from `validate`, which sets `index` to `None`.
 
-`rule.apply_with_format(path, output_format) -> Option<String>` is the same as
-`apply` but lets the caller pick the output separator (`/` for Posix/Uri, `\` for
-Windows). The source format still dictates how the prefix match is performed.
+### Path length limit
+
+`path_mapping::MAX_PATH_LEN` is 32 KiB (32,768 bytes). `validate` and
+`PathMapper::new` reject a rule whose `source_path` or `destination_path` is
+longer, with `source_path is <n> bytes long, more than the limit of 32768
+bytes` (or `destination_path ...`). An input path longer than the limit
+matches no rule, and `apply_path_mapping` raises `apply_path_mapping: the
+path is <n> bytes long, more than the limit of 32768 bytes` for one.
+
+32 KiB covers a Windows extended-length path (up to 32,767 UTF-16 code units)
+of ASCII characters and is eight times Linux's `PATH_MAX` (4096). It bounds
+the work for one path, and the trie size limit below bounds the rules as a
+whole.
+
+### Trie size limit
+
+Any number of rules is allowed. What is limited is the estimated size of the
+trie, `PathMapper::trie_bytes()`: each node counts its key's length plus 224
+bytes for the node and its entry in the parent's map (measured at about 230
+bytes per one-character component; the estimate is within about 15% for
+chains of single-child nodes and above the real size for wide trees). A rule
+adds only the components it does not share with earlier rules, so rules
+under a common root, as real rule sets are, cost little.
+
+`PathMapper::new` limits the estimate to
+`path_mapping::DEFAULT_MAX_TRIE_BYTES` (30 MiB);
+`PathMapper::with_max_trie_bytes(rules, max)` takes the limit. When a rule
+takes the estimate past the limit, it is rejected with
+`path mapping rule <i>: the rules' trie would need about <n> bytes, more than
+the limit of <max> bytes`. Without the limit, a 10 MB rules file (which the
+CLI accepts) of rules near 32 KiB that share nothing would build a trie of
+about 1.2 GB. `openjd-sessions` takes the limit from
+`SessionLimits::max_path_mapping_trie_bytes`.
 
 ### Serde
 
@@ -86,6 +109,166 @@ Windows). The source format still dictates how the prefix match is performed.
     "destination_path": "/mnt/projects"
 }
 ```
+
+Deserializing does not validate `source_path`; `PathMapper::new` does.
+
+## PathMapper
+
+```rust
+#[derive(Debug, Clone)]
+pub struct PathMapper { /* rules, precedence order, one trie per format */ }
+
+impl Default for PathMapper; // no rules
+
+impl PathMapper {
+    pub fn new(rules: Vec<PathMappingRule>) -> Result<Self, InvalidPathMappingRule>;
+    pub fn with_max_trie_bytes(
+        rules: Vec<PathMappingRule>,
+        max_trie_bytes: usize,
+    ) -> Result<Self, InvalidPathMappingRule>;
+    pub fn trie_bytes(&self) -> usize;
+    pub fn rules(&self) -> &[PathMappingRule];
+    pub fn rules_by_precedence(&self) -> impl Iterator<Item = &PathMappingRule> + '_;
+    pub fn is_empty(&self) -> bool;
+    pub fn apply(&self, path: &str) -> Option<String>;
+    pub fn apply_with_format(&self, path: &str, output_format: PathFormat) -> Option<String>;
+    pub fn map(&self, path: &str) -> String;
+    pub fn map_with_format(&self, path: &str, output_format: PathFormat) -> String;
+}
+```
+
+`PathMapper::new` validates every rule and builds one trie per source format,
+keyed by path component. A rule's source path is stored at the node reached
+by its components. To map a path, the mapper splits it once per source format
+and walks its components down that format's trie, remembering the deepest
+node that holds a rule. The work is linear in the length of the path,
+whatever the number of rules. `apply_path_mapping` charges `path.len()`
+string operations for the match and, when a rule applies, the length of the
+result for building it (see [function-library.md](function-library.md), which
+describes `count_string_ops`). This port follows the trie in
+[deadline-cloud-job-attachments `_PathMappingRuleApplier`](https://github.com/aws-deadline/deadline-cloud-job-attachments/blob/2ae3635c6f5642846e9a98cdf1075f867886133a/src/deadline/job_attachments/_path_mapping.py),
+extended to URI rules and to rules of several formats at once. The tries
+are stored as one flat array of nodes that refer to each other by index, so
+building, dropping, cloning or formatting a mapper never recurses, however
+many components a rule has.
+
+`apply` and `apply_with_format` return `None` when no rule matches; `map`
+and `map_with_format` return the path unchanged instead. `apply` and `map`
+join components with the host separator; the `_with_format` forms take the
+output format (`\` for `Windows`, `/` for `Posix` and `Uri`).
+
+### Components
+
+How a path is split depends on the source format of the trie being searched:
+
+- **POSIX**: the anchor is `/`, and components are split on `/` only. A
+  backslash is an ordinary filename character, so `home\user` is one
+  component: the rule `/home/user` does not match `/home\user/f`, and the
+  rule `/home\user` matches `/home\user/f` but not `/home/user/f`. This
+  follows `PurePosixPath("/home\\user/f").parts == ('/', 'home\\user', 'f')`.
+  Components compare exactly.
+- **WINDOWS**: `\` and `/` are interchangeable separators. The anchor is a
+  drive (`C:`) or a UNC share (`\\server\share`), and it is one component, so
+  `\\srv\share` never matches `\srv\share\x` (a path on the current drive) or
+  `\\srv\other\x`. Components, including the drive letter, server and share,
+  compare the way Windows compares file names: each UTF-16 code unit is
+  mapped through the Windows uppercase table (see [Windows case](#windows-case)).
+- **URI**: the anchor is `scheme://authority`, compared ASCII
+  case-insensitively (RFC 3986). Path segments are split on `/` and compare
+  exactly. Empty segments are kept, because URI paths are
+  [opaque](#why-uri-paths-are-opaque): `s3://b/a//f` has the segments `a`,
+  ``, `f`, and the rule `s3://b/a/` (segments `a`, ``) matches `s3://b/a/` and
+  `s3://b/a//f` but not `s3://b/a/f`.
+
+For POSIX and WINDOWS, empty components (from repeated or trailing
+separators) and `.` are dropped, as `pathlib` does, so `/a/./b`, `/a//b` and
+`/a/b/` all name `/a/b`. `..` is a component and is not collapsed, because
+doing so safely needs the filesystem (symbolic links).
+
+A path is matched against every format that has rules. `//srv/share/x` is
+both a POSIX path and a Windows UNC path, and can match rules of both
+formats.
+
+### Which rule wins
+
+The matching rule whose source path has the most names wins. The anchor
+counts as no names for the POSIX root `/`, one for a drive (`C:`) or a URI's
+`scheme://authority`, and two for a UNC share (its server and share); every
+component after the anchor counts as one. Rules whose source paths have the
+same components name the same location (`/mnt/p`, `/mnt/p/` and `/mnt//p`
+are one location; so are `C:\Data` and `c:/data`), and the rule given last
+wins.
+
+How an anchor counts matters only when a path matches rules of more than one
+format. Within one format it adds the same amount to every rule that can
+match a path (a path cannot match both a drive rule and a UNC rule). Across
+formats, the only overlap is a path like `//srv/share/x`, which is a POSIX
+path and a UNC path. `\\srv\share` beats `/srv`, and `\\srv\share\x` beats
+`/srv/share`. The POSIX rule `/srv/share` and the WINDOWS rule `\\srv\share`
+both have two names; between rules of different formats with the same number
+of names, the WINDOWS rule wins, because `//srv/share/...` is the UNC
+spelling. This tie is not broken by list order, because the two rules are
+different locations, so reordering the rules (as a reader of
+`rules_by_precedence()` may) must not change the result.
+
+This replaces the earlier order, "decreasing length of the source path" as a
+string (How-Jobs-Are-Run, "Applying Path Mapping Rules"). For rules spelled
+without redundant separators or `.` components, a rule with more components
+that matches the same path is also the longer string, so the two orders pick
+the same rule. They differ for redundant spellings: string length prefers
+`/aaaa///` over `/aaaa/b`, and between `/mnt/p` and `/mnt/p/` it prefers the
+longer spelling instead of the rule given last.
+
+`rules()` returns the rules in the order given. `rules_by_precedence()`
+returns the rules that can apply: the most names first, then WINDOWS before
+POSIX before URI, then the one given last first. A rule replaced by a later
+rule for the same location is left out, so each location appears once.
+Applying the first rule in that order that matches a path gives the same
+result as `apply`. Building a new mapper from that list, in that order or any
+other, also gives the same result: the list has no two rules for one
+location, and the remaining ties are broken by format, not by order. A
+consumer that reads the rules (such as a job script reading
+`Session.PathMappingRulesFile`) therefore picks the same rule as the mapper
+whether it takes the first match or follows these rules, as long as it splits
+and compares paths the same way (see
+[Divergence from Python](#divergence-from-python) for where pathlib differs).
+
+### Output
+
+The result is `destination_path`, as written, followed by the path's
+components after the matched source path, each preceded by the output
+separator. Components keep the case they have in the input. A trailing
+separator on the input (`/` for POSIX and URI, `\` or `/` for WINDOWS) is
+kept, unless the result already ends with the output separator.
+
+### Windows case
+
+Windows compares file names by mapping each UTF-16 code unit through its
+uppercase table (`RtlUpcaseUnicodeChar`; NTFS keeps a copy in `$UpCase`, and
+`CompareStringOrdinal` with `bIgnoreCase` uses the same mapping). The table
+is generated into `windows_upcase.rs` by
+`scripts/generate_windows_upcase_table.py`, which reads it from a running
+Windows system and checks every entry against `CompareStringOrdinal`; a
+Windows-only unit test re-checks the checked-in table the same way. The
+mapping applies on every host, so a WINDOWS rule matches the same paths on a
+Linux worker as on a Windows one.
+
+The table is not a Unicode case folding:
+
+- It maps one code unit to one code unit, so `ß` does not match `SS` or `ẞ`.
+- It maps a letter only to an uppercase or titlecase letter that maps back to
+  it, so the
+  dotless `ı` does not match `I`, the long `ſ` does not match `S`, final `ς`
+  does not match `Σ`, and no non-ASCII character matches an ASCII one (the
+  KELVIN SIGN `K` does not match `k`).
+- It predates several Unicode case pairs, such as Cherokee lowercase and
+  Georgian Mtavruli, which do not fold.
+- It leaves surrogates alone, so characters outside the BMP never fold.
+
+Python's `PureWindowsPath` compares with `str.lower()`, which folds more
+pairs than Windows does (including KELVIN SIGN to `k`), and
+openjd-sessions-for-python compares Windows components with an ASCII-only
+fold. See [Divergence from Python](#divergence-from-python).
 
 ## URI Path Operations
 
@@ -267,21 +450,66 @@ produces `C:render.exr`.
 ### apply_path_mapping
 
 `apply_path_mapping(path_string)` is a host-context-only function that applies
-the rules captured in its implementing closure to a string, returning a path
-value. It is registered on a [`FunctionLibrary`](../../crates/openjd-expr/src/function_library.rs)
+the `PathMapper` captured in its implementing closure to a string, returning a
+path value. It is registered on a [`FunctionLibrary`](../../crates/openjd-expr/src/function_library.rs)
 obtained from [`FunctionLibrary::for_profile`](../../crates/openjd-expr/src/default_library.rs)
 with an [`ExprProfile`](../../crates/openjd-expr/src/profile.rs) whose
-`host_context` is `HostContext::WithRules(Arc::new(rules))` — see
+`host_context` is `HostContext::WithRules(Arc<PathMapper>)`, usually built
+with the fallible `HostContext::with_rules(rules)` — see
 [function-library.md § Host Context](function-library.md#host-context).
 During template validation, when rules aren't available yet, callers build
 the profile with `HostContext::Unresolved` instead, which registers a stub
 that returns `Unresolved(path)` for type checking.
 
+The function charges `path.len()` string operations before mapping, and the
+result's length after a rule applies. The trie walk is linear in the path
+length whatever the number of rules, and building the result is linear in its
+length, so the charges grow with the whole cost. A charged operation covers 256
+bytes, and matching costs more per byte than most string functions (each
+WINDOWS component is folded before lookup), so the time per operation is
+several times that of, say, `upper()`. The earlier rule-by-rule loop charged
+only `path.len()` while its cost also grew with the rule count (openjd-rs#210).
+
 ## Divergence from Python
 
-The Rust implementation uses the same `PathMappingRule` structure and application logic
-as the Python version. The Python version uses `PurePosixPath` / `PureWindowsPath` for
-path manipulation; the Rust version uses string operations directly, which avoids the
-overhead of constructing path objects for simple prefix matching.
+The Python openjd-sessions `PathMappingRule.apply` uses `PurePosixPath` /
+`PureWindowsPath` and is applied rule by rule. The Rust `PathMapper` splits
+paths itself and walks a trie. They agree on how input paths split into
+components (`.` and empty components dropped, `..` kept, the POSIX backslash
+rule, UNC anchors), with these differences:
 
-URI path handling is functionally identical between implementations.
+- **Device paths.** Rust has no special case for the Windows device
+  namespace: `\\?\C:\x` is a UNC path with server `?` and share `C:`, and
+  `\\?\UNC\srv\share` is the share `\\?\UNC` followed by `srv` and
+  `share`. `PureWindowsPath` treats both prefixes as part of the drive. Both
+  keep such paths apart from `C:\x` and `\\srv\share`.
+
+- **Windows case.** Rust uses the Windows uppercase table. Python
+  openjd-sessions uses an ASCII-only fold, chosen to match the earlier Rust
+  behavior. `PureWindowsPath` itself uses `str.lower()`. All three agree on
+  ASCII.
+- **Source paths.** Rust rejects a relative source path. Python accepts one,
+  and it then matches only relative inputs.
+- **Length.** Rust limits rule paths and input paths to 32 KiB
+  ([Path length limit](#path-length-limit)); Python has no limit.
+- **Two leading slashes.** `PurePosixPath('//a')` keeps `//` as its own root,
+  so it is not relative to `/a`. Rust treats `//a` as `/a`, as Linux and
+  macOS do. So in Rust, but not in Python, a POSIX rule can match a
+  `//server/share/...` path, where it competes with WINDOWS UNC rules (see
+  [Which rule wins](#which-rule-wins)).
+- **Ties.** Between rules for the same location, Rust takes the rule given
+  last. Python sorts rules by component count, and among rules for the same
+  location takes the one given first.
+- **Destination.** Rust appends the remaining components to
+  `destination_path` as written. Python rebuilds the result with
+  `PurePath(*destination.parts, *rest)`, which normalizes the destination:
+  for the destination `D:\x\`, Rust gives `D:\x\\f` and Python `D:\x\f`.
+  Python also reads a remaining component that looks like a drive as one:
+  with the rule `C:\a` → `D:\m`, `C:\a\b:c` gives `D:\m\b:c` in Rust and
+  `b:c` in Python. Both predate `PathMapper`.
+- **URI rules.** Python accepts a one-letter scheme (`C://data`) for a URI
+  rule; Rust rejects it, because `C://data` is a Windows path (see
+  [is_uri](#scheme-must-be-at-least-two-characters)). For precedence, Python
+  strips slashes from both ends of a URI path, so it counts `s3://b/a/` as
+  two components; Rust keeps the empty segment and counts three. Matching
+  and output for a single URI rule are the same.

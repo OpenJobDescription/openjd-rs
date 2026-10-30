@@ -626,32 +626,39 @@ pub fn relative_to_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     ))
 }
 
-/// Build a closure for `apply_path_mapping` that captures the given rules.
+/// Build a closure for `apply_path_mapping` that captures the given mapper.
 ///
-/// The rules are stored in an `Arc` so many `FunctionLibrary` clones can
-/// share them cheaply. This factory is the only way to produce an
-/// `apply_path_mapping` implementation; the host crate passes its rules
-/// at library-construction time rather than plumbing them through the
+/// The mapper is stored in an `Arc` so many `FunctionLibrary` clones can
+/// share it cheaply. This factory is the only way to produce an
+/// `apply_path_mapping` implementation; the host crate passes its mapper
+/// at library-construction time rather than plumbing it through the
 /// evaluator on every call.
 pub fn make_apply_path_mapping_fn(
-    rules: std::sync::Arc<Vec<crate::path_mapping::PathMappingRule>>,
+    mapper: std::sync::Arc<crate::path_mapping::PathMapper>,
 ) -> impl Fn(&mut dyn EvalContext, &[ExprValue]) -> R + Send + Sync + 'static {
     move |ctx, a| {
         let (path_str, fmt) = get_path(&a[0], ctx)?;
-        // `apply_rules_with_format` walks the rules and does an
-        // `O(rules × path_len)` prefix comparison + a string
-        // substitution. Budget the work proportionally to the
-        // input length — the rule count is bounded by the
-        // session profile, but the path length is caller-
-        // controlled.
-        ctx.count_string_ops(path_str.len())?;
-        let mapped =
-            crate::path_mapping::apply_rules_with_format(&rules, &path_str, ctx.path_format());
-        if mapped == path_str {
-            Ok(ExprValue::new_path(path_str, fmt))
-        } else {
-            Ok(ExprValue::new_path(mapped, fmt))
+        if path_str.len() > crate::path_mapping::MAX_PATH_LEN {
+            return Err(ExpressionError::new(format!(
+                "apply_path_mapping: the path is {} bytes long, more than the limit of {} bytes",
+                path_str.len(),
+                crate::path_mapping::MAX_PATH_LEN
+            )));
         }
+        // `PathMapper` walks the path's components down each source
+        // format's trie once, so matching is linear in the path length
+        // whatever the number of rules. Building the result copies the
+        // rule's destination and the rest of the path, which is linear in
+        // the result's length. Charge both.
+        ctx.count_string_ops(path_str.len())?;
+        let mapped = match mapper.apply_with_format(&path_str, ctx.path_format()) {
+            Some(mapped) => {
+                ctx.count_string_ops(mapped.len())?;
+                mapped
+            }
+            None => path_str,
+        };
+        Ok(ExprValue::new_path(mapped, fmt))
     }
 }
 

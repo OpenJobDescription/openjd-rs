@@ -90,11 +90,13 @@ files directory, a symbol table, the entered-environments stack, and
 pub struct Session { /* private fields */ }
 
 impl Session {
-    /// Primary constructor. Validates paths, creates a working directory
-    /// (via a `TempDir` that gets cleaned up on drop), materializes
-    /// path-mapping rules into a JSON file referenced by the
-    /// `Session.PathMappingRulesFile` template variable, and — for
-    /// cross-user sessions — spawns the embedded helper process.
+    /// Primary constructor. Builds the session's `PathMapper` first,
+    /// failing with `SessionError::InvalidPathMappingRule` before any
+    /// directory is created when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit.
+    /// Then validates paths, creates a working directory (via a `TempDir`
+    /// that gets cleaned up on drop), and, for cross-user sessions, spawns
+    /// the embedded helper process. Path mapping rules are written to the
+    /// JSON file behind `Session.PathMappingRulesFile` before each action.
     pub fn with_config(config: SessionConfig) -> Result<Self, SessionError>;
 
     // ── Accessors ──
@@ -225,12 +227,20 @@ impl Session {
 
     // ── Builder-style configuration (post-construction) ──
 
-    /// Replace the session's path-mapping rules. Rebuilds the derived
-    /// `FunctionLibrary` used for evaluating `apply_path_mapping`.
-    pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Self;
+    /// Replace the session's path-mapping rules, keeping the order given.
+    /// Rebuilds the session's `PathMapper` and the derived
+    /// `FunctionLibrary` used for evaluating `apply_path_mapping`. Fails
+    /// with `SessionError::InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit.
+    pub fn with_path_mapping(self, rules: Vec<PathMappingRule>) -> Result<Self, SessionError>;
 
-    /// Append to the existing rules (in-place).
-    pub fn extend_path_mapping_rules(&mut self, additional: Vec<PathMappingRule>);
+    /// Append to the existing rules (in-place). Between rules for the
+    /// same location the one given last wins, so an added rule takes
+    /// precedence over an existing one (`path_mapping_rules()` keeps both).
+    /// On `SessionError::InvalidPathMappingRule` the rules are unchanged;
+    /// its index counts from the first existing rule.
+    pub fn extend_path_mapping_rules(
+        &mut self, additional: Vec<PathMappingRule>,
+    ) -> Result<(), SessionError>;
 
     /// Replace the session's profile (revision + extensions).
     /// Rebuilds the derived `FunctionLibrary`.
@@ -304,9 +314,10 @@ pub struct SessionConfig {
     /// `openjd_model::preprocess_job_parameters`.
     pub job_parameter_values: JobParameterValues,
 
-    /// Path-mapping rules from the spec's Path Mapping JSON object.
-    /// Registered as `apply_path_mapping(...)` in the session's
-    /// function library at construction time.
+    /// Path-mapping rules from the spec's Path Mapping JSON object, in
+    /// the order given. Registered as `apply_path_mapping(...)` in the session's
+    /// function library at construction time. `with_config` fails with
+    /// `SessionError::InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit.
     pub path_mapping_rules: Option<Vec<PathMappingRule>>,
 
     /// If true, `cleanup()` skips the working-directory removal —
@@ -411,6 +422,11 @@ pub struct SessionLimits {
     /// Operation budget per expression evaluation. `None` =
     /// `openjd_expr::DEFAULT_OPERATION_LIMIT` (10 million).
     pub max_eval_operations: Option<usize>,
+    /// Limit on the estimated size of the path mapping trie
+    /// (`PathMapper::with_max_trie_bytes`). `None` = 30 MiB
+    /// (`openjd_expr::path_mapping::DEFAULT_MAX_TRIE_BYTES`). Applies in
+    /// `with_config`, `with_path_mapping` and `extend_path_mapping_rules`.
+    pub max_path_mapping_trie_bytes: Option<usize>,
 }
 
 /// Mirror the run-time-relevant fields of a submitting service's
@@ -1008,6 +1024,14 @@ pub enum SessionError {
     /// environment is already active. Raised before any state is
     /// recorded for the rejected environment; the session stays Ready.
     MultipleWrapEnvironments { existing: String, entering: String },
+
+    /// A path mapping rule is invalid (a relative source path, or a path
+    /// longer than 32 KiB), or the rules' trie would pass its size limit
+    /// (`SessionLimits::max_path_mapping_trie_bytes`).
+    /// From `with_config`, `with_path_mapping` and
+    /// `extend_path_mapping_rules`. Display:
+    /// "Invalid path mapping rules: path mapping rule <i>: <reason>".
+    InvalidPathMappingRule(openjd_expr::InvalidPathMappingRule),
 }
 ```
 
@@ -1020,8 +1044,10 @@ pub use openjd_expr::path_mapping::PathMappingRule;
 ```
 
 `PathFormat` and `PathMappingRule` are the types used on
-`SessionConfig.path_mapping_rules`. They are re-exported here so
-downstream callers don't need to depend on `openjd-expr` directly.
+`SessionConfig.path_mapping_rules`, re-exported so downstream callers
+don't need to depend on `openjd-expr` directly. `PathMapper` and
+`InvalidPathMappingRule` are reachable through the re-exported
+`path_mapping` module.
 
 ## Cross-User Execution
 

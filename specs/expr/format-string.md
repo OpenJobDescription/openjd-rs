@@ -156,7 +156,7 @@ Example — configure every axis:
 // Build a library with host context baked in — this is how
 // apply_path_mapping gets its rules.
 let profile = ExprProfile::current()
-    .with_host_context(HostContext::with_rules(rules));
+    .with_host_context(HostContext::with_rules(rules)?);
 let lib = FunctionLibrary::for_profile(&profile);
 
 let opts = FormatStringOptions::new()

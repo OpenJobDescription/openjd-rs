@@ -450,7 +450,7 @@ fn derive_return_type_union_expansion() {
 #[test]
 fn with_host_context_enables_apply_path_mapping() {
     let lib = FunctionLibrary::for_profile(&ExprProfile::current().with_host_context(
-        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()),
+        HostContext::with_rules(Vec::<openjd_expr::PathMappingRule>::new()).unwrap(),
     ));
     assert!(!lib.get_signatures("apply_path_mapping").is_empty());
 }

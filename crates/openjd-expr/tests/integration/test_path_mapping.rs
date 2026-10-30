@@ -8,8 +8,22 @@
 // All call sites go through the non-deprecated FunctionLibrary::for_profile.
 
 use openjd_expr::{
-    ExprProfile, ExprValue, FunctionLibrary, HostContext, PathFormat, PathMappingRule, SymbolTable,
+    ExprProfile, ExprValue, FunctionLibrary, HostContext, PathFormat, PathMapper, PathMappingRule,
+    SymbolTable,
 };
+
+/// Apply one rule through a [`PathMapper`], the only way rules are applied.
+trait ApplyOne {
+    fn apply_with_format(&self, path: &str, output_format: PathFormat) -> Option<String>;
+}
+
+impl ApplyOne for PathMappingRule {
+    fn apply_with_format(&self, path: &str, output_format: PathFormat) -> Option<String> {
+        PathMapper::new(vec![self.clone()])
+            .expect("valid rule")
+            .apply_with_format(path, output_format)
+    }
+}
 
 fn eval_with_rules(expr: &str, rules: Vec<PathMappingRule>, st: &SymbolTable) -> ExprValue {
     eval_with_rules_fmt(expr, rules, st, PathFormat::Posix)
@@ -24,7 +38,7 @@ fn eval_with_rules_fmt(
     let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
     let symtabs = [st];
     let lib = FunctionLibrary::for_profile(
-        &ExprProfile::current().with_host_context(HostContext::with_rules(rules)),
+        &ExprProfile::current().with_host_context(HostContext::with_rules(rules).unwrap()),
     );
     parsed
         .with_library(&lib)
@@ -67,38 +81,45 @@ fn relative_path_does_not_match_absolute_rule() {
     );
 }
 
+// A rule's source path must be absolute for its format, so a relative
+// source path, which could only ever match relative inputs, is rejected
+// when the mapper is built.
+fn rejection(rule: PathMappingRule) -> String {
+    PathMapper::new(vec![rule]).unwrap_err().to_string()
+}
+
 #[test]
-fn absolute_path_does_not_match_relative_rule() {
+fn relative_posix_source_is_rejected() {
     let rule = PathMappingRule {
         source_path_format: PathFormat::Posix,
         source_path: "home/user".to_string(),
         destination_path: "mapped".to_string(),
     };
     assert_eq!(
-        rule.apply_with_format("/home/user/f", PathFormat::Posix),
-        None
+        rejection(rule),
+        "path mapping rule 0: source_path 'home/user' must be an absolute POSIX path, starting with '/'"
     );
 }
 
 #[test]
-fn relative_path_does_not_match_windows_rooted_rule() {
-    // Pins the Windows backslash-root arm of the rootedness check: without
-    // it, segments ["projects"] vs ["projects", "file.txt"] would match.
+fn rooted_windows_source_without_drive_is_rejected() {
+    // `\projects` is relative to the current drive, so it is not absolute.
     let rule = PathMappingRule {
         source_path_format: PathFormat::Windows,
         source_path: "\\projects".to_string(),
         destination_path: "D:\\work".to_string(),
     };
     assert_eq!(
-        rule.apply_with_format("projects\\file.txt", PathFormat::Windows),
-        None
+        rejection(rule),
+        "path mapping rule 0: source_path '\\projects' must be an absolute WINDOWS path, \
+         starting with a drive such as 'C:\\' or a UNC share such as '\\\\server\\share'"
     );
 }
 
 #[test]
 fn relative_path_does_not_match_windows_drive_rule() {
-    // Drive anchors need no rootedness special case: "C:" stays a path
-    // segment, so it can never equal "projects" (matches PureWindowsPath).
+    // Neither a relative path nor a drive-relative one is under C:\projects
+    // (matches PureWindowsPath.is_relative_to).
     let rule = PathMappingRule {
         source_path_format: PathFormat::Windows,
         source_path: "C:\\projects".to_string(),
@@ -115,15 +136,17 @@ fn relative_path_does_not_match_windows_drive_rule() {
 }
 
 #[test]
-fn relative_rule_still_matches_relative_path() {
-    // Negative control: same-rootedness matching must keep working.
+fn drive_relative_windows_source_is_rejected() {
     let rule = PathMappingRule {
-        source_path_format: PathFormat::Posix,
-        source_path: "home/user".to_string(),
-        destination_path: "/mnt/x".to_string(),
+        source_path_format: PathFormat::Windows,
+        source_path: "C:projects".to_string(),
+        destination_path: "D:\\work".to_string(),
     };
-    let mapped = rule.apply_with_format("home/user/f", PathFormat::Posix);
-    assert_eq!(mapped.as_deref(), Some("/mnt/x/f"));
+    assert_eq!(
+        rejection(rule),
+        "path mapping rule 0: source_path 'C:projects' must be an absolute WINDOWS path, \
+         starting with a drive such as 'C:\\' or a UNC share such as '\\\\server\\share'"
+    );
 }
 
 // Regression: split_path_parts split on `\` for every format, but under POSIX a
@@ -593,12 +616,13 @@ fn no_rules_unchanged() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// PathMappingRule::apply() unit tests (no evaluator needed)
+// PathMapper unit tests (no evaluator needed); `ApplyOne` applies one rule
 // ══════════════════════════════════════════════════════════════
 
 mod apply_unit {
+    use super::ApplyOne;
     use openjd_expr::path_mapping::PathFormat;
-    use openjd_expr::PathMappingRule;
+    use openjd_expr::{PathMapper, PathMappingRule};
     fn posix_rule(src: &str, dst: &str) -> PathMappingRule {
         PathMappingRule {
             source_path_format: PathFormat::Posix,
@@ -931,36 +955,699 @@ mod apply_unit {
         );
     }
 
-    // ── apply_rules ──
+    // ── PathMapper: choosing between rules ──
+
+    fn mapper(rules: Vec<PathMappingRule>) -> PathMapper {
+        PathMapper::new(rules).expect("valid rules")
+    }
 
     #[test]
-    fn apply_rules_first_match_wins() {
-        let rules = vec![posix_rule("/a", "/first"), posix_rule("/a", "/second")];
+    fn same_location_last_rule_wins() {
+        // Rules naming the same location: the one given last wins.
+        let m = mapper(vec![
+            posix_rule("/a", "/first"),
+            posix_rule("/a", "/second"),
+        ]);
         assert_eq!(
-            openjd_expr::path_mapping::apply_rules_with_format(
-                &rules,
-                "/a/file",
-                PathFormat::Posix
-            ),
-            "/first/file"
+            m.map_with_format("/a/file", PathFormat::Posix),
+            "/second/file"
         );
     }
 
     #[test]
-    fn apply_rules_no_match_returns_original() {
-        let rules = vec![posix_rule("/a", "/b")];
+    fn same_location_spelled_differently_last_rule_wins() {
+        // `/mnt/p/` and `/mnt//p` are the same location as `/mnt/p`, so
+        // these rules tie and the one given last wins, whatever the
+        // string lengths.
+        let m = mapper(vec![
+            posix_rule("/mnt/p/", "/long"),
+            posix_rule("/mnt//p", "/double"),
+            posix_rule("/mnt/p", "/short"),
+        ]);
+        assert_eq!(m.map_with_format("/mnt/p/f", PathFormat::Posix), "/short/f");
+        let m = mapper(vec![
+            posix_rule("/mnt/p", "/short"),
+            posix_rule("/mnt/p/", "/long"),
+        ]);
+        assert_eq!(m.map_with_format("/mnt/p/f", PathFormat::Posix), "/long/f");
+        let m = mapper(vec![
+            windows_rule("C:\\Data", "/upper"),
+            windows_rule("c:/data/", "/lower"),
+        ]);
         assert_eq!(
-            openjd_expr::path_mapping::apply_rules(&rules, "/other/file"),
+            m.map_with_format("C:\\DATA\\f", PathFormat::Posix),
+            "/lower/f"
+        );
+    }
+
+    #[test]
+    fn deepest_rule_wins_in_any_order() {
+        for rules in [
+            vec![posix_rule("/a", "/shallow"), posix_rule("/a/b", "/deep")],
+            vec![posix_rule("/a/b", "/deep"), posix_rule("/a", "/shallow")],
+        ] {
+            let m = mapper(rules);
+            assert_eq!(m.map_with_format("/a/b/f", PathFormat::Posix), "/deep/f");
+            assert_eq!(
+                m.map_with_format("/a/c/f", PathFormat::Posix),
+                "/shallow/c/f"
+            );
+        }
+    }
+
+    #[test]
+    fn deepest_rule_wins_over_longer_string() {
+        // `/aaaaaaaa///` is the longer string but has fewer components.
+        let m = mapper(vec![
+            posix_rule("/aaaaaaaa///", "/shallow"),
+            posix_rule("/aaaaaaaa/b", "/deep"),
+        ]);
+        assert_eq!(
+            m.map_with_format("/aaaaaaaa/b/f", PathFormat::Posix),
+            "/deep/f"
+        );
+    }
+
+    #[test]
+    fn cross_format_deepest_then_last_wins() {
+        // `//srv/share/x` is a POSIX path and a Windows UNC path. Rules are
+        // ranked by names: the POSIX root counts as none, a UNC share as
+        // two (server and share).
+        let path = "//srv/share/x/f";
+        let posix_srv = posix_rule("/srv", "/posix");
+        let posix_share = posix_rule("/srv/share", "/posix");
+        let unc = windows_rule("\\\\srv\\share", "/unc");
+        let unc_x = windows_rule("\\\\srv\\share\\x", "/unc");
+        let both_orders = |a: &PathMappingRule, b: &PathMappingRule| {
+            [vec![a.clone(), b.clone()], vec![b.clone(), a.clone()]]
+                .map(|rules| mapper(rules).map_with_format(path, PathFormat::Posix))
+        };
+        // `\\srv\share` (two names) beats `/srv` (one), in either order.
+        assert_eq!(both_orders(&posix_srv, &unc), ["/unc/x/f", "/unc/x/f"]);
+        // `\\srv\share\x` (three) beats `/srv/share` (two).
+        assert_eq!(both_orders(&posix_share, &unc_x), ["/unc/f", "/unc/f"]);
+        // `/srv/share` and `\\srv\share` both have two names: the WINDOWS
+        // rule wins, whichever is given last.
+        assert_eq!(both_orders(&posix_share, &unc), ["/unc/x/f", "/unc/x/f"]);
+        // `/srv/share/x/f` (four) beats `\\srv\share\x` (three).
+        let m = mapper(vec![posix_rule("/srv/share/x/f", "/deep"), unc_x]);
+        assert_eq!(m.map_with_format(path, PathFormat::Posix), "/deep");
+        let order: Vec<&str> = m
+            .rules_by_precedence()
+            .map(|r| r.destination_path.as_str())
+            .collect();
+        assert_eq!(order, ["/deep", "/unc"]);
+    }
+
+    #[test]
+    fn uri_scheme_and_authority_fold_path_does_not() {
+        // An authority after a longer scheme, and an empty authority.
+        let m = mapper(vec![uri_rule("https://H/Path", "/h")]);
+        assert_eq!(
+            m.map_with_format("HTTPS://h/Path/f", PathFormat::Posix),
+            "/h/f"
+        );
+        assert_eq!(
+            m.apply_with_format("https://h/path/f", PathFormat::Posix),
+            None
+        );
+        let m = mapper(vec![uri_rule("file:///mnt/x", "/d")]);
+        assert!(!m.is_empty());
+        assert_eq!(
+            m.map_with_format("file:///mnt/x/y", PathFormat::Posix),
+            "/d/y"
+        );
+        assert_eq!(
+            m.apply_with_format("file:///mnt/xy", PathFormat::Posix),
+            None
+        );
+        assert_eq!(
+            m.apply_with_format("file://h/mnt/x/y", PathFormat::Posix),
+            None
+        );
+    }
+
+    #[test]
+    fn rules_by_precedence_order() {
+        let m = mapper(vec![
+            posix_rule("/a", "/1"),
+            posix_rule("/a/b/c", "/2"),
+            uri_rule("s3://b/x", "/3"),
+            posix_rule("/a", "/4"),
+            windows_rule("C:\\a\\b", "/5"),
+        ]);
+        let order: Vec<&str> = m
+            .rules_by_precedence()
+            .map(|r| r.destination_path.as_str())
+            .collect();
+        // Names: `/a/b/c` 3, `C:\\a\\b` 3 (the drive counts as one),
+        // `s3://b/x` 2 (the authority counts as one), `/a` 1. WINDOWS before
+        // POSIX among equals. `/1` is left out: `/4` replaces it.
+        assert_eq!(order, ["/5", "/2", "/3", "/4"]);
+        let given: Vec<&str> = m
+            .rules()
+            .iter()
+            .map(|r| r.destination_path.as_str())
+            .collect();
+        assert_eq!(given, ["/1", "/2", "/3", "/4", "/5"]);
+        // A drive counts as one name: `C:\\a` (2) after `/x/y/z` (3).
+        let m = mapper(vec![
+            windows_rule("C:\\a", "/ca"),
+            posix_rule("/x/y/z", "/xyz"),
+        ]);
+        let order: Vec<&str> = m
+            .rules_by_precedence()
+            .map(|r| r.destination_path.as_str())
+            .collect();
+        assert_eq!(order, ["/xyz", "/ca"]);
+    }
+
+    #[test]
+    fn mapper_rebuilt_from_precedence_order_maps_the_same() {
+        // A reader of `rules_by_precedence()` (such as the session's rules
+        // file) gets the same mapping in either list order.
+        let rule_sets = [
+            vec![
+                posix_rule("/srv/share", "/posix"),
+                windows_rule("\\\\srv\\share", "/unc"),
+            ],
+            vec![
+                windows_rule("\\\\srv\\share", "/unc"),
+                posix_rule("/srv/share", "/posix"),
+                posix_rule("/srv/share/", "/posix2"),
+                windows_rule("//SRV/Share/", "/unc2"),
+                posix_rule("/srv", "/srv"),
+                windows_rule("\\\\srv\\share\\x", "/unc-x"),
+                uri_rule("s3://b/a", "/s3"),
+                windows_rule("C:\\a", "/c"),
+                windows_rule("c:/A/", "/c2"),
+            ],
+        ];
+        let paths = [
+            "//srv/share/x/f",
+            "//srv/share/y",
+            "//srv/other",
+            "/srv/share/z",
+            "\\\\srv\\share\\x",
+            "s3://b/a/f",
+            "C:\\a\\f",
+        ];
+        for rules in rule_sets {
+            let original = mapper(rules);
+            let listed: Vec<PathMappingRule> = original.rules_by_precedence().cloned().collect();
+            let mut reversed = listed.clone();
+            reversed.reverse();
+            for rebuilt in [mapper(listed), mapper(reversed)] {
+                for path in paths {
+                    assert_eq!(
+                        rebuilt.apply_with_format(path, PathFormat::Posix),
+                        original.apply_with_format(path, PathFormat::Posix),
+                        "{path}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rules_by_precedence_first_match_equals_apply() {
+        // Four rules with two names each: WINDOWS before POSIX before URI,
+        // and the POSIX rules (different locations) later first.
+        let w = windows_rule("\\\\srv\\share", "/w");
+        let p = posix_rule("/srv/share", "/p");
+        let u = uri_rule("s3://b/x", "/u");
+        let q = posix_rule("/q/r", "/q");
+        for (rules, expected) in [
+            (
+                vec![w.clone(), p.clone(), u.clone(), q.clone()],
+                ["/w", "/q", "/p", "/u"],
+            ),
+            (vec![q, p, u, w], ["/w", "/p", "/q", "/u"]),
+        ] {
+            let m = mapper(rules);
+            let listed: Vec<&PathMappingRule> = m.rules_by_precedence().collect();
+            let order: Vec<&str> = listed.iter().map(|r| r.destination_path.as_str()).collect();
+            assert_eq!(order, expected);
+            for path in [
+                "//srv/share/f",
+                "/srv/share/f",
+                "s3://b/x/f",
+                "/q/r/f",
+                "/none",
+            ] {
+                let first_match = listed
+                    .iter()
+                    .find_map(|r| ApplyOne::apply_with_format(*r, path, PathFormat::Posix));
+                assert_eq!(
+                    first_match,
+                    m.apply_with_format(path, PathFormat::Posix),
+                    "{path}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn deep_rule_builds_maps_clones_and_drops_on_a_small_stack() {
+        // The trie is a flat arena, so nothing about a mapper recurses per
+        // component; the deepest rule the length limit allows (16,383
+        // components) must not overflow a 64 KiB stack.
+        let handle = std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(|| {
+                let source = "/a".repeat(openjd_expr::path_mapping::MAX_PATH_LEN / 2 - 1);
+                let m = mapper(vec![posix_rule(&source, "/d")]);
+                let path = format!("{source}/f");
+                assert_eq!(m.map_with_format(&path, PathFormat::Posix), "/d/f");
+                let copy = m.clone();
+                assert!(!format!("{copy:?}").is_empty());
+                drop(copy);
+                drop(m);
+            })
+            .unwrap();
+        handle.join().expect("no stack overflow");
+    }
+
+    #[test]
+    fn posix_trailing_backslash_is_a_filename_character() {
+        // Only `/` is a POSIX trailing separator, so no `/` is added.
+        let m = mapper(vec![posix_rule("/a", "/d")]);
+        assert_eq!(m.map_with_format("/a/b\\", PathFormat::Posix), "/d/b\\");
+    }
+
+    #[test]
+    fn paths_longer_than_the_limit() {
+        use openjd_expr::path_mapping::MAX_PATH_LEN;
+        let long = format!("/{}", "a".repeat(MAX_PATH_LEN));
+        let err =
+            PathMapper::new(vec![posix_rule("/ok", "/a"), posix_rule(&long, "/d")]).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "path mapping rule 1: source_path is {} bytes long, more than the limit of \
+                 {MAX_PATH_LEN} bytes",
+                MAX_PATH_LEN + 1
+            )
+        );
+        let err = posix_rule("/a", &long).validate().unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "destination_path is {} bytes long, more than the limit of {MAX_PATH_LEN} bytes",
+                MAX_PATH_LEN + 1
+            )
+        );
+        // At the limit is accepted; a longer input path matches no rule.
+        let at_limit = format!("/{}", "a".repeat(MAX_PATH_LEN - 1));
+        let m = mapper(vec![posix_rule(&at_limit, "/d"), posix_rule("/", "/root")]);
+        assert_eq!(m.map_with_format(&at_limit, PathFormat::Posix), "/d");
+        assert_eq!(m.apply_with_format(&long, PathFormat::Posix), None);
+    }
+
+    /// A small deterministic generator, so the property test needs no
+    /// dependency and fails the same way every time.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self, n: usize) -> usize {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((self.0 >> 33) as usize) % n
+        }
+    }
+
+    #[test]
+    fn precedence_properties_hold_on_random_rules() {
+        // First match over rules_by_precedence() equals apply, and a mapper
+        // rebuilt from that list in a shuffled order maps the same way.
+        let anchors = [
+            "/",
+            "//srv/share/",
+            "C:\\",
+            "c:/",
+            "\\\\SRV\\share\\",
+            "s3://B/",
+            "s3://b//",
+        ];
+        let names = ["srv", "share", "a", "A", ".", "", "x", "\u{e9}", "\u{c9}"];
+        let mut rng = Lcg(42);
+        let random_path = |rng: &mut Lcg| {
+            let mut p = anchors[rng.next(anchors.len())].to_string();
+            for _ in 0..rng.next(4) {
+                p.push_str(names[rng.next(names.len())]);
+                p.push(if rng.next(2) == 0 { '/' } else { '\\' });
+            }
+            p
+        };
+        let formats = [PathFormat::Posix, PathFormat::Windows, PathFormat::Uri];
+        for _ in 0..2000 {
+            let rules: Vec<PathMappingRule> = (0..1 + rng.next(5))
+                .map(|i| PathMappingRule {
+                    source_path_format: formats[rng.next(3)],
+                    source_path: random_path(&mut rng),
+                    destination_path: format!("/d{i}"),
+                })
+                .filter(|r| r.validate().is_ok())
+                .collect();
+            let m = mapper(rules);
+            let mut listed: Vec<PathMappingRule> = m.rules_by_precedence().cloned().collect();
+            let paths: Vec<String> = (0..10).map(|_| random_path(&mut rng)).collect();
+            for path in &paths {
+                let first = listed
+                    .iter()
+                    .find_map(|r| r.apply_with_format(path, PathFormat::Posix));
+                assert_eq!(
+                    first,
+                    m.apply_with_format(path, PathFormat::Posix),
+                    "{path}"
+                );
+            }
+            for i in (1..listed.len()).rev() {
+                listed.swap(i, rng.next(i + 1));
+            }
+            let rebuilt = mapper(listed);
+            for path in &paths {
+                assert_eq!(
+                    rebuilt.apply_with_format(path, PathFormat::Posix),
+                    m.apply_with_format(path, PathFormat::Posix),
+                    "{path}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn trie_size_limit() {
+        use openjd_expr::path_mapping::DEFAULT_MAX_TRIE_BYTES;
+        assert_eq!(DEFAULT_MAX_TRIE_BYTES, 30 * 1024 * 1024);
+        // Each new node counts 224 bytes plus its key: `/a` has the nodes
+        // `/` and `a`; `C:\Ab` has `C:` and the folded `AB`.
+        assert_eq!(
+            mapper(vec![posix_rule("/a", "/x")]).trie_bytes(),
+            2 * 224 + 2
+        );
+        assert_eq!(
+            mapper(vec![windows_rule("C:\\Ab", "/x")]).trie_bytes(),
+            2 * 224 + 4
+        );
+        // Rules under a common root share its nodes, so only new components
+        // add to the estimate.
+        let one = mapper(vec![posix_rule("/mnt/projects/a", "/a")]);
+        let two = mapper(vec![
+            posix_rule("/mnt/projects/a", "/a"),
+            posix_rule("/mnt/projects/b", "/b"),
+        ]);
+        let per_new_component = two.trie_bytes() - one.trie_bytes();
+        assert!(per_new_component > 0);
+        let same = mapper(vec![
+            posix_rule("/mnt/projects/a", "/a"),
+            posix_rule("/mnt/projects/a/", "/a2"),
+        ]);
+        assert_eq!(same.trie_bytes(), one.trie_bytes());
+        // Any number of rules is allowed until the estimate passes the limit;
+        // the error names the rule that passed it.
+        let limit = two.trie_bytes();
+        let rules = vec![
+            posix_rule("/mnt/projects/a", "/a"),
+            posix_rule("/mnt/projects/b", "/b"),
+            posix_rule("/mnt/projects/c", "/c"),
+        ];
+        assert_eq!(
+            PathMapper::with_max_trie_bytes(rules[..2].to_vec(), limit)
+                .unwrap()
+                .trie_bytes(),
+            limit
+        );
+        let err = PathMapper::with_max_trie_bytes(rules, limit).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "path mapping rule 2: the rules' trie would need about {} bytes, more than the \
+                 limit of {limit} bytes",
+                limit + per_new_component
+            )
+        );
+        // Many rules under a shared root fit easily in the default limit.
+        let many: Vec<PathMappingRule> = (0..20_000)
+            .map(|i| posix_rule(&format!("/mnt/projects/show{}/shot{i}", i / 100), "/d"))
+            .collect();
+        assert!(mapper(many).trie_bytes() < DEFAULT_MAX_TRIE_BYTES);
+    }
+
+    #[test]
+    fn no_match_returns_original() {
+        let m = mapper(vec![posix_rule("/a", "/b")]);
+        assert_eq!(
+            m.map_with_format("/other/file", PathFormat::Posix),
             "/other/file"
         );
+        assert_eq!(m.apply_with_format("/other/file", PathFormat::Posix), None);
     }
 
     #[test]
-    fn apply_rules_empty_returns_original() {
+    fn empty_mapper_returns_original() {
+        let m = mapper(vec![]);
+        assert!(m.is_empty());
+        assert_eq!(m.map("/any/path"), "/any/path");
+        assert_eq!(PathMapper::default().map("/any/path"), "/any/path");
+    }
+
+    #[test]
+    fn map_uses_host_separator() {
+        let m = mapper(vec![posix_rule("/a", "/b")]);
+        let expected = if cfg!(windows) { "/b\\c\\d" } else { "/b/c/d" };
+        assert_eq!(m.map("/a/c/d"), expected);
+        assert_eq!(m.apply("/a/c/d").as_deref(), Some(expected));
+    }
+
+    // ── Components: `.` and empty components ──
+
+    #[test]
+    fn dot_and_empty_components_are_ignored() {
+        // As in pathlib, `.` and repeated separators do not count.
+        let m = mapper(vec![posix_rule("/a/./b", "/x")]);
+        assert_eq!(m.map_with_format("/a//b/./c", PathFormat::Posix), "/x/c");
+        let m = mapper(vec![windows_rule("C:\\a\\.\\b", "/x")]);
         assert_eq!(
-            openjd_expr::path_mapping::apply_rules(&[], "/any/path"),
-            "/any/path"
+            m.map_with_format("C:\\a\\\\b\\.\\c", PathFormat::Posix),
+            "/x/c"
         );
+    }
+
+    #[test]
+    fn dot_dot_is_a_component() {
+        // `..` is not collapsed: symbolic links make that unsafe.
+        let m = mapper(vec![posix_rule("/a", "/x")]);
+        assert_eq!(m.map_with_format("/a/../b", PathFormat::Posix), "/x/../b");
+        assert_eq!(m.apply_with_format("/b/../a/f", PathFormat::Posix), None);
+    }
+
+    #[test]
+    fn uri_empty_segments_are_kept() {
+        // URI paths are opaque: an empty segment is a segment.
+        let m = mapper(vec![uri_rule("s3://b/a", "/x")]);
+        assert_eq!(m.map_with_format("s3://b/a//f", PathFormat::Posix), "/x//f");
+        let m = mapper(vec![uri_rule("s3://b/a/", "/x")]);
+        assert_eq!(m.apply_with_format("s3://b/a/f", PathFormat::Posix), None);
+        assert_eq!(m.map_with_format("s3://b/a/", PathFormat::Posix), "/x/");
+    }
+
+    // ── Windows anchors: drives and UNC shares ──
+
+    #[test]
+    fn unc_share_is_one_component() {
+        let m = mapper(vec![windows_rule("\\\\srv\\share", "/mnt/share")]);
+        assert_eq!(
+            m.map_with_format("\\\\srv\\share\\x", PathFormat::Posix),
+            "/mnt/share/x"
+        );
+        assert_eq!(
+            m.map_with_format("//SRV/Share/x", PathFormat::Posix),
+            "/mnt/share/x"
+        );
+        assert_eq!(
+            m.map_with_format("\\\\srv\\share", PathFormat::Posix),
+            "/mnt/share"
+        );
+        // A different share on the same server is a different anchor.
+        assert_eq!(
+            m.apply_with_format("\\\\srv\\other\\x", PathFormat::Posix),
+            None
+        );
+        // The server/share boundary is part of the share: `\\a\bc` is not
+        // `\\ab\c`.
+        let m = mapper(vec![windows_rule("\\\\a\\bc", "/m")]);
+        assert_eq!(m.apply_with_format("\\\\ab\\c\\x", PathFormat::Posix), None);
+        assert_eq!(m.map_with_format("\\\\a\\bc\\x", PathFormat::Posix), "/m/x");
+    }
+
+    #[test]
+    fn single_backslash_path_does_not_match_unc_share() {
+        // `\srv\share\x` is a path on the current drive, not on \\srv\share
+        // (PureWindowsPath agrees: it is not relative to \\srv\share).
+        let m = mapper(vec![windows_rule("\\\\srv\\share", "/mnt/share")]);
+        assert_eq!(
+            m.apply_with_format("\\srv\\share\\x", PathFormat::Posix),
+            None
+        );
+        assert_eq!(
+            m.apply_with_format("\\\\\\srv\\share\\x", PathFormat::Posix),
+            None
+        );
+    }
+
+    #[test]
+    fn unc_server_alone_is_not_a_share() {
+        let m = mapper(vec![windows_rule("\\\\srv\\share", "/mnt/share")]);
+        assert_eq!(m.apply_with_format("\\\\srv", PathFormat::Posix), None);
+        assert_eq!(m.apply_with_format("\\\\srv\\", PathFormat::Posix), None);
+        for source in [
+            "\\\\srv",
+            "\\\\srv\\",
+            "\\\\\\srv\\share",
+            "\\\\srv\\\\share",
+        ] {
+            assert!(
+                PathMapper::new(vec![windows_rule(source, "/x")]).is_err(),
+                "{source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn drive_letter_compares_case_insensitively() {
+        let m = mapper(vec![windows_rule("c:\\data", "/d")]);
+        assert_eq!(m.map_with_format("C:/DATA/f", PathFormat::Posix), "/d/f");
+        assert_eq!(m.apply_with_format("D:\\data\\f", PathFormat::Posix), None);
+    }
+
+    #[test]
+    fn drive_root_rule() {
+        let m = mapper(vec![windows_rule("C:\\", "/c")]);
+        assert_eq!(m.map_with_format("c:\\a\\b", PathFormat::Posix), "/c/a/b");
+        assert_eq!(m.apply_with_format("C:", PathFormat::Posix), None);
+    }
+
+    // ── Windows case: the Windows uppercase table, not Unicode case folding ──
+
+    #[test]
+    fn windows_case_folds_non_ascii_like_windows() {
+        for (rule_part, input_part) in [
+            ("\u{c9}t\u{e9}", "\u{e9}T\u{c9}"),   // été / ÉTÉ
+            ("\u{3a3}\u{3b1}", "\u{3c3}\u{391}"), // Σα / σΑ
+            ("\u{416}", "\u{436}"),               // Cyrillic Zhe
+            ("\u{ff21}", "\u{ff41}"),             // fullwidth A / a
+        ] {
+            let m = mapper(vec![windows_rule(&format!("C:\\{rule_part}"), "/x")]);
+            assert_eq!(
+                m.map_with_format(&format!("C:\\{input_part}\\f"), PathFormat::Posix),
+                "/x/f",
+                "{rule_part} vs {input_part}"
+            );
+        }
+    }
+
+    #[test]
+    fn windows_case_does_not_fold_what_windows_keeps_apart() {
+        for (rule_part, input_part) in [
+            ("k", "\u{212a}"),          // KELVIN SIGN is not k
+            ("K", "\u{212a}"),          // ...nor K
+            ("I", "\u{131}"),           // dotless i
+            ("i", "\u{130}"),           // I with dot above
+            ("S", "\u{17f}"),           // long s
+            ("\u{3a3}", "\u{3c2}"),     // final sigma
+            ("\u{df}", "\u{1e9e}"),     // sharp s / capital sharp s
+            ("SS", "\u{df}"),           // no multi-character folding
+            ("\u{13a0}", "\u{ab70}"),   // Cherokee: newer than the Windows table
+            ("\u{10400}", "\u{10428}"), // Deseret, outside the BMP
+        ] {
+            let m = mapper(vec![windows_rule(&format!("C:\\{rule_part}"), "/x")]);
+            assert_eq!(
+                m.apply_with_format(&format!("C:\\{input_part}\\f"), PathFormat::Posix),
+                None,
+                "{rule_part:?} vs {input_part:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn windows_unc_server_and_share_fold_like_windows() {
+        let m = mapper(vec![windows_rule("\\\\\u{c9}t\u{e9}\\\u{3a3}", "/x")]);
+        assert_eq!(
+            m.map_with_format("\\\\\u{e9}T\u{c9}\\\u{3c3}\\f", PathFormat::Posix),
+            "/x/f"
+        );
+        assert_eq!(
+            m.apply_with_format("\\\\\u{e9}T\u{c9}\\\u{3c2}\\f", PathFormat::Posix),
+            None
+        );
+    }
+
+    #[test]
+    fn windows_output_keeps_input_case() {
+        let m = mapper(vec![windows_rule("C:\\Data", "D:\\Data")]);
+        assert_eq!(
+            m.map_with_format("c:\\data\\\u{e9}T\u{e9}\\File.TXT", PathFormat::Windows),
+            "D:\\Data\\\u{e9}T\u{e9}\\File.TXT"
+        );
+    }
+
+    // ── Validation ──
+
+    #[test]
+    fn invalid_rule_reports_its_index() {
+        let err = PathMapper::new(vec![
+            posix_rule("/ok", "/a"),
+            uri_rule("bucket/prefix", "/b"),
+        ])
+        .unwrap_err();
+        assert_eq!(err.index, Some(1));
+        assert_eq!(
+            err.to_string(),
+            "path mapping rule 1: source_path 'bucket/prefix' must be a URI, starting with \
+             '<scheme>://' where the scheme has at least two characters"
+        );
+    }
+
+    #[test]
+    fn validate_reports_no_index() {
+        let err = posix_rule("relative", "/a").validate().unwrap_err();
+        assert_eq!(err.index, None);
+        assert_eq!(
+            err.to_string(),
+            "source_path 'relative' must be an absolute POSIX path, starting with '/'"
+        );
+        assert_eq!(posix_rule("/abs", "/a").validate(), Ok(()));
+    }
+
+    #[test]
+    fn single_letter_uri_scheme_is_rejected() {
+        // `C://data` is a Windows drive path, not a URI.
+        assert_eq!(
+            uri_rule("C://data", "/x")
+                .validate()
+                .unwrap_err()
+                .to_string(),
+            "source_path 'C://data' must be a URI, starting with '<scheme>://' where the scheme \
+             has at least two characters"
+        );
+        assert!(uri_rule("s3://data", "/x").validate().is_ok());
+        assert!(uri_rule("", "/x").validate().is_err());
+        assert!(posix_rule("", "/x").validate().is_err());
+        assert!(windows_rule("", "/x").validate().is_err());
+    }
+
+    #[test]
+    fn many_rules_map_correctly() {
+        // The trie keeps lookup independent of the rule count.
+        let rules: Vec<PathMappingRule> = (0..5000)
+            .map(|i| posix_rule(&format!("/r{i}"), &format!("/d{i}")))
+            .collect();
+        let m = mapper(rules);
+        assert_eq!(m.map_with_format("/r4999/f", PathFormat::Posix), "/d4999/f");
+        assert_eq!(m.map_with_format("/r0/f", PathFormat::Posix), "/d0/f");
+        assert_eq!(m.apply_with_format("/r5000/f", PathFormat::Posix), None);
     }
 }
 
@@ -1177,7 +1864,7 @@ fn apply_path_mapping_rejects_path_input() {
         .unwrap();
     let parsed = openjd_expr::ParsedExpression::new("P.apply_path_mapping()").unwrap();
     let lib = FunctionLibrary::for_profile(
-        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule])),
+        &ExprProfile::current().with_host_context(HostContext::with_rules(vec![rule]).unwrap()),
     );
     let result = parsed.with_library(&lib).evaluate(&[&st]);
     assert!(
@@ -1192,6 +1879,7 @@ fn apply_path_mapping_rejects_path_input() {
 // ══════════════════════════════════════════════════════════════
 
 mod uri_case_sensitivity {
+    use super::ApplyOne;
     use openjd_expr::{PathFormat, PathMappingRule};
 
     fn uri_rule(src: &str, dst: &str) -> PathMappingRule {

@@ -1678,6 +1678,50 @@ steps:
         assert_ne!(code, 0, "oversized path-mapping file should be rejected");
         assert!(stderr.contains("exceeds maximum size"), "stderr: {stderr}");
     }
+
+    /// A path mapping rule with a relative source path is rejected when the
+    /// rules are loaded, naming the rule. The template's required parameter
+    /// has no value, so a later check would report that instead.
+    #[test]
+    fn test_run_path_mapping_rules_relative_source_rejected() {
+        let mut tpl = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            tpl,
+            r#"specificationVersion: "jobtemplate-2023-09"
+name: test
+parameterDefinitions:
+  - name: Required
+    type: PATH
+steps:
+  - name: s1
+    script:
+      actions:
+        onRun:
+          command: echo
+"#
+        )
+        .unwrap();
+        let rules = r#"{"version": "pathmapping-1.0", "path_mapping_rules": [
+            {"source_path_format": "POSIX", "source_path": "/ok", "destination_path": "/a"},
+            {"source_path_format": "POSIX", "source_path": "home/user", "destination_path": "/b"}
+        ]}"#;
+
+        let (code, stdout, stderr) = run_cli(&[
+            "run",
+            tpl.path().to_str().unwrap(),
+            "--path-mapping-rules",
+            rules,
+        ]);
+        assert_ne!(code, 0, "relative source path should be rejected");
+        assert!(
+            stderr.contains(
+                "Invalid path mapping rules: path mapping rule 1: source_path 'home/user' \
+                 must be an absolute POSIX path, starting with '/'"
+            ),
+            "stderr: {stderr}"
+        );
+        assert!(!stdout.contains("Session start"), "stdout: {stdout}");
+    }
 }
 
 // ============================================================

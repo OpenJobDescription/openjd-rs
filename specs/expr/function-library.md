@@ -492,7 +492,7 @@ on the rules-independent portion of the profile (see
 pub fn for_profile(profile: &ExprProfile) -> Arc<FunctionLibrary>;
 ```
 
-Profiles that differ only in their `Arc<Vec<PathMappingRule>>` share a single
+Profiles that differ only in their `Arc<PathMapper>` share a single
 cached no-host skeleton; the rules closure is applied on top as a cheap clone
 per call.
 
@@ -510,17 +510,19 @@ use openjd_expr::{ExprProfile, FunctionLibrary, HostContext, PathMappingRule};
 let rules: Vec<PathMappingRule> = /* ... */;
 
 // Runtime: real rules baked into an `apply_path_mapping` closure.
+// `with_rules` fails when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit.
 let profile = ExprProfile::current()
-    .with_host_context(HostContext::with_rules(rules));
+    .with_host_context(HostContext::with_rules(rules)?);
 let lib: Arc<FunctionLibrary> = FunctionLibrary::for_profile(&profile);
 assert!(!lib.get_signatures("apply_path_mapping").is_empty());
 ```
 
-`HostContext::with_rules(Vec<PathMappingRule>)` takes ownership of the rules
-and wraps them in an `Arc` internally. Callers that already have an
-`Arc<Vec<PathMappingRule>>` can construct `HostContext::WithRules(arc)`
-directly. The `apply_path_mapping` closure captures the `Arc` by reference,
-so many libraries built from the same rules share a single allocation.
+`HostContext::with_rules(Vec<PathMappingRule>)` builds a
+[`PathMapper`](path-mapping.md#pathmapper) from the rules and wraps it in an
+`Arc`. It returns `InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit. Callers that already have an
+`Arc<PathMapper>` can construct `HostContext::WithRules(arc)`
+directly. The `apply_path_mapping` closure owns a clone of the `Arc`, so
+many libraries built from the same mapper share a single allocation.
 
 For template validation at job creation time (when path mapping rules aren't
 available yet), use `HostContext::Unresolved`. This registers the
@@ -547,7 +549,7 @@ want to layer host-context functions onto a custom-built library:
 ```rust
 pub fn default_library::register_host_context_functions(
     lib: &mut FunctionLibrary,
-    rules: Arc<Vec<PathMappingRule>>,
+    mapper: Arc<PathMapper>,
 );
 
 pub fn default_library::register_unresolved_host_context_functions(
@@ -562,8 +564,8 @@ primitives are documented in [public-api.md § Default Library](public-api.md#de
 ### Rule-change semantics
 
 Rules are captured at the point `FunctionLibrary::for_profile` resolves a
-`HostContext::WithRules(rules)` profile. The `apply_path_mapping` closure
-holds an immutable `Arc<Vec<PathMappingRule>>` reference for the library's
+`HostContext::WithRules(mapper)` profile. The `apply_path_mapping` closure
+holds an immutable `Arc<PathMapper>` reference for the library's
 lifetime. If the host's rules change (e.g. `openjd-sessions` accumulates
 path mapping rules across let-binding evaluations), the host must rebuild
 the library by calling `for_profile` with a new rules-carrying profile:
@@ -571,7 +573,7 @@ the library by calling `for_profile` with a new rules-carrying profile:
 ```rust
 // Rebuild with updated rules.
 let updated_profile = ExprProfile::current()
-    .with_host_context(HostContext::with_rules(new_rules));
+    .with_host_context(HostContext::with_rules(new_rules)?);
 let updated_lib = FunctionLibrary::for_profile(&updated_profile);
 ```
 

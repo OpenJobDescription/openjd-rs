@@ -23,7 +23,9 @@ async fn test_path_mapping_file_created_with_rules() {
         source_path: "/mnt/shared".into(),
         destination_path: "/local/shared".into(),
     }];
-    let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(rules);
+    let mut session = Session::new_for_test(tmp.path().to_path_buf())
+        .with_path_mapping(rules)
+        .unwrap();
     let script = StepScript {
         let_bindings: None,
         actions: StepActions {
@@ -82,7 +84,9 @@ async fn test_has_path_mapping_rules_true() {
         source_path: "/src".into(),
         destination_path: "/dst".into(),
     }];
-    let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(rules);
+    let mut session = Session::new_for_test(tmp.path().to_path_buf())
+        .with_path_mapping(rules)
+        .unwrap();
     let script = StepScript {
         let_bindings: None,
         actions: StepActions {
@@ -128,19 +132,21 @@ async fn test_has_path_mapping_rules_false() {
 #[tokio::test]
 async fn test_path_mapping_multiple_rules() {
     let tmp = TempDir::new().unwrap();
+    let rule = |format: PathFormat, src: &str, dst: &str| PathMappingRule {
+        source_path_format: format,
+        source_path: src.into(),
+        destination_path: dst.into(),
+    };
+    // Given in an order that is not the precedence order.
     let rules = vec![
-        PathMappingRule {
-            source_path_format: PathFormat::Posix,
-            source_path: "/mnt/a".into(),
-            destination_path: "/local/a".into(),
-        },
-        PathMappingRule {
-            source_path_format: PathFormat::Windows,
-            source_path: "C:\\share".into(),
-            destination_path: "/local/share".into(),
-        },
+        rule(PathFormat::Windows, "C:\\share", "/local/share"),
+        rule(PathFormat::Posix, "/mnt/a", "/first"),
+        rule(PathFormat::Posix, "/mnt/a/b", "/local/b"),
+        rule(PathFormat::Posix, "/mnt/a/", "/last"),
     ];
-    let mut session = Session::new_for_test(tmp.path().to_path_buf()).with_path_mapping(rules);
+    let mut session = Session::new_for_test(tmp.path().to_path_buf())
+        .with_path_mapping(rules)
+        .unwrap();
     let script = StepScript {
         let_bindings: None,
         actions: StepActions {
@@ -159,8 +165,15 @@ async fn test_path_mapping_multiple_rules() {
         .unwrap();
     let json: serde_json::Value = serde_json::from_str(result.stdout.trim()).unwrap();
     let rules = json["path_mapping_rules"].as_array().unwrap();
-    assert_eq!(rules.len(), 2);
-    // Sorted by longest source_path first: "C:\\share" (8) > "/mnt/a" (6)
-    assert_eq!(rules[0]["source_path_format"], "WINDOWS");
-    assert_eq!(rules[1]["source_path_format"], "POSIX");
+    let destinations: Vec<&str> = rules
+        .iter()
+        .map(|r| r["destination_path"].as_str().unwrap())
+        .collect();
+    // In precedence order: most names first ("/mnt/a/b" has three), then,
+    // among the two-name rules "C:\\share" (the drive counts as one name)
+    // and "/mnt/a/", WINDOWS before POSIX. "/mnt/a" is left out: the later
+    // "/mnt/a/" names the same location and replaces it.
+    assert_eq!(destinations, ["/local/b", "/local/share", "/last"]);
+    assert_eq!(rules[1]["source_path_format"], "WINDOWS");
+    assert_eq!(rules[1]["source_path"], "C:\\share");
 }

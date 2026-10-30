@@ -382,16 +382,23 @@ impl JsFunctionLibrary {
     }
 
     /// Create a library with path mapping rules.
+    ///
+    /// Throws when a rule's source path is not absolute for its format, a
+    /// path is longer than 32 KiB, or the rules' trie would pass its 30 MiB
+    /// limit; the message names the rule's position in `rules`.
     #[wasm_bindgen(js_name = "withPathMappingRules")]
-    pub fn with_path_mapping_rules(rules: Vec<JsPathMappingRule>) -> JsFunctionLibrary {
+    pub fn with_path_mapping_rules(
+        rules: Vec<JsPathMappingRule>,
+    ) -> Result<JsFunctionLibrary, JsError> {
         let rust_rules: Vec<openjd_expr::PathMappingRule> =
             rules.into_iter().map(|r| r.inner).collect();
+        let host = openjd_expr::HostContext::with_rules(rust_rules)
+            .map_err(|e| JsError::new(&e.to_string()))?;
         let inner = (*openjd_expr::FunctionLibrary::for_profile(
-            &openjd_expr::ExprProfile::current()
-                .with_host_context(openjd_expr::HostContext::with_rules(rust_rules)),
+            &openjd_expr::ExprProfile::current().with_host_context(host),
         ))
         .clone();
-        JsFunctionLibrary { inner }
+        Ok(JsFunctionLibrary { inner })
     }
 }
 

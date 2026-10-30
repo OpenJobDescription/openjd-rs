@@ -73,7 +73,7 @@ pub enum HostContext {
     #[default]
     None,                                    // no host functions registered
     Unresolved,                              // stub impls returning Unresolved(T)
-    WithRules(Arc<Vec<PathMappingRule>>),    // real impls using these rules
+    WithRules(Arc<PathMapper>),              // real impls using this mapper
 }
 ```
 
@@ -86,9 +86,10 @@ three call sites:
 - **`Unresolved`** — template validation time: signatures must be known
   for type checking, but no rules exist yet. Stub implementations return
   `Unresolved(PATH)`.
-- **`WithRules`** — runtime: real implementations capture the rules via
-  `Arc`, so cloning libraries is cheap. `HostContext::with_rules(vec)` is
-  the owning-constructor convenience.
+- **`WithRules`** — runtime: real implementations capture a
+  [`PathMapper`](path-mapping.md#pathmapper) via `Arc`, so cloning
+  libraries is cheap. `HostContext::with_rules(vec)` builds the mapper,
+  and fails with `InvalidPathMappingRule` when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit.
 
 Whether a given library instance has host functions is discoverable only
 one way: whether they are registered — `lib.get_signatures("apply_path_mapping")`.

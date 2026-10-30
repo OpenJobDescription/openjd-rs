@@ -165,6 +165,17 @@ The JSON document must:
 2. Have a `version` field with value `"pathmapping-1.0"`
 3. Have a `path_mapping_rules` field that is an array
 4. Each rule must deserialize into `PathMappingRule` via serde
+5. Each rule's `source_path` must be absolute for its `source_path_format`,
+   and neither path may be longer than 32 KiB; and the rules' trie must fit
+   the default 30 MiB limit
+   (checked with `PathMapper::new`, see
+   [expr path-mapping.md](../expr/path-mapping.md#source-paths-must-be-absolute)).
+   The error is `Invalid path mapping rules: path mapping rule <i>: <reason>`,
+   where `<i>` is the rule's position in `path_mapping_rules`.
+
+The rules keep the order given. The session's `PathMapper` decides which rule
+applies to a path: the one whose source path has the most names, and between
+rules for the same location, the one given last.
 
 ### Why JSON Only
 
