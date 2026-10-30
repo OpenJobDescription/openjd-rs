@@ -299,6 +299,16 @@ describe("parseRangeExpr", () => {
     const result = mod.parseRangeExpr("1-10:3");
     expect(Array.from(result)).toEqual([1n, 4n, 7n, 10n]);
   });
+
+  it("refuses to materialize more values than the operation limit", () => {
+    expect(() => mod.parseRangeExpr("1-10000001")).toThrow(
+      new Error("Range expression has too many elements to materialize (10000001 > 10000000)")
+    );
+    // The exact count, past what a wasm32 usize can hold.
+    expect(() => mod.parseRangeExpr("1-5000000000")).toThrow(
+      new Error("Range expression has too many elements to materialize (5000000000 > 10000000)")
+    );
+  });
 });
 
 describe("range_expr values", () => {

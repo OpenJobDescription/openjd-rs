@@ -1074,6 +1074,14 @@ mod tests {
     }
 
     #[test]
+    fn int_range_is_never_empty() {
+        // An IntRange holds at least its start value.
+        assert!(!IntRange::new(1, 1, 1).unwrap().is_empty());
+        assert!(!IntRange::new(1, 4_294_967_296, 1).unwrap().is_empty());
+        assert_eq!(IntRange::new(1, 1, 1).unwrap().len(), 1);
+    }
+
+    #[test]
     fn saturating_count_saturates_at_a_32_bit_width() {
         // A count that a 32-bit usize cannot hold saturates rather than
         // wrapping: 2^32 would wrap to 0 and 5e9 to 705032704.
