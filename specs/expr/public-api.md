@@ -1547,9 +1547,12 @@ pub enum ExpressionErrorKind {
     DivisionByZero { op: &'static str },
     FloatError { message: String },  // NaN / infinity produced
     IndexOutOfBounds { message: String },
-    /// Exceeded `memory_limit` (default `DEFAULT_MEMORY_LIMIT`).
+    /// Exceeded `memory_limit` (default `DEFAULT_MEMORY_LIMIT`). `used`
+    /// saturates at usize::MAX, which is over every limit (evaluator.md).
     MemoryLimitExceeded { used: usize, limit: usize },
     /// Exceeded `operation_limit` (default `DEFAULT_OPERATION_LIMIT`).
+    /// `count` saturates at usize::MAX, which is over every limit, and
+    /// the message then reads "at least" (evaluator.md).
     OperationLimitExceeded { count: usize, limit: usize },
     /// Exceeded `MAX_EXPRESSION_DEPTH`.
     ExpressionTooDeep { depth: usize, limit: usize },

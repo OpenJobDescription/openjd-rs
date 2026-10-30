@@ -2187,6 +2187,60 @@ mod tests {
     }
 
     #[test]
+    fn contiguous_containment_and_adaptive_walk_past_2_pow_32() {
+        // Interval offsets and the adaptive cursor past 2^32 (they wrapped
+        // as 32-bit usizes). Thread-free, so it also runs on wasm32-wasip1.
+        let chunk = |s: &str| -> TaskParameterSet {
+            let r: RangeExpr = s.parse().unwrap();
+            [(
+                "Frame".to_string(),
+                TaskParameterValue {
+                    param_type: TaskParameterType::ChunkInt,
+                    value: ExprValue::RangeExpr(r.with_contiguous(true)),
+                },
+            )]
+            .into_iter()
+            .collect()
+        };
+        let space = make_space(vec![("Frame", static_chunk_param("1-5000000000", 1))], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert!(iter.contains(&chunk("4294967297-4294967297")));
+        assert!(iter.contains(&chunk("5000000000-5000000000")));
+        assert!(!iter.contains(&chunk("4294967297-4294967298")));
+
+        let mut adaptive = match static_chunk_param("1-5000000000", 1) {
+            job::TaskParameter::ChunkInt { range, mut chunks } => {
+                chunks.target_runtime_seconds = Some(60);
+                job::TaskParameter::ChunkInt { range, chunks }
+            }
+            other => other,
+        };
+        let space = make_space(vec![("Frame", adaptive.clone())], None);
+        let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert!(iter.chunks_adaptive());
+        iter.set_chunks_default_task_count(1 << 32);
+        let mut walked = Vec::new();
+        for set in iter.by_ref() {
+            match &set["Frame"].value {
+                ExprValue::RangeExpr(r) => walked.push(r.to_string()),
+                other => panic!("expected a chunk, got {other:?}"),
+            }
+        }
+        assert_eq!(walked, ["1-4294967296", "4294967297-5000000000"]);
+        // NONCONTIGUOUS adaptive: the cursor is an index past 2^32.
+        if let job::TaskParameter::ChunkInt { chunks, .. } = &mut adaptive {
+            chunks.range_constraint = RangeConstraint::Noncontiguous;
+        }
+        let space = make_space(vec![("Frame", adaptive)], None);
+        let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+        iter.set_chunks_default_task_count((1 << 32) + 1);
+        let walked: Vec<String> = iter
+            .map(|set| set["Frame"].value.to_display_string())
+            .collect();
+        assert_eq!(walked, ["1-4294967297", "4294967298-5000000000"]);
+    }
+
+    #[test]
     fn size_hint_tracks_a_contiguous_walk() {
         let space = make_space(vec![("Frame", static_chunk_param("1-10", 3))], None);
         let mut iter = StepParameterSpaceIterator::new(&space).unwrap();

@@ -1079,7 +1079,7 @@ describe("StepParameterSpaceIterator", () => {
       expect(iter.count).toBe(3n);
       expect(iter.names).toEqual(["F"]);
       expect(iter.get(2n).get("F")).toBe("3");
-      expect(() => iter.get(3n)).toThrow("Index 3 out of range");
+      expect(() => iter.get(3n)).toThrow(new Error("Index 3 out of range"));
       iter.free();
     });
   });
@@ -1095,7 +1095,7 @@ describe("StepParameterSpaceIterator", () => {
 
   it("rejects an unknown step name", () => {
     withIter("Nope", (make) => {
-      expect(make).toThrow("Job has no step named 'Nope'");
+      expect(make).toThrow(new Error("Job has no step named 'Nope'"));
     });
   });
 });
@@ -1185,6 +1185,23 @@ describe("task counts above 2^32 (wasm32)", () => {
     });
   });
 
+  it("places CONTIGUOUS chunks at offsets of 2^32 and beyond", () => {
+    // An offset into an interval past 2^32 wraps a 32-bit usize: index
+    // 4294967296 of 1-5000000000 read "705032704-705032704" that way.
+    withJob(chunkTemplate("1-5000000000", 1, "CONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [4294967295n, 4294967296n, 4999999999n])).toEqual({
+        count: 5000000000n,
+        chunks: ["4294967296-4294967296", "4294967297-4294967297", "5000000000-5000000000"],
+      });
+    });
+    withJob(chunkTemplate("1-10000000000", 1000000000, "CONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [4n, 5n, 9n])).toEqual({
+        count: 10n,
+        chunks: ["4000000001-5000000000", "5000000001-6000000000", "9000000001-10000000000"],
+      });
+    });
+  });
+
   it("splits 1-4294967296 into two chunks of 2^31", () => {
     withJob(chunkTemplate("1-4294967296", 2147483648, "CONTIGUOUS"), undefined, (job) => {
       expect(chunksAt(job, [0n, 1n])).toEqual({
@@ -1210,7 +1227,7 @@ describe("task counts above 2^32 (wasm32)", () => {
     withJob(chunkTemplate("1-4294967296", 1, "CONTIGUOUS"), undefined, (job) => {
       const iter = new mod.StepParameterSpaceIterator(job, "S");
       try {
-        expect(() => iter.get(4294967296n)).toThrow("Index 4294967296 out of range");
+        expect(() => iter.get(4294967296n)).toThrow(new Error("Index 4294967296 out of range"));
       } finally {
         iter.free();
       }
@@ -1223,12 +1240,10 @@ describe("task counts above 2^32 (wasm32)", () => {
     withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), undefined, (job) => {
       const iter = new mod.StepParameterSpaceIterator(job, "S");
       try {
-        expect(() => iter.get(2n ** 64n)).toThrow("Index 18446744073709551616 out of range");
-        expect(() => iter.get(2n ** 64n + 1n)).toThrow(
-          "Index 18446744073709551617 out of range"
-        );
-        expect(() => iter.get(-1n)).toThrow("Index -1 out of range");
-        expect(() => iter.get(1)).toThrow("Index must be a bigint");
+        expect(() => iter.get(2n ** 64n)).toThrow(new Error("Index 18446744073709551616 out of range"));
+        expect(() => iter.get(2n ** 64n + 1n)).toThrow(new Error("Index 18446744073709551617 out of range"));
+        expect(() => iter.get(-1n)).toThrow(new Error("Index -1 out of range"));
+        expect(() => iter.get(1)).toThrow(new Error("Index must be a bigint"));
       } finally {
         iter.free();
       }
@@ -1280,12 +1295,12 @@ describe("task counts above 2^32 (wasm32)", () => {
     // The list's length plus the range's saturated 2^32 - 1 wraps a 32-bit
     // usize to 0 without saturating addition.
     expect(evalError("[1] + range_expr('1-4294967296')")).toBe(
-      "Expression operation count (4294967295) exceeded limit (10000000)\n" +
+      "Expression operation count (at least 4294967295) exceeded limit (10000000)\n" +
         "  [1] + range_expr('1-4294967296')\n" +
         "  ~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~"
     );
     expect(evalError("range_expr('1-4294967296') + [1]")).toBe(
-      "Expression operation count (4294967295) exceeded limit (10000000)\n" +
+      "Expression operation count (at least 4294967295) exceeded limit (10000000)\n" +
         "  range_expr('1-4294967296') + [1]\n" +
         "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~"
     );
@@ -1302,16 +1317,42 @@ describe("task counts above 2^32 (wasm32)", () => {
   it("charges the operation budget for concatenating two ranges of 2^31 values", () => {
     // The two lengths sum to 2^32, which wraps a 32-bit usize to 0 and
     // used to skip the budget (then trap building 2^32 values). The charge
-    // saturates at usize::MAX instead, so the reported count is 2^32 - 1.
+    // saturates at usize::MAX instead, so the count reads "at least".
     const st = new mod.SymbolTable();
     try {
       expect(() =>
         mod.evaluateExpression("range_expr('1-2147483648') + range_expr('1-2147483648')", st)
       ).toThrow(
-        "Expression operation count (4294967295) exceeded limit (10000000)\n" +
+        "Expression operation count (at least 4294967295) exceeded limit (10000000)\n" +
           "  range_expr('1-2147483648') + range_expr('1-2147483648')\n" +
           "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~"
       );
+    } finally {
+      st.free();
+    }
+  });
+
+  it("rejects a saturated charge under the largest operation limit", () => {
+    // 4294967295 is usize::MAX here, the largest operationLimit a caller
+    // can pass. A saturated counter may stand for more, so it is over
+    // every limit; a 64-bit build rejects the same input and limit with
+    // the exact count. Without that rule this trapped.
+    const st = new mod.SymbolTable();
+    try {
+      for (const expr of [
+        "range_expr('1-2147483648') + range_expr('1-2147483648')",
+        "list(range_expr('1-5000000000'))",
+      ]) {
+        let message = null;
+        try {
+          mod.evaluateExpression(expr, st, undefined, { operationLimit: 4294967295 });
+        } catch (e) {
+          message = e.message;
+        }
+        expect(message.split("\n")[0]).toBe(
+          "Expression operation count (at least 4294967295) exceeded limit (4294967295)"
+        );
+      }
     } finally {
       st.free();
     }
