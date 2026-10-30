@@ -269,14 +269,14 @@ takes a `u64` index, on every target. A `usize` would be exact only on 64-bit ta
 32-bit target such as wasm32 (openjd-for-js), `"1-5000000000"` has more values than a
 `usize` can count. Where an evaluator function charges an operation or memory budget, both
 `usize`, by a range's length, it uses the crate-private `len_saturating`, which saturates at
-`usize::MAX`: a count that does not fit exceeds every budget below `usize::MAX`, so
-saturating keeps the charge over such a limit, and a sum of two lengths uses
-`saturating_add` for the same reason (on 32-bit, `range_expr('1-2147483648') +
-range_expr('1-2147483648')` would otherwise wrap to a charge of 0). A limit of `usize::MAX`
-admits any charge on every target. On a 32-bit target the operation-limit error then
-reports the saturated charge, `Expression operation count (4294967295) exceeded limit
-(10000000)`, where a 64-bit target reports the full count; the budget is enforced the same
-way on both.
+`usize::MAX`, and a sum of two lengths uses `saturating_add` (on 32-bit,
+`range_expr('1-2147483648') + range_expr('1-2147483648')` would otherwise wrap to a charge
+of 0). The evaluator's counters saturate too, and a counter at `usize::MAX` counts as over
+every limit, `usize::MAX` included (see `evaluator.md`, Operation Counting), so a charge
+that does not fit a `usize` is always rejected: on a 32-bit target even the largest limit a
+caller can set rejects what a 64-bit target counts exactly and rejects. The error message
+then reads `Expression operation count (at least 4294967295) exceeded limit (...)`, where a
+64-bit target reports the full count.
 
 **Deviation from Template Schemas §3.4.1.1.1:** the specification does not constrain the
 number of values a range expression expands to, and expects an implementation that bounds

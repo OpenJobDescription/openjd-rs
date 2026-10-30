@@ -1009,3 +1009,28 @@ fn repr_json_counts_nested_elements_and_string_work() {
         .concat()
     );
 }
+
+// === A saturated operation counter is over every limit ===
+
+#[test]
+fn saturated_operation_count_exceeds_the_largest_limit() {
+    // The counter saturates at usize::MAX, so a counter there may stand for
+    // a larger count and is over every limit, usize::MAX included. On a
+    // 64-bit target these two lengths sum to 2^64 - 2, and the calls
+    // before the concatenation push the counter past usize::MAX; on a
+    // 32-bit target a single range of 2^32 values saturates it. Without
+    // the rule the concatenation went on to collect ~2^64 values and
+    // aborted on allocation.
+    let range = "range_expr('1-9223372036854775807')";
+    let err = eval_op(&format!("{range} + {range}"), usize::MAX).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "Expression operation count (at least {max}) exceeded limit ({max})\n  \
+             {range} + {range}\n  {}^{}",
+            "~".repeat(range.len() + 1),
+            "~".repeat(range.len() + 1),
+            max = usize::MAX
+        )
+    );
+}

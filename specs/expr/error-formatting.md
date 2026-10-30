@@ -104,8 +104,8 @@ pub enum ExpressionErrorKind {
 | `DivisionByZero` | Division or modulo by zero |
 | `FloatError` | Float operation produces NaN or infinity |
 | `IndexOutOfBounds` | List or range index outside valid range |
-| `MemoryLimitExceeded` | Cumulative value memory exceeds configured limit |
-| `OperationLimitExceeded` | Operation count exceeds configured limit; reports the count and limit |
+| `MemoryLimitExceeded` | Cumulative value memory exceeds configured limit; a saturated count (`usize::MAX`) reads "at least" |
+| `OperationLimitExceeded` | Operation count exceeds configured limit; reports the count and limit, and a saturated count (`usize::MAX`) reads "at least" |
 | `ExpressionTooDeep` | AST nesting depth exceeds `MAX_EXPRESSION_DEPTH`; raised by parser structural validator and by evaluator recursion guard |
 | `UnsupportedSyntax` | Valid Python syntax not supported by the expression language |
 | `ExplicitFail` | The `fail()` function was called |

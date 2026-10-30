@@ -100,6 +100,16 @@ Every function call increments the operation counter:
 The proportional costs prevent DoS via large strings or lists — a million-element list
 comprehension costs 1M operations even if each iteration is trivial.
 
+The operation counter and the projected memory of `check_memory` saturate at `usize::MAX`
+rather than wrap, so a value there may stand for a larger true count, and it is treated as
+over every limit, `usize::MAX` included (`over_budget`). This matters on 32-bit targets
+(wasm32), where a charge by a range of 2^32 or more values saturates: without the rule, a
+limit of `usize::MAX` (4294967295, the largest a JS caller can pass) would admit it, and the
+evaluation would try to build the values. (A true count of exactly `usize::MAX` under a
+limit of `usize::MAX` is rejected as well; no evaluation reaches one.) The error messages
+then say "at least": `Expression operation count (at least 4294967295) exceeded limit
+(4294967295)`, `Expression memory usage (at least ... bytes) exceeded limit (...)`.
+
 ### Depth Limit
 
 In addition to memory and operation counters, the evaluator carries a
