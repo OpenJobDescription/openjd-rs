@@ -1245,7 +1245,7 @@ fn noncontiguous_chunk_get_matches_iteration() {
     let iter = StepParameterSpaceIterator::new(ps).unwrap();
     let iterated: Vec<String> = chunk_strings(template);
     assert_eq!(iterated, vec!["1,2,4", "6,9", "12,13"]);
-    let accessed: Vec<String> = (0..iterated.len())
+    let accessed: Vec<String> = (0..iterated.len() as u64)
         .map(|i| match &iter.get(i).unwrap()["P"].value {
             openjd_expr::ExprValue::RangeExpr(r) => r.to_string(),
             other => panic!("expected a RangeExpr chunk value, got {other:?}"),

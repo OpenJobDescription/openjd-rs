@@ -465,7 +465,7 @@ async fn execute_parameter_space_tasks(
     let is_adaptive = iter.chunks_adaptive();
     let chunks_param_name = iter.chunks_parameter_name().map(String::from);
     let target_runtime_seconds = adaptive_target_runtime(step, is_adaptive);
-    let mut completed_task_count = 0usize;
+    let mut completed_task_count = 0u64;
     let mut completed_task_duration = 0.0;
     let mut remaining_tasks = if maximum_tasks > 0 {
         maximum_tasks
@@ -504,7 +504,7 @@ async fn execute_parameter_space_tasks(
                     _ => 1,
                 })
                 .unwrap_or(1);
-            completed_task_count += chunk_items;
+            completed_task_count = completed_task_count.saturating_add(chunk_items);
             completed_task_duration += task_duration;
             adjust_adaptive_chunk_size(
                 ctx,
@@ -539,11 +539,11 @@ fn adaptive_target_runtime(step: &Step, is_adaptive: bool) -> f64 {
 }
 
 fn calculate_adaptive_chunk_size(
-    current_chunk_size: usize,
-    completed_task_count: usize,
+    current_chunk_size: u64,
+    completed_task_count: u64,
     completed_task_duration: f64,
     target_runtime_seconds: f64,
-) -> Option<usize> {
+) -> Option<u64> {
     if completed_task_count == 0
         || completed_task_duration <= 0.0
         || !completed_task_duration.is_finite()
@@ -557,13 +557,14 @@ fn calculate_adaptive_chunk_size(
         adaptive_chunk_size = 0.75 * current_chunk_size as f64 + 0.25 * adaptive_chunk_size;
     }
 
-    Some((adaptive_chunk_size as usize).max(1))
+    // A float-to-int `as` saturates (NaN becomes 0), so this cannot wrap.
+    Some((adaptive_chunk_size as u64).max(1))
 }
 
 fn adjust_adaptive_chunk_size(
     ctx: &RunContext,
     iter: &mut openjd_model::StepParameterSpaceIterator,
-    completed_task_count: usize,
+    completed_task_count: u64,
     completed_task_duration: f64,
     target_runtime_seconds: f64,
 ) {

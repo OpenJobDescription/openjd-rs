@@ -121,7 +121,7 @@ impl From<RangeExprError> for ExpressionError {
 /// `end`.
 ///
 /// Fields are private to protect the construction invariants that
-/// `len_u64()`, iteration, and indexing arithmetic rely on: `start <= end`,
+/// `len()`, iteration, and indexing arithmetic rely on: `start <= end`,
 /// `step > 0`, `end - start` is a multiple of `step`, no value or step is
 /// `i64::MIN`, and the progression has at most [`MAX_RANGE_EXPR_LEN`]
 /// values. Deserialization re-validates through [`IntRange::new`]. Read
@@ -258,24 +258,18 @@ impl IntRange {
         }
     }
 
-    /// Number of integers in this range.
+    /// Number of integers in this range, at most [`MAX_RANGE_EXPR_LEN`].
     ///
-    /// Exact on 64-bit targets, where a count (at most
-    /// [`MAX_RANGE_EXPR_LEN`]) always fits `usize`. On 32-bit targets a
-    /// larger count clamps to `usize::MAX`.
-    pub fn len(&self) -> usize {
-        usize::try_from(self.len_u64()).unwrap_or(usize::MAX)
-    }
-
-    /// Number of integers in this range as an exact u64, at most
-    /// [`MAX_RANGE_EXPR_LEN`].
-    pub(crate) fn len_u64(&self) -> u64 {
+    /// A `u64` rather than a `usize`, so the count is exact on every
+    /// target: a range is symbolic, and on a 32-bit target such as wasm32
+    /// it can hold more values than a `usize` can count.
+    pub fn len(&self) -> u64 {
         self.end.abs_diff(self.start) / self.step as u64 + 1
     }
 
     /// Returns `true` if the range contains no elements.
     pub fn is_empty(&self) -> bool {
-        self.len_u64() == 0
+        self.len() == 0
     }
 
     /// Test whether `value` is a member of this range.
@@ -294,7 +288,7 @@ impl IntRange {
 
     /// Iterate over all values in ascending order.
     pub fn iter(&self) -> impl Iterator<Item = i64> + '_ {
-        (0..self.len_u64()).map(move |i| self.nth(i))
+        (0..self.len()).map(move |i| self.nth(i))
     }
 
     /// First value in the range (`start <= end` after normalization).
@@ -312,16 +306,11 @@ impl IntRange {
         self.step
     }
 
-    /// Get element by zero-based index, or `None` if out of bounds.
-    pub fn get(&self, index: usize) -> Option<i64> {
-        self.value_at(index as u64)
-    }
-
-    /// Get element by zero-based u64 index, or `None` if out of bounds.
-    /// (u64 rather than usize so symbolic offsets beyond the pointer
-    /// width still resolve on 32-bit targets.)
-    pub(crate) fn value_at(&self, index: u64) -> Option<i64> {
-        if index < self.len_u64() {
+    /// Get element by zero-based index, or `None` if out of bounds. The
+    /// index is a `u64` like [`IntRange::len`], so every value is
+    /// reachable on 32-bit targets too.
+    pub fn get(&self, index: u64) -> Option<i64> {
+        if index < self.len() {
             Some(self.nth(index))
         } else {
             None
@@ -335,7 +324,7 @@ impl IntRange {
 /// values), this is the run as the canonical form writes it.
 impl std::fmt::Display for IntRange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let len = self.len_u64();
+        let len = self.len();
         if len == 1 {
             write!(f, "{}", self.start)
         } else if len == 2 {
@@ -463,7 +452,7 @@ fn capped_canonical_runs(progressions: &[IntRange]) -> (Vec<IntRange>, usize) {
             runs.push(run);
         }
     };
-    let last_offset = |p: usize| progressions[p].len_u64() - 1;
+    let last_offset = |p: usize| progressions[p].len() - 1;
     let value = |p: usize, o: u64| progressions[p].nth(o);
     let next = |p: usize, o: u64| -> Option<(usize, u64)> {
         if o < last_offset(p) {
@@ -630,7 +619,7 @@ impl RangeExpr {
         let mut total: u64 = 0;
         for r in &ranges {
             total = total
-                .checked_add(r.len_u64())
+                .checked_add(r.len())
                 .filter(|&t| t <= MAX_RANGE_EXPR_LEN)
                 .ok_or_else(too_many_values)?;
         }
@@ -639,19 +628,25 @@ impl RangeExpr {
         Self::from_increasing(&ranges)
     }
 
-    /// Total number of integers across all sub-ranges.
+    /// Total number of integers across all sub-ranges, at most
+    /// [`MAX_RANGE_EXPR_LEN`], so it also converts to `i64` exactly.
     ///
-    /// Exact on 64-bit targets. (On 32-bit targets a count above
-    /// usize::MAX clamps; index arithmetic internally uses the exact
-    /// u64 count via the crate-private `len_u64`.)
-    pub fn len(&self) -> usize {
-        usize::try_from(self.length & LENGTH_MASK).unwrap_or(usize::MAX)
+    /// A `u64` rather than a `usize`, so the count is exact on every
+    /// target: a range expression is symbolic, and on a 32-bit target such
+    /// as wasm32 it can hold more values than a `usize` can count (for
+    /// example `"1-5000000000"`). Convert with `usize::try_from` only where
+    /// the values are materialized.
+    pub fn len(&self) -> u64 {
+        self.length & LENGTH_MASK
     }
 
-    /// Exact total number of integers across all sub-ranges as u64, at
-    /// most [`MAX_RANGE_EXPR_LEN`], so it also converts to i64 exactly.
-    pub(crate) fn len_u64(&self) -> u64 {
-        self.length & LENGTH_MASK
+    /// [`len`](Self::len) as a `usize` for charging an operation or memory
+    /// budget, saturating at `usize::MAX`. Budgets are `usize`, and a count
+    /// that does not fit one (on a 32-bit target) exceeds every budget, so
+    /// saturating keeps the charge over the limit; wrapping or truncating
+    /// would let it through. Not a count: use `len` for that.
+    pub(crate) fn len_saturating(&self) -> usize {
+        saturating_count(self.len(), usize::MAX)
     }
 
     /// Returns `true` if the range expression contains no elements.
@@ -670,7 +665,7 @@ impl RangeExpr {
     /// O(log m) via the cumulative table (mirrors Python's bisect on
     /// `_range_length_indices`).
     pub(crate) fn value_at(&self, idx: u64) -> Option<i64> {
-        if idx >= self.len_u64() {
+        if idx >= self.len() {
             return None;
         }
         let range_idx = self.cumulative_lengths.partition_point(|&cum| cum <= idx);
@@ -679,14 +674,14 @@ impl RangeExpr {
         } else {
             idx - self.cumulative_lengths[range_idx - 1]
         };
-        self.ranges[range_idx].value_at(offset)
+        self.ranges[range_idx].get(offset)
     }
 
     /// Get element by index (supports negative indexing like Python).
     pub fn get(&self, index: i64) -> Option<i64> {
-        // Counts are at most i64::MAX, so len_u64 as i64 is exact.
+        // Counts are at most i64::MAX, so len() as i64 is exact.
         let idx = if index < 0 {
-            index + self.len_u64() as i64
+            index + self.len() as i64
         } else {
             index
         };
@@ -758,7 +753,7 @@ impl RangeExpr {
         // like `offset + step` can reach ~2^64 for a user-supplied step
         // near i64::MAX. A step beyond total_len selects only the start
         // index, so clamp it — that also keeps `k * step` bounded.
-        let total_len = self.len_u64() as i64;
+        let total_len = self.len() as i64;
         let start = start.clamp(0, total_len) as u64;
         let stop = stop.clamp(0, total_len) as u64;
         let step = step.min(total_len.max(1)) as u64;
@@ -780,7 +775,7 @@ impl RangeExpr {
             if cum_start >= stop {
                 break;
             }
-            let r_len = r.len_u64();
+            let r_len = r.len();
             let cum_end = cum_start + r_len; // exclusive end of this sub-range's global indices
 
             // The slice selects global indices start, start+step, ...;
@@ -847,11 +842,17 @@ impl RangeExpr {
     }
 }
 
+/// `n` as a `T` whose largest value is `max`, saturating at `max`. The
+/// width is a parameter so a 32-bit `usize` can be tested on any host.
+fn saturating_count<T: TryFrom<u64>>(n: u64, max: T) -> T {
+    T::try_from(n).unwrap_or(max)
+}
+
 fn build_cumulative(ranges: &[IntRange]) -> Vec<u64> {
     let mut cum = Vec::with_capacity(ranges.len());
     let mut total = 0u64;
     for r in ranges {
-        total += r.len_u64();
+        total += r.len();
         cum.push(total);
     }
     cum
@@ -863,7 +864,7 @@ fn build_cumulative(ranges: &[IntRange]) -> Vec<u64> {
 /// `<N>-<M>` instead. O(number of runs).
 impl std::fmt::Display for RangeExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let len = self.len_u64();
+        let len = self.len();
         if self.length & CONTIGUOUS_BIT != 0 && len > 0 {
             let first = self.ranges[0].start;
             let last = self.ranges[self.ranges.len() - 1].end;
@@ -1051,6 +1052,44 @@ fn parse_integer(expr: &str, pos: &mut usize) -> Result<i64, ExpressionError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Counts beyond a 32-bit usize ──
+    //
+    // `len()` is a u64 on every target. These ranges hold more values than
+    // a 32-bit usize (wasm32) can count, and are built from text, so
+    // nothing lists their values.
+
+    #[test]
+    fn len_is_exact_beyond_2_pow_32() {
+        let r = "1-5000000000".parse::<RangeExpr>().unwrap();
+        assert_eq!(r.len(), 5_000_000_000);
+        let r = "1-4294967296".parse::<RangeExpr>().unwrap();
+        assert_eq!(r.len(), 1 << 32);
+        assert_eq!(r.ranges()[0].len(), 1 << 32);
+        assert_eq!(r.get((1 << 32) - 1), Some(4_294_967_296));
+        assert_eq!(r.ranges()[0].get((1 << 32) - 1), Some(4_294_967_296));
+        assert_eq!(r.ranges()[0].get(1 << 32), None);
+    }
+
+    #[test]
+    fn saturating_count_saturates_at_a_32_bit_width() {
+        // A count that a 32-bit usize cannot hold saturates rather than
+        // wrapping: 2^32 would wrap to 0 and 5e9 to 705032704.
+        assert_eq!(saturating_count(1 << 32, u32::MAX), u32::MAX);
+        assert_eq!(saturating_count(5_000_000_000, u32::MAX), u32::MAX);
+        assert_eq!(saturating_count(u64::from(u32::MAX), u32::MAX), u32::MAX);
+        assert_eq!(saturating_count(4_294_967_294, u32::MAX), 4_294_967_294);
+        assert_eq!(saturating_count(5_000_000_000, u64::MAX), 5_000_000_000);
+    }
+
+    #[test]
+    fn len_saturating_on_this_target() {
+        let r = "1-5000000000".parse::<RangeExpr>().unwrap();
+        #[cfg(target_pointer_width = "32")]
+        assert_eq!(r.len_saturating(), usize::MAX);
+        #[cfg(target_pointer_width = "64")]
+        assert_eq!(r.len_saturating() as u64, 5_000_000_000);
+    }
 
     #[test]
     fn simple_range() {
@@ -1417,7 +1456,7 @@ mod tests {
         // Span 2^64 - 2, step i64::MAX: three values.
         let max = i64::MAX;
         let r = IntRange::new(-max, max, max).unwrap();
-        assert_eq!(r.len_u64(), 3);
+        assert_eq!(r.len(), 3);
         assert_eq!(r.iter().collect::<Vec<_>>(), vec![-max, 0, max]);
         assert!(r.contains(0));
         assert!(!r.contains(1));

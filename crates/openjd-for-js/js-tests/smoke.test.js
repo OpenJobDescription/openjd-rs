@@ -1033,3 +1033,213 @@ describe("supportedExtensions on decodeJobTemplateFromObject (F8)", () => {
     ).toThrow(/EXPR|extension/i);
   });
 });
+
+describe("StepParameterSpaceIterator", () => {
+  const TEMPLATE = JSON.stringify({
+    specificationVersion: "jobtemplate-2023-09",
+    name: "T",
+    steps: [
+      {
+        name: "Frames",
+        parameterSpace: {
+          taskParameterDefinitions: [{ name: "F", type: "INT", range: "1-3" }],
+        },
+        script: { actions: { onRun: { command: "x" } } },
+      },
+      { name: "Bare", script: { actions: { onRun: { command: "x" } } } },
+    ],
+  });
+
+  const withIter = (stepName, body) => {
+    const template = mod.decodeJobTemplate(TEMPLATE);
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    const job = mod.createJob(template, {}, opts);
+    try {
+      body(() => new mod.StepParameterSpaceIterator(job, stepName));
+    } finally {
+      job.free();
+      opts.free();
+      template.free();
+    }
+  };
+
+  it("reads a step's tasks by index", () => {
+    withIter("Frames", (make) => {
+      const iter = make();
+      expect(iter.count).toBe(3n);
+      expect(iter.names).toEqual(["F"]);
+      expect(iter.get(2n).get("F")).toBe("3");
+      expect(() => iter.get(3n)).toThrow("Index 3 out of range");
+      iter.free();
+    });
+  });
+
+  it("gives a step without a parameter space one task", () => {
+    withIter("Bare", (make) => {
+      const iter = make();
+      expect(iter.count).toBe(1n);
+      expect(iter.get(0n).size).toBe(0);
+      iter.free();
+    });
+  });
+
+  it("rejects an unknown step name", () => {
+    withIter("Nope", (make) => {
+      expect(make).toThrow("Job has no step named 'Nope'");
+    });
+  });
+});
+
+// ── Counts above 2^32 (wasm32) ─────────────────────────────────────
+//
+// WebAssembly is a 32-bit target, so `usize` is 32 bits here. Task, chunk,
+// and value counts are 64-bit end to end; these ranges have more values
+// than a 32-bit count can hold. Each is built from text, so no test lists
+// its values.
+
+describe("task counts above 2^32 (wasm32)", () => {
+  const chunkTemplate = (range, defaultTaskCount, rangeConstraint) =>
+    JSON.stringify({
+      specificationVersion: "jobtemplate-2023-09",
+      extensions: ["TASK_CHUNKING"],
+      name: "T",
+      steps: [
+        {
+          name: "S",
+          parameterSpace: {
+            taskParameterDefinitions: [
+              {
+                name: "F",
+                type: "CHUNK[INT]",
+                range,
+                chunks: { defaultTaskCount, rangeConstraint },
+              },
+            ],
+          },
+          script: { actions: { onRun: { command: "x" } } },
+        },
+      ],
+    });
+
+  // Creates the job, runs `body(job)`, and frees everything.
+  const withJob = (templateText, limits, body) => {
+    const template = mod.decodeJobTemplate(templateText);
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    try {
+      const job = mod.createJob(template, {}, opts, limits);
+      try {
+        body(job);
+      } finally {
+        job.free();
+      }
+    } finally {
+      opts.free();
+      template.free();
+    }
+  };
+
+  // The chunk strings at `indices`, from the step's parameter space.
+  const chunksAt = (job, indices) => {
+    const iter = new mod.StepParameterSpaceIterator(job, "S");
+    try {
+      return { count: iter.count, chunks: indices.map((i) => iter.get(i).get("F")) };
+    } finally {
+      iter.free();
+    }
+  };
+
+  it("counts and splits CONTIGUOUS 1-5000000000", () => {
+    withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [0n, 1n, 4n])).toEqual({
+        count: 5n,
+        chunks: ["1-1000000000", "1000000001-2000000000", "4000000001-5000000000"],
+      });
+    });
+  });
+
+  it("counts and splits NONCONTIGUOUS 1-5000000000", () => {
+    withJob(chunkTemplate("1-5000000000", 1000000000, "NONCONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [0n, 4n])).toEqual({
+        count: 5n,
+        chunks: ["1-1000000000", "4000000001-5000000000"],
+      });
+    });
+  });
+
+  it("counts every value of 1-4294967296 as a task", () => {
+    withJob(chunkTemplate("1-4294967296", 1, "CONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [0n, 4294967295n])).toEqual({
+        count: 4294967296n,
+        chunks: ["1-1", "4294967296-4294967296"],
+      });
+    });
+  });
+
+  it("splits 1-4294967296 into two chunks of 2^31", () => {
+    withJob(chunkTemplate("1-4294967296", 2147483648, "CONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [0n, 1n])).toEqual({
+        count: 2n,
+        chunks: ["1-2147483648", "2147483649-4294967296"],
+      });
+    });
+  });
+
+  it("keeps a defaultTaskCount above 2^32", () => {
+    withJob(chunkTemplate("1-5000000000", 4294967297, "CONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [0n, 1n])).toEqual({
+        count: 2n,
+        chunks: ["1-2500000000", "2500000001-5000000000"],
+      });
+      const chunks = job.toJSON().steps[0].parameterSpace.taskParameterDefinitions.get("F")
+        .chunkInt.chunks;
+      expect(chunks.defaultTaskCount).toBe(4294967297);
+    });
+  });
+
+  it("rejects an index past the last task", () => {
+    withJob(chunkTemplate("1-4294967296", 1, "CONTIGUOUS"), undefined, (job) => {
+      const iter = new mod.StepParameterSpaceIterator(job, "S");
+      try {
+        expect(() => iter.get(4294967296n)).toThrow("Index 4294967296 out of range");
+      } finally {
+        iter.free();
+      }
+    });
+  });
+
+  it("enforces maxTaskCount on 1-5000000000", () => {
+    expect(() =>
+      withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), { maxTaskCount: 1000000n }, () => {})
+    ).toThrow("Total task count (5000000000) exceeds caller limit of 1000000.");
+  });
+
+  it("enforces maxTaskCount on 1-4294967296", () => {
+    expect(() =>
+      withJob(chunkTemplate("1-4294967296", 1, "CONTIGUOUS"), { maxTaskCount: 1000000n }, () => {})
+    ).toThrow("Total task count (4294967296) exceeds caller limit of 1000000.");
+  });
+
+  it("accepts a maxTaskCount equal to the exact task count", () => {
+    withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), { maxTaskCount: 5000000000n }, (job) => {
+      expect(job.name).toBe("T");
+    });
+  });
+
+  it("charges the operation budget for concatenating two ranges of 2^31 values", () => {
+    // The two lengths sum to 2^32, which wraps a 32-bit usize to 0 and
+    // used to skip the budget (then trap building 2^32 values). The charge
+    // saturates at usize::MAX instead, so the reported count is 2^32 - 1.
+    const st = new mod.SymbolTable();
+    try {
+      expect(() =>
+        mod.evaluateExpression("range_expr('1-2147483648') + range_expr('1-2147483648')", st)
+      ).toThrow(
+        "Expression operation count (4294967295) exceeded limit (10000000)\n" +
+          "  range_expr('1-2147483648') + range_expr('1-2147483648')\n" +
+          "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+      );
+    } finally {
+      st.free();
+    }
+  });
+});

@@ -8,30 +8,31 @@ the multidimensional space of task parameter values defined by a step's paramete
 ```rust
 impl StepParameterSpaceIterator {
     pub fn new(space: &StepParameterSpace) -> Result<Self, ModelError>
-    pub fn new_with_chunk_override(space: &StepParameterSpace, override_count: Option<usize>) -> Result<Self, ModelError>
+    pub fn new_with_chunk_override(space: &StepParameterSpace, override_count: Option<u64>) -> Result<Self, ModelError>
     pub fn names(&self) -> &HashSet<String>
-    pub fn len(&self) -> usize
+    pub fn len(&self) -> u64
     pub fn is_empty(&self) -> bool
-    pub fn get(&self, index: usize) -> Option<TaskParameterSet>
+    pub fn get(&self, index: u64) -> Option<TaskParameterSet>
     pub fn contains(&self, params: &TaskParameterSet) -> bool
     pub fn validate_containment(&self, params: &TaskParameterSet) -> Result<(), String>
     pub fn chunks_adaptive(&self) -> bool
     pub fn chunks_parameter_name(&self) -> Option<&str>
-    pub fn chunks_default_task_count(&self) -> Option<usize>
-    pub fn set_chunks_default_task_count(&mut self, value: usize)
+    pub fn chunks_default_task_count(&self) -> Option<u64>
+    pub fn set_chunks_default_task_count(&mut self, value: u64)
     pub fn reset(&mut self)
 }
 
 impl Iterator for StepParameterSpaceIterator {
     type Item = TaskParameterSet;
+    fn size_hint(&self) -> (usize, Option<usize>)
 }
 ```
 
 `new` returns `Result<Self, ModelError>` because construction can fail (e.g., if the
-product of parameter dimensions overflows `usize`). `get` returns `Option<TaskParameterSet>`
+product of parameter dimensions overflows `u64`). `get` returns `Option<TaskParameterSet>`
 (returns `None` for out-of-bounds indices, or for an adaptive space, where chunk
 boundaries are not a function of the index alone).
-`set_chunks_default_task_count` takes `&mut self` (no `Arc<AtomicUsize>` indirection).
+`set_chunks_default_task_count` takes `&mut self` (no `Arc<AtomicU64>` indirection).
 
 `chunks_parameter_name` and `chunks_default_task_count` report for *any* chunked space,
 adaptive or not: both values are in the template, and a chunk override replaces the size.
@@ -46,7 +47,7 @@ chunking (the parameter is treated as static with chunk size `n`).
 again, without rebuilding from the parameter space. For non-sequential (random-access)
 iterators it sets the internal `current_index` to 0; for sequential iterators (adaptive
 chunking) it delegates to the inner node iterator's reset.
-The adaptive `Arc<AtomicUsize>` chunk-size override set via
+The adaptive `Arc<AtomicU64>` chunk-size override set via
 `set_chunks_default_task_count` is preserved across `reset` calls — `reset` does not
 restore the template's original `defaultTaskCount`.
 
@@ -320,11 +321,11 @@ because chunk boundaries aren't known in advance.
 chunk is the next `chunk size` values by index, built with `noncontiguous_chunk()` like a
 static one. A CONTIGUOUS chunk is up to `chunk size` values from the current interval,
 taken from the range's interval groups (see Contiguous Chunking). Any chunk size from 1 to
-`usize::MAX` is valid. A NONCONTIGUOUS chunk ends at `cursor.saturating_add(chunk_size)`
+`u64::MAX` is valid. A NONCONTIGUOUS chunk ends at `cursor.saturating_add(chunk_size)`
 clamped to the value count, and a CONTIGUOUS chunk takes `chunk_size` clamped to the values
 left in its interval, so a size beyond the values that remain takes all of them (for
 CONTIGUOUS, the rest of the interval). (openjd-cli's
-adaptive size saturates at `usize::MAX` when a quick task has a huge
+adaptive size saturates at `u64::MAX` when a quick task has a huge
 `targetRuntimeSeconds`.)
 
 The chunk size can change at run time, where iteration cannot fail, so a NONCONTIGUOUS
@@ -375,6 +376,27 @@ walks the interval groups in O(1) per chunk, so both use the `node_iter` path. E
 random access; an adaptive one does not, because chunk N is not a function of N.
 
 `len()` returns the exact count except for adaptive, which returns 0.
+
+### Counts Are 64-bit
+
+Every count and index of values, chunks, and tasks is a `u64`: the node lengths and
+indices, `StaticLayout`, the interval groups and their chunk arithmetic, the adaptive
+cursor and chunk size, `len()`, `get()`, the chunk override, and
+`ResolvedChunks::default_task_count`. A range expression is symbolic, so its count is
+independent of the pointer width, and on a 32-bit target such as wasm32 (openjd-for-js) a
+`usize` cannot count `"1-5000000000"`. Only an index into a list held in memory is converted
+to `usize` (`list_index`), and it is below the list's length, so it always fits. On 64-bit
+targets `u64` and `usize` have the same range, so chunk boundaries and chunk strings there
+are the same as when the counts were `usize`.
+
+`len()` is a `u64` rather than a `usize` for the same reason `std::fs::Metadata::len` is:
+the count describes something that is not held in memory. The type does not implement
+`ExactSizeIterator`, whose `len` must be an exact `usize`. `size_hint` returns the exact
+remaining count `(n, Some(n))` when it fits a `usize`, and otherwise `(usize::MAX, None)`,
+the bound `Iterator::size_hint` documents for a count beyond `usize`; it is never a
+truncated count. Adaptive chunking returns `(0, None)`. The remaining count is the length
+minus the items `Iterator::next` has returned since the last `reset`, on the sequential
+path as well as the random-access one.
 
 ## Design Decisions
 

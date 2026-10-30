@@ -129,7 +129,9 @@ fn task_param_type_name(tp: &job::TaskParameter) -> &'static str {
     }
 }
 
-fn step_total_tasks(step: &job::Step) -> usize {
+/// A step's task count, exact on every target (a `u64`, like
+/// `StepParameterSpaceIterator::len`).
+fn step_total_tasks(step: &job::Step) -> u64 {
     match &step.parameter_space {
         None => 1,
         Some(ps) => {
@@ -197,7 +199,7 @@ fn output_job_summary(
         })
         .collect();
 
-    let total_tasks: usize = step_summaries.iter().map(|s| s.total_tasks).sum();
+    let total_tasks: u64 = step_summaries.iter().map(|s| s.total_tasks).sum();
     let step_envs: usize = step_summaries.iter().map(|s| s.envs.len()).sum();
     let root_envs: Vec<EnvInfo> = job
         .job_environments
@@ -307,7 +309,7 @@ struct JobSummaryResult {
     step_summaries: Vec<StepInfo>,
     root_envs: Vec<EnvInfo>,
     step_envs: Vec<EnvInfo>,
-    total_tasks: usize,
+    total_tasks: u64,
     total_envs: usize,
 }
 
@@ -454,7 +456,7 @@ impl fmt::Display for JobSummaryResult {
 struct StepSummaryResult {
     job_name: String,
     step_name: String,
-    total_tasks: usize,
+    total_tasks: u64,
     task_params: Vec<(String, String)>,
     envs: Vec<EnvInfo>,
     deps: Vec<String>,
@@ -547,7 +549,7 @@ impl fmt::Display for StepSummaryResult {
 struct StepInfo {
     name: String,
     description: Option<String>,
-    total_tasks: usize,
+    total_tasks: u64,
     task_params: Vec<(String, String)>,
     envs: Vec<String>,
     deps: Vec<String>,

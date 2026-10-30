@@ -1159,10 +1159,10 @@ impl ExprValue {
         // Cap the materialization at the evaluator's default operation limit:
         // a range longer than that could not have been built as a list
         // through any budgeted path either.
-        if r.len_u64() > crate::eval::DEFAULT_OPERATION_LIMIT as u64 {
+        if r.len() > crate::eval::DEFAULT_OPERATION_LIMIT as u64 {
             return Err(format!(
                 "Cannot coerce range_expr of {} elements to list[int] (maximum {})",
-                r.len_u64(),
+                r.len(),
                 crate::eval::DEFAULT_OPERATION_LIMIT
             ));
         }
@@ -1789,12 +1789,12 @@ impl ExprValue {
             }
             (Self::ListInt(elems), Self::RangeExpr(r))
             | (Self::RangeExpr(r), Self::ListInt(elems)) => {
-                // O(1) uncharged length check first — len_u64() is an exact
+                // O(1) uncharged length check first — len() is an exact
                 // count, at most MAX_RANGE_EXPR_LEN — matching
                 // the list arms. Then walk the range lazily (never
                 // materializing it), charged per comparison performed;
                 // equal lengths guarantee the zip covers both sides.
-                if elems.len() as u64 != r.len_u64() {
+                if elems.len() as u64 != r.len() {
                     return Ok(false);
                 }
                 for (e, rv) in elems.iter().zip(r.iter()) {

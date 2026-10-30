@@ -395,14 +395,37 @@ pub struct JsStepParameterSpaceIterator {
 
 #[wasm_bindgen(js_class = "StepParameterSpaceIterator")]
 impl JsStepParameterSpaceIterator {
-    /// Total number of tasks.
+    /// The tasks of the step named `step_name` in `job`. A step with no
+    /// parameter space has one task with no parameters.
+    #[wasm_bindgen(constructor)]
+    pub fn new(job: &JsJob, step_name: &str) -> Result<JsStepParameterSpaceIterator, JsError> {
+        let step = job
+            .inner
+            .steps
+            .iter()
+            .find(|s| s.name == step_name)
+            .ok_or_else(|| JsError::new(&format!("Job has no step named '{step_name}'")))?;
+        let empty = openjd_model::job::StepParameterSpace {
+            task_parameter_definitions: Default::default(),
+            combination: None,
+        };
+        let space = step.parameter_space.as_ref().unwrap_or(&empty);
+        let inner = openjd_model::StepParameterSpaceIterator::new(space).map_err(to_js_error)?;
+        Ok(JsStepParameterSpaceIterator { inner })
+    }
+
+    /// Total number of tasks (chunks, for a chunked parameter), as a
+    /// `bigint`: exact for counts above 2^53, and above the 2^32 a wasm32
+    /// `usize` could hold.
     #[wasm_bindgen(getter)]
-    pub fn count(&self) -> usize {
+    pub fn count(&self) -> u64 {
         self.inner.len()
     }
 
-    /// Get a specific task's parameter set as a JS object.
-    pub fn get(&self, index: usize) -> Result<JsValue, JsError> {
+    /// Get a specific task's parameter set as a JS `Map` from parameter
+    /// name to value string. The index is a `bigint` (`u64`), so every
+    /// task is reachable.
+    pub fn get(&self, index: u64) -> Result<JsValue, JsError> {
         match self.inner.get(index) {
             Some(params) => {
                 // Convert TaskParameterSet to a simple {name: value_string} object

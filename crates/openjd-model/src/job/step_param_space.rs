@@ -19,9 +19,15 @@
 //! No chunking path lists a range expression's values: a NONCONTIGUOUS
 //! chunk is a `RangeExpr::slice`, and CONTIGUOUS chunks come from at most
 //! three interval groups per run of the range.
+//!
+//! Every count and index of values, chunks, and tasks is a `u64`, never a
+//! `usize`: a range expression is symbolic, so on a 32-bit target such as
+//! wasm32 it can hold more values than a `usize` can count. Only an index
+//! into a list held in memory is converted to `usize`, and it is below the
+//! list's length.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use openjd_expr::{ExprValue, RangeExpr, MAX_RANGE_EXPR_CHUNKS};
@@ -34,8 +40,8 @@ use crate::types::{TaskParameterSet, TaskParameterType, TaskParameterValue};
 // ── Shared utilities ──
 
 /// Compute the product of child node lengths with overflow checking.
-fn checked_product_len(children: &[Box<dyn Node>]) -> Result<usize, ModelError> {
-    children.iter().try_fold(1usize, |acc, c| {
+fn checked_product_len(children: &[Box<dyn Node>]) -> Result<u64, ModelError> {
+    children.iter().try_fold(1u64, |acc, c| {
         acc.checked_mul(c.len()).ok_or_else(|| {
             ModelError::DecodeValidation(
                 "Total parameter space size overflow: the product of parameter dimensions is too large.".into(),
@@ -140,14 +146,28 @@ fn contiguous_chunk(first: i64, last: i64) -> RangeExpr {
 /// list, holds `i64::MIN`. Callers guarantee `start <= end <= len`.
 fn noncontiguous_chunk(
     range: &job::TaskParamRange<i64>,
-    start: usize,
-    end: usize,
+    start: u64,
+    end: u64,
 ) -> Result<RangeExpr, openjd_expr::ExpressionError> {
     match range {
         // A range expression has at most i64::MAX values, so its indices fit i64.
         job::TaskParamRange::RangeExpr(r) => r.slice(start as i64, end as i64, 1),
-        job::TaskParamRange::List(values) => RangeExpr::from_values(values[start..end].to_vec()),
+        job::TaskParamRange::List(values) => {
+            RangeExpr::from_values(values[list_index(start)..list_index(end)].to_vec())
+        }
     }
+}
+
+/// An index into a list held in memory, at most the list's length, as a
+/// `usize`. It always fits: the list's length is a `usize`.
+fn list_index(index: u64) -> usize {
+    usize::try_from(index).expect("an index at most a list's length fits usize")
+}
+
+/// The length of a list held in memory, as a `u64` count. Lossless: a
+/// `usize` is at most 64 bits on every target Rust supports.
+fn list_len<T>(values: &[T]) -> u64 {
+    values.len() as u64
 }
 
 /// How static NONCONTIGUOUS chunking splits `total` values into `num_chunks`
@@ -155,15 +175,15 @@ fn noncontiguous_chunk(
 /// `small + 1` values and the rest take `small`.
 #[derive(Clone, Copy)]
 struct StaticLayout {
-    num_chunks: usize,
-    small: usize,
-    leftovers: usize,
+    num_chunks: u64,
+    small: u64,
+    leftovers: u64,
 }
 
 impl StaticLayout {
     /// The layout for `total > 0` values and chunks of at most
     /// `default_task_count >= 1` values.
-    fn new(total: usize, default_task_count: usize) -> Self {
+    fn new(total: u64, default_task_count: u64) -> Self {
         let num_chunks = total.div_ceil(default_task_count);
         Self {
             num_chunks,
@@ -173,21 +193,21 @@ impl StaticLayout {
     }
 
     /// The largest chunk's size.
-    fn largest(&self) -> usize {
-        self.small + usize::from(self.leftovers > 0)
+    fn largest(&self) -> u64 {
+        self.small + u64::from(self.leftovers > 0)
     }
 
     /// Chunk `i` covers indices `offset..offset + size`; returns
     /// `(offset, size)`. Offsets are at most the value count, so nothing
     /// overflows.
-    fn bounds(&self, i: usize) -> (usize, usize) {
-        let size = self.small + usize::from(i < self.leftovers);
+    fn bounds(&self, i: u64) -> (u64, u64) {
+        let size = self.small + u64::from(i < self.leftovers);
         let offset = i * self.small + i.min(self.leftovers);
         (offset, size)
     }
 
     /// The chunk that holds the value at `index` (below the value count).
-    fn chunk_holding(&self, index: usize) -> usize {
+    fn chunk_holding(&self, index: u64) -> u64 {
         // The larger chunks come first.
         let larger_span = self.leftovers * (self.small + 1);
         if index < larger_span {
@@ -199,7 +219,7 @@ impl StaticLayout {
 }
 
 /// The index of `value` in `r`, or `None` if `r` does not hold it. O(log R).
-fn range_expr_index_of(r: &RangeExpr, value: i64) -> Option<usize> {
+fn range_expr_index_of(r: &RangeExpr, value: i64) -> Option<u64> {
     let runs = r.ranges();
     let k = runs.partition_point(|run| run.end() < value);
     let run = runs.get(k).filter(|run| run.contains(value))?;
@@ -209,7 +229,7 @@ fn range_expr_index_of(r: &RangeExpr, value: i64) -> Option<usize> {
     };
     // `step > 0`, and `value` is on the run's progression.
     let offset = value.abs_diff(run.start()) / run.step() as u64;
-    usize::try_from(before + offset).ok()
+    Some(before + offset)
 }
 
 /// Whether every value of `sub` is a value of `sup`, decided on their runs
@@ -257,7 +277,7 @@ enum IntervalGroup {
     Interval { first: i64, last: i64 },
     /// `count >= 1` intervals of one value each: `first`, `first + step`,
     /// and so on.
-    Singles { first: i64, step: i64, count: usize },
+    Singles { first: i64, step: i64, count: u64 },
 }
 
 impl IntervalGroup {
@@ -267,22 +287,23 @@ impl IntervalGroup {
             Self::Interval { last, .. } => last,
             // The values are those of a run, so this is exact.
             Self::Singles { first, step, count } => {
-                first.wrapping_add_unsigned((count as u64 - 1) * step as u64)
+                first.wrapping_add_unsigned((count - 1) * step as u64)
             }
         }
     }
 
     /// The number of values in the group.
-    fn value_count(&self) -> usize {
+    fn value_count(&self) -> u64 {
         match *self {
-            // At most the length of a range, so it fits on 64-bit targets.
-            Self::Interval { first, last } => (last.abs_diff(first) + 1) as usize,
+            // At most the length of a range, at most i64::MAX, so `+ 1`
+            // cannot overflow.
+            Self::Interval { first, last } => last.abs_diff(first) + 1,
             Self::Singles { count, .. } => count,
         }
     }
 
     /// The number of chunks the group splits into.
-    fn chunk_count(&self, default_task_count: usize) -> usize {
+    fn chunk_count(&self, default_task_count: u64) -> u64 {
         match *self {
             Self::Interval { .. } => interval_chunking(self.value_count(), default_task_count).0,
             Self::Singles { count, .. } => count,
@@ -290,33 +311,35 @@ impl IntervalGroup {
     }
 
     /// The group's chunk `j` (below its chunk count).
-    fn chunk(&self, j: usize, default_task_count: usize) -> RangeExpr {
+    fn chunk(&self, j: u64, default_task_count: u64) -> RangeExpr {
         match *self {
             Self::Interval { first, .. } => {
                 let (cc, small, lo) = interval_chunking(self.value_count(), default_task_count);
                 let offset = j * small + larger_chunks_before(j, lo, cc);
                 let size =
                     small + (larger_chunks_before(j + 1, lo, cc) - larger_chunks_before(j, lo, cc));
+                // Offsets and sizes are within the interval, whose values
+                // are below CHUNK_INT_VALUE_BOUND, so these fit i64.
                 let start = first + offset as i64;
                 contiguous_chunk(start, start + size as i64 - 1)
             }
             Self::Singles { first, step, .. } => {
-                let v = first.wrapping_add_unsigned(j as u64 * step as u64);
+                let v = first.wrapping_add_unsigned(j * step as u64);
                 contiguous_chunk(v, v)
             }
         }
     }
 
     /// The group's chunk that holds `value`, if any, for `value <= last_value()`.
-    fn chunk_holding(&self, value: i64, default_task_count: usize) -> Option<RangeExpr> {
+    fn chunk_holding(&self, value: i64, default_task_count: u64) -> Option<RangeExpr> {
         match *self {
             Self::Interval { first, .. } => {
                 if value < first {
                     return None;
                 }
-                let offset = value.abs_diff(first) as usize;
+                let offset = value.abs_diff(first);
                 let (cc, small, lo) = interval_chunking(self.value_count(), default_task_count);
-                let start = |j: usize| j * small + larger_chunks_before(j, lo, cc);
+                let start = |j: u64| j * small + larger_chunks_before(j, lo, cc);
                 // The last chunk that starts at or before `offset`; chunk
                 // starts increase with `j`, and chunk 0 starts at 0.
                 let (mut found, mut beyond) = (0, cc);
@@ -356,7 +379,7 @@ impl IntervalGroupBuilder {
         };
     }
 
-    fn push_singles(&mut self, first: i64, step: i64, count: usize) {
+    fn push_singles(&mut self, first: i64, step: i64, count: u64) {
         if count > 0 {
             let open = self.open.take();
             self.flush(open);
@@ -437,11 +460,11 @@ fn check_noncontiguous_chunks_fit(
     range: &job::TaskParamRange<i64>,
     layout: &StaticLayout,
 ) -> Result<(), ModelError> {
-    if layout.largest() <= MAX_RANGE_EXPR_CHUNKS {
+    if layout.largest() <= MAX_RANGE_EXPR_CHUNKS as u64 {
         return Ok(());
     }
     // Names the chunk by its index and its smallest and largest values.
-    let chunk_error = |i: usize, first: i64, last: i64, e: openjd_expr::ExpressionError| {
+    let chunk_error = |i: u64, first: i64, last: i64, e: openjd_expr::ExpressionError| {
         ModelError::DecodeValidation(format!(
             "Task parameter '{name}': chunk {i} (values {first} to {last}): {e}"
         ))
@@ -451,10 +474,8 @@ fn check_noncontiguous_chunks_fit(
             if r.ranges().len() + 2 <= MAX_RANGE_EXPR_CHUNKS {
                 return Ok(());
             }
-            // Here R >= MAX_RANGE_EXPR_CHUNKS - 1, so run 2 exists. (An
-            // index beyond usize, on a 32-bit target, saturates like the
-            // range's `len()`.)
-            let first_of_run_2 = usize::try_from(r.cumulative_lengths()[1]).unwrap_or(usize::MAX);
+            // Here R >= MAX_RANGE_EXPR_CHUNKS - 1, so run 2 exists.
+            let first_of_run_2 = r.cumulative_lengths()[1];
             let i = layout.chunk_holding(first_of_run_2);
             let (offset, size) = layout.bounds(i);
             noncontiguous_chunk(range, offset, offset + size)
@@ -462,7 +483,7 @@ fn check_noncontiguous_chunks_fit(
                 .map_err(|e| {
                     // Chunk offsets and sizes are within the range's length,
                     // at most i64::MAX.
-                    let value = |k: usize| r.get(k as i64).expect("chunk index within the range");
+                    let value = |k: u64| r.get(k as i64).expect("chunk index within the range");
                     chunk_error(i, value(offset), value(offset + size - 1), e)
                 })
         }
@@ -472,7 +493,7 @@ fn check_noncontiguous_chunks_fit(
                 .map(|_| ())
                 .map_err(|e| {
                     // A list may be unsorted: name its smallest and largest values.
-                    let (min, max) = values[offset..offset + size]
+                    let (min, max) = values[list_index(offset)..list_index(offset + size)]
                         .iter()
                         .fold((i64::MAX, i64::MIN), |(lo, hi), &v| (lo.min(v), hi.max(v)));
                     chunk_error(i, min, max, e)
@@ -485,8 +506,8 @@ fn check_noncontiguous_chunks_fit(
 
 /// Internal trait for lazy parameter space tree nodes.
 trait Node: Send + Sync {
-    fn len(&self) -> usize;
-    fn get(&self, index: usize, result: &mut TaskParameterSet);
+    fn len(&self) -> u64;
+    fn get(&self, index: u64, result: &mut TaskParameterSet);
     /// Validate containment with a detailed error message on failure.
     fn validate_containment(&self, params: &TaskParameterSet) -> Result<(), String>;
     /// Create an iterator over this node's elements.
@@ -503,8 +524,8 @@ trait NodeIterator: Send + Sync {
 /// Tracks only index and length — the caller (ProductIterator/AssociationIterator)
 /// is responsible for calling `get()` on the original node to populate results.
 struct IndexedNodeIterator {
-    len: usize,
-    index: usize,
+    len: u64,
+    index: u64,
 }
 
 impl NodeIterator for IndexedNodeIterator {
@@ -552,7 +573,7 @@ impl NodeIterator for RangeListIterator {
 struct RangeExprIterator {
     name: String,
     range: RangeExpr,
-    index: usize,
+    index: u64,
 }
 
 impl NodeIterator for RangeExprIterator {
@@ -584,7 +605,7 @@ struct StaticChunkIterator {
     name: String,
     range: job::TaskParamRange<i64>,
     layout: StaticLayout,
-    index: usize,
+    index: u64,
 }
 
 impl NodeIterator for StaticChunkIterator {
@@ -609,7 +630,7 @@ impl NodeIterator for StaticChunkIterator {
 
 /// Static NONCONTIGUOUS chunk `i` of `range`. It fits the run cap: the node
 /// was built only after `check_noncontiguous_chunks_fit` passed.
-fn static_chunk(range: &job::TaskParamRange<i64>, layout: &StaticLayout, i: usize) -> RangeExpr {
+fn static_chunk(range: &job::TaskParamRange<i64>, layout: &StaticLayout, i: u64) -> RangeExpr {
     let (offset, size) = layout.bounds(i);
     noncontiguous_chunk(range, offset, offset + size)
         // A CHUNK[INT] range is within the value bound, so the only error is
@@ -629,9 +650,9 @@ fn static_chunk(range: &job::TaskParamRange<i64>, layout: &StaticLayout, i: usiz
 struct ContiguousChunkNode {
     name: String,
     groups: Arc<[IntervalGroup]>,
-    default_task_count: usize,
+    default_task_count: u64,
     /// Entry `g` is the number of chunks in groups `0..=g`.
-    cumulative_chunks: Vec<usize>,
+    cumulative_chunks: Vec<u64>,
     /// Whether the groups are in increasing order of value, so a value's
     /// group can be found by binary search: true for a range expression.
     /// A list's groups follow list order, which may be unsorted.
@@ -639,16 +660,17 @@ struct ContiguousChunkNode {
 }
 
 impl ContiguousChunkNode {
-    fn new(name: String, range: &job::TaskParamRange<i64>, default_task_count: usize) -> Self {
+    fn new(name: String, range: &job::TaskParamRange<i64>, default_task_count: u64) -> Self {
         let dtc = default_task_count.max(1);
         let groups: Arc<[IntervalGroup]> = interval_groups(range).into();
-        let mut total = 0usize;
+        let mut total = 0u64;
         let cumulative_chunks = groups
             .iter()
             .map(|g| {
-                // At most one chunk per value, so this saturates only where
-                // the range's `len()` does (32-bit targets).
-                total = total.saturating_add(g.chunk_count(dtc));
+                // At most one chunk per value, and a range has at most
+                // u64::MAX values (a list) or i64::MAX (a range
+                // expression), so this cannot overflow.
+                total += g.chunk_count(dtc);
                 total
             })
             .collect();
@@ -662,7 +684,7 @@ impl ContiguousChunkNode {
     }
 
     /// The chunk at `index`, in O(log G) for `G` groups.
-    fn chunk_at(&self, index: usize) -> Option<RangeExpr> {
+    fn chunk_at(&self, index: u64) -> Option<RangeExpr> {
         let g = self.cumulative_chunks.partition_point(|&c| c <= index);
         let group = self.groups.get(g)?;
         let before = match g {
@@ -693,10 +715,10 @@ impl ContiguousChunkNode {
 }
 
 impl Node for ContiguousChunkNode {
-    fn len(&self) -> usize {
+    fn len(&self) -> u64 {
         self.cumulative_chunks.last().copied().unwrap_or(0)
     }
-    fn get(&self, index: usize, result: &mut TaskParameterSet) {
+    fn get(&self, index: u64, result: &mut TaskParameterSet) {
         if let Some(r) = self.chunk_at(index) {
             result.insert(
                 self.name.clone(),
@@ -746,7 +768,7 @@ impl Node for ContiguousChunkNode {
 /// Chunk count and even-distribution parameters for one contiguous interval, as
 /// `(chunk_count, small, leftovers)`. Shared so sequential iteration and random access
 /// cannot drift apart on how an interval is split.
-fn interval_chunking(interval_len: usize, default_task_count: usize) -> (usize, usize, usize) {
+fn interval_chunking(interval_len: u64, default_task_count: u64) -> (u64, u64, u64) {
     let chunk_count = interval_len.div_ceil(default_task_count);
     if chunk_count >= interval_len {
         (chunk_count, 1, 0)
@@ -767,27 +789,27 @@ fn interval_chunking(interval_len: usize, default_task_count: usize) -> (usize, 
 /// `ceil(j*leftovers/chunk_count)`, so summing that over the chunks before `j`
 /// telescopes to the single ceiling below. That is what lets a chunk's offset and size be
 /// computed without walking the chunks before it.
-fn larger_chunks_before(j: usize, leftovers: usize, chunk_count: usize) -> usize {
+fn larger_chunks_before(j: u64, leftovers: u64, chunk_count: u64) -> u64 {
     if leftovers == 0 {
         return 0;
     }
     // Widened to u128 for the product only. `j` is bounded by `chunk_count` and
     // `leftovers` is `interval_len % chunk_count`, so `j * leftovers` approaches
-    // `(interval_len/2)^2` and overflows usize once an interval passes roughly 8.6e9
+    // `(interval_len/2)^2` and overflows u64 once an interval passes roughly 8.6e9
     // values — well inside the range sizes this module is built to handle. The quotient
     // is bounded by `leftovers`, so narrowing back is lossless.
-    let product = (j as u128) * (leftovers as u128);
-    (product.div_ceil(chunk_count as u128)) as usize
+    let product = u128::from(j) * u128::from(leftovers);
+    (product.div_ceil(u128::from(chunk_count))) as u64
 }
 
 /// Sequential iterator for [`ContiguousChunkNode`]: O(1) per chunk.
 struct ContiguousChunkNodeIterator {
     name: String,
     groups: Arc<[IntervalGroup]>,
-    default_task_count: usize,
+    default_task_count: u64,
     /// The group of the next chunk, and the chunk's index within it.
     group: usize,
-    chunk: usize,
+    chunk: u64,
 }
 
 impl NodeIterator for ContiguousChunkNodeIterator {
@@ -820,10 +842,10 @@ impl NodeIterator for ContiguousChunkNodeIterator {
 struct ZeroDimSpaceNode;
 
 impl Node for ZeroDimSpaceNode {
-    fn len(&self) -> usize {
+    fn len(&self) -> u64 {
         1
     }
-    fn get(&self, _index: usize, _result: &mut TaskParameterSet) {}
+    fn get(&self, _index: u64, _result: &mut TaskParameterSet) {}
     fn validate_containment(&self, _params: &TaskParameterSet) -> Result<(), String> {
         Ok(())
     }
@@ -840,15 +862,15 @@ struct RangeListNode {
 }
 
 impl Node for RangeListNode {
-    fn len(&self) -> usize {
-        self.values.len()
+    fn len(&self) -> u64 {
+        list_len(&self.values)
     }
-    fn get(&self, index: usize, result: &mut TaskParameterSet) {
+    fn get(&self, index: u64, result: &mut TaskParameterSet) {
         result.insert(
             self.name.clone(),
             TaskParameterValue {
                 param_type: self.param_type,
-                value: self.values[index].clone(),
+                value: self.values[list_index(index)].clone(),
             },
         );
     }
@@ -910,10 +932,10 @@ struct RangeExprNode {
 }
 
 impl Node for RangeExprNode {
-    fn len(&self) -> usize {
+    fn len(&self) -> u64 {
         self.range.len()
     }
-    fn get(&self, index: usize, result: &mut TaskParameterSet) {
+    fn get(&self, index: u64, result: &mut TaskParameterSet) {
         let val = self
             .range
             .get(index as i64)
@@ -988,10 +1010,10 @@ impl StaticChunkNode {
 }
 
 impl Node for StaticChunkNode {
-    fn len(&self) -> usize {
+    fn len(&self) -> u64 {
         self.layout.num_chunks
     }
-    fn get(&self, index: usize, result: &mut TaskParameterSet) {
+    fn get(&self, index: u64, result: &mut TaskParameterSet) {
         result.insert(
             self.name.clone(),
             TaskParameterValue {
@@ -1041,14 +1063,14 @@ impl Node for StaticChunkNode {
 /// Cartesian product of children (rightmost moves fastest).
 struct ProductNode {
     children: Vec<Box<dyn Node>>,
-    length: usize,
+    length: u64,
 }
 
 impl Node for ProductNode {
-    fn len(&self) -> usize {
+    fn len(&self) -> u64 {
         self.length
     }
-    fn get(&self, mut index: usize, result: &mut TaskParameterSet) {
+    fn get(&self, mut index: u64, result: &mut TaskParameterSet) {
         for child in self.children.iter().rev() {
             let child_len = child.len();
             child.get(index % child_len, result);
@@ -1151,14 +1173,14 @@ impl NodeIterator for ProductIterator {
 /// Association: all children have the same length, indexed in lockstep.
 struct AssociationNode {
     children: Vec<Box<dyn Node>>,
-    length: usize,
+    length: u64,
 }
 
 impl Node for AssociationNode {
-    fn len(&self) -> usize {
+    fn len(&self) -> u64 {
         self.length
     }
-    fn get(&self, index: usize, result: &mut TaskParameterSet) {
+    fn get(&self, index: u64, result: &mut TaskParameterSet) {
         for child in &self.children {
             child.get(index, result);
         }
@@ -1259,20 +1281,20 @@ impl NodeIterator for AssociationIterator {
 struct AdaptiveChunkNode {
     name: String,
     range: job::TaskParamRange<i64>,
-    total_len: usize,
+    total_len: u64,
     /// The interval groups, for CONTIGUOUS chunking only.
     groups: Option<Arc<[IntervalGroup]>>,
-    default_task_count: Arc<AtomicUsize>,
+    default_task_count: Arc<AtomicU64>,
 }
 
 impl Node for AdaptiveChunkNode {
-    fn len(&self) -> usize {
+    fn len(&self) -> u64 {
         // Upper bound: one chunk per value. Actual count depends on runtime chunk size.
         // Used only for association length validation during construction.
         let dtc = self.default_task_count.load(Ordering::Relaxed).max(1);
         self.total_len.div_ceil(dtc)
     }
-    fn get(&self, _index: usize, _result: &mut TaskParameterSet) {
+    fn get(&self, _index: u64, _result: &mut TaskParameterSet) {
         // Random access not supported — use iter() instead.
     }
     fn validate_containment(&self, params: &TaskParameterSet) -> Result<(), String> {
@@ -1326,23 +1348,23 @@ impl Node for AdaptiveChunkNode {
 struct AdaptiveChunkIterator {
     name: String,
     range: job::TaskParamRange<i64>,
-    total_len: usize,
+    total_len: u64,
     groups: Option<Arc<[IntervalGroup]>>,
-    default_task_count: Arc<AtomicUsize>,
+    default_task_count: Arc<AtomicU64>,
     /// NONCONTIGUOUS: the index of the next value. CONTIGUOUS: the offset of
     /// the next value within group `group`.
-    cursor: usize,
+    cursor: u64,
     group: usize,
 }
 
 impl AdaptiveChunkIterator {
     /// The next NONCONTIGUOUS chunk: the next `chunk_size` values, or all
     /// that remain.
-    fn next_noncontiguous(&mut self, chunk_size: usize) -> Option<RangeExpr> {
+    fn next_noncontiguous(&mut self, chunk_size: u64) -> Option<RangeExpr> {
         if self.cursor >= self.total_len {
             return None;
         }
-        // Saturating: any chunk size, up to usize::MAX, is valid.
+        // Saturating: any chunk size, up to u64::MAX, is valid.
         let end = self.cursor.saturating_add(chunk_size).min(self.total_len);
         let chunk = match noncontiguous_chunk(&self.range, self.cursor, end) {
             Ok(chunk) => {
@@ -1357,7 +1379,10 @@ impl AdaptiveChunkIterator {
             // MAX_RANGE_EXPR_CHUNKS values. Shorten the chunk to
             // MAX_RANGE_EXPR_CHUNKS values, which always fit.
             Err(_) => {
-                let end = self.cursor.saturating_add(MAX_RANGE_EXPR_CHUNKS).min(end);
+                let end = self
+                    .cursor
+                    .saturating_add(MAX_RANGE_EXPR_CHUNKS as u64)
+                    .min(end);
                 let chunk = noncontiguous_chunk(&self.range, self.cursor, end)
                     .expect("MAX_RANGE_EXPR_CHUNKS values fit the run cap");
                 self.cursor = end;
@@ -1369,17 +1394,15 @@ impl AdaptiveChunkIterator {
 
     /// The next CONTIGUOUS chunk: up to `chunk_size` values from the current
     /// interval.
-    fn next_contiguous(
-        &mut self,
-        groups: &[IntervalGroup],
-        chunk_size: usize,
-    ) -> Option<RangeExpr> {
+    fn next_contiguous(&mut self, groups: &[IntervalGroup], chunk_size: u64) -> Option<RangeExpr> {
         loop {
             let group = groups.get(self.group)?;
             if self.cursor < group.value_count() {
                 let chunk = match *group {
                     IntervalGroup::Interval { first, .. } => {
                         let take = chunk_size.min(group.value_count() - self.cursor);
+                        // Within the interval, whose values are below
+                        // CHUNK_INT_VALUE_BOUND, so these fit i64.
                         let start = first + self.cursor as i64;
                         self.cursor += take;
                         contiguous_chunk(start, start + (take - 1) as i64)
@@ -1430,15 +1453,17 @@ impl NodeIterator for AdaptiveChunkIterator {
 pub struct StepParameterSpaceIterator {
     root: Box<dyn Node>,
     names: HashSet<String>,
-    current_index: usize,
+    /// The number of items `Iterator::next` has returned since the last
+    /// reset; for a random-access walk, also the index of the next one.
+    current_index: u64,
     adaptive: bool,
-    adaptive_chunk_size: Option<Arc<AtomicUsize>>,
+    adaptive_chunk_size: Option<Arc<AtomicU64>>,
     node_iter: Option<Box<dyn NodeIterator>>,
     chunks_param_name: Option<String>,
     /// Effective chunk size for a non-adaptive chunked space. `None` when the space has
     /// no chunked parameter. Adaptive spaces read `adaptive_chunk_size` instead, since
     /// theirs is mutable.
-    chunk_size: Option<usize>,
+    chunk_size: Option<u64>,
     /// True when iteration must be sequential (adaptive or contiguous chunking).
     sequential: bool,
 }
@@ -1458,14 +1483,14 @@ impl StepParameterSpaceIterator {
     /// When `Some(1)`, disables adaptive chunking and counts individual tasks.
     pub fn new_with_chunk_override(
         space: &job::StepParameterSpace,
-        override_count: Option<usize>,
+        override_count: Option<u64>,
     ) -> Result<Self, ModelError> {
         Self::new_inner(space, override_count)
     }
 
     fn new_inner(
         space: &job::StepParameterSpace,
-        chunk_override: Option<usize>,
+        chunk_override: Option<u64>,
     ) -> Result<Self, ModelError> {
         // CHUNK[INT] chunking arithmetic bounds values to |v| < 2^62
         // (CHUNK_INT_VALUE_BOUND). create_job validates this, but
@@ -1509,8 +1534,8 @@ impl StepParameterSpaceIterator {
         // Name and size are reported for any chunked space; only adaptive gets the mutable
         // Arc, because only an adaptive size can change part-way through iteration.
         let mut chunks_param_name: Option<String> = None;
-        let mut chunk_size: Option<usize> = None;
-        let mut adaptive_info: Option<(String, Arc<AtomicUsize>)> = None;
+        let mut chunk_size: Option<u64> = None;
+        let mut adaptive_info: Option<(String, Arc<AtomicU64>)> = None;
         for (name, param) in &space.task_parameter_definitions {
             if let job::TaskParameter::ChunkInt { chunks, .. } = param {
                 let effective = chunk_override.unwrap_or(chunks.default_task_count).max(1);
@@ -1519,7 +1544,7 @@ impl StepParameterSpaceIterator {
                 // An override pins the size, which rules out adaptive.
                 if chunk_override.is_none() && chunks.target_runtime_seconds.is_some_and(|t| t > 0)
                 {
-                    adaptive_info = Some((name.clone(), Arc::new(AtomicUsize::new(effective))));
+                    adaptive_info = Some((name.clone(), Arc::new(AtomicU64::new(effective))));
                 }
                 break;
             }
@@ -1592,11 +1617,17 @@ impl StepParameterSpaceIterator {
         &self.names
     }
 
-    #[allow(
-        missing_docs,
-        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-    )]
-    pub fn len(&self) -> usize {
+    /// The number of task parameter sets in the space: tasks, or chunks
+    /// for a chunked parameter. 0 for adaptive chunking, where the count
+    /// depends on chunk sizes chosen during iteration.
+    ///
+    /// A `u64` rather than a `usize`, so the count is exact on every
+    /// target: a range expression is symbolic, and on a 32-bit target such
+    /// as wasm32 a space can hold more tasks than a `usize` can count (for
+    /// example `"1-5000000000"`). For the same reason the type is not an
+    /// [`ExactSizeIterator`]; its `Iterator::size_hint` is exact only when
+    /// the remaining count fits a `usize`.
+    pub fn len(&self) -> u64 {
         if self.adaptive {
             0
         } else {
@@ -1622,7 +1653,10 @@ impl StepParameterSpaceIterator {
     /// given index is not a function of the index alone. Gated on `adaptive` rather than
     /// `sequential`: contiguous chunking prefers sequential *iteration* for cost reasons
     /// but can still answer for a single index.
-    pub fn get(&self, index: usize) -> Option<TaskParameterSet> {
+    ///
+    /// The index is a `u64` like [`len`](Self::len), so every task is
+    /// reachable on 32-bit targets too.
+    pub fn get(&self, index: u64) -> Option<TaskParameterSet> {
         if self.adaptive {
             return None;
         }
@@ -1666,7 +1700,7 @@ impl StepParameterSpaceIterator {
     }
 
     /// Current default_task_count for adaptive chunking.
-    pub fn chunks_default_task_count(&self) -> Option<usize> {
+    pub fn chunks_default_task_count(&self) -> Option<u64> {
         match &self.adaptive_chunk_size {
             // Adaptive: read the live value, which `set_chunks_default_task_count` may
             // have changed since construction.
@@ -1678,14 +1712,14 @@ impl StepParameterSpaceIterator {
 
     /// Update the chunk size for adaptive chunking; a no-op for a
     /// non-adaptive space. Any value is accepted: 0 acts as 1, and a size
-    /// beyond the values that remain (up to `usize::MAX`) makes the next
+    /// beyond the values that remain (up to `u64::MAX`) makes the next
     /// chunk take all of them (for CONTIGUOUS, the rest of its interval).
     /// The exception is a NONCONTIGUOUS chunk whose canonical form would
     /// have more than 50,000 runs: it is shortened to 50,000 values.
-    pub fn set_chunks_default_task_count(&mut self, value: usize) {
+    pub fn set_chunks_default_task_count(&mut self, value: u64) {
         if let Some(ref a) = self.adaptive_chunk_size {
             a.store(value, Ordering::Relaxed);
-            // The Arc<AtomicUsize> propagates to the live iterator — no reset needed.
+            // The Arc<AtomicU64> propagates to the live iterator — no reset needed.
         }
     }
 
@@ -1695,7 +1729,7 @@ impl StepParameterSpaceIterator {
     /// For non-sequential (random-access) iterators this resets the
     /// internal cursor used by `Iterator::next` to 0. For sequential
     /// (adaptive or contiguous-with-gaps) iterators it delegates to the
-    /// inner node iterator's `reset()`. The adaptive `Arc<AtomicUsize>`
+    /// inner node iterator's `reset()`. The adaptive `Arc<AtomicU64>`
     /// chunk size is preserved across resets — `reset()` does not undo
     /// `set_chunks_default_task_count`.
     pub fn reset(&mut self) {
@@ -1735,11 +1769,12 @@ impl Iterator for StepParameterSpaceIterator {
         if self.sequential {
             let iter = self.node_iter.as_mut()?;
             let mut result = TaskParameterSet::new();
-            if iter.next(&mut result) {
-                Some(result)
-            } else {
-                None
+            if !iter.next(&mut result) {
+                return None;
             }
+            // Counted so `size_hint` stays exact on this path too.
+            self.current_index += 1;
+            Some(result)
         } else {
             let item = self.get(self.current_index)?;
             self.current_index += 1;
@@ -1747,13 +1782,32 @@ impl Iterator for StepParameterSpaceIterator {
         }
     }
 
+    /// The number of remaining items, exactly, when it fits a `usize`. On
+    /// a 32-bit target a larger count gives `(usize::MAX, None)`: a true
+    /// bound, never a wrong count. Adaptive chunking gives `(0, None)`.
+    /// [`StepParameterSpaceIterator::len`] is the exact count on every
+    /// target.
     fn size_hint(&self) -> (usize, Option<usize>) {
         if self.adaptive {
             (0, None)
         } else {
-            let remaining = self.root.len().saturating_sub(self.current_index);
-            (remaining, Some(remaining))
+            size_hint_for(self.root.len().saturating_sub(self.current_index))
         }
+    }
+}
+
+/// The `Iterator::size_hint` for `remaining` items: exact when it fits a
+/// `usize`, otherwise the true bound `(usize::MAX, None)`.
+fn size_hint_for(remaining: u64) -> (usize, Option<usize>) {
+    size_hint_in(remaining, usize::MAX)
+}
+
+/// [`size_hint_for`] with the width of `usize` as a parameter (`max` is
+/// its largest value), so the 32-bit case can be tested on any host.
+fn size_hint_in<T: TryFrom<u64> + Copy>(remaining: u64, max: T) -> (T, Option<T>) {
+    match T::try_from(remaining) {
+        Ok(n) => (n, Some(n)),
+        Err(_) => (max, None),
     }
 }
 
@@ -1762,8 +1816,8 @@ impl Iterator for StepParameterSpaceIterator {
 fn parse_node_expr(
     tokens: &[String],
     space: &job::StepParameterSpace,
-    adaptive_info: &Option<(String, Arc<AtomicUsize>)>,
-    chunk_override: Option<usize>,
+    adaptive_info: &Option<(String, Arc<AtomicU64>)>,
+    chunk_override: Option<u64>,
 ) -> Result<Box<dyn Node>, ModelError> {
     let mut pos = 0;
     let result = parse_node_product(tokens, &mut pos, space, adaptive_info, chunk_override)?;
@@ -1780,8 +1834,8 @@ fn parse_node_product(
     tokens: &[String],
     pos: &mut usize,
     space: &job::StepParameterSpace,
-    adaptive_info: &Option<(String, Arc<AtomicUsize>)>,
-    chunk_override: Option<usize>,
+    adaptive_info: &Option<(String, Arc<AtomicU64>)>,
+    chunk_override: Option<u64>,
 ) -> Result<Box<dyn Node>, ModelError> {
     let mut children = vec![parse_node_element(
         tokens,
@@ -1817,8 +1871,8 @@ fn parse_node_element(
     tokens: &[String],
     pos: &mut usize,
     space: &job::StepParameterSpace,
-    adaptive_info: &Option<(String, Arc<AtomicUsize>)>,
-    chunk_override: Option<usize>,
+    adaptive_info: &Option<(String, Arc<AtomicU64>)>,
+    chunk_override: Option<u64>,
 ) -> Result<Box<dyn Node>, ModelError> {
     if *pos >= tokens.len() {
         return Err(ModelError::DecodeValidation(
@@ -1877,8 +1931,8 @@ fn parse_node_element(
 fn make_leaf_node(
     name: &str,
     space: &job::StepParameterSpace,
-    adaptive_info: &Option<(String, Arc<AtomicUsize>)>,
-    chunk_override: Option<usize>,
+    adaptive_info: &Option<(String, Arc<AtomicU64>)>,
+    chunk_override: Option<u64>,
 ) -> Result<Box<dyn Node>, ModelError> {
     let param = space.task_parameter_definitions.get(name).ok_or_else(|| {
         ModelError::DecodeValidation(format!(
@@ -1948,8 +2002,8 @@ fn make_chunk_node(
     name: &str,
     range: &job::TaskParamRange<i64>,
     chunks: &job::ResolvedChunks,
-    adaptive_info: &Option<(String, Arc<AtomicUsize>)>,
-    chunk_override: Option<usize>,
+    adaptive_info: &Option<(String, Arc<AtomicU64>)>,
+    chunk_override: Option<u64>,
 ) -> Result<Box<dyn Node>, ModelError> {
     // Check if this parameter should use adaptive chunking
     if let Some((adaptive_name, rc)) = adaptive_info {
@@ -1998,9 +2052,9 @@ fn make_chunk_node(
 }
 
 /// The number of values in a task parameter range.
-fn range_len(range: &job::TaskParamRange<i64>) -> usize {
+fn range_len(range: &job::TaskParamRange<i64>) -> u64 {
     match range {
-        job::TaskParamRange::List(v) => v.len(),
+        job::TaskParamRange::List(v) => list_len(v),
         job::TaskParamRange::RangeExpr(r) => r.len(),
     }
 }
@@ -2008,6 +2062,117 @@ fn range_len(range: &job::TaskParamRange<i64>) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Counts beyond a 32-bit usize ──
+    //
+    // Counts and indices are u64 on every target, so these exercise on any
+    // host the arithmetic a wasm32 build runs. The ranges are built from
+    // text, so nothing lists their values.
+
+    #[test]
+    fn size_hint_is_a_true_bound_at_a_32_bit_width() {
+        // A 32-bit usize cannot hold 2^32 or more: the hint must say "at
+        // least u32::MAX, upper bound unknown", never a wrapped count.
+        assert_eq!(size_hint_in(1 << 32, u32::MAX), (u32::MAX, None));
+        assert_eq!(size_hint_in(5_000_000_000, u32::MAX), (u32::MAX, None));
+        assert_eq!(
+            size_hint_in(u64::from(u32::MAX), u32::MAX),
+            (u32::MAX, Some(u32::MAX))
+        );
+        assert_eq!(size_hint_in(7, u32::MAX), (7, Some(7)));
+        assert_eq!(
+            size_hint_in(5_000_000_000, u64::MAX),
+            (5_000_000_000, Some(5_000_000_000))
+        );
+        // And the target's own width.
+        #[cfg(target_pointer_width = "32")]
+        assert_eq!(size_hint_for(5_000_000_000), (usize::MAX, None));
+        #[cfg(target_pointer_width = "64")]
+        {
+            let n = usize::try_from(5_000_000_000u64).unwrap();
+            assert_eq!(size_hint_for(5_000_000_000), (n, Some(n)));
+        }
+    }
+
+    #[test]
+    fn contiguous_counts_and_chunks_beyond_2_pow_32() {
+        // 1-5000000000 in chunks of 1e9: five chunks. A usize count on
+        // wasm32 truncated the interval to 705032704 values.
+        let space = make_space(
+            vec![("Frame", static_chunk_param("1-5000000000", 1_000_000_000))],
+            None,
+        );
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert_eq!(iter.len(), 5);
+        let chunks: Vec<String> = (0..5).map(|i| chunk_of(&iter, i)).collect();
+        assert_eq!(
+            chunks,
+            [
+                "1-1000000000",
+                "1000000001-2000000000",
+                "2000000001-3000000000",
+                "3000000001-4000000000",
+                "4000000001-5000000000",
+            ]
+        );
+        assert_eq!(chunks_via_iteration(&space), chunks);
+    }
+
+    #[test]
+    fn one_task_per_value_counts_2_pow_32() {
+        // 1-4294967296 one value per chunk: 2^32 tasks, which a 32-bit
+        // usize count wrapped to 0.
+        let space = make_space(vec![("Frame", static_chunk_param("1-4294967296", 1))], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert_eq!(iter.len(), 1 << 32);
+        assert_eq!(chunk_of(&iter, 0), "1-1");
+        assert_eq!(chunk_of(&iter, (1 << 32) - 1), "4294967296-4294967296");
+        assert!(iter.get(1 << 32).is_none());
+        let noncontiguous = make_space(
+            vec![("Frame", noncontiguous_static_chunk_param("1-4294967296", 1))],
+            None,
+        );
+        let iter = StepParameterSpaceIterator::new(&noncontiguous).unwrap();
+        assert_eq!(iter.len(), 1 << 32);
+        assert_eq!(chunk_of(&iter, (1 << 32) - 1), "4294967296");
+    }
+
+    #[test]
+    fn a_default_task_count_beyond_2_pow_32_is_kept() {
+        // 4294967297 would truncate to 1 as a 32-bit usize.
+        let space = make_space(
+            vec![("Frame", static_chunk_param("1-5000000000", 4_294_967_297))],
+            None,
+        );
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert_eq!(iter.len(), 2);
+        assert_eq!(iter.chunks_default_task_count(), Some(4_294_967_297));
+        assert_eq!(
+            chunks_via_iteration(&space),
+            ["1-2500000000", "2500000001-5000000000"]
+        );
+    }
+
+    #[test]
+    fn size_hint_tracks_a_contiguous_walk() {
+        let space = make_space(vec![("Frame", static_chunk_param("1-10", 3))], None);
+        let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert_eq!(iter.size_hint(), (4, Some(4)));
+        iter.next();
+        assert_eq!(iter.size_hint(), (3, Some(3)));
+        iter.by_ref().for_each(drop);
+        assert_eq!(iter.size_hint(), (0, Some(0)));
+        iter.reset();
+        assert_eq!(iter.size_hint(), (4, Some(4)));
+    }
+
+    /// The chunk string at `index`, via random access.
+    fn chunk_of(iter: &StepParameterSpaceIterator, index: u64) -> String {
+        match &iter.get(index).expect("index within bounds")["Frame"].value {
+            ExprValue::RangeExpr(r) => r.to_string(),
+            other => panic!("expected a chunk, got {other:?}"),
+        }
+    }
 
     /// A NONCONTIGUOUS chunk is written in the canonical form of Template
     /// Schemas §3.4.1.1.1 (§3.4.1.5 rangeConstraint). Where the Python
@@ -2019,7 +2184,7 @@ mod tests {
         // is a slice, which must write the same string.
         let render = |vals: &[i64]| {
             let list = job::TaskParamRange::List(vals.to_vec());
-            let text = noncontiguous_chunk(&list, 0, vals.len())
+            let text = noncontiguous_chunk(&list, 0, vals.len() as u64)
                 .unwrap()
                 .to_string();
             let expr =
@@ -2105,7 +2270,7 @@ mod tests {
         }
     }
 
-    fn adaptive_chunk_param(values: Vec<i64>, default_task_count: usize) -> job::TaskParameter {
+    fn adaptive_chunk_param(values: Vec<i64>, default_task_count: u64) -> job::TaskParameter {
         job::TaskParameter::ChunkInt {
             range: job::TaskParamRange::List(values),
             chunks: job::ResolvedChunks {
@@ -2123,7 +2288,7 @@ mod tests {
         }
     }
 
-    fn static_chunk_param(expr: &str, default_task_count: usize) -> job::TaskParameter {
+    fn static_chunk_param(expr: &str, default_task_count: u64) -> job::TaskParameter {
         job::TaskParameter::ChunkInt {
             range: job::TaskParamRange::RangeExpr(expr.parse::<RangeExpr>().unwrap()),
             chunks: job::ResolvedChunks {
@@ -2482,10 +2647,7 @@ mod tests {
     // so both went silent the moment a space was not adaptive — including when a chunk
     // override made an adaptive space static.
 
-    fn noncontiguous_static_chunk_param(
-        expr: &str,
-        default_task_count: usize,
-    ) -> job::TaskParameter {
+    fn noncontiguous_static_chunk_param(expr: &str, default_task_count: u64) -> job::TaskParameter {
         job::TaskParameter::ChunkInt {
             range: job::TaskParamRange::RangeExpr(expr.parse::<RangeExpr>().unwrap()),
             chunks: job::ResolvedChunks {
@@ -2563,7 +2725,7 @@ mod tests {
     // declined for any contiguous chunked space while `len` still reported a count.
 
     /// The chunk string at `index`, via random access.
-    fn chunk_via_get(iter: &StepParameterSpaceIterator, index: usize) -> String {
+    fn chunk_via_get(iter: &StepParameterSpaceIterator, index: u64) -> String {
         match &iter.get(index).expect("index within bounds")["Frame"].value {
             ExprValue::RangeExpr(r) => r.to_string(),
             other => panic!("expected a RangeExpr chunk, got {other:?}"),
@@ -2589,7 +2751,7 @@ mod tests {
         //
         // Uneven splits, exact splits, single-chunk, chunk-per-value, and ranges with
         // gaps and steps, since each drives a different branch of `interval_groups`.
-        let cases: Vec<(&str, usize, Vec<&str>)> = vec![
+        let cases: Vec<(&str, u64, Vec<&str>)> = vec![
             ("1-10", 3, vec!["1-3", "4-5", "6-8", "9-10"]),
             ("1-10", 5, vec!["1-5", "6-10"]),
             ("1-12", 5, vec!["1-4", "5-8", "9-12"]),
@@ -2663,7 +2825,7 @@ mod tests {
             let iter = StepParameterSpaceIterator::new(&space).unwrap();
             assert_eq!(
                 iter.len(),
-                reference.len(),
+                reference.len() as u64,
                 "len disagrees with the reference for {expr} dtc={dtc}"
             );
             let by_index: Vec<String> = (0..iter.len()).map(|i| chunk_via_get(&iter, i)).collect();
@@ -2691,7 +2853,7 @@ mod tests {
 
     #[test]
     fn test_chunk_offsets_do_not_overflow_on_a_huge_range() {
-        // `j * leftovers` approaches (interval_len/2)^2, which passes usize::MAX once an
+        // `j * leftovers` approaches (interval_len/2)^2, which passes u64::MAX once an
         // interval is over roughly 8.6e9 values. A default_task_count that divides the
         // range evenly leaves `leftovers == 0` and never multiplies, so the arithmetic has
         // to be exercised with one that leaves a remainder.
@@ -2707,7 +2869,7 @@ mod tests {
 
             // Chunks must tile the range without gaps or overlaps. Spot-check adjacency
             // deep into the space, where a wrapped product would show up as a wild offset.
-            for i in [1usize, 2, 1_000_000, 30_000_000_000, n - 2] {
+            for i in [1u64, 2, 1_000_000, 30_000_000_000, n - 2] {
                 let a = chunk_via_get(&iter, i);
                 let b = chunk_via_get(&iter, i + 1);
                 let a_end: i64 = a.split('-').next_back().unwrap().parse().unwrap();
@@ -2741,13 +2903,13 @@ mod tests {
             let walked = chunks_via_iteration(&space);
             assert_eq!(
                 iter.len(),
-                walked.len(),
+                walked.len() as u64,
                 "len disagrees with iteration for {expr} dtc={dtc}"
             );
             // The final chunk must be reachable by index, which it is not when len()
             // under-reports.
             assert!(
-                iter.get(walked.len() - 1).is_some(),
+                iter.get(walked.len() as u64 - 1).is_some(),
                 "last chunk unreachable for {expr} dtc={dtc}"
             );
         }
@@ -2851,7 +3013,7 @@ mod tests {
                 (a, f)
             })
             .collect();
-        for (i, want) in expected.iter().enumerate() {
+        for (i, want) in (0u64..).zip(expected.iter()) {
             let set = iter.get(i).unwrap();
             let a = match &set["A"].value {
                 ExprValue::Int(v) => *v,

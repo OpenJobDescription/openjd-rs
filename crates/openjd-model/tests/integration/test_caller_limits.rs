@@ -453,6 +453,129 @@ fn max_task_count_counts_tasks_not_chunks() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// max_task_count with more tasks than a 32-bit usize can count
+// ══════════════════════════════════════════════════════════════
+
+/// `create_job` for one `CHUNK[INT]` step over the range expression
+/// `range` (text, so nothing lists its values) under `max_task_count`.
+fn create_chunked_job_with_limit(range: &str, max_task_count: u64) -> Result<(), String> {
+    let tmpl = format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["TASK_CHUNKING"],
+        "steps": [{{
+            "name": "S",
+            "parameterSpace": {{
+                "taskParameterDefinitions": [
+                    {{"name": "Frame", "type": "CHUNK[INT]", "range": "{range}",
+                      "chunks": {{"defaultTaskCount": 1000000000, "rangeConstraint": "CONTIGUOUS"}}}}
+                ]
+            }},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#
+    );
+    let jt = decode_job_template(
+        yaml_val(&tmpl),
+        Some(&["TASK_CHUNKING"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &PathParameterOptions::new(test_tmp_dir(), test_tmp_dir()),
+    )
+    .unwrap();
+    let limits = CallerLimits {
+        max_task_count: Some(max_task_count),
+        ..Default::default()
+    };
+    create_job(
+        &jt,
+        &params,
+        &jt.default_validation_context().with_caller_limits(limits),
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+#[test]
+fn max_task_count_counts_beyond_2_pow_32() {
+    // A 32-bit usize count reported 705032704 for 5e9 tasks and 0 for
+    // 2^32, which passed this limit. The count is a u64 on every target.
+    assert_eq!(
+        create_chunked_job_with_limit("1-5000000000", 1_000_000),
+        Err(
+            "Model validation error: 1 validation error for Template\nTemplate: \
+             Total task count (5000000000) exceeds caller limit of 1000000."
+                .to_string()
+        )
+    );
+    assert_eq!(
+        create_chunked_job_with_limit("1-4294967296", 1_000_000),
+        Err(
+            "Model validation error: 1 validation error for Template\nTemplate: \
+             Total task count (4294967296) exceeds caller limit of 1000000."
+                .to_string()
+        )
+    );
+    // The limit is inclusive.
+    assert_eq!(
+        create_chunked_job_with_limit("1-5000000000", 5_000_000_000),
+        Ok(())
+    );
+    assert!(create_chunked_job_with_limit("1-5000000000", 4_999_999_999).is_err());
+}
+
+#[test]
+fn max_task_count_total_is_exact_beyond_u64() {
+    // Two steps of (2^63 - 1) * 2 tasks each: the total, 2^65 - 4, is past
+    // u64::MAX, so a saturating u64 total would equal a u64::MAX limit and
+    // pass it.
+    let step = |name: &str| {
+        format!(
+            r#"{{"name": "{name}",
+              "parameterSpace": {{"taskParameterDefinitions": [
+                {{"name": "A", "type": "INT", "range": "1-9223372036854775807"}},
+                {{"name": "B", "type": "INT", "range": [1, 2]}}]}},
+              "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}}}"#
+        )
+    };
+    let tmpl = format!(
+        r#"{{"specificationVersion": "jobtemplate-2023-09", "name": "Test",
+            "steps": [{}, {}]}}"#,
+        step("S1"),
+        step("S2")
+    );
+    let jt = decode_job_template(yaml_val(&tmpl), None, &CallerLimits::default()).unwrap();
+    let params = preprocess_job_parameters(
+        &jt,
+        &Default::default(),
+        &[],
+        &PathParameterOptions::new(test_tmp_dir(), test_tmp_dir()),
+    )
+    .unwrap();
+    let limits = CallerLimits {
+        max_task_count: Some(u64::MAX),
+        ..Default::default()
+    };
+    let err = create_job(
+        &jt,
+        &params,
+        &jt.default_validation_context().with_caller_limits(limits),
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Model validation error: 1 validation error for Template\nTemplate: \
+         Total task count (36893488147419103228) exceeds caller limit of 18446744073709551615."
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
 // max_template_size (checked in document_string_to_object)
 // ══════════════════════════════════════════════════════════════
 

@@ -477,6 +477,15 @@ earlier scopes. These leave the job unconstructible
 rather than describing a defect in a carried-forward field, and they
 are reported with their own (pre-existing) error kinds and formats.
 
+**Task-count limit.** With `CallerLimits::max_task_count` set, each
+step's task count is `StepParameterSpaceIterator::len` with a chunk
+override of 1 (so a `CHUNK[INT]` parameter counts values, not chunks),
+and a step without a parameter space counts 1. Each count is an exact
+`u64` on every target, including wasm32, where a `usize` could not
+count `"1-5000000000"`. The counts are summed in `u128`, so the total
+cannot overflow, and a total above the limit fails with
+`Total task count (<total>) exceeds caller limit of <limit>.`
+
 **Error policy.** Evaluation/parse errors are reported exactly as in
 pass 8. `create_job` requires a context whose revision matches the
 template's and whose extensions cover everything the template declares

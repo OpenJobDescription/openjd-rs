@@ -48,8 +48,8 @@ const TRILLION: &str = "1-1000000000000";
 
 fn chunk_space(
     range: job::TaskParamRange<i64>,
-    default_task_count: usize,
-    target_runtime_seconds: Option<usize>,
+    default_task_count: u64,
+    target_runtime_seconds: Option<u64>,
     range_constraint: RangeConstraint,
 ) -> job::StepParameterSpace {
     let mut defs = IndexMap::new();
@@ -107,7 +107,7 @@ fn adaptive_noncontiguous_chunk_size_of_usize_max_takes_the_rest_of_a_list() {
     );
     let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
     assert_eq!(chunk_of(&iter.next().unwrap()), "1,2");
-    iter.set_chunks_default_task_count(usize::MAX);
+    iter.set_chunks_default_task_count(u64::MAX);
     assert_eq!(chunk_of(&iter.next().unwrap()), "3-10");
     assert!(iter.next().is_none());
 }
@@ -117,7 +117,7 @@ fn adaptive_contiguous_chunk_size_of_usize_max_takes_the_rest_of_the_interval() 
     let space = chunk_space(expr("1-10,20-25"), 2, Some(60), RangeConstraint::Contiguous);
     let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
     assert_eq!(chunk_of(&iter.next().unwrap()), "1-2");
-    iter.set_chunks_default_task_count(usize::MAX);
+    iter.set_chunks_default_task_count(u64::MAX);
     let rest: Vec<String> = iter.map(|s| chunk_of(&s)).collect();
     assert_eq!(rest, ["3-10", "20-25"]);
 }
@@ -128,7 +128,7 @@ fn adaptive_noncontiguous_chunk_size_of_usize_max_on_a_huge_range() {
         let space = chunk_space(expr(TRILLION), 2, Some(60), RangeConstraint::Noncontiguous);
         let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
         assert_eq!(chunk_of(&iter.next().unwrap()), "1,2");
-        iter.set_chunks_default_task_count(usize::MAX);
+        iter.set_chunks_default_task_count(u64::MAX);
         assert_eq!(chunk_of(&iter.next().unwrap()), "3-1000000000000");
         assert!(iter.next().is_none());
     });
@@ -418,7 +418,7 @@ fn walk_adaptive(space: &job::StepParameterSpace, schedule: &[usize]) -> Vec<Str
     assert!(iter.chunks_adaptive());
     let mut out = Vec::new();
     loop {
-        iter.set_chunks_default_task_count(schedule[out.len().min(schedule.len() - 1)]);
+        iter.set_chunks_default_task_count(schedule[out.len().min(schedule.len() - 1)] as u64);
         match iter.next() {
             Some(set) => out.push(chunk_of(&set)),
             None => return out,
@@ -485,10 +485,15 @@ fn chunks_agree_with_the_value_based_construction() {
             let ctx = format!("case {case}: {range:?} dtc={dtc} schedule={schedule:?}");
 
             // Static NONCONTIGUOUS.
-            let space = chunk_space(range.clone(), dtc, None, RangeConstraint::Noncontiguous);
+            let space = chunk_space(
+                range.clone(),
+                dtc as u64,
+                None,
+                RangeConstraint::Noncontiguous,
+            );
             let want = oracle_static_noncontiguous(&listed, dtc).unwrap();
             let iter = StepParameterSpaceIterator::new(&space).unwrap();
-            assert_eq!(iter.len(), want.len(), "{ctx}");
+            assert_eq!(iter.len(), want.len() as u64, "{ctx}");
             let got: Vec<String> = StepParameterSpaceIterator::new(&space)
                 .unwrap()
                 .map(|s| chunk_of(&s))
@@ -502,10 +507,10 @@ fn chunks_agree_with_the_value_based_construction() {
             check_containment(&iter, &listed, &want, |r| set.contains(r), &mut rng);
 
             // Static CONTIGUOUS.
-            let space = chunk_space(range.clone(), dtc, None, RangeConstraint::Contiguous);
+            let space = chunk_space(range.clone(), dtc as u64, None, RangeConstraint::Contiguous);
             let want = oracle_static_contiguous(&listed, dtc);
             let iter = StepParameterSpaceIterator::new(&space).unwrap();
-            assert_eq!(iter.len(), want.len(), "{ctx}");
+            assert_eq!(iter.len(), want.len() as u64, "{ctx}");
             let got: Vec<String> = StepParameterSpaceIterator::new(&space)
                 .unwrap()
                 .map(|s| chunk_of(&s))
@@ -520,7 +525,7 @@ fn chunks_agree_with_the_value_based_construction() {
 
             // Adaptive, both constraints; containment is a subset test.
             for constraint in [RangeConstraint::Noncontiguous, RangeConstraint::Contiguous] {
-                let space = chunk_space(range.clone(), dtc, Some(60), constraint.clone());
+                let space = chunk_space(range.clone(), dtc as u64, Some(60), constraint.clone());
                 let want = oracle_adaptive(&listed, &schedule, &constraint);
                 assert_eq!(
                     walk_adaptive(&space, &schedule),
@@ -562,7 +567,7 @@ fn unsorted_list_chunks_agree_with_the_value_based_construction() {
                 oracle_static_contiguous(&values, dtc),
             ),
         ] {
-            let space = chunk_space(range.clone(), dtc, None, constraint.clone());
+            let space = chunk_space(range.clone(), dtc as u64, None, constraint.clone());
             let iter = StepParameterSpaceIterator::new(&space).unwrap();
             let got: Vec<String> = StepParameterSpaceIterator::new(&space)
                 .unwrap()
@@ -574,7 +579,7 @@ fn unsorted_list_chunks_agree_with_the_value_based_construction() {
         }
         for constraint in [RangeConstraint::Noncontiguous, RangeConstraint::Contiguous] {
             let schedule = [dtc, 1 + rng.below(n as u64) as usize, usize::MAX];
-            let space = chunk_space(range.clone(), dtc, Some(60), constraint.clone());
+            let space = chunk_space(range.clone(), dtc as u64, Some(60), constraint.clone());
             let want = oracle_adaptive(&values, &schedule, &constraint);
             assert_eq!(
                 walk_adaptive(&space, &schedule),
@@ -614,7 +619,12 @@ fn run_cap_behavior_agrees_with_the_value_based_construction() {
         // Static: a chunk over the cap fails construction, naming the chunk;
         // otherwise every chunk is built.
         for dtc in [n - 1, n - 2, n, 50_000, 50_001, 30_000, 25_002] {
-            let space = chunk_space(range.clone(), dtc, None, RangeConstraint::Noncontiguous);
+            let space = chunk_space(
+                range.clone(),
+                dtc as u64,
+                None,
+                RangeConstraint::Noncontiguous,
+            );
             let got = StepParameterSpaceIterator::new(&space)
                 .map(|iter| iter.map(|s| chunk_of(&s)).collect::<Vec<_>>())
                 .map_err(|e| e.to_string());

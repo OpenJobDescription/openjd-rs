@@ -83,7 +83,7 @@ chunked parameters (CHUNK[INT]) are counted as individual tasks rather than chun
 the true task count.
 
 ```rust
-fn step_total_tasks(step: &job::Step) -> usize {
+fn step_total_tasks(step: &job::Step) -> u64 {
     match &step.parameter_space {
         None => 1,
         Some(ps) => {
@@ -97,6 +97,9 @@ fn step_total_tasks(step: &job::Step) -> usize {
 ```
 
 Steps with no parameter space have exactly 1 task (the implicit single task).
+
+Task counts are `u64`, the type of `StepParameterSpaceIterator::len`, so they are exact on
+every target, including one where `usize` is 32 bits.
 
 ## Job Summary Output
 
@@ -168,7 +171,7 @@ Three private structs organize the collected summary data:
 struct StepInfo {
     name: String,
     description: Option<String>,
-    total_tasks: usize,
+    total_tasks: u64,
     task_params: Vec<(String, String)>,  // (name, type_name)
     envs: Vec<String>,
     deps: Vec<String>,
