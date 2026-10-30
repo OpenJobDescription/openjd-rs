@@ -76,9 +76,9 @@ ProductNode (cartesian product)
 | `RangeExprNode` | Integer range expression | Computed from range | O(1) via arithmetic |
 | `ProductNode` | Cartesian product (`*` operator) | Product of children (checked) | O(D) via divmod |
 | `AssociationNode` | Lockstep (`,` in parens) | Same as children | O(1) |
-| `ContiguousChunkNode` | Gap-respecting contiguous chunks | Cached exact count | Sequential only |
-| `StaticChunkNode` | Noncontiguous chunk boundaries | Number of chunks | O(1) |
-| `AdaptiveChunkNode` | Runtime-adjustable chunks | Dynamic | Sequential only |
+| `ContiguousChunkNode` | Gap-respecting contiguous chunks | Cached exact count | O(log G) in interval groups (at most 3R for a range expression) |
+| `StaticChunkNode` | Noncontiguous chunk boundaries | Number of chunks | Range expression: O(log R + runs the chunk spans); list: O(k log k) in the chunk's k values |
+| `AdaptiveChunkNode` | Runtime-adjustable chunks | Dynamic | None (sequential only) |
 
 ### ProductNode Index Arithmetic
 
@@ -171,28 +171,39 @@ For example, range `"1,10-12,18-50"` with `defaultTaskCount=10` produces chunks:
 `"1-1"`, `"10-12"`, `"18-27"`, `"28-37"`, `"38-47"`, `"48-50"` — gaps between 1, 10,
 and 18 are never bridged.
 
-**Chunk count computation** uses the `RangeExpr` sub-range structure (`Vec<IntRange>`)
-for O(R) complexity where R is the number of sub-ranges, not O(N) over individual values.
-A 100-billion-element contiguous range like `"1-100000000000"` has one sub-range, so
-counting is instant.
+**Interval groups.** The node never lists values. `interval_groups()` turns the range into
+a sequence of `IntervalGroup`s, built once when the node is built:
+
+- `Interval { first, last }`: one interval, the values `first..=last`;
+- `Singles { first, step, count }`: `count` intervals of one value each, `first`,
+  `first + step`, and so on.
+
+For a range expression the groups come from its runs in O(R): a step-1 run (including a
+one-value run) is an interval, merged into the interval before it when its first value is
+one more than that interval's last. A run with a step above 1 separates every pair of its
+values, so its first and last values are one-value intervals (which can merge with a
+neighbour) and its inner values are one `Singles` group. So a range of `R` runs has at most
+`3R` groups however many values it has: `"1-1000000000000:2"` (5e11 intervals) has three: `1`, the inner values `3`
+to `999999999997`, and `999999999999`. A
+list's intervals follow list order, as in the reference: a value joins the interval before
+it when it is one more than the value before it in the list, so a list of `N` values has at
+most `N` groups.
 
 **Even distribution** within each interval uses the Python `divide_chunk_sizes` algorithm:
 `chunk_count = ceil(interval_len / default_task_count)`, then `small = interval_len / chunk_count`
-with leftovers distributed evenly across chunks.
+with leftovers distributed evenly across chunks. A `Singles` group has one chunk per value.
 
-`ContiguousChunkNode` supports random access through `chunk_at(index)`, and the exact
-chunk count is cached at construction time.
+**Counting and random access.** The node caches the cumulative chunk count through each
+group, so `len()` is O(1) and `chunk_at(index)` finds the group by binary search, O(log G)
+for `G` groups, then computes the chunk within it arithmetically (below), O(1) however large
+the interval. Iteration walks the groups in O(1) per chunk.
 
-Finding which interval holds a given chunk means walking the intervals, since that is only
-known from the chunk counts of the intervals before it. For step-1 sub-ranges that is O(R)
-in sub-ranges rather than O(N) in values, but a sub-range with step > 1 contributes one
-interval *per value*, so a stepped or heavily-gapped range is O(N). The chunk *within* the
-located interval is then computed arithmetically, so one large contiguous interval costs
-O(1) rather than O(index).
-
-Because of that walk, contiguous chunking still uses the sequential path for
-`Iterator::next` — see "Sequential Iteration" below. Random access is for callers that
-genuinely want one index, not a way to drive a full walk.
+**Containment.** For a range expression the groups are in increasing order of value, so
+`validate_containment()` finds the group holding the candidate's first value by binary
+search, then the chunk within it holding that value by binary search over the chunk starts,
+and compares that one chunk with the candidate: the chunks are disjoint, so no other can
+equal it. That is O(log G + log chunks). A list's groups may be unsorted, so its chunks (at
+most one per value, already in memory) are compared one by one.
 
 Within an interval, chunk `j` gets one extra value when
 `ceil((j+1)*leftovers/chunk_count) > ceil(j*leftovers/chunk_count)`, so the number of
@@ -201,16 +212,19 @@ the offset and size of chunk `j` be computed without walking the chunks before i
 
 ### Noncontiguous Static Chunking
 
-`StaticChunkNode` computes chunk boundaries lazily via O(1) arithmetic. It stores only
-the total range size, chunk count, base chunk size (`small = total / num_chunks`), and
-remainder count (`leftovers = total % num_chunks`). Both `StaticChunkNode` and
-`StaticChunkIterator` delegate to a shared `build_chunk_range_expr()` function.
+`StaticChunkNode` computes chunk boundaries lazily via O(1) arithmetic. Its
+`StaticLayout` holds the chunk count, base chunk size (`small = total / num_chunks`), and
+remainder count (`leftovers = total % num_chunks`); the first `leftovers` chunks take one
+more value. Both `StaticChunkNode` and `StaticChunkIterator` build chunk `i` with the
+shared `static_chunk()`.
 
-On `get(i)`, the node slices into the underlying range at the computed offset and builds
-a `RangeExpr` on the fly. `chunk_values_to_range_expr()` builds it with
-`RangeExpr::from_values`, so a NONCONTIGUOUS chunk is written in the canonical form of
-Template Schemas §3.4.1.1.1, as §3.4.1.5 (`rangeConstraint`) requires: for example
-`[1,3,5]` → `"1-5:2"`, `[1,2,4,6]` → `"1,2-6:2"`, `[1,2,3,5,7,8,9]` → `"1-3,5,7-9"`.
+A chunk is the values at a window of indices, and `noncontiguous_chunk()` builds it without
+listing them. For a range expression it is `RangeExpr::slice(offset, offset + size, 1)`,
+O(log R + runs the window spans), so a chunk of `"1-1000000000000"` costs the same as a
+chunk of `"1-10"`. A list is already in memory and goes through `RangeExpr::from_values`.
+Both write the chunk in the canonical form of Template Schemas §3.4.1.1.1, as §3.4.1.5
+(`rangeConstraint`) requires: for example `[1,3,5]` → `"1-5:2"`, `[1,2,4,6]` →
+`"1,2-6:2"`, `[1,2,3,5,7,8,9]` → `"1-3,5,7-9"`.
 
 **Divergence from the Python reference:** `IntRangeExpr.from_list` consumes a value that
 cannot start a run of three together with the value after it, so it writes `[1,2,4,6]` as
@@ -283,7 +297,7 @@ public-API list of more than 50,000 values. (A list is chunked in list order, so
 an unsorted list can have more runs than the whole list.) openjd-model-for-python has no
 such limit.
 
-A CONTIGUOUS chunk is built from the string `"<N>-<M>"` and flagged with
+A CONTIGUOUS chunk is built by `contiguous_chunk()` from the string `"<N>-<M>"` and flagged with
 `RangeExpr::with_contiguous(true)`, so it is written `<N>-<M>` even with one or two values
 (`"3-3"`, `"7-8"`), the one exception §3.4.1.5 makes to the canonical form. Values
 computed from a chunk (slices, `range_expr(list(...))`) do not carry the flag and are
@@ -301,6 +315,17 @@ is what triggers adaptive (vs static) chunking.
 Adaptive chunking disables random access (`get()` returns `None` and `len()` returns 0)
 because chunk boundaries aren't known in advance.
 
+`AdaptiveChunkNode` keeps the range as given, never its list of values. A NONCONTIGUOUS
+chunk is the next `chunk size` values by index, built with `noncontiguous_chunk()` like a
+static one. A CONTIGUOUS chunk is up to `chunk size` values from the current interval,
+taken from the range's interval groups (see Contiguous Chunking). Any chunk size from 1 to
+`usize::MAX` is valid. A NONCONTIGUOUS chunk ends at `cursor.saturating_add(chunk_size)`
+clamped to the value count, and a CONTIGUOUS chunk takes `chunk_size` clamped to the values
+left in its interval, so a size beyond the values that remain takes all of them (for
+CONTIGUOUS, the rest of the interval). (openjd-cli's
+adaptive size saturates at `usize::MAX` when a quick task has a huge
+`targetRuntimeSeconds`.)
+
 The chunk size can change at run time, where iteration cannot fail, so a NONCONTIGUOUS
 adaptive chunk is never checked in advance against the run cap (see Noncontiguous Static
 Chunking). Instead, when the next `chunk size` values have a canonical form with more than
@@ -310,12 +335,21 @@ shortened, and only for a range of at least 49,999 runs (or a public-API list of
 50,000 values). §3.4.1.5 leaves the size of an adaptive chunk to the implementation
 (`targetRuntimeSeconds` is a target), so this stays within the specification.
 
-`AdaptiveChunkNode::validate_containment()` uses a `HashSet` for O(N) lookup.
+`AdaptiveChunkNode::validate_containment()` accepts any subset of the range. For a range
+expression `range_expr_is_subset()` decides it on the runs, O((R_sub + R) log R): for each
+run of the candidate it finds the range's run that could hold the next unchecked value,
+and when that run holds it and its step divides the candidate run's step, skips every value
+of the candidate run up to that run's end in one move. For a list it looks each candidate
+value up in a `HashSet` of the list; the candidate's values are distinct, so this stops
+after at most the list's length plus one lookups however long the candidate is.
 
-`StaticChunkNode::validate_containment()` compares a candidate against each generated
-chunk with `RangeExpr` equality, which compares values (Expression Language §1.2.5)
-because every `RangeExpr` stores the runs of its canonical form: `from_values([6,9])` and
-the parse of its rendered form `"6,9"` are the same value. This keeps the invariant that a
+`StaticChunkNode::validate_containment()` compares a candidate with the chunk that holds
+its first value: for a range expression that value's index (`range_expr_index_of()`,
+O(log R)) gives the chunk (`StaticLayout::chunk_holding`), and the values are distinct, so
+no other chunk can equal it. A list may repeat a value, so its chunks are compared one by
+one. The comparison is `RangeExpr` equality, which compares values (Expression Language
+§1.2.5) because every `RangeExpr` stores the runs of its canonical form:
+`from_values([6,9])` and the parse of its rendered form `"6,9"` are the same value. This keeps the invariant that a
 chunk string printed by the iterator passes validation when handed back (e.g. via the
 CLI's `--task-params`).
 
@@ -332,10 +366,8 @@ Two separate questions, tracked by two different flags.
 
 **Which path `Iterator::next` takes** is the `sequential` flag: adaptive chunking or
 contiguous chunking. Adaptive must be sequential because its chunk size can change
-part-way through a walk. Contiguous *could* answer per index, but locating a chunk walks
-the intervals before it, so driving a full walk through `get()` would be
-O(chunks x intervals) — quadratic for a range whose values are mostly isolated. Both
-therefore use the `node_iter` path. Every other space takes the random-access path, where
+part-way through a walk. Contiguous answers per index in O(log G), but its node iterator
+walks the interval groups in O(1) per chunk, so both use the `node_iter` path. Every other space takes the random-access path, where
 `Iterator::next` is implemented as `get(current_index)`.
 
 **Whether `get()` answers at all** is gated on adaptive alone. A contiguous space supports
@@ -357,8 +389,8 @@ regardless of space size (for non-list ranges).
 
 ### Index Arithmetic for Random Access
 
-Random access (`get(index)`) is O(D) for all non-adaptive node types (where D is the number
-of dimensions). This is important for schedulers that need to access arbitrary tasks without
+Random access (`get(index)`) is O(D) node lookups for all non-adaptive node types (where D
+is the number of dimensions); a chunk node's lookup costs what the Node Types table says. This is important for schedulers that need to access arbitrary tasks without
 iterating from the beginning. The divmod decomposition in `ProductNode` avoids materializing
 intermediate products.
 

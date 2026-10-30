@@ -1825,6 +1825,168 @@ mod chunked_job {
         assert!(stdout.contains("2-40"), "stdout: {stdout}");
     }
 
+    /// A one-step template with one CHUNK[INT] parameter `Item`, whose task
+    /// does nothing; `chunks` is the YAML body of its `chunks` field.
+    fn write_chunk_template(dir: &std::path::Path, range: &str, chunks: &str) -> PathBuf {
+        let template = dir.join("chunks.yaml");
+        std::fs::write(
+            &template,
+            format!(
+                r#"specificationVersion: 'jobtemplate-2023-09'
+extensions: [TASK_CHUNKING]
+name: Chunks
+steps:
+- name: S
+  parameterSpace:
+    taskParameterDefinitions:
+    - name: Item
+      type: CHUNK[INT]
+      range: "{range}"
+      chunks: {{{chunks}}}
+  script:
+    actions:
+      onRun:
+        command: python
+        args: ["-c", "pass"]
+"#
+            ),
+        )
+        .unwrap();
+        template
+    }
+
+    /// `run_cli`, failing if the CLI has not exited within `limit`. A CLI that
+    /// lists the values of a huge range runs out of memory or never finishes;
+    /// the limit turns the second into a failure.
+    fn run_cli_within(args: &[&str], limit: std::time::Duration) -> (i32, String, String) {
+        let mut child = cli_command(args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("failed to execute openjd");
+        // Drain both pipes while waiting, so a CLI that writes more than a
+        // pipe buffer holds is not mistaken for one that does not finish.
+        let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
+            std::thread::spawn(move || {
+                let mut text = String::new();
+                if let Some(mut pipe) = pipe {
+                    let _ = std::io::Read::read_to_string(&mut pipe, &mut text);
+                }
+                text
+            })
+        };
+        let stdout = drain(child.stdout.take().map(|p| Box::new(p) as _));
+        let stderr = drain(child.stderr.take().map(|p| Box::new(p) as _));
+        let started = std::time::Instant::now();
+        while child.try_wait().expect("try_wait").is_none() {
+            if started.elapsed() > limit {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!(
+                    "openjd {args:?} did not finish within {limit:?}: is it expanding the values?"
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let status = child.wait().expect("wait");
+        (
+            status.code().unwrap_or(-1),
+            stdout.join().expect("stdout reader"),
+            stderr.join().expect("stderr reader"),
+        )
+    }
+
+    #[test]
+    fn test_run_adaptive_chunk_size_beyond_usize_takes_the_rest() {
+        // A huge targetRuntimeSeconds over a quick task makes the adaptive
+        // chunk size saturate at usize::MAX, which the next chunk's end used
+        // to overflow on. The next chunk is all the values that remain.
+        let dir = tempfile::TempDir::new().unwrap();
+        let template = write_chunk_template(
+            dir.path(),
+            "1-10",
+            "defaultTaskCount: 1, targetRuntimeSeconds: 9223372036854775807, \
+             rangeConstraint: NONCONTIGUOUS",
+        );
+        let (code, stdout, stderr) = run_cli_within(
+            &["run", template.to_str().unwrap()],
+            std::time::Duration::from_secs(120),
+        );
+        assert_eq!(code, 0, "stdout: {stdout}\nstderr: {stderr}");
+        assert!(
+            stdout.contains("Item(CHUNK[INT]) = 1\n"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("Item(CHUNK[INT]) = 2-10\n"),
+            "stdout: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_chunks_of_huge_ranges_are_built_without_listing_values() {
+        // Each case lists a trillion values (or walks half a trillion
+        // intervals) if any chunking path expands the range.
+        let dir = tempfile::TempDir::new().unwrap();
+        let limit = std::time::Duration::from_secs(60);
+        for (range, chunks, extra, want) in [
+            (
+                "1-1000000000000",
+                "defaultTaskCount: 500000000000, rangeConstraint: NONCONTIGUOUS",
+                vec!["--maximum-tasks", "1"],
+                "Item(CHUNK[INT]) = 1-500000000000\n",
+            ),
+            (
+                "1-1000000000000",
+                "defaultTaskCount: 2, targetRuntimeSeconds: 1, rangeConstraint: NONCONTIGUOUS",
+                vec!["--maximum-tasks", "1"],
+                "Item(CHUNK[INT]) = 1,2\n",
+            ),
+            (
+                "1-1000000000000",
+                "defaultTaskCount: 2, targetRuntimeSeconds: 1, rangeConstraint: CONTIGUOUS",
+                vec!["--maximum-tasks", "1"],
+                "Item(CHUNK[INT]) = 1-2\n",
+            ),
+            (
+                "1-1000000000000:2",
+                "defaultTaskCount: 1, rangeConstraint: CONTIGUOUS",
+                vec!["--maximum-tasks", "1"],
+                "Item(CHUNK[INT]) = 1-1\n",
+            ),
+            (
+                "1-1000000000000:2",
+                "defaultTaskCount: 1, rangeConstraint: CONTIGUOUS",
+                vec!["-t", "Item=999999999999-999999999999"],
+                "Item = 999999999999-999999999999\n",
+            ),
+        ] {
+            let template = write_chunk_template(dir.path(), range, chunks);
+            let mut args = vec!["run", template.to_str().unwrap()];
+            args.extend(extra);
+            let (code, stdout, stderr) = run_cli_within(&args, limit);
+            assert_eq!(
+                code, 0,
+                "{range} {chunks}\nstdout: {stdout}\nstderr: {stderr}"
+            );
+            assert!(
+                stdout.contains(want),
+                "{range} {chunks}: want {want:?}, stdout: {stdout}"
+            );
+        }
+
+        // `summary` counts a stepped range's contiguous chunks: one per value.
+        let template = write_chunk_template(
+            dir.path(),
+            "1-1000000000000:2",
+            "defaultTaskCount: 1, rangeConstraint: CONTIGUOUS",
+        );
+        let (code, stdout, stderr) =
+            run_cli_within(&["summary", template.to_str().unwrap()], limit);
+        assert_eq!(code, 0, "stdout: {stdout}\nstderr: {stderr}");
+        assert!(stdout.contains("500000000000"), "stdout: {stdout}");
+    }
+
     #[test]
     fn test_contiguous_chunk_task_param_written_n_dash_m() {
         // A CONTIGUOUS chunk is always written <N>-<M> (Template Schemas

@@ -147,7 +147,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 | Combination expression parsing | O(T) | ✅ Optimal |
 | Validation pipeline | O(S × P × F) | ✅ Linear in template size |
 | Association containment | O(L × K) | ✅ Acceptable |
-| AdaptiveChunkNode containment | O(V + N) | ✅ O(N) via HashSet |
+| AdaptiveChunkNode containment | O(V + N) | ✅ O(N) via HashSet (since the chunking fixes that followed #470: a run-wise subset test for a range expression) |
 
 ---
 
@@ -289,7 +289,7 @@ Re-exports of `FormatString` and `SymbolTable` from `openjd-expr` are appropriat
 
 **File:** `src/job/step_param_space.rs`
 **Severity:** ~~Informational~~ Resolved
-**Description:** `StaticChunkNode` and `StaticChunkIterator` previously had ~40 lines of identical `chunk_range_expr()` logic. Now both delegate to a shared `build_chunk_range_expr()` function.
+**Description:** `StaticChunkNode` and `StaticChunkIterator` previously had ~40 lines of identical `chunk_range_expr()` logic. Now both delegate to a shared `build_chunk_range_expr()` function (since renamed `static_chunk()`).
 **Resolution:** Extracted shared helper function.
 
 ### Finding #7: Long Validation Function

@@ -728,9 +728,13 @@ impl RangeExpr {
     /// flattened element sequence. `step` must be positive. Returns a new
     /// `RangeExpr`, in canonical form, without materializing any elements.
     ///
-    /// Runs in O(m) where m is the number of sub-ranges, regardless of
-    /// how many elements are selected. Each sub-range's intersection with
-    /// the slice index sequence is computed as pure arithmetic.
+    /// Runs in O(log m + k), where m is the number of sub-ranges and k the
+    /// number of them that the index span `start..stop` overlaps,
+    /// regardless of how many elements are selected: a binary search finds
+    /// the first sub-range, and each overlapped sub-range's intersection
+    /// with the slice index sequence is computed as pure arithmetic. So
+    /// cutting a range into consecutive windows costs O(m + windows) in
+    /// total, plus the binary searches.
     ///
     /// For negative step (reverse slices), callers should use `get()` to
     /// collect elements into a list, since `RangeExpr` cannot represent
@@ -763,9 +767,19 @@ impl RangeExpr {
         }
 
         let mut selected = Vec::new();
-        let mut cum_start: u64 = 0; // global index where current sub-range begins
+        // Start at the sub-range holding index `start` and stop after the
+        // one holding `stop - 1`: the sub-ranges outside select nothing.
+        let first_range = self.cumulative_lengths.partition_point(|&c| c <= start);
+        // global index where current sub-range begins
+        let mut cum_start: u64 = match first_range {
+            0 => 0,
+            k => self.cumulative_lengths[k - 1],
+        };
 
-        for r in &self.ranges {
+        for r in &self.ranges[first_range..] {
+            if cum_start >= stop {
+                break;
+            }
             let r_len = r.len_u64();
             let cum_end = cum_start + r_len; // exclusive end of this sub-range's global indices
 
@@ -1317,17 +1331,6 @@ mod tests {
             .collect();
         let err = RangeExpr::from_ranges(ranges).unwrap_err().to_string();
         assert!(err.contains("too many sub-ranges"), "got: {err}");
-    }
-
-    #[test]
-    fn accept_single_huge_chunk() {
-        // A single chunk with a very large logical length is allowed —
-        // `RangeExpr` stores chunks symbolically, so the heap cost is O(1)
-        // regardless of `end - start`. Only chunk count is capped.
-        let expr = "1-100000000000";
-        let r = expr.parse::<RangeExpr>().unwrap();
-        assert_eq!(r.ranges().len(), 1);
-        assert_eq!(r.len(), 100_000_000_000);
     }
 
     #[test]

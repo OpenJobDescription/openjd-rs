@@ -1196,7 +1196,12 @@ impl StepParameterSpaceIterator {
     pub fn chunks_default_task_count(&self) -> Option<usize>;
 
     /// Adaptive-only: a static chunk size cannot change mid-walk, so this
-    /// is a no-op for a non-adaptive space.
+    /// is a no-op for a non-adaptive space. Any value is accepted: 0 acts
+    /// as 1, and a size beyond the values that remain (up to usize::MAX)
+    /// makes the next chunk take all of them (for CONTIGUOUS, the rest of
+    /// its interval). The exception is a NONCONTIGUOUS chunk whose canonical
+    /// form would have more than 50,000 runs: it is shortened to 50,000
+    /// values.
     pub fn set_chunks_default_task_count(&mut self, value: usize);
 
     /// Rewind the iterator so a fresh `Iterator::next` walk yields the
@@ -1215,10 +1220,14 @@ impl Iterator for StepParameterSpaceIterator {
 Random-access indexing uses `O(1)` arithmetic on a product-of-factors
 representation — submitters that want to shard a large parameter
 space across workers can compute per-worker index slices without
-iterating the whole space. Contiguous chunking costs an additional
-walk over the range's intervals to locate the chunk's — O(R) in
-sub-ranges for step-1 sub-ranges, but O(N) where a range is stepped or
-heavily gapped, since each such value is its own interval.
+iterating the whole space. A chunked parameter adds the cost of
+building one chunk. For a range expression it never lists the
+range's values: a NONCONTIGUOUS chunk is a `RangeExpr::slice`
+(O(log R + runs it spans)), and a CONTIGUOUS chunk is found by binary
+search over the range's interval groups (O(log G), with at most three
+groups per run however many values the range has). A list range (at
+most 1,024 values in a template) builds a NONCONTIGUOUS chunk from its
+values, and has up to one interval group per value.
 
 Adaptive chunking (TASK_CHUNKING §4 / RFC 0001) is the one case that
 forces sequential iteration, because chunk size depends on runtime

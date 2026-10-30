@@ -15,6 +15,8 @@ mod test_caller_limits;
 mod test_capabilities;
 #[path = "integration/test_chunk_int.rs"]
 mod test_chunk_int;
+#[path = "integration/test_chunk_scaling.rs"]
+mod test_chunk_scaling;
 #[path = "integration/test_combination_expr.rs"]
 mod test_combination_expr;
 #[path = "integration/test_create_job.rs"]
