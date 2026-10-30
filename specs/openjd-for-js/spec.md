@@ -296,10 +296,18 @@ Returned by `createJob`. All format strings are resolved.
 
 #### `StepParameterSpaceIterator`
 
-| Constructor | `new StepParameterSpaceIterator(paramSpace: StepParameterSpace, symbols: SymbolTable)` |
+| Constructor | `new StepParameterSpaceIterator(job: Job, stepName: string)` — the tasks of the named step; throws `Job has no step named '<name>'` for an unknown name. A step with no parameter space has one task with no parameters. |
 |-------------|------|
-| `count()` | `number` — Total task count |
-| `[Symbol.iterator]()` | `Iterator<Map<string, ExprValue>>` — Iterate over task parameter sets |
+| `count` (getter) | `bigint` — Total task count (chunks, for a `CHUNK[INT]` parameter) |
+| `get(index: bigint)` | `Map<string, string>` — Task `index`'s parameter values as display strings; throws `Index <n> out of range` past the end, and for adaptive chunking, which has no random access |
+| `names` (getter) | `string[]` — Parameter names |
+
+Counts and indices are `bigint` (`u64`). WebAssembly is a 32-bit target, so a
+`usize` count would truncate: `"1-5000000000"` has more values than a 32-bit
+`usize` can count, and `1-4294967296` would count 0. Counts and chunk
+boundaries are computed in 64 bits end to end (see
+`specs/model/parameter-space.md`, "Counts Are 64-bit"), so `count`, the chunk
+strings, and the `maxTaskCount` check are exact here too.
 
 ### Classes — Expression Engine
 

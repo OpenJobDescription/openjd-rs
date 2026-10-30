@@ -1256,11 +1256,14 @@ impl IntRange {
     pub fn start(&self) -> i64;
     pub fn end(&self) -> i64;
     pub fn step(&self) -> i64;
-    pub fn len(&self) -> usize;
+    /// The exact number of values, at most MAX_RANGE_EXPR_LEN, as a u64
+    /// on every target (see RangeExpr::len).
+    pub fn len(&self) -> u64;
     pub fn is_empty(&self) -> bool;
     pub fn contains(&self, value: i64) -> bool;
     pub fn iter(&self) -> impl Iterator<Item = i64> + '_;
-    pub fn get(&self, index: usize) -> Option<i64>;
+    /// Value at a zero-based index, or None past the end.
+    pub fn get(&self, index: u64) -> Option<i64>;
 }
 ```
 
@@ -1332,7 +1335,12 @@ impl RangeExpr {
     #[must_use]
     pub fn with_contiguous(self, contiguous: bool) -> Self;
 
-    pub fn len(&self) -> usize;
+    /// The exact number of values, at most MAX_RANGE_EXPR_LEN, so it also
+    /// converts to i64 exactly. A u64, not a usize, on every target: a
+    /// range is symbolic, and on a 32-bit target (wasm32) it can hold more
+    /// values than a usize can count, e.g. "1-5000000000". Convert with
+    /// `usize::try_from` only where values are materialized.
+    pub fn len(&self) -> u64;
     pub fn is_empty(&self) -> bool;
     pub fn contains(&self, value: i64) -> bool;
     pub fn get(&self, index: i64) -> Option<i64>;

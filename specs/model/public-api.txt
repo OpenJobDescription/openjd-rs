@@ -229,17 +229,17 @@ pub mod openjd_model::job::step_param_space
 pub struct openjd_model::job::step_param_space::StepParameterSpaceIterator
 impl openjd_model::job::step_param_space::StepParameterSpaceIterator
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::chunks_adaptive(&self) -> bool
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::chunks_default_task_count(&self) -> core::option::Option<usize>
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::chunks_default_task_count(&self) -> core::option::Option<u64>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::chunks_parameter_name(&self) -> core::option::Option<&str>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::contains(&self, &openjd_model::types::TaskParameterSet) -> bool
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::get(&self, usize) -> core::option::Option<openjd_model::types::TaskParameterSet>
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::get(&self, u64) -> core::option::Option<openjd_model::types::TaskParameterSet>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::is_empty(&self) -> bool
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::len(&self) -> usize
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::len(&self) -> u64
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::names(&self) -> &std::collections::hash::set::HashSet<alloc::string::String>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::new(&openjd_model::job::StepParameterSpace) -> core::result::Result<Self, openjd_model::error::ModelError>
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::new_with_chunk_override(&openjd_model::job::StepParameterSpace, core::option::Option<usize>) -> core::result::Result<Self, openjd_model::error::ModelError>
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::new_with_chunk_override(&openjd_model::job::StepParameterSpace, core::option::Option<u64>) -> core::result::Result<Self, openjd_model::error::ModelError>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::reset(&mut self)
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::set_chunks_default_task_count(&mut self, usize)
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::set_chunks_default_task_count(&mut self, u64)
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::validate_containment(&self, &openjd_model::types::TaskParameterSet) -> core::result::Result<(), alloc::string::String>
 impl core::iter::traits::iterator::Iterator for openjd_model::job::step_param_space::StepParameterSpaceIterator
 pub type openjd_model::job::step_param_space::StepParameterSpaceIterator::Item = indexmap::map::IndexMap<alloc::string::String, openjd_model::types::TaskParameterValue>
@@ -500,9 +500,9 @@ impl core::marker::StructuralPartialEq for openjd_model::job::JobParameter
 impl serde_core::ser::Serialize for openjd_model::job::JobParameter
 pub fn openjd_model::job::JobParameter::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 pub struct openjd_model::job::ResolvedChunks
-pub openjd_model::job::ResolvedChunks::default_task_count: usize
+pub openjd_model::job::ResolvedChunks::default_task_count: u64
 pub openjd_model::job::ResolvedChunks::range_constraint: openjd_model::template::RangeConstraint
-pub openjd_model::job::ResolvedChunks::target_runtime_seconds: core::option::Option<usize>
+pub openjd_model::job::ResolvedChunks::target_runtime_seconds: core::option::Option<u64>
 impl core::clone::Clone for openjd_model::job::ResolvedChunks
 pub fn openjd_model::job::ResolvedChunks::clone(&self) -> openjd_model::job::ResolvedChunks
 impl core::cmp::Eq for openjd_model::job::ResolvedChunks
@@ -635,17 +635,17 @@ pub mod openjd_model::step_param_space
 pub struct openjd_model::step_param_space::StepParameterSpaceIterator
 impl openjd_model::job::step_param_space::StepParameterSpaceIterator
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::chunks_adaptive(&self) -> bool
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::chunks_default_task_count(&self) -> core::option::Option<usize>
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::chunks_default_task_count(&self) -> core::option::Option<u64>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::chunks_parameter_name(&self) -> core::option::Option<&str>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::contains(&self, &openjd_model::types::TaskParameterSet) -> bool
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::get(&self, usize) -> core::option::Option<openjd_model::types::TaskParameterSet>
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::get(&self, u64) -> core::option::Option<openjd_model::types::TaskParameterSet>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::is_empty(&self) -> bool
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::len(&self) -> usize
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::len(&self) -> u64
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::names(&self) -> &std::collections::hash::set::HashSet<alloc::string::String>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::new(&openjd_model::job::StepParameterSpace) -> core::result::Result<Self, openjd_model::error::ModelError>
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::new_with_chunk_override(&openjd_model::job::StepParameterSpace, core::option::Option<usize>) -> core::result::Result<Self, openjd_model::error::ModelError>
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::new_with_chunk_override(&openjd_model::job::StepParameterSpace, core::option::Option<u64>) -> core::result::Result<Self, openjd_model::error::ModelError>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::reset(&mut self)
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::set_chunks_default_task_count(&mut self, usize)
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::set_chunks_default_task_count(&mut self, u64)
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::validate_containment(&self, &openjd_model::types::TaskParameterSet) -> core::result::Result<(), alloc::string::String>
 impl core::iter::traits::iterator::Iterator for openjd_model::job::step_param_space::StepParameterSpaceIterator
 pub type openjd_model::job::step_param_space::StepParameterSpaceIterator::Item = indexmap::map::IndexMap<alloc::string::String, openjd_model::types::TaskParameterValue>
@@ -2104,17 +2104,17 @@ pub fn openjd_model::job::step_dependency_graph::StepDependencyGraph::fmt(&self,
 pub struct openjd_model::StepParameterSpaceIterator
 impl openjd_model::job::step_param_space::StepParameterSpaceIterator
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::chunks_adaptive(&self) -> bool
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::chunks_default_task_count(&self) -> core::option::Option<usize>
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::chunks_default_task_count(&self) -> core::option::Option<u64>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::chunks_parameter_name(&self) -> core::option::Option<&str>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::contains(&self, &openjd_model::types::TaskParameterSet) -> bool
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::get(&self, usize) -> core::option::Option<openjd_model::types::TaskParameterSet>
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::get(&self, u64) -> core::option::Option<openjd_model::types::TaskParameterSet>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::is_empty(&self) -> bool
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::len(&self) -> usize
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::len(&self) -> u64
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::names(&self) -> &std::collections::hash::set::HashSet<alloc::string::String>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::new(&openjd_model::job::StepParameterSpace) -> core::result::Result<Self, openjd_model::error::ModelError>
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::new_with_chunk_override(&openjd_model::job::StepParameterSpace, core::option::Option<usize>) -> core::result::Result<Self, openjd_model::error::ModelError>
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::new_with_chunk_override(&openjd_model::job::StepParameterSpace, core::option::Option<u64>) -> core::result::Result<Self, openjd_model::error::ModelError>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::reset(&mut self)
-pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::set_chunks_default_task_count(&mut self, usize)
+pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::set_chunks_default_task_count(&mut self, u64)
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::validate_containment(&self, &openjd_model::types::TaskParameterSet) -> core::result::Result<(), alloc::string::String>
 impl core::iter::traits::iterator::Iterator for openjd_model::job::step_param_space::StepParameterSpaceIterator
 pub type openjd_model::job::step_param_space::StepParameterSpaceIterator::Item = indexmap::map::IndexMap<alloc::string::String, openjd_model::types::TaskParameterValue>

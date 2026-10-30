@@ -436,7 +436,9 @@ pub fn add_path_string(ctx: Ctx, a: &[ExprValue]) -> R {
 pub fn add_range_range(ctx: Ctx, a: &[ExprValue]) -> R {
     match (&a[0], &a[1]) {
         (ExprValue::RangeExpr(l), ExprValue::RangeExpr(r)) => {
-            ctx.count_ops(l.len() + r.len())?;
+            // Saturating: on a 32-bit target two lengths can sum past usize::MAX,
+            // and a wrapped sum would slip under the operation limit.
+            ctx.count_ops(l.len_saturating().saturating_add(r.len_saturating()))?;
             let elements: Vec<ExprValue> = l.iter().chain(r.iter()).map(ExprValue::Int).collect();
             Ok(ExprValue::make_list_checked(ctx, elements, ExprType::INT)?)
         }
@@ -582,7 +584,7 @@ pub fn add_list_range(ctx: Ctx, a: &[ExprValue]) -> R {
         ExprValue::RangeExpr(r) => r,
         _ => return Err(ExpressionError::type_error("type error")),
     };
-    ctx.count_ops(l.len() + r.len())?;
+    ctx.count_ops(l.len().saturating_add(r.len_saturating()))?;
     l.extend(r.iter().map(ExprValue::Int));
     concat_common_type(
         ctx,
@@ -606,7 +608,7 @@ pub fn add_range_list(ctx: Ctx, a: &[ExprValue]) -> R {
         .clone()
         .into_list()
         .ok_or_else(|| ExpressionError::type_error("type error"))?;
-    ctx.count_ops(r.len() + l.len())?;
+    ctx.count_ops(r.len_saturating().saturating_add(l.len()))?;
     let mut combined: Vec<ExprValue> = r.iter().map(ExprValue::Int).collect();
     combined.extend(l);
     concat_common_type(

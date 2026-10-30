@@ -292,20 +292,23 @@ pub fn create_job(
 
     // Caller-imposed total task count limit across all steps
     if let Some(max_task_count) = ctx.caller_limits.max_task_count {
-        let mut total: u64 = 0;
+        // u128: each step's count is a u64, so the sum cannot overflow, and
+        // the total is compared and reported exactly.
+        let mut total: u128 = 0;
         for step in &steps {
             let step_tasks = step
                 .parameter_space
                 .as_ref()
                 .map(|ps| {
                     crate::job::step_param_space::StepParameterSpaceIterator::new_with_chunk_override(ps, Some(1))
-                        .map(|iter| iter.len() as u64)
+                        // `len` is an exact u64 on every target.
+                        .map(|iter| iter.len())
                 })
                 .transpose()?
                 .unwrap_or(1); // Steps without a parameter space have 1 task
-            total = total.saturating_add(step_tasks);
+            total += u128::from(step_tasks);
         }
-        if total > max_task_count {
+        if total > u128::from(max_task_count) {
             return Err(ModelError::ModelValidation(
                 crate::error::ValidationErrors::single(format!(
                     "Total task count ({total}) exceeds caller limit of {max_task_count}."

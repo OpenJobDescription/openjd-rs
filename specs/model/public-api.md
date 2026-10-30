@@ -672,8 +672,10 @@ pub enum job::TaskParamRange<T> {
 }
 
 pub struct job::ResolvedChunks {
-    pub default_task_count: usize,
-    pub target_runtime_seconds: Option<usize>,
+    /// u64, not usize, so a size above 2^32 is kept on 32-bit targets
+    /// (wasm32) rather than truncated.
+    pub default_task_count: u64,
+    pub target_runtime_seconds: Option<u64>,
     pub range_constraint: RangeConstraint,
 }
 ```
@@ -1164,7 +1166,7 @@ impl StepParameterSpaceIterator {
     /// `CHUNK[INT]` parameter's range (a list or a range expression) has a
     /// value of magnitude 2^62 or more (see parameter-space.md "Chunking");
     /// `ModelError::DecodeValidation` also when the combination expression
-    /// does not fit the parameters or the task count overflows `usize`;
+    /// does not fit the parameters or the task count overflows `u64`;
     /// and `ModelError::DecodeValidation` naming the parameter and the
     /// chunk when static `NONCONTIGUOUS` chunking would build a chunk with
     /// more than `openjd_expr::MAX_RANGE_EXPR_CHUNKS` runs in canonical
@@ -1180,18 +1182,23 @@ impl StepParameterSpaceIterator {
     /// Same errors as `new`.
     pub fn new_with_chunk_override(
         space: &job::StepParameterSpace,
-        override_count: Option<usize>,
+        override_count: Option<u64>,
     ) -> Result<Self, ModelError>;
 
     pub fn names(&self) -> &HashSet<String>;
-    pub fn len(&self) -> usize;
+
+    /// The exact number of task parameter sets (tasks, or chunks for a
+    /// chunked parameter); 0 for adaptive chunking. A u64 on every
+    /// target: on 32-bit targets (wasm32) a space can have more tasks
+    /// than a usize can count, e.g. "1-5000000000".
+    pub fn len(&self) -> u64;
     pub fn is_empty(&self) -> bool;
 
     /// Random access. Returns `None` for out-of-bounds and for adaptive
     /// chunking, the one case where chunk N is not a function of N.
     /// A contiguous chunked space answers, though `Iterator::next` still
     /// walks it sequentially — see parameter-space.md.
-    pub fn get(&self, index: usize) -> Option<TaskParameterSet>;
+    pub fn get(&self, index: u64) -> Option<TaskParameterSet>;
 
     pub fn contains(&self, params: &TaskParameterSet) -> bool;
     pub fn validate_containment(&self, params: &TaskParameterSet) -> Result<(), String>;
@@ -1204,16 +1211,16 @@ impl StepParameterSpaceIterator {
     /// adaptive or static, and reflecting a chunk override when one was
     /// given. `None` when the space has no chunked parameter.
     pub fn chunks_parameter_name(&self) -> Option<&str>;
-    pub fn chunks_default_task_count(&self) -> Option<usize>;
+    pub fn chunks_default_task_count(&self) -> Option<u64>;
 
     /// Adaptive-only: a static chunk size cannot change mid-walk, so this
     /// is a no-op for a non-adaptive space. Any value is accepted: 0 acts
-    /// as 1, and a size beyond the values that remain (up to usize::MAX)
+    /// as 1, and a size beyond the values that remain (up to u64::MAX)
     /// makes the next chunk take all of them (for CONTIGUOUS, the rest of
     /// its interval). The exception is a NONCONTIGUOUS chunk whose canonical
     /// form would have more than 50,000 runs: it is shortened to 50,000
     /// values.
-    pub fn set_chunks_default_task_count(&mut self, value: usize);
+    pub fn set_chunks_default_task_count(&mut self, value: u64);
 
     /// Rewind the iterator so a fresh `Iterator::next` walk yields the
     /// same elements again. Preserves the adaptive chunk size set via
@@ -1224,9 +1231,17 @@ impl StepParameterSpaceIterator {
 impl Iterator for StepParameterSpaceIterator {
     type Item = TaskParameterSet;
     fn next(&mut self) -> Option<TaskParameterSet>;
+    /// The exact remaining count when it fits a usize; otherwise
+    /// (usize::MAX, None), never a truncated count. (0, None) for
+    /// adaptive chunking.
     fn size_hint(&self) -> (usize, Option<usize>);
 }
 ```
+
+The iterator is deliberately not an `ExactSizeIterator`: that trait's
+`len` is an exact `usize`, which a 32-bit target cannot give for every
+space. `len()` above is the exact count (see parameter-space.md, "Counts
+Are 64-bit").
 
 Random-access indexing uses `O(1)` arithmetic on a product-of-factors
 representation — submitters that want to shard a large parameter

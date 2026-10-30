@@ -3161,6 +3161,51 @@ steps:
     }
 
     #[test]
+    fn test_summary_counts_tasks_beyond_2_pow_32() {
+        // Task counts are u64 on every target; 5e9 is past what a 32-bit
+        // usize can count. The range is text, so nothing lists its values.
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
+extensions: [TASK_CHUNKING]
+name: BigJob
+steps:
+  - name: S1
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: F
+          type: CHUNK[INT]
+          range: "1-5000000000"
+          chunks:
+            defaultTaskCount: 1000000000
+            rangeConstraint: CONTIGUOUS
+    script:
+      actions:
+        onRun:
+          command: echo
+"#
+        )
+        .unwrap();
+        let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap()]);
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(
+            stdout.contains("Total tasks: 5000000000\n"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("'S1' (5000000000 total Tasks)"),
+            "stdout: {stdout}"
+        );
+        let (code, stdout, stderr) =
+            run_cli(&["summary", f.path().to_str().unwrap(), "--output", "json"]);
+        assert_eq!(code, 0, "stderr: {stderr}");
+        let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(json["total_tasks"], 5_000_000_000u64, "stdout: {stdout}");
+        assert_eq!(json["steps"][0]["total_tasks"], 5_000_000_000u64);
+    }
+
+    #[test]
     fn test_summary_yaml_output() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
         write!(
