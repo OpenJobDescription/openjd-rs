@@ -263,8 +263,10 @@ pub enum TaskParamRange<T> {
 }
 
 pub struct ResolvedChunks {
-    pub default_task_count: usize,
-    pub target_runtime_seconds: Option<usize>,
+    // u64 rather than usize, so a value above 2^32 is kept on 32-bit
+    // targets (wasm32); see parameter-space.md, "Counts Are 64-bit".
+    pub default_task_count: u64,
+    pub target_runtime_seconds: Option<u64>,
     pub range_constraint: RangeConstraint,
 }
 ```

@@ -99,7 +99,10 @@ fn step_total_tasks(step: &job::Step) -> u64 {
 Steps with no parameter space have exactly 1 task (the implicit single task).
 
 Task counts are `u64`, the type of `StepParameterSpaceIterator::len`, so they are exact on
-every target, including one where `usize` is 32 bits.
+every target, including one where `usize` is 32 bits. The job summary's total is their
+checked sum: when it passes `u64::MAX` (two steps of 2^63 tasks) the command fails with
+`Job '<name>' has more than 18446744073709551615 tasks in total, so the total cannot be
+reported.` rather than printing a wrapped total. A single step's summary is unaffected.
 
 ## Job Summary Output
 

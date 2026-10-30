@@ -527,7 +527,14 @@ fn max_task_count_counts_beyond_2_pow_32() {
         create_chunked_job_with_limit("1-5000000000", 5_000_000_000),
         Ok(())
     );
-    assert!(create_chunked_job_with_limit("1-5000000000", 4_999_999_999).is_err());
+    assert_eq!(
+        create_chunked_job_with_limit("1-5000000000", 4_999_999_999),
+        Err(
+            "Model validation error: 1 validation error for Template\nTemplate: \
+             Total task count (5000000000) exceeds caller limit of 4999999999."
+                .to_string()
+        )
+    );
 }
 
 #[test]
