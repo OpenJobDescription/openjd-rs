@@ -1726,10 +1726,11 @@ impl StepParameterSpaceIterator {
     /// Rewind the iterator to the beginning so a fresh `Iterator::next`
     /// walk yields the same elements again.
     ///
-    /// For non-sequential (random-access) iterators this resets the
-    /// internal cursor used by `Iterator::next` to 0. For sequential
-    /// (adaptive or contiguous-with-gaps) iterators it delegates to the
-    /// inner node iterator's `reset()`. The adaptive `Arc<AtomicU64>`
+    /// It always resets the count of items returned (which `size_hint`
+    /// reads, and which is the random-access cursor `Iterator::next` uses
+    /// for a non-sequential iterator) to 0. For sequential (adaptive or
+    /// CONTIGUOUS) iterators it also resets the inner node iterator. The
+    /// adaptive `Arc<AtomicU64>`
     /// chunk size is preserved across resets — `reset()` does not undo
     /// `set_chunks_default_task_count`.
     pub fn reset(&mut self) {

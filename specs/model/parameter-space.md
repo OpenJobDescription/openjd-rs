@@ -44,9 +44,10 @@ is mutable mid-walk.
 chunking (the parameter is treated as static with chunk size `n`).
 
 `reset` rewinds the iterator so a fresh `Iterator::next` walk yields the same elements
-again, without rebuilding from the parameter space. For non-sequential (random-access)
-iterators it sets the internal `current_index` to 0; for sequential iterators (adaptive
-chunking) it delegates to the inner node iterator's reset.
+again, without rebuilding from the parameter space. It always sets the internal
+`current_index` (the items returned so far, which `size_hint` reads and which is the
+random-access cursor) to 0; for sequential iterators (adaptive or CONTIGUOUS chunking) it
+also resets the inner node iterator.
 The adaptive `Arc<AtomicU64>` chunk-size override set via
 `set_chunks_default_task_count` is preserved across `reset` calls — `reset` does not
 restore the template's original `defaultTaskCount`.

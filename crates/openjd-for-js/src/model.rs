@@ -416,7 +416,8 @@ impl JsStepParameterSpaceIterator {
 
     /// Total number of tasks (chunks, for a chunked parameter), as a
     /// `bigint`: exact for counts above 2^53, and above the 2^32 a wasm32
-    /// `usize` could hold.
+    /// `usize` could hold. `0n` for adaptive chunking, whose chunk count
+    /// depends on chunk sizes chosen while running.
     #[wasm_bindgen(getter)]
     pub fn count(&self) -> u64 {
         self.inner.len()
