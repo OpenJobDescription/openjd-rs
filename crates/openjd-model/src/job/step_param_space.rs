@@ -2155,6 +2155,38 @@ mod tests {
     }
 
     #[test]
+    fn iterator_size_hint_beyond_2_pow_32() {
+        // The iterator's own size_hint, not just the helper: on a 32-bit
+        // target 5e9 remaining items must be "at least usize::MAX", never a
+        // truncated 705032704. Run on wasm32-wasip1 to check the 32-bit arm.
+        for (expr, constraint) in [
+            ("1-5000000000", "contiguous"),
+            ("1-5000000000", "noncontiguous"),
+        ] {
+            let param = match constraint {
+                "contiguous" => static_chunk_param(expr, 1),
+                _ => noncontiguous_static_chunk_param(expr, 1),
+            };
+            let space = make_space(vec![("Frame", param)], None);
+            let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+            assert_eq!(iter.len(), 5_000_000_000, "{constraint}");
+            for remaining in [5_000_000_000u64, 4_999_999_999] {
+                #[cfg(target_pointer_width = "32")]
+                {
+                    assert!(remaining > u64::from(u32::MAX));
+                    assert_eq!(iter.size_hint(), (usize::MAX, None), "{constraint}");
+                }
+                #[cfg(target_pointer_width = "64")]
+                {
+                    let n = usize::try_from(remaining).unwrap();
+                    assert_eq!(iter.size_hint(), (n, Some(n)), "{constraint}");
+                }
+                iter.next();
+            }
+        }
+    }
+
+    #[test]
     fn size_hint_tracks_a_contiguous_walk() {
         let space = make_space(vec![("Frame", static_chunk_param("1-10", 3))], None);
         let mut iter = StepParameterSpaceIterator::new(&space).unwrap();

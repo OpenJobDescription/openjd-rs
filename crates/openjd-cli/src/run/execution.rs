@@ -641,4 +641,20 @@ mod tests {
     fn measurable_duration_preserves_early_sample_blending() {
         assert_eq!(calculate_adaptive_chunk_size(1, 1, 1.0, 9.0), Some(3));
     }
+
+    #[test]
+    fn adaptive_chunk_size_is_kept_beyond_2_pow_32() {
+        // 16 tasks in 2^-28 s is 2^-32 s per task, so a 1 s target asks
+        // for exactly 2^32 tasks per chunk (powers of two keep the float
+        // math exact). A 32-bit usize would truncate that to 0, then 1.
+        assert_eq!(
+            calculate_adaptive_chunk_size(1, 16, 2f64.powi(-28), 1.0),
+            Some(1 << 32)
+        );
+        // Larger sizes saturate at u64::MAX rather than wrap.
+        assert_eq!(
+            calculate_adaptive_chunk_size(1, 16, 2f64.powi(-28), 1e30),
+            Some(u64::MAX)
+        );
+    }
 }
