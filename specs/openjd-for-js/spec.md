@@ -308,9 +308,9 @@ Counts and indices are `bigint` (`u64`). WebAssembly is a 32-bit target, so a
 boundaries are computed in 64 bits end to end (see
 `specs/model/parameter-space.md`, "Counts Are 64-bit"), so `count`, the chunk
 strings, and the `maxTaskCount` check are exact here too. `Job.toJSON()`
-writes integers as JS numbers, so it shows a `defaultTaskCount` up to 2^53
-exactly and throws for a larger one, as for any integer above 2^53 in the
-job.
+writes integers as JS numbers, so it shows a `defaultTaskCount` up to
+2^53 - 1 (`Number.MAX_SAFE_INTEGER`) exactly and throws for 2^53 or more,
+as for any such integer in the job.
 
 ### Classes — Expression Engine
 
