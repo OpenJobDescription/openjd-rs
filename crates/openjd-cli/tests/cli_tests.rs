@@ -3255,6 +3255,47 @@ steps:
     }
 
     #[test]
+    fn test_summary_rejects_a_step_beyond_u64() {
+        // 9 chunks x 3 values is a valid job, but one task per value is
+        // about 2.77e19 tasks, past u64::MAX. The count used to read 1.
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
+extensions: [TASK_CHUNKING]
+name: HugeStep
+steps:
+  - name: S
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: F
+          type: CHUNK[INT]
+          range: "-4611686018427387903-4611686018427387903"
+          chunks:
+            defaultTaskCount: 4611686018427387903
+            rangeConstraint: CONTIGUOUS
+        - name: G
+          type: INT
+          range: "1-3"
+    script:
+      actions:
+        onRun:
+          command: echo
+"#
+        )
+        .unwrap();
+        let want = "ERROR: Step 'S': Validation error: Total parameter space size \
+                    overflow: the product of parameter dimensions is too large.";
+        for args in [vec![], vec!["--step", "S"]] {
+            let mut cmd = vec!["summary", f.path().to_str().unwrap()];
+            cmd.extend(args);
+            let (code, stdout, stderr) = run_cli(&cmd);
+            assert_ne!(code, 0, "stdout: {stdout}");
+            assert!(stderr.contains(want), "stderr: {stderr}");
+        }
+    }
+
+    #[test]
     fn test_summary_yaml_output() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
         write!(

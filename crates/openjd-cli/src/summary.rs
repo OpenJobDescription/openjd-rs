@@ -130,16 +130,15 @@ fn task_param_type_name(tp: &job::TaskParameter) -> &'static str {
 }
 
 /// A step's task count, exact on every target (a `u64`, like
-/// `StepParameterSpaceIterator::len`).
-fn step_total_tasks(step: &job::Step) -> u64 {
+/// `StepParameterSpaceIterator::len`). Fails, naming the step, when the
+/// count cannot be computed: a chunked step can have more than `u64::MAX`
+/// tasks, which counting one task per value overflows.
+fn step_total_tasks(step: &job::Step) -> Result<u64, String> {
     match &step.parameter_space {
-        None => 1,
-        Some(ps) => {
-            match openjd_model::StepParameterSpaceIterator::new_with_chunk_override(ps, Some(1)) {
-                Ok(it) => it.len(),
-                Err(_) => 1,
-            }
-        }
+        None => Ok(1),
+        Some(ps) => openjd_model::StepParameterSpaceIterator::new_with_chunk_override(ps, Some(1))
+            .map(|it| it.len())
+            .map_err(|e| format!("Step '{}': {e}", step.name)),
     }
 }
 
@@ -155,7 +154,7 @@ fn output_job_summary(
         .steps
         .iter()
         .map(|s| {
-            let total_tasks = step_total_tasks(s);
+            let total_tasks = step_total_tasks(s)?;
             let task_params: Vec<(String, String)> = s
                 .parameter_space
                 .as_ref()
@@ -188,16 +187,16 @@ fn output_job_summary(
                 .as_ref()
                 .map(|deps| deps.iter().map(|d| d.depends_on.clone()).collect())
                 .unwrap_or_default();
-            StepInfo {
+            Ok(StepInfo {
                 name: s.name.clone(),
                 description: s.description.clone(),
                 total_tasks,
                 task_params,
                 envs,
                 deps,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<_, String>>()?;
 
     // Each step's count is an exact u64, but their sum can pass u64::MAX
     // (two steps of 2^63 tasks). Fail rather than print a wrapped total.
@@ -264,7 +263,7 @@ fn output_step_summary(
         .find(|s| s.name == step_name)
         .ok_or_else(|| format!("Step '{step_name}' does not exist in Job '{}'.", job.name))?;
 
-    let total_tasks = step_total_tasks(step);
+    let total_tasks = step_total_tasks(step)?;
     let task_params: Vec<(String, String)> = step
         .parameter_space
         .as_ref()

@@ -1037,10 +1037,15 @@ fn saturated_operation_count_exceeds_the_largest_limit() {
 
 #[test]
 fn saturated_memory_projection_exceeds_the_largest_limit() {
-    // The memory projection saturates too: i64::MAX values cannot be held,
-    // and with both limits at usize::MAX only the saturation rule stops
-    // the allocation (otherwise a capacity-overflow panic).
+    // The memory projection saturates too: the values cannot be held, and
+    // with both limits at usize::MAX only the saturation rule stops the
+    // allocation (otherwise a capacity-overflow panic, or a trap on
+    // wasm32). The range is chosen per target so the operation charge
+    // stays below usize::MAX and the memory check is what saturates.
+    #[cfg(target_pointer_width = "64")]
     let expr = "list(range_expr('1-9223372036854775807'))";
+    #[cfg(target_pointer_width = "32")]
+    let expr = "list(range_expr('1-134217728'))";
     let err = eval_op(expr, usize::MAX).unwrap_err();
     assert_eq!(
         err.to_string(),
