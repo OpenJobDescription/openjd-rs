@@ -2264,8 +2264,10 @@ impl<'a> Evaluator<'a> {
 /// 2^32 or more saturates there. Such a counter is treated as over every
 /// limit, `usize::MAX` included, so the largest limit a caller can set on
 /// a 32-bit target still rejects a charge that a 64-bit target counts
-/// exactly and rejects. (A true count of exactly `usize::MAX` under a limit
-/// of `usize::MAX` is rejected too; no evaluation reaches it.)
+/// exactly and rejects. A true count of exactly `usize::MAX` is rejected
+/// too, and reported as "at least": on a 32-bit target
+/// `list(range_expr('1-4294967293'))` charges exactly that, which a 64-bit
+/// target, with the same limits, rejects on memory instead.
 pub(crate) fn over_budget(value: usize, limit: usize) -> bool {
     value > limit || value == usize::MAX
 }

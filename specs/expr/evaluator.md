@@ -105,9 +105,9 @@ rather than wrap, so a value there may stand for a larger true count, and it is 
 over every limit, `usize::MAX` included (`over_budget`). This matters on 32-bit targets
 (wasm32), where a charge by a range of 2^32 or more values saturates: without the rule, a
 limit of `usize::MAX` (4294967295, the largest a JS caller can pass) would admit it, and the
-evaluation would try to build the values. (A true count of exactly `usize::MAX` under a
-limit of `usize::MAX` is rejected as well; no evaluation reaches one.) The error messages
-then say "at least": `Expression operation count (at least 4294967295) exceeded limit
+evaluation would try to build the values. A true count of exactly `usize::MAX` is rejected
+as well and reported as "at least" (on 32-bit, `list(range_expr('1-4294967293'))` charges
+exactly that). The error messages then say "at least": `Expression operation count (at least 4294967295) exceeded limit
 (4294967295)`, `Expression memory usage (at least ... bytes) exceeded limit (...)`.
 
 ### Depth Limit

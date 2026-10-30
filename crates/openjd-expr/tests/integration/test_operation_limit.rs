@@ -1034,3 +1034,21 @@ fn saturated_operation_count_exceeds_the_largest_limit() {
         )
     );
 }
+
+#[test]
+fn saturated_memory_projection_exceeds_the_largest_limit() {
+    // The memory projection saturates too: i64::MAX values cannot be held,
+    // and with both limits at usize::MAX only the saturation rule stops
+    // the allocation (otherwise a capacity-overflow panic).
+    let expr = "list(range_expr('1-9223372036854775807'))";
+    let err = eval_op(expr, usize::MAX).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "Expression memory usage (at least {max} bytes) exceeded limit ({max} bytes)\n  \
+             {expr}\n  ^{}",
+            "~".repeat(expr.len() - 1),
+            max = usize::MAX
+        )
+    );
+}

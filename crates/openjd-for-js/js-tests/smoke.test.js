@@ -1323,9 +1323,11 @@ describe("task counts above 2^32 (wasm32)", () => {
       expect(() =>
         mod.evaluateExpression("range_expr('1-2147483648') + range_expr('1-2147483648')", st)
       ).toThrow(
-        "Expression operation count (at least 4294967295) exceeded limit (10000000)\n" +
-          "  range_expr('1-2147483648') + range_expr('1-2147483648')\n" +
-          "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+        new Error(
+          "Expression operation count (at least 4294967295) exceeded limit (10000000)\n" +
+            "  range_expr('1-2147483648') + range_expr('1-2147483648')\n" +
+            "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+        )
       );
     } finally {
       st.free();
@@ -1339,18 +1341,21 @@ describe("task counts above 2^32 (wasm32)", () => {
     // the exact count. Without that rule this trapped.
     const st = new mod.SymbolTable();
     try {
-      for (const expr of [
-        "range_expr('1-2147483648') + range_expr('1-2147483648')",
-        "list(range_expr('1-5000000000'))",
+      for (const [expr, caret] of [
+        [
+          "range_expr('1-2147483648') + range_expr('1-2147483648')",
+          "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+        ["list(range_expr('1-5000000000'))", "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"],
       ]) {
-        let message = null;
-        try {
-          mod.evaluateExpression(expr, st, undefined, { operationLimit: 4294967295 });
-        } catch (e) {
-          message = e.message;
-        }
-        expect(message.split("\n")[0]).toBe(
-          "Expression operation count (at least 4294967295) exceeded limit (4294967295)"
+        expect(() =>
+          mod.evaluateExpression(expr, st, undefined, { operationLimit: 4294967295 })
+        ).toThrow(
+          new Error(
+            "Expression operation count (at least 4294967295) exceeded limit (4294967295)\n" +
+              `  ${expr}\n` +
+              caret
+          )
         );
       }
     } finally {
