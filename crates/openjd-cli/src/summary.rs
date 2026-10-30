@@ -199,7 +199,18 @@ fn output_job_summary(
         })
         .collect();
 
-    let total_tasks: u64 = step_summaries.iter().map(|s| s.total_tasks).sum();
+    // Each step's count is an exact u64, but their sum can pass u64::MAX
+    // (two steps of 2^63 tasks). Fail rather than print a wrapped total.
+    let total_tasks = step_summaries
+        .iter()
+        .try_fold(0u64, |acc, s| acc.checked_add(s.total_tasks))
+        .ok_or_else(|| {
+            format!(
+                "Job '{}' has more than {} tasks in total, so the total cannot be reported.",
+                job.name,
+                u64::MAX
+            )
+        })?;
     let step_envs: usize = step_summaries.iter().map(|s| s.envs.len()).sum();
     let root_envs: Vec<EnvInfo> = job
         .job_environments

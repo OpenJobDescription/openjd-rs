@@ -1207,6 +1207,24 @@ describe("task counts above 2^32 (wasm32)", () => {
     });
   });
 
+  it("rejects indices outside u64 instead of wrapping them", () => {
+    // A wasm-bindgen u64 parameter would wrap 2^64 to 0 (task 0) and -1 to
+    // 2^64 - 1; the index is range-checked as a bigint instead.
+    withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), undefined, (job) => {
+      const iter = new mod.StepParameterSpaceIterator(job, "S");
+      try {
+        expect(() => iter.get(2n ** 64n)).toThrow("Index 18446744073709551616 out of range");
+        expect(() => iter.get(2n ** 64n + 1n)).toThrow(
+          "Index 18446744073709551617 out of range"
+        );
+        expect(() => iter.get(-1n)).toThrow("Index -1 out of range");
+        expect(() => iter.get(1)).toThrow("Index must be a bigint");
+      } finally {
+        iter.free();
+      }
+    });
+  });
+
   it("enforces maxTaskCount on 1-5000000000", () => {
     expect(() =>
       withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), { maxTaskCount: 1000000n }, () => {})
@@ -1223,6 +1241,42 @@ describe("task counts above 2^32 (wasm32)", () => {
     withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), { maxTaskCount: 5000000000n }, (job) => {
       expect(job.name).toBe("T");
     });
+  });
+
+  // Evaluates `expr` and returns the error message it throws.
+  const evalError = (expr) => {
+    const st = new mod.SymbolTable();
+    try {
+      mod.evaluateExpression(expr, st);
+      return null;
+    } catch (e) {
+      return e.message;
+    } finally {
+      st.free();
+    }
+  };
+
+  it("charges the operation budget for a list plus a range of 2^32 values", () => {
+    // The list's length plus the range's saturated 2^32 - 1 wraps a 32-bit
+    // usize to 0 without saturating addition.
+    expect(evalError("[1] + range_expr('1-4294967296')")).toBe(
+      "Expression operation count (4294967295) exceeded limit (10000000)\n" +
+        "  [1] + range_expr('1-4294967296')\n" +
+        "  ~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+    );
+    expect(evalError("range_expr('1-4294967296') + [1]")).toBe(
+      "Expression operation count (4294967295) exceeded limit (10000000)\n" +
+        "  range_expr('1-4294967296') + [1]\n" +
+        "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~"
+    );
+  });
+
+  it("reports a range's exact length in an index error", () => {
+    expect(evalError("range_expr('1-5000000000')[5000000000]")).toBe(
+      "Index 5000000000 out of bounds for range_expr of length 5000000000\n" +
+        "  range_expr('1-5000000000')[5000000000]\n" +
+        "  ~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~"
+    );
   });
 
   it("charges the operation budget for concatenating two ranges of 2^31 values", () => {

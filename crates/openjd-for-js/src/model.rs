@@ -423,10 +423,22 @@ impl JsStepParameterSpaceIterator {
     }
 
     /// Get a specific task's parameter set as a JS `Map` from parameter
-    /// name to value string. The index is a `bigint` (`u64`), so every
-    /// task is reachable.
-    pub fn get(&self, index: u64) -> Result<JsValue, JsError> {
-        match self.inner.get(index) {
+    /// name to value string. The index is a `bigint`, so every task is
+    /// reachable; one that is negative or past the last task throws
+    /// `Index <n> out of range`, and a non-`bigint` throws.
+    ///
+    /// Taken as a `BigInt` and range-checked here, not as a `u64`: the
+    /// wasm-bindgen `u64` conversion wraps modulo 2^64, so `2n ** 64n`
+    /// would read task 0 and `-1n` would name index 2^64 - 1.
+    pub fn get(&self, index: js_sys::BigInt) -> Result<JsValue, JsError> {
+        let index = JsValue::from(index);
+        if !index.is_bigint() {
+            return Err(JsError::new("Index must be a bigint"));
+        }
+        let task = u64::try_from(index.clone())
+            .ok()
+            .and_then(|i| self.inner.get(i));
+        match task {
             Some(params) => {
                 // Convert TaskParameterSet to a simple {name: value_string} object
                 let map: HashMap<String, String> = params
@@ -435,7 +447,13 @@ impl JsStepParameterSpaceIterator {
                     .collect();
                 serde_wasm_bindgen::to_value(&map).map_err(serde_wasm_to_js_error)
             }
-            None => Err(JsError::new(&format!("Index {index} out of range"))),
+            None => {
+                let shown = js_sys::BigInt::unchecked_from_js(index)
+                    .to_string(10)
+                    .map(String::from)
+                    .unwrap_or_default();
+                Err(JsError::new(&format!("Index {shown} out of range")))
+            }
         }
     }
 

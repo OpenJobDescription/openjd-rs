@@ -3206,6 +3206,55 @@ steps:
     }
 
     #[test]
+    fn test_summary_rejects_a_total_beyond_u64() {
+        // Two steps of (2^63 - 1) * 2 tasks: each count fits a u64, the
+        // total does not. A wrapped sum printed 18446744073709551612.
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        let step = |name: &str| {
+            format!(
+                r#"  - name: {name}
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: A
+          type: INT
+          range: "1-9223372036854775807"
+        - name: B
+          type: INT
+          range: "1-2"
+    script:
+      actions:
+        onRun:
+          command: echo
+"#
+            )
+        };
+        write!(
+            f,
+            "specificationVersion: \"jobtemplate-2023-09\"\nname: HugeJob\nsteps:\n{}{}",
+            step("S1"),
+            step("S2")
+        )
+        .unwrap();
+        let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap()]);
+        assert_ne!(code, 0, "stdout: {stdout}");
+        assert!(
+            stderr.contains(
+                "Job 'HugeJob' has more than 18446744073709551615 tasks in total, \
+                 so the total cannot be reported."
+            ),
+            "stderr: {stderr}"
+        );
+        // One step alone is reported exactly.
+        let (code, stdout, stderr) =
+            run_cli(&["summary", f.path().to_str().unwrap(), "--step", "S1"]);
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(
+            stdout.contains("Total tasks: 18446744073709551614\n"),
+            "stdout: {stdout}"
+        );
+    }
+
+    #[test]
     fn test_summary_yaml_output() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
         write!(
