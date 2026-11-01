@@ -270,7 +270,7 @@ PRs run these checks (all must pass):
 | **Public API** | `scripts/check_public_api.sh` on Linux and Windows: the committed `specs/<crate>/public-api*.txt` listings match the code |
 | **Cross-User (Linux)** | Docker-based cross-user tests: localuser and LDAP variants |
 | **Cross-User (Windows)** | Windows cross-user and permissions tests with a temporary test user |
-| **openjd-for-js** | Builds the wasm32 crate with `wasm-bindgen` and runs the vitest suite |
+| **openjd-for-js** | Clippy (host and wasm32) and Rust tests for the crate, then builds the wasm32 crate with `wasm-bindgen` and runs the vitest suite |
 
 If a dependency update bumps `wasm-bindgen`, also bump `WASM_BINDGEN_VERSION`
 in the `openjd-for-js` job in `.github/workflows/ci.yml`, which pins

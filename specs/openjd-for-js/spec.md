@@ -701,16 +701,20 @@ The `openjd-for-js` job in `.github/workflows/ci.yml` runs on ubuntu with Node 2
 1. Install `wasm-bindgen-cli` at `WASM_BINDGEN_VERSION`, which must equal the
    `wasm-bindgen` crate version in `Cargo.lock`.
 2. `cd crates/openjd-for-js && npm install`
-3. `npm run build`, which runs
+3. `cargo clippy --release -p openjd-for-js --all-targets -- -D warnings`, for the host
+   (which covers the Rust-side tests) and again with `--target wasm32-unknown-unknown`
+   (what ships).
+4. `cargo test --release -p openjd-for-js` (Rust-side tests; they run on the host).
+5. `npm run build`, which runs
    `cargo build --target wasm32-unknown-unknown -p openjd-for-js --release` and then
    `wasm-bindgen --target web --out-dir crates/openjd-for-js/pkg target/wasm32-unknown-unknown/release/openjd_for_js.wasm`.
-4. `npx vitest run` (JS-side tests).
+6. `npx vitest run` (JS-side tests).
 
-The build, test and clippy steps of the workspace jobs pass `--exclude openjd-for-js`.
-The MSRV (`cargo check --workspace`) and Documentation (`cargo doc --workspace`) jobs
-include the crate, for the host target. So CI does not run the crate's Rust-side tests
-(`cargo test -p openjd-for-js`), clippy for the wasm32 target, `wasm-opt`, or
-`npm pack`. The package is not published.
+The build, test and clippy steps of the workspace jobs pass `--exclude openjd-for-js`,
+which is why this job runs the crate's clippy and Rust tests itself. The MSRV
+(`cargo check --workspace`) and Documentation (`cargo doc --workspace`) jobs include
+the crate, for the host target. CI does not run `wasm-opt` or `npm pack`. The package
+is not published.
 
 ## Relationship to Other Bindings
 

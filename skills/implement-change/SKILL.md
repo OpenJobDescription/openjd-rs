@@ -115,9 +115,10 @@ Add the following checks when they apply:
   `Cargo.lock` or any `Cargo.toml` dependency changed;
 - `cargo +<MSRV> check --workspace`, with the MSRV from `AGENTS.md`, when
   dependencies, the toolchain, or language features in use changed;
-- the `openjd-for-js` wasm build and vitest suite, when that crate, its
-  dependencies, or `wasm-bindgen` changed (see `AGENTS.md` on the
-  `wasm-bindgen-cli` pin);
+- the `openjd-for-js` wasm build and vitest suite, and its wasm32 clippy
+  (`cargo clippy -p openjd-for-js --target wasm32-unknown-unknown
+  --all-targets -- -D warnings`), when that crate, its dependencies, or
+  `wasm-bindgen` changed (see `AGENTS.md` on the `wasm-bindgen-cli` pin);
 - the cross-user tests (see `AGENTS.md`), when sessions' cross-user or
   permissions code changed;
 - the relevant slice of the conformance suite (see `AGENTS.md`), when
