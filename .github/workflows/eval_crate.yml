@@ -325,7 +325,7 @@ jobs:
           echo "AWS_SESSION_TOKEN=" >> "$GITHUB_ENV"
 
       - name: Run the eval-crate skill
-        uses: anthropics/claude-code-action@16f9f71ab9c490faf367f94dd294897edc25be33 # v1.0.261
+        uses: anthropics/claude-code-action@8041f1d17e0e7d2f2cfe35002962e9f26237c0bb # v1.0.263
         env:
           AWS_BEARER_TOKEN_BEDROCK: ${{ env.AWS_BEARER_TOKEN_BEDROCK }}
           AWS_REGION: us-west-2
