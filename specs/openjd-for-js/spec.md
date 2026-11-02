@@ -62,12 +62,18 @@ Rust source → cargo build --target wasm32-unknown-unknown --release
            → package in crates/openjd-for-js/pkg/
 ```
 
+`npm run build` runs both steps. The `.wasm` is not run through `wasm-opt`
+yet; see [Size Budget](#size-budget).
+
 ### Package Entry Point
 
 `index.js` is the package's entry point. It re-exports everything in
 `pkg/openjd_for_js.js` (including the default `init` export), then defines
 `evaluateExpression`, `ParsedExpression.prototype.evaluate`, and a wrapped
-`FunctionLibrary.withPathMappingRules`.
+`FunctionLibrary.withPathMappingRules`. Import the package (or `index.js`),
+not `pkg/openjd_for_js.js` directly: on its own, `pkg/` has no
+`evaluateExpression` or `ParsedExpression.prototype.evaluate`, although its
+`.d.ts` declares them.
 
 It exists because wasm-bindgen 0.2.129 can take an exported Rust struct as an
 optional argument (`Option<T>`) only by value. That zeroes the caller's JS
@@ -86,13 +92,14 @@ is borrowed. So Rust exports, with `skip_typescript`:
 The public signatures of `evaluate` and `evaluateExpression`, and the
 `EvalOptions` type, come from a `typescript_custom_section` in `src/expr.rs`,
 so they appear in the generated `pkg/openjd_for_js.d.ts`. A `lib` that is not
-a `FunctionLibrary` throws `expected instance of FunctionLibrary`.
+a `FunctionLibrary` throws `expected instance of FunctionLibrary`. Because
+`index.js` uses `export *`, the two free functions `__evaluateExpression` and
+`__evaluateExpressionWithLibrary` are also exported at runtime, though not in
+the types. Neither takes a library by value, so calling them directly is safe
+but not supported.
 
 Remove `index.js` once wasm-bindgen supports `Option<&T>` for exported structs
 ([wasm-bindgen#4873](https://github.com/wasm-bindgen/wasm-bindgen/pull/4873)).
-
-`npm run build` runs both steps. The `.wasm` is not run through `wasm-opt`
-yet; see [Size Budget](#size-budget).
 
 ### Binding Pattern
 
@@ -384,7 +391,7 @@ Mirrors the Python binding's `__setitem__` / `__getitem__` / `__contains__` / `g
 
 | Static | `FunctionLibrary.default()` — Built-in functions |
 |---|---|
-| `withPathMappingRules(rules: PathMappingRule[])` | `FunctionLibrary` — Library with path mapping. The rules are copied, so the caller's `PathMappingRule` objects stay usable. Throws when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit; the message names the rule's index |
+| `withPathMappingRules(rules: PathMappingRule[])` | `FunctionLibrary` — Library with path mapping. `rules` may be any iterable of `PathMappingRule`. The rules are copied, so the caller's `PathMappingRule` objects stay usable. Throws when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit; the message names the rule's index |
 
 #### `PathMappingRule`
 
