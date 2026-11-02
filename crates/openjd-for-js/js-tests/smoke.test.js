@@ -428,6 +428,16 @@ describe("FunctionLibrary.withPathMappingRules", () => {
     const freed = new mod.PathMappingRule(mod.PathFormat.Posix, "/b", "/y");
     freed.free();
     const forged = Object.create(mod.PathMappingRule.prototype);
+    const fakePointer = Object.create(mod.PathMappingRule.prototype);
+    fakePointer.__wbg_ptr = "x";
+    const freedDuringIteration = () => {
+      const victim = new mod.PathMappingRule(mod.PathFormat.Posix, "/v", "/w");
+      return (function* () {
+        yield victim;
+        victim.free();
+        yield rule;
+      })();
+    };
     const prefix = "FunctionLibrary.withPathMappingRules: ";
     const cases = [
       ...[undefined, null, 5, {}, rule].map((arg) => [
@@ -438,6 +448,8 @@ describe("FunctionLibrary.withPathMappingRules", () => {
       [[null], "rules[0] is not a PathMappingRule"],
       [[freed], "rules[0] has been freed"],
       [[rule, forged], "rules[1] has been freed"],
+      [[fakePointer], "rules[0] has been freed"],
+      [freedDuringIteration(), "rules[0] has been freed"],
     ];
     for (const [arg, message] of cases) {
       let error;
@@ -463,16 +475,26 @@ describe("FunctionLibrary.withPathMappingRules", () => {
   it("survives many rejected calls", () => {
     // A wasm-bindgen error thrown from inside wasm (a wrong-typed element in
     // the rules array, or a freed rule) left the wasm heap inconsistent, and
-    // a few thousand of them failed with "memory access out of bounds".
+    // some thousands of them failed with "memory access out of bounds".
     const a = new mod.PathMappingRule(mod.PathFormat.Posix, "/a", "/x");
     const b = new mod.PathMappingRule(mod.PathFormat.Posix, "/b", "/y");
     const freed = new mod.PathMappingRule(mod.PathFormat.Posix, "/c", "/z");
     freed.free();
     const forged = Object.create(mod.PathMappingRule.prototype);
     const bad = [[{}, a, b], [a, {}, b], [a, b, {}], [a, freed], [freed, a], [a, forged]];
+    // Frees a rule it already yielded, after the element check saw it live.
+    const freesWhileIterating = () => {
+      const victim = new mod.PathMappingRule(mod.PathFormat.Posix, "/v", "/w");
+      return (function* () {
+        yield a;
+        yield victim;
+        victim.free();
+        yield b;
+      })();
+    };
     for (let n = 0; n < 30_000; n++) {
-      for (const rules of bad) {
-        expect(() => mod.FunctionLibrary.withPathMappingRules(rules)).toThrow();
+      for (const rules of [...bad, freesWhileIterating()]) {
+        expect(() => mod.FunctionLibrary.withPathMappingRules(rules)).toThrow(TypeError);
       }
     }
     const lib = mod.FunctionLibrary.withPathMappingRules([a, b]);
