@@ -398,7 +398,8 @@ impl JsFunctionLibrary {
     /// limit; the message names the rule's position in `rules`.
     ///
     /// wasm-bindgen takes `rules` by value. `index.js` wraps this static
-    /// method to pass copies, so the caller's `PathMappingRule` objects
+    /// method: it checks in JS that `rules` is an iterable of live
+    /// `PathMappingRule` objects, then passes copies, so the caller's rules
     /// stay usable.
     #[wasm_bindgen(js_name = "withPathMappingRules")]
     pub fn with_path_mapping_rules(

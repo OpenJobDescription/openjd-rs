@@ -11,8 +11,8 @@
 // library and one that borrows a required library, and the functions below
 // pick between them. `withPathMappingRules` takes its rules by value for the
 // same reason, so it is given copies. It also checks its argument first,
-// because wasm-bindgen's own check of a wrong-typed array element corrupts
-// the wasm heap after repeated failures.
+// because a wasm-bindgen error thrown from inside wasm leaves the heap
+// inconsistent and repeated ones corrupt it.
 //
 // The library wrappers can go once wasm-bindgen supports `Option<&T>` for
 // exported structs (https://github.com/wasm-bindgen/wasm-bindgen/pull/4873);
@@ -43,10 +43,12 @@ export function evaluateExpression(expr, symbols, lib, options) {
 
 const withPathMappingRules = FunctionLibrary.withPathMappingRules;
 FunctionLibrary.withPathMappingRules = function (rules) {
-  // Check every element here. wasm-bindgen's own check for a wrong-typed
-  // element in a `Vec<PathMappingRule>` throws without freeing what it had
-  // already converted, and a few thousand such calls corrupt the wasm heap.
-  // It also accepts a non-iterable as an empty list.
+  // Check every element here, before any call into wasm. A wasm-bindgen
+  // error thrown from inside wasm, such as its "array contains a value of
+  // the wrong type" for a wrong-typed `Vec<PathMappingRule>` element or its
+  // "null pointer passed to rust" for a freed object, leaves the wasm heap
+  // inconsistent, and a few thousand of them corrupt it. A non-iterable
+  // would also be read as an empty list.
   if (rules == null || typeof rules[Symbol.iterator] !== "function") {
     throw new TypeError(
       "FunctionLibrary.withPathMappingRules: rules must be an array (or other iterable) of PathMappingRule",
@@ -60,18 +62,20 @@ FunctionLibrary.withPathMappingRules = function (rules) {
         `FunctionLibrary.withPathMappingRules: rules[${i}] is not a PathMappingRule`,
       );
     }
+    // A freed rule, or an object made with Object.create(PathMappingRule.prototype),
+    // has no live wasm pointer. `__wbg_ptr` is wasm-bindgen's handle field.
+    if (!rule.__wbg_ptr) {
+      throw new TypeError(
+        `FunctionLibrary.withPathMappingRules: rules[${i}] has been freed`,
+      );
+    }
     checked.push(rule);
     i++;
   }
-  // Copy only after every element passed, so a rejected call leaves the
-  // caller's rules as they were. A freed rule fails in `__clone`; free the
-  // copies already made before rethrowing.
-  const copies = [];
-  try {
-    for (const rule of checked) copies.push(rule.__clone());
-  } catch (e) {
-    copies.forEach((copy) => copy.free());
-    throw e;
-  }
-  return withPathMappingRules.call(FunctionLibrary, copies);
+  // Copy only after every element passed, so a rejected call allocates
+  // nothing and leaves the caller's rules as they were.
+  return withPathMappingRules.call(
+    FunctionLibrary,
+    checked.map((rule) => rule.__clone()),
+  );
 };
