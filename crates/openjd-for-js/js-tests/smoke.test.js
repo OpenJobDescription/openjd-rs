@@ -423,6 +423,62 @@ describe("FunctionLibrary.withPathMappingRules", () => {
     st.free();
   });
 
+  it("rejects an argument that is not an iterable of PathMappingRule", () => {
+    const rule = new mod.PathMappingRule(mod.PathFormat.Posix, "/mnt", "/local");
+    const notIterable =
+      "FunctionLibrary.withPathMappingRules: rules must be an array (or other iterable) of PathMappingRule";
+    for (const arg of [undefined, null, 5, {}, rule]) {
+      expect(() => mod.FunctionLibrary.withPathMappingRules(arg)).toThrow(notIterable);
+    }
+    expect(() => mod.FunctionLibrary.withPathMappingRules([rule, {}])).toThrow(
+      "FunctionLibrary.withPathMappingRules: rules[1] is not a PathMappingRule",
+    );
+    expect(() => mod.FunctionLibrary.withPathMappingRules([null])).toThrow(
+      "FunctionLibrary.withPathMappingRules: rules[0] is not a PathMappingRule",
+    );
+    // A rejected call leaves the caller's rule usable.
+    const lib = mod.FunctionLibrary.withPathMappingRules(new Set([rule]));
+    const st = new mod.SymbolTable();
+    const v = mod.evaluateExpression("apply_path_mapping('/mnt/f')", st, lib);
+    expect(v.toString()).toBe("/local/f");
+    v.free();
+    st.free();
+    lib.free();
+    rule.free();
+  });
+
+  it("survives many calls with a wrong-typed element", () => {
+    // wasm-bindgen's own element check corrupted the wasm heap after a few
+    // thousand such calls ("memory access out of bounds").
+    const a = new mod.PathMappingRule(mod.PathFormat.Posix, "/a", "/x");
+    const b = new mod.PathMappingRule(mod.PathFormat.Posix, "/b", "/y");
+    for (let n = 0; n < 20_000; n++) {
+      for (const rules of [[{}, a, b], [a, {}, b], [a, b, {}]]) {
+        expect(() => mod.FunctionLibrary.withPathMappingRules(rules)).toThrow();
+      }
+    }
+    const lib = mod.FunctionLibrary.withPathMappingRules([a, b]);
+    const st = new mod.SymbolTable();
+    const v = mod.evaluateExpression("apply_path_mapping('/b/f')", st, lib);
+    expect(v.toString()).toBe("/y/f");
+    v.free();
+    st.free();
+    lib.free();
+    a.free();
+    b.free();
+  });
+
+  it("throws for a freed rule and frees the copies it already made", () => {
+    const kept = new mod.PathMappingRule(mod.PathFormat.Posix, "/a", "/x");
+    const freed = new mod.PathMappingRule(mod.PathFormat.Posix, "/b", "/y");
+    freed.free();
+    expect(() => mod.FunctionLibrary.withPathMappingRules([kept, freed])).toThrow(
+      "null pointer passed to rust",
+    );
+    const lib = mod.FunctionLibrary.withPathMappingRules([kept]);
+    lib.free();
+    kept.free();
+  });
   it("throws for a relative source path, naming the rule", () => {
     expect(() =>
       mod.FunctionLibrary.withPathMappingRules([
