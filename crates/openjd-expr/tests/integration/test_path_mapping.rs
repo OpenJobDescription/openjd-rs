@@ -328,6 +328,9 @@ fn destination_ending_in_a_separator_is_not_doubled() {
         (rule(Posix, "/mnt", "/local/"), "/mnt", Posix, "/local/"),
         (rule(Posix, "/mnt", "C:\\"), "/mnt/a", Windows, "C:\\a"),
         (rule(Posix, "/mnt", "C:/x/"), "/mnt/a/", Windows, "C:/x/a\\"),
+        // A whole-source match with a trailing separator: the destination's
+        // `/` counts as a separator for WINDOWS output, so no `\` is added.
+        (rule(Posix, "/mnt", "/local/"), "/mnt/", Windows, "/local/"),
         (
             rule(Windows, "D:\\x", "D:\\y\\"),
             "d:\\X\\f",

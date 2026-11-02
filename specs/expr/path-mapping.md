@@ -504,10 +504,13 @@ rule, UNC anchors), with these differences:
   last. Python sorts rules by component count, and among rules for the same
   location takes the one given first.
 - **Destination.** Rust appends the remaining components to
-  `destination_path` as written, reusing a separator it ends with. Python
-  rebuilds the result with `PurePath(*destination.parts, *rest)`, which also
-  normalizes the rest of the destination: for the destination `D:\x\\y`,
-  Rust gives `D:\x\\y\f` and Python `D:\x\y\f`.
+  `destination_path` as written, reusing a separator it ends with. For POSIX
+  and WINDOWS rules, Python rebuilds the result with
+  `PurePath(*destination.parts, *rest)`, which also normalizes the rest of the
+  destination: for the destination `D:\x\\y`, Rust gives `D:\x\\y\f` and
+  Python `D:\x\y\f`. When the whole source path matches, Rust keeps a
+  separator the destination ends with and Python drops it: `/mnt` → `/local/`
+  maps `/mnt` to `/local/` in Rust and `/local` in Python.
   Python also reads a remaining component that looks like a drive as one:
   with the rule `C:\a` → `D:\m`, `C:\a\b:c` gives `D:\m\b:c` in Rust and
   `b:c` in Python. Both predate `PathMapper`.
@@ -515,5 +518,10 @@ rule, UNC anchors), with these differences:
   rule; Rust rejects it, because `C://data` is a Windows path (see
   [is_uri](#scheme-must-be-at-least-two-characters)). For precedence, Python
   strips slashes from both ends of a URI path, so it counts `s3://b/a/` as
-  two components; Rust keeps the empty segment and counts three. Matching
-  and output for a single URI rule are the same.
+  two components; Rust keeps the empty segment and counts three. For a URI
+  rule, Python joins `str(destination_path) + separator + rest`, so a
+  destination ending in a separator still gives a doubled one (`s3://b` →
+  `/` maps `s3://b/a` to `//a`), where Rust gives `/a`; and a whole-source
+  match drops a separator the destination ends with (`s3://b` → `/local/`
+  maps `s3://b` to `/local`), where Rust keeps it. Matching for a single URI
+  rule is the same.
