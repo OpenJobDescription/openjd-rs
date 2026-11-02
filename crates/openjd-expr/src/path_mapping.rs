@@ -552,24 +552,37 @@ impl PathMapper {
 
     /// Map `path`, joining the components after the matched source path to
     /// the destination with the separator of `output_format`: `\` for
-    /// `Windows`, `/` otherwise. A trailing separator on `path` is kept.
-    /// Returns `None` when no rule matches.
+    /// `Windows`, `/` otherwise. No separator is added after a destination
+    /// that already ends with one (`\` or `/` for `Windows`, `/` otherwise).
+    /// A trailing separator on `path` is kept. Returns `None` when no rule
+    /// matches.
     pub fn apply_with_format(&self, path: &str, output_format: PathFormat) -> Option<String> {
         let sep = match output_format {
             PathFormat::Windows => '\\',
             PathFormat::Posix | PathFormat::Uri => '/',
         };
+        let ends_with_sep = |s: &str| match output_format {
+            PathFormat::Windows => s.ends_with(is_windows_sep),
+            PathFormat::Posix | PathFormat::Uri => s.ends_with('/'),
+        };
         let found = self.find(path)?;
         let mut result = self.rules[found.rule].destination_path.clone();
-        for part in components(found.rest, found.format).skip(found.consumed) {
-            result.push(sep);
+        for (i, part) in components(found.rest, found.format)
+            .skip(found.consumed)
+            .enumerate()
+        {
+            // Only the destination's own separator is reused. Later empty
+            // components (URI paths keep them) still get theirs.
+            if i > 0 || !ends_with_sep(&result) {
+                result.push(sep);
+            }
             result.push_str(part);
         }
         let trailing = match found.format {
             PathFormat::Windows => path.ends_with(is_windows_sep),
             PathFormat::Posix | PathFormat::Uri => path.ends_with('/'),
         };
-        if trailing && !result.ends_with(sep) {
+        if trailing && !ends_with_sep(&result) {
             result.push(sep);
         }
         Some(result)

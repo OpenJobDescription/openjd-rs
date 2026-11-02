@@ -2830,6 +2830,74 @@ async fn test_list_path_parameter_value_is_path_mapped() {
     );
 }
 
+#[test]
+fn test_list_path_parameter_maps_the_same_with_a_base_symbol_table() {
+    use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+    use openjd_expr::{ExprType, ExprValue, SerializedSymbolTable, SymbolTable};
+    use openjd_model::types::{JobParameterType, JobParameterValue};
+
+    let tmp = TempDir::new().unwrap();
+    let mut config = config_in_root(tmp.path(), "test-list-path-base");
+    let list_path = |value| JobParameterValue {
+        param_type: JobParameterType::ListPath,
+        value,
+    };
+    config.job_parameter_values = [
+        (
+            "Strings".to_string(),
+            list_path(
+                ExprValue::make_list(
+                    vec![ExprValue::String("C:\\src\\s".into())],
+                    ExprType::STRING,
+                )
+                .unwrap(),
+            ),
+        ),
+        (
+            "Paths".to_string(),
+            list_path(
+                ExprValue::make_list(
+                    vec![ExprValue::new_path("C:\\src\\a", PathFormat::Windows)],
+                    ExprType::PATH,
+                )
+                .unwrap(),
+            ),
+        ),
+        (
+            "One".to_string(),
+            list_path(ExprValue::new_path("C:\\src\\c", PathFormat::Windows)),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    config.path_mapping_rules = Some(vec![PathMappingRule {
+        source_path_format: PathFormat::Windows,
+        source_path: "C:\\src".into(),
+        destination_path: "/dst".into(),
+    }]);
+    let s = Session::with_config(config).unwrap();
+    let base = SerializedSymbolTable::from_symtab(&SymbolTable::new());
+    let values = |st: SymbolTable| {
+        ["Param.Strings", "Param.Paths", "Param.One"].map(|k| {
+            st.get_value(k)
+                .unwrap_or_else(|| panic!("{k} is set"))
+                .to_display_string()
+        })
+    };
+    let without_base = values(s.build_symbol_table(None, None).unwrap());
+    let with_base = values(s.build_symbol_table(None, Some(&base)).unwrap());
+    // A list displays as JSON, which quotes and escapes like `{:?}` here.
+    assert_eq!(
+        without_base,
+        [
+            format!("[{:?}]", host("/dst/s")),
+            format!("[{:?}]", host("/dst/a")),
+            host("/dst/c"),
+        ]
+    );
+    assert_eq!(with_base, without_base);
+}
+
 #[tokio::test]
 async fn test_path_mapping_trie_limit_comes_from_session_limits() {
     use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
@@ -2936,6 +3004,7 @@ async fn test_path_parameter_over_the_length_limit_is_an_error() {
         ("list", list_of_strings(&long), None),
         ("list-base", list_of_strings(&long), Some(&base)),
         ("list-of-paths", list_of_paths(&long), None),
+        ("list-of-paths-base", list_of_paths(&long), Some(&base)),
     ] {
         let err = session(name, param)
             .build_symbol_table(None, base)

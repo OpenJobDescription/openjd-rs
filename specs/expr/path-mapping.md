@@ -237,9 +237,12 @@ and compares paths the same way (see
 
 The result is `destination_path`, as written, followed by the path's
 components after the matched source path, each preceded by the output
-separator. Components keep the case they have in the input. A trailing
-separator on the input (`/` for POSIX and URI, `\` or `/` for WINDOWS) is
-kept, unless the result already ends with the output separator.
+separator. When `destination_path` already ends with a separator (`\` or `/`
+for WINDOWS output, `/` otherwise), the first component reuses it, so
+`/local/` and `/mnt/a` give `/local/a`, not `/local//a`. Components keep the
+case they have in the input. A trailing separator on the input (`/` for
+POSIX and URI, `\` or `/` for WINDOWS) is kept, unless the result already
+ends with a separator.
 
 ### Windows case
 
@@ -501,15 +504,26 @@ rule, UNC anchors), with these differences:
   last. Python sorts rules by component count, and among rules for the same
   location takes the one given first.
 - **Destination.** Rust appends the remaining components to
-  `destination_path` as written. Python rebuilds the result with
-  `PurePath(*destination.parts, *rest)`, which normalizes the destination:
-  for the destination `D:\x\`, Rust gives `D:\x\\f` and Python `D:\x\f`.
+  `destination_path` as written, reusing a separator it ends with. Python
+  normalizes the destination for every rule format, because it keeps it as a
+  `PurePath`: for the destination `D:\x\\y`, Rust gives `D:\x\\y\f` and
+  Python `D:\x\y\f`, and the same holds for a URI rule's destination. When
+  the whole source path matches and the input has no trailing separator, Rust
+  keeps a separator a non-root destination ends with and Python drops it:
+  `/mnt` → `/local/` maps `/mnt` to `/local/` in Rust and `/local` in Python.
   Python also reads a remaining component that looks like a drive as one:
   with the rule `C:\a` → `D:\m`, `C:\a\b:c` gives `D:\m\b:c` in Rust and
-  `b:c` in Python. Both predate `PathMapper`.
+  `b:c` in Python. These differences predate `PathMapper`.
 - **URI rules.** Python accepts a one-letter scheme (`C://data`) for a URI
   rule; Rust rejects it, because `C://data` is a Windows path (see
   [is_uri](#scheme-must-be-at-least-two-characters)). For precedence, Python
   strips slashes from both ends of a URI path, so it counts `s3://b/a/` as
-  two components; Rust keeps the empty segment and counts three. Matching
-  and output for a single URI rule are the same.
+  two components; Rust keeps the empty segment and counts three. For a URI
+  rule, Python joins `str(destination_path) + separator + rest`, and a
+  `PurePath` keeps a trailing separator only on a root, so a root
+  destination still gives a doubled one (`s3://b` → `/` maps `s3://b/a` to
+  `//a`, and `s3://b` → `D:\` gives `D:\\a`), where Rust gives `/a` and
+  `D:\a`; and a whole-source match without a trailing separator drops one a
+  non-root destination ends with (`s3://b` → `/local/` maps `s3://b` to
+  `/local`), where Rust keeps it.
+  Matching for a single URI rule is the same.
