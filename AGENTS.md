@@ -138,7 +138,7 @@ Spec entry point: `specs/snapshots/README.md`
 surface, the Rust API, the WASM package layout, and the build pipeline may
 all change without notice.
 
-ECMAScript/WebAssembly bindings for `openjd-model` and `openjd-expr`. Depends on both via Cargo, compiles to `wasm32-unknown-unknown`, and produces an npm package via `wasm-bindgen`. Source is Rust (`src/lib.rs`, `src/model.rs`, `src/expr.rs`, `src/errors.rs`) alongside npm manifest, Vitest config, and JS-side integration tests (`js-tests/`).
+ECMAScript/WebAssembly bindings for `openjd-model` and `openjd-expr`. Depends on both via Cargo, compiles to `wasm32-unknown-unknown`, and produces an npm package via `wasm-bindgen`. Source is Rust (`src/lib.rs`, `src/model.rs`, `src/expr.rs`, `src/errors.rs`) alongside npm manifest, Vitest config, JS-side integration tests (`js-tests/`), and a hand-written package entry point (`index.js`, `index.d.ts`) that wraps the generated `pkg/` so `evaluate` borrows the `FunctionLibrary` it is given.
 
 Spec entry point: `specs/openjd-for-js/spec.md`
 

@@ -444,7 +444,7 @@ impl JsParsedExpression {
     /// Hidden from JS and TypeScript: `index.js` defines the public
     /// `ParsedExpression.prototype.evaluate(symbols, lib?, options?)`,
     /// which calls this or
-    /// [`__evaluate_with_library`](Self::__evaluate_with_library).
+    /// `__evaluateWithLibrary`.
     /// wasm-bindgen can only take an optional exported struct by value,
     /// which would use up the caller's `FunctionLibrary`; borrowing
     /// needs a required `&` argument, so the dispatch happens in JS.
@@ -463,7 +463,7 @@ impl JsParsedExpression {
 
     /// Evaluate the expression with `library`, which is borrowed: the
     /// caller keeps it and can pass it to later calls. Hidden; see
-    /// [`__evaluate`](Self::__evaluate).
+    /// `__evaluate`.
     #[wasm_bindgen(js_name = "__evaluateWithLibrary", skip_typescript)]
     pub fn __evaluate_with_library(
         &self,
@@ -591,8 +591,8 @@ pub fn parse_expression(expr: &str) -> Result<JsParsedExpression, JsError> {
 /// Evaluate an expression string without a function library. Hidden
 /// from JS and TypeScript: `index.js` defines the public
 /// `evaluateExpression(expr, symbols, lib?, options?)`, which calls this
-/// or [`__evaluate_expression_with_library`]. See
-/// [`JsParsedExpression::__evaluate`] for why the dispatch is in JS.
+/// or `__evaluateExpressionWithLibrary`. See
+/// `ParsedExpression.__evaluate` for why the dispatch is in JS.
 ///
 /// `options` (optional, plain-object shape) lets the host cap
 /// `memoryLimit` and/or `operationLimit` for this specific call.
@@ -609,7 +609,7 @@ pub fn __evaluate_expression(
 
 /// Evaluate an expression string with `library`, which is borrowed: the
 /// caller keeps it and can pass it to later calls. Hidden; see
-/// [`__evaluate_expression`].
+/// `__evaluateExpression`.
 #[wasm_bindgen(js_name = "__evaluateExpressionWithLibrary", skip_typescript)]
 pub fn __evaluate_expression_with_library(
     expr: &str,
