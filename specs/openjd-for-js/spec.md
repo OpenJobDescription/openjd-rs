@@ -98,8 +98,13 @@ a `FunctionLibrary` throws `expected instance of FunctionLibrary`. Because
 the types. Neither takes a library by value, so calling them directly is safe
 but not supported.
 
-Remove `index.js` once wasm-bindgen supports `Option<&T>` for exported structs
+Remove the library wrappers in `index.js` once wasm-bindgen supports `Option<&T>`
+for exported structs
 ([wasm-bindgen#4873](https://github.com/wasm-bindgen/wasm-bindgen/pull/4873)).
+Keep the argument check in `withPathMappingRules`, or move it to Rust: when
+wasm-bindgen's own conversion of `Vec<PathMappingRule>` meets an element of the
+wrong type, it throws without freeing what it had converted, and a few thousand
+such calls corrupt the wasm heap (`RuntimeError: memory access out of bounds`).
 
 ### Binding Pattern
 
@@ -391,7 +396,7 @@ Mirrors the Python binding's `__setitem__` / `__getitem__` / `__contains__` / `g
 
 | Static | `FunctionLibrary.default()` — Built-in functions |
 |---|---|
-| `withPathMappingRules(rules: PathMappingRule[])` | `FunctionLibrary` — Library with path mapping. `rules` may be any iterable of `PathMappingRule`. The rules are copied, so the caller's `PathMappingRule` objects stay usable. Throws when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit; the message names the rule's index |
+| `withPathMappingRules(rules: PathMappingRule[])` | `FunctionLibrary` — Library with path mapping. `rules` may be any iterable of `PathMappingRule`. The rules are copied, so the caller's `PathMappingRule` objects stay usable. Throws a `TypeError` when `rules` is not iterable (`rules must be an array (or other iterable) of PathMappingRule`) or an element is not a `PathMappingRule` (`rules[<i>] is not a PathMappingRule`), before calling into wasm. Throws when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit; the message names the rule's index |
 
 #### `PathMappingRule`
 
