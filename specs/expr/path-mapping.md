@@ -513,16 +513,17 @@ rule, UNC anchors), with these differences:
   `/local/` maps `/mnt` to `/local/` in Rust and `/local` in Python.
   Python also reads a remaining component that looks like a drive as one:
   with the rule `C:\a` → `D:\m`, `C:\a\b:c` gives `D:\m\b:c` in Rust and
-  `b:c` in Python. These differences predate `PathMapper`, except that before
-  it Rust also doubled the separator after a destination ending in one.
+  `b:c` in Python. These differences predate `PathMapper`.
 - **URI rules.** Python accepts a one-letter scheme (`C://data`) for a URI
   rule; Rust rejects it, because `C://data` is a Windows path (see
   [is_uri](#scheme-must-be-at-least-two-characters)). For precedence, Python
   strips slashes from both ends of a URI path, so it counts `s3://b/a/` as
   two components; Rust keeps the empty segment and counts three. For a URI
-  rule, Python joins `str(destination_path) + separator + rest`, so a
-  destination ending in a separator still gives a doubled one (`s3://b` →
-  `/` maps `s3://b/a` to `//a`), where Rust gives `/a`; and a whole-source
+  rule, Python joins `str(destination_path) + separator + rest`, and a
+  `PurePath` keeps a trailing separator only on a root, so a root
+  destination still gives a doubled one (`s3://b` → `/` maps `s3://b/a` to
+  `//a`, and `s3://b` → `D:\` gives `D:\\a`), where Rust gives `/a` and
+  `D:\a`; and a whole-source
   match without a trailing separator drops one the destination ends with
   (`s3://b` → `/local/` maps `s3://b` to `/local`), where Rust keeps it.
   Matching for a single URI rule is the same.
