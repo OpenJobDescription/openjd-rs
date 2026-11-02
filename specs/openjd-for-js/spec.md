@@ -39,8 +39,10 @@ openjd-rs/
 │   ├── openjd-sessions/      ← Runtime sessions (Rust, not exposed to JS)
 │   └── openjd-for-js/        ← WASM bindings crate — all JS concerns collocated
 │       ├── Cargo.toml        ← Rust crate manifest
-│       ├── package.json      ← npm manifest ("openjd-for-js")
+│       ├── package.json      ← npm manifest ("openjd-for-js"); main/types are index.js/index.d.ts
 │       ├── package-lock.json
+│       ├── index.js          ← package entry point; wraps pkg/ (see Package Entry Point)
+│       ├── index.d.ts        ← types for index.js (re-exports pkg/'s types)
 │       ├── vitest.config.ts  ← JS test runner config
 │       ├── src/              ← Rust sources
 │       │   ├── lib.rs         ← Module registration
@@ -59,6 +61,35 @@ Rust source → cargo build --target wasm32-unknown-unknown --release
            → wasm-bindgen --target web → .wasm + .js + .d.ts
            → package in crates/openjd-for-js/pkg/
 ```
+
+### Package Entry Point
+
+`index.js` is the package's entry point. It re-exports everything in
+`pkg/openjd_for_js.js` (including the default `init` export), then defines
+`evaluateExpression`, `ParsedExpression.prototype.evaluate`, and a wrapped
+`FunctionLibrary.withPathMappingRules`.
+
+It exists because wasm-bindgen 0.2.129 can take an exported Rust struct as an
+optional argument (`Option<T>`) only by value. That zeroes the caller's JS
+handle, so a `FunctionLibrary` passed to `evaluate` would be used up after one
+call, and a later call would silently run without it. A required `&T` argument
+is borrowed. So Rust exports, with `skip_typescript`:
+
+| Rust export (JS name) | Called by `index.js` for |
+|---|---|
+| `ParsedExpression.__evaluate(symbols, options)` | `evaluate` with no `lib` (`undefined` or `null`) |
+| `ParsedExpression.__evaluateWithLibrary(symbols, lib, options)` | `evaluate` with a `lib` |
+| `__evaluateExpression(expr, symbols, options)` | `evaluateExpression` with no `lib` |
+| `__evaluateExpressionWithLibrary(expr, symbols, lib, options)` | `evaluateExpression` with a `lib` |
+| `PathMappingRule.__clone()` | copying each rule before `withPathMappingRules`, which takes `Vec<PathMappingRule>` by value |
+
+The public signatures of `evaluate` and `evaluateExpression`, and the
+`EvalOptions` type, come from a `typescript_custom_section` in `src/expr.rs`,
+so they appear in the generated `pkg/openjd_for_js.d.ts`. A `lib` that is not
+a `FunctionLibrary` throws `expected instance of FunctionLibrary`.
+
+Remove `index.js` once wasm-bindgen supports `Option<&T>` for exported structs
+([wasm-bindgen#4873](https://github.com/wasm-bindgen/wasm-bindgen/pull/4873)).
 
 `npm run build` runs both steps. The `.wasm` is not run through `wasm-opt`
 yet; see [Size Budget](#size-budget).
@@ -144,7 +175,7 @@ Callers who want non-throwing validation use `try { decodeJobTemplate(...) } cat
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `evaluateExpression` | `(expr: string, symbols: SymbolTable, lib?: FunctionLibrary, options?: EvalOptions) → ExprValue` | Evaluate an EXPR extension expression. `options` lets the host cap memory and operation use per call; omit to use the built-in defaults. |
+| `evaluateExpression` | `(expr: string, symbols: SymbolTable, lib?: FunctionLibrary, options?: EvalOptions) → ExprValue` | Evaluate an EXPR extension expression. `lib` is borrowed: the caller keeps it, can pass it to later calls, and frees it. `options` lets the host cap memory and operation use per call; omit to use the built-in defaults. |
 | `parseExpression` | `(expr: string) → ParsedExpression` | Parse an expression for repeated evaluation. |
 | `getDefaultLibrary` | `() → FunctionLibrary` | Get the default function library (includes builtins like `len`, `str`, `int`, etc.). |
 | `getDefaultMemoryLimit` | `() → number` | Report the built-in memory budget (bytes) used when `EvalOptions.memoryLimit` is omitted. Informational only. |
@@ -334,7 +365,7 @@ Enum: `String`, `Int`, `Float`, `Bool`, `Path`, `RangeExpr`, `ListString`, `List
 
 | Constructor | Via `parseExpression(expr)` |
 |---|---|
-| `evaluate(symbols: SymbolTable, lib?: FunctionLibrary, options?: EvalOptions)` | `ExprValue` — `options` lets the host override the per-call memory/operation caps |
+| `evaluate(symbols: SymbolTable, lib?: FunctionLibrary, options?: EvalOptions)` | `ExprValue` — `lib` is borrowed: the caller keeps it, can pass it to later calls, and frees it. `options` lets the host override the per-call memory/operation caps |
 
 #### `SymbolTable`
 
@@ -353,7 +384,7 @@ Mirrors the Python binding's `__setitem__` / `__getitem__` / `__contains__` / `g
 
 | Static | `FunctionLibrary.default()` — Built-in functions |
 |---|---|
-| `withPathMappingRules(rules: PathMappingRule[])` | `FunctionLibrary` — Library with path mapping. Throws when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit; the message names the rule's index |
+| `withPathMappingRules(rules: PathMappingRule[])` | `FunctionLibrary` — Library with path mapping. The rules are copied, so the caller's `PathMappingRule` objects stay usable. Throws when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit; the message names the rule's index |
 
 #### `PathMappingRule`
 
