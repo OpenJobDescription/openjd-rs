@@ -5,8 +5,11 @@ import { dirname, join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // pkg/ is produced by `npm run build` as a sibling of this crate's
-// package.json, one directory up from js-tests/.
+// package.json, one directory up from js-tests/. Tests load the package
+// entry point, index.js, which re-exports pkg/ and adds the functions
+// that take an optional FunctionLibrary.
 const PKG_DIR = join(__dirname, "..", "pkg");
+const ENTRY = join(__dirname, "..", "index.js");
 
 let initialized = false;
 
@@ -16,8 +19,7 @@ export async function loadWasm() {
   const wasmPath = join(PKG_DIR, "openjd_for_js_bg.wasm");
   const wasmBytes = await readFile(wasmPath);
 
-  // Dynamic import of the generated JS glue
-  const mod = await import(join(PKG_DIR, "openjd_for_js.js"));
+  const mod = await import(ENTRY);
   await mod.default(wasmBytes);
   initialized = true;
   return mod;
@@ -25,5 +27,5 @@ export async function loadWasm() {
 
 export async function getModule() {
   await loadWasm();
-  return import(join(PKG_DIR, "openjd_for_js.js"));
+  return import(ENTRY);
 }
