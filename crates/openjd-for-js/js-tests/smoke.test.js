@@ -412,31 +412,6 @@ describe("FunctionLibrary.withPathMappingRules", () => {
     st.free();
   });
 
-  it("applies options when a library is passed", () => {
-    const st = new mod.SymbolTable();
-    const lib = mod.getDefaultLibrary();
-    const ops = "sum([i for i in range(100)])";
-    const opsError =
-      "Expression operation count (11) exceeded limit (10)\n" +
-      "  sum([i for i in range(100)])\n" +
-      "                  ^~~~~~~~~~";
-    const mem = "'x' * 1000000";
-    const memError =
-      "Expression memory usage (1000088 bytes) exceeded limit (1000 bytes)\n" +
-      "  'x' * 1000000\n" +
-      "  ~~~~^~~~~~~~~";
-    const parsedOps = mod.parseExpression(ops);
-    const parsedMem = mod.parseExpression(mem);
-    expect(() => parsedOps.evaluate(st, lib, { operationLimit: 10 })).toThrow(opsError);
-    expect(() => mod.evaluateExpression(ops, st, lib, { operationLimit: 10 })).toThrow(opsError);
-    expect(() => parsedMem.evaluate(st, lib, { memoryLimit: 1_000 })).toThrow(memError);
-    expect(() => mod.evaluateExpression(mem, st, lib, { memoryLimit: 1_000 })).toThrow(memError);
-    parsedOps.free();
-    parsedMem.free();
-    lib.free();
-    st.free();
-  });
-
   it("rejects a library argument that is not a FunctionLibrary", () => {
     const st = new mod.SymbolTable();
     const parsed = mod.parseExpression("1 + 1");
@@ -927,6 +902,31 @@ describe("evaluateExpression EvalOptions enforcement (F5)", () => {
 });
 
 describe("ParsedExpression.evaluate EvalOptions enforcement (F5)", () => {
+  it("applies options when a library is passed", () => {
+    const st = new mod.SymbolTable();
+    const lib = mod.getDefaultLibrary();
+    const ops = "sum([i for i in range(100)])";
+    const opsError =
+      "Expression operation count (11) exceeded limit (10)\n" +
+      "  sum([i for i in range(100)])\n" +
+      "                  ^~~~~~~~~~";
+    const mem = "'x' * 1000000";
+    const memError =
+      "Expression memory usage (1000088 bytes) exceeded limit (1000 bytes)\n" +
+      "  'x' * 1000000\n" +
+      "  ~~~~^~~~~~~~~";
+    const parsedOps = mod.parseExpression(ops);
+    const parsedMem = mod.parseExpression(mem);
+    expect(() => parsedOps.evaluate(st, lib, { operationLimit: 10 })).toThrow(opsError);
+    expect(() => mod.evaluateExpression(ops, st, lib, { operationLimit: 10 })).toThrow(opsError);
+    expect(() => parsedMem.evaluate(st, lib, { memoryLimit: 1_000 })).toThrow(memError);
+    expect(() => mod.evaluateExpression(mem, st, lib, { memoryLimit: 1_000 })).toThrow(memError);
+    parsedOps.free();
+    parsedMem.free();
+    lib.free();
+    st.free();
+  });
+
   it("respects memoryLimit override", () => {
     const parsed = mod.parseExpression("'x' * 1000000");
     const st = new mod.SymbolTable();
