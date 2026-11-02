@@ -47,7 +47,7 @@ FunctionLibrary.withPathMappingRules = function (rules) {
   // error thrown from inside wasm, such as its "array contains a value of
   // the wrong type" for a wrong-typed `Vec<PathMappingRule>` element or its
   // "null pointer passed to rust" for a freed object, leaves the wasm heap
-  // inconsistent, and a few thousand of them corrupt it. A non-iterable
+  // inconsistent, and some thousands to tens of thousands of them corrupt it. A non-iterable
   // would also be read as an empty list.
   if (rules == null || typeof rules[Symbol.iterator] !== "function") {
     throw new TypeError(
@@ -62,16 +62,22 @@ FunctionLibrary.withPathMappingRules = function (rules) {
         `FunctionLibrary.withPathMappingRules: rules[${i}] is not a PathMappingRule`,
       );
     }
-    // A freed rule, or an object made with Object.create(PathMappingRule.prototype),
-    // has no live wasm pointer. `__wbg_ptr` is wasm-bindgen's handle field.
-    if (!rule.__wbg_ptr) {
-      throw new TypeError(
-        `FunctionLibrary.withPathMappingRules: rules[${i}] has been freed`,
-      );
-    }
     checked.push(rule);
     i++;
   }
+  // Check the pointers only after iteration has finished: an iterator could
+  // free a rule it already yielded. No user code runs from here to the call.
+  // A freed rule, or an object made with Object.create(PathMappingRule.prototype),
+  // has no live wasm pointer. `__wbg_ptr` is wasm-bindgen's handle field, a
+  // positive 32-bit integer for a live object.
+  checked.forEach((rule, index) => {
+    const ptr = rule.__wbg_ptr;
+    if (!(Number.isInteger(ptr) && ptr > 0 && ptr <= 0xffffffff)) {
+      throw new TypeError(
+        `FunctionLibrary.withPathMappingRules: rules[${index}] has been freed`,
+      );
+    }
+  });
   // Copy only after every element passed, so a rejected call allocates
   // nothing and leaves the caller's rules as they were.
   return withPathMappingRules.call(
