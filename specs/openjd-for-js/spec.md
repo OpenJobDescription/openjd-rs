@@ -101,10 +101,15 @@ but not supported.
 Remove the library wrappers in `index.js` once wasm-bindgen supports `Option<&T>`
 for exported structs
 ([wasm-bindgen#4873](https://github.com/wasm-bindgen/wasm-bindgen/pull/4873)).
-Keep the argument check in `withPathMappingRules`, or move it to Rust: when
-wasm-bindgen's own conversion of `Vec<PathMappingRule>` meets an element of the
-wrong type, it throws without freeing what it had converted, and a few thousand
-such calls corrupt the wasm heap (`RuntimeError: memory access out of bounds`).
+Keep the argument check in `withPathMappingRules` when they go. An error that
+wasm-bindgen throws from inside wasm, such as `array contains a value of the
+wrong type` for a wrong-typed element of a `Vec<PathMappingRule>` or `null
+pointer passed to rust` for a freed object, leaves the wasm heap inconsistent,
+and a few thousand of them corrupt it (`RuntimeError: memory access out of
+bounds`). So the check must run in JS, or in Rust as a returned `Err`, not as
+a wasm-bindgen conversion error. Calling any method on a freed object has the
+same effect; that is a wasm-bindgen limitation this package does not guard
+against beyond `withPathMappingRules`.
 
 ### Binding Pattern
 
@@ -396,7 +401,7 @@ Mirrors the Python binding's `__setitem__` / `__getitem__` / `__contains__` / `g
 
 | Static | `FunctionLibrary.default()` — Built-in functions |
 |---|---|
-| `withPathMappingRules(rules: PathMappingRule[])` | `FunctionLibrary` — Library with path mapping. `rules` may be any iterable of `PathMappingRule`. The rules are copied, so the caller's `PathMappingRule` objects stay usable. Throws a `TypeError` when `rules` is not iterable (`rules must be an array (or other iterable) of PathMappingRule`) or an element is not a `PathMappingRule` (`rules[<i>] is not a PathMappingRule`), before calling into wasm. Throws when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit; the message names the rule's index |
+| `withPathMappingRules(rules: PathMappingRule[])` | `FunctionLibrary` — Library with path mapping. `rules` may be any iterable of `PathMappingRule`. The rules are copied, so the caller's `PathMappingRule` objects stay usable. Throws a `TypeError` when `rules` is not iterable (`rules must be an array (or other iterable) of PathMappingRule`), an element is not a `PathMappingRule` (`rules[<i>] is not a PathMappingRule`), or an element has been freed (`rules[<i>] has been freed`), before calling into wasm. Throws when a rule is invalid (a relative source path, or a path longer than 32 KiB) or the rules' trie would pass its size limit; the message names the rule's index |
 
 #### `PathMappingRule`
 
