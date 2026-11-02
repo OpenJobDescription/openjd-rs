@@ -207,9 +207,8 @@ impl JsPathMappingRule {
     }
 
     /// A copy of this rule. Hidden from JS and TypeScript: `index.js`
-    /// passes copies to [`JsFunctionLibrary::with_path_mapping_rules`],
-    /// which takes its rules by value, so the caller's rules are not used
-    /// up.
+    /// passes copies to `FunctionLibrary.withPathMappingRules`, which
+    /// takes its rules by value, so the caller's rules are not used up.
     #[wasm_bindgen(js_name = "__clone", skip_typescript)]
     pub fn __clone(&self) -> JsPathMappingRule {
         JsPathMappingRule {
