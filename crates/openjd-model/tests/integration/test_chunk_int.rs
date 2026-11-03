@@ -136,14 +136,36 @@ fn range_list_format_string() {
 }
 
 /// Template validation checks a CHUNK[INT] range list's format string
-/// elements, reporting at the element.
+/// elements, reporting each at its own element.
 #[test]
 fn range_list_format_string_undefined_variable() {
+    let err = decode_job_template(
+        yaml_val(&chunk_job(
+            r#"{"name": "foo", "type": "CHUNK[INT]", "range": [1, "{{Param.Nope}}", 3, "{{Param.Gone}}"], "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}}"#,
+        )),
+        Some(&["TASK_CHUNKING"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("undefined variables")
+    .to_string();
+    assert_eq!(
+        err,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n\
+         \tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'.\n  Param.Nope\n  ~~~~~~^~~~\n\
+         steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[3]:\n\
+         \tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Gone'.\n  Param.Gone\n  ~~~~~~^~~~"
+    );
+}
+
+/// The format strings of a CHUNK[INT] range expression are checked too.
+#[test]
+fn range_expression_format_string_undefined_variable() {
     check_err(
         &chunk_job(
-            r#"{"name": "foo", "type": "CHUNK[INT]", "range": [1, "{{Param.Nope}}"], "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}}"#,
+            r#"{"name": "foo", "type": "CHUNK[INT]", "range": "1-{{Param.Nope}}", "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}}"#,
         ),
-        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'.\n  Param.Nope\n  ~~~~~~^~~~"],
+        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range:\n\tFailed to parse interpolation expression at [2, 16]. Undefined variable: 'Param.Nope'.\n  Param.Nope\n  ~~~~~~^~~~"],
     );
 }
 

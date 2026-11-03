@@ -189,6 +189,47 @@ fn int_format_string_undefined_variable() {
     );
 }
 
+/// Template validation types a format string element as a list item
+/// (Expression Language §1.3.2), with the same target job creation uses, so a
+/// value that can never coerce to the element type fails `check`.
+#[test]
+fn numeric_range_list_element_static_type_error() {
+    for (param_type, target) in [
+        ("INT", "int | list[int] | nulltype"),
+        ("FLOAT", "float | int | list[float] | nulltype"),
+    ] {
+        let template = format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["EXPR"],
+            "name": "Test",
+            "parameterDefinitions": [{{"name": "B", "type": "BOOL", "default": true}}],
+            "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}, "parameterSpace": {{"taskParameterDefinitions": [
+                {{"name": "foo", "type": "{param_type}", "range": [1, "{{{{ null }}}}", "{{{{ [2] }}}}", "{{{{ Param.B }}}}", "{{{{ ['a'] }}}}"]}}
+            ]}}}}]
+        }}"#
+        );
+        let err = decode_job_template(
+            yaml_val(&template),
+            Some(&["EXPR"]),
+            &CallerLimits::default(),
+        )
+        .expect_err(param_type)
+        .to_string();
+        assert_eq!(
+            err,
+            format!(
+                "Model validation error: 2 validation errors for JobTemplate\n\
+                 steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[3]:\n\
+                 \tFailed to parse interpolation expression at [0, 13]. Cannot coerce bool to {target}\n  Param.B\n  ~~~~~~^\n\
+                 steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[4]:\n\
+                 \tFailed to parse interpolation expression at [0, 11]. Cannot coerce list[string] to {target}\n  ['a']\n  ^~~~~"
+            ),
+            "{param_type}"
+        );
+    }
+}
+
 #[test]
 fn int_format_string_unterminated() {
     check_err(

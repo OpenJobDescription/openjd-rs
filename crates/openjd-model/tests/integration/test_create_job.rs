@@ -1304,19 +1304,19 @@ fn test_create_job_int_range_list_format_string_whitespace_and_text() {
     assert_eq!(frame_int_list(&job), vec![10, 10, 110, -10]);
 }
 
-/// A format string element that resolves to something other than a base-10
-/// integer fails job creation, naming the parameter, the element, and the
-/// resolved text.
+/// A format string element with text around its expression resolves to a
+/// string, which must parse as a base-10 integer. Otherwise job creation
+/// fails, naming the parameter, the element, and the resolved text.
 #[test]
 fn test_create_job_int_range_list_format_string_not_an_integer() {
     for param_type in ["INT", "CHUNK[INT]"] {
         for (element, resolved) in [
-            ("{{Param.Text}}", "abc"),
+            ("x{{Param.Text}}", "xabc"),
             // The message quotes the resolved text before it is trimmed.
             (" {{Param.Text}} ", " abc "),
             // Resolving to nothing is not an integer, not out of range.
-            ("{{Param.Empty}}", ""),
-            ("{{Param.Ratio}}", "2.5"),
+            (" {{Param.Empty}} ", "  "),
+            ("{{Param.Ratio}} ", "2.5 "),
             ("1_{{Param.Value}}", "1_10"),
         ] {
             let err = parse_and_create_err(
@@ -1331,6 +1331,142 @@ fn test_create_job_int_range_list_format_string_not_an_integer() {
                 "{param_type} {element}"
             );
         }
+    }
+}
+
+/// A whole-field element is typed `int? | list[int]` (Expression Language
+/// §1.3.2), so a value that does not coerce to an integer fails with the
+/// coercion error and its caret, named by parameter and element.
+#[test]
+fn test_create_job_int_range_list_whole_field_does_not_coerce() {
+    for param_type in ["INT", "CHUNK[INT]"] {
+        for (expr, source_type, caret) in [
+            ("Param.Text", "string", "~~~~~~^~~~"),
+            ("Param.Empty", "string", "~~~~~~^~~~~"),
+            ("Param.Ratio", "float", "~~~~~~^~~~~"),
+        ] {
+            let err = parse_and_create_err(
+                &int_range_list_template(param_type, &format!(r#"[1, 2, "{{{{{expr}}}}}"]"#)),
+                &[],
+            );
+            assert_eq!(
+                err,
+                format!(
+                    "Expression error: Task parameter 'Frame' range[2]: Cannot coerce {source_type} to int | list[int] | nulltype\n  {expr}\n  {caret}"
+                ),
+                "{param_type} {expr}"
+            );
+        }
+    }
+}
+
+/// The resolved values of a FLOAT task parameter `Frame`, each as it renders.
+fn frame_float_renderings(job: &job::Job) -> Vec<String> {
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    match &ps.task_parameter_definitions["Frame"] {
+        job::TaskParameter::Float { range } => range.iter().map(|f| f.to_string()).collect(),
+        other => panic!("Expected Float, got {other:?}"),
+    }
+}
+
+/// Like `int_range_list_template`, with the EXPR extension and the list job
+/// parameters `Ints` (LIST[INT]), `Floats` (LIST[FLOAT]) and `Strs`
+/// (LIST[STRING]).
+fn expr_range_list_template(param_type: &str, range_json: &str) -> String {
+    int_range_list_template(param_type, range_json)
+        .replacen(
+            r#""specificationVersion": "jobtemplate-2023-09","#,
+            r#""specificationVersion": "jobtemplate-2023-09", "extensions": ["EXPR"],"#,
+            1,
+        )
+        .replacen(
+            r#""extensions": ["EXPR"],
+        "extensions": ["TASK_CHUNKING"],"#,
+            r#""extensions": ["EXPR", "TASK_CHUNKING"],"#,
+            1,
+        )
+        .replacen(
+            r#"{"name": "Value", "type": "INT", "default": 10},"#,
+            r#"{"name": "Value", "type": "INT", "default": 10},
+            {"name": "Ints", "type": "LIST[INT]", "default": [3, 4]},
+            {"name": "Floats", "type": "LIST[FLOAT]", "default": [2.5, 3.75]},
+            {"name": "Strs", "type": "LIST[STRING]", "default": ["a", "b"]},"#,
+            1,
+        )
+}
+
+/// Expression Language §1.3.2: a range list element is a list item. A
+/// whole-field `null` drops the element, and a list (or a range expression,
+/// which coerces to `list[int]`) flattens into one element per member.
+#[test]
+fn test_create_job_int_range_list_null_drops_and_list_flattens() {
+    for param_type in ["INT", "CHUNK[INT]"] {
+        let job = parse_and_create(
+            &expr_range_list_template(
+                param_type,
+                r#"[1, "{{ null }}", "{{ Param.Ints }}", "{{ range_expr('7-8') }}", "{{ 3.0 * 3 }}"]"#,
+            ),
+            &[],
+        );
+        assert_eq!(frame_int_list(&job), vec![1, 3, 4, 7, 8, 9], "{param_type}");
+    }
+}
+
+#[test]
+fn test_create_job_float_range_list_null_drops_and_list_flattens() {
+    let job = parse_and_create(
+        &expr_range_list_template(
+            "FLOAT",
+            r#"[1.5, "{{ null }}", "{{ Param.Floats }}", "{{ Param.Ints }}", "{{ Param.Value }}", "{{ Param.Ratio }}"]"#,
+        ),
+        &[("Ratio", "2.50")],
+    );
+    // An integer renders as written, a float keeps the spelling it was given,
+    // and the members of a list render like a whole-field range expression's.
+    assert_eq!(
+        frame_float_renderings(&job),
+        ["1.5", "2.5", "3.75", "3.0", "4.0", "10", "2.50"]
+    );
+}
+
+/// A list whose members do not coerce to the element type is rejected.
+#[test]
+fn test_create_job_range_list_element_list_of_wrong_type() {
+    for (param_type, target) in [
+        ("INT", "int | list[int] | nulltype"),
+        ("CHUNK[INT]", "int | list[int] | nulltype"),
+        ("FLOAT", "float | int | list[float] | nulltype"),
+    ] {
+        let err = parse_and_create_err(
+            &expr_range_list_template(param_type, r#"[1, "{{ Param.Strs }}"]"#),
+            &[],
+        );
+        assert_eq!(
+            err,
+            format!(
+                "Expression error: Task parameter 'Frame' range[1]: Cannot coerce list[string] to {target}\n  Param.Strs\n  ~~~~~~^~~~"
+            ),
+            "{param_type}"
+        );
+    }
+}
+
+/// The ≥1-element rule is checked at decode on the list as written, so a list
+/// whose every element drops is rejected at job creation.
+#[test]
+fn test_create_job_numeric_range_list_emptied_by_nulls() {
+    for param_type in ["INT", "CHUNK[INT]", "FLOAT"] {
+        let err = parse_and_create_err(
+            &expr_range_list_template(
+                param_type,
+                r#"["{{ null }}", "{{ null if Param.Value > 0 else 1 }}"]"#,
+            ),
+            &[],
+        );
+        assert_eq!(
+            err, "Validation error: Task parameter 'Frame' range has no elements after resolution",
+            "{param_type}"
+        );
     }
 }
 
@@ -3921,27 +4057,38 @@ fn test_create_job_float_range_string_non_finite() {
 
 #[test]
 fn test_create_job_float_range_resolved_string_non_finite() {
-    for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
-        let err = parse_and_create_err(
-            r#"{
+    let template = |element: &str| {
+        format!(
+            r#"{{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "Test",
-            "parameterDefinitions": [{"name": "Value", "type": "STRING"}],
-            "steps": [{
+            "parameterDefinitions": [{{"name": "Value", "type": "STRING"}}],
+            "steps": [{{
                 "name": "S",
-                "parameterSpace": {
-                    "taskParameterDefinitions": [{"name": "Weight", "type": "FLOAT", "range": ["{{Param.Value}}"]}]
-                },
-                "script": {"actions": {"onRun": {"command": "render"}}}
-            }]
-        }"#,
-            &[("Value", value)],
-        );
+                "parameterSpace": {{
+                    "taskParameterDefinitions": [{{"name": "Weight", "type": "FLOAT", "range": ["{element}"]}}]
+                }},
+                "script": {{"actions": {{"onRun": {{"command": "render"}}}}}}
+            }}]
+        }}"#
+        )
+    };
+    for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
+        // With text around the expression, the element resolves to a string,
+        // which must be a finite <floatstring>.
+        let err = parse_and_create_err(&template(" {{Param.Value}}"), &[("Value", value)]);
         assert_eq!(
             err,
             format!(
-                "Expression error: FLOAT parameter 'Weight' range value '{value}' is not finite"
+                "Expression error: FLOAT parameter 'Weight' range value ' {value}' is not finite"
             )
+        );
+        // A whole-field element is typed `float? | list[float]` (Expression
+        // Language §1.3.2), and a non-finite string does not coerce.
+        let err = parse_and_create_err(&template("{{Param.Value}}"), &[("Value", value)]);
+        assert_eq!(
+            err,
+            "Expression error: Task parameter 'Weight' range[0]: Cannot coerce string to float | int | list[float] | nulltype\n  Param.Value\n  ~~~~~~^~~~~"
         );
     }
 }

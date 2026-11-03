@@ -331,6 +331,33 @@ impl TaskParameterType {
         }
     }
 
+    /// The target type of a format string element of this parameter's
+    /// `range` list (Template Schemas §3.4.1). Each element is a list item,
+    /// so Expression Language §1.3.2 gives it `T? | list[T]`, where `T` is
+    /// the element type: `null` drops the element and a list flattens into
+    /// one element per member. STRING and PATH elements use `T = string`.
+    ///
+    /// A FLOAT element's target also accepts `int`, so an integer stays an
+    /// integer and renders as written (`10`, not `10.0`), the way the
+    /// `<floatstring>` it denotes would.
+    ///
+    /// Template validation and job creation both take the target from here,
+    /// so the two stages cannot disagree about what an element accepts.
+    pub(crate) fn range_list_item_target(&self) -> ExprType {
+        let mut choices = vec![ExprType::NULLTYPE];
+        let item = match self {
+            Self::Int | Self::ChunkInt => ExprType::INT,
+            Self::Float => {
+                choices.push(ExprType::INT);
+                ExprType::FLOAT
+            }
+            Self::String | Self::Path => ExprType::STRING,
+        };
+        choices.push(item.clone());
+        choices.push(ExprType::list(item));
+        ExprType::union(choices)
+    }
+
     /// Returns the canonical spec string.
     pub fn as_spec_str(&self) -> &'static str {
         match self {

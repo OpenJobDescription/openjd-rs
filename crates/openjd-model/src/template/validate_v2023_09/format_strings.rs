@@ -350,6 +350,15 @@ enum ResolvedConstraint<'a> {
     /// reference implementation, which accepts empty STRING elements
     /// (see `resolve_string_range` in create_job/ranges.rs).
     TextListItem { max_len: usize, forbid_empty: bool },
+    /// A format string element of an INT, CHUNK[INT] or FLOAT range list
+    /// (Template Schemas §3.4.1.1, §3.4.1.2), with the list-item `target`
+    /// from [`TaskParameterType::range_list_item_target`]: `null` skips the
+    /// element and a list flattens. Static typing against the target is
+    /// the whole check here. A value that only fails once known, such as a
+    /// string that does not parse as a number, fails at job creation.
+    ///
+    /// [`TaskParameterType::range_list_item_target`]: crate::types::TaskParameterType::range_list_item_target
+    NumericListItem { target: ExprType },
     /// A `hostRequirements` attribute value (§3.3.2.2): 100-char
     /// identifier-like values, or membership in the allowed set for a
     /// standard capability. Also a list item, with the same
@@ -429,11 +438,10 @@ impl ResolvedConstraint<'_> {
     fn target_type(&self) -> Option<ExprType> {
         match self {
             Self::Text { .. } | Self::CapabilityName { .. } => Some(ExprType::STRING),
-            Self::TextListItem { .. } | Self::AttributeValue { .. } => Some(ExprType::union(vec![
-                ExprType::NULLTYPE,
-                ExprType::STRING,
-                ExprType::list(ExprType::STRING),
-            ])),
+            Self::TextListItem { .. } | Self::AttributeValue { .. } => {
+                Some(crate::types::TaskParameterType::String.range_list_item_target())
+            }
+            Self::NumericListItem { target } => Some(target.clone()),
             Self::Float { .. } => Some(ExprType::union(vec![ExprType::FLOAT, ExprType::NULLTYPE])),
             Self::Int { nullable, .. } => {
                 if *nullable {
@@ -554,6 +562,8 @@ fn check_resolved_constraint(
             // creation re-checks that the list is non-empty after all
             // skips are applied.
         }
+        // Static typing already ran with the target. See the variant doc.
+        ResolvedConstraint::NumericListItem { .. } => {}
         ResolvedConstraint::ResolvedString { max_len } => {
             // `resolve_string_with` renders every value inline into one
             // string, so the display-form bound is a true lower bound on
@@ -896,11 +906,11 @@ fn validate_fs(
 /// Validate the format strings in an INT or CHUNK[INT] `range` at
 /// `range_path`: the whole-field `<IntRangeExpr>`, or each
 /// `<TaskParameterStringValue>` element of an `<IntRangeList>` (Template
-/// Schemas §3.4.1.1) at `range_path[k]`. No target type applies to either,
-/// because `resolve_int_range` gives neither one: a list element resolves to
-/// a string, and the expression is evaluated untyped and then, failing a
-/// range or list result, resolved to a string. Literal elements were checked
-/// at decode.
+/// Schemas §3.4.1.1) at `range_path[k]`. A list element is typed as a list
+/// item, with the target `resolve_int_range` resolves it with. The
+/// expression has no target: `resolve_int_range` evaluates it untyped and
+/// then, failing a range or list result, resolves it to a string. Literal
+/// elements were checked at decode.
 fn validate_int_range_fs(
     range: &crate::template::IntRange,
     symtab: &SymbolTable,
@@ -913,9 +923,19 @@ fn validate_int_range_fs(
             validate_fs(expr, symtab, ev, range_path, errors);
         }
         crate::template::IntRange::List(items) => {
+            let constraint = ResolvedConstraint::NumericListItem {
+                target: crate::types::TaskParameterType::Int.range_list_item_target(),
+            };
             for (k, item) in items.iter().enumerate() {
                 if let crate::template::IntOrFormatString::FormatString(fs) = item {
-                    validate_fs(fs, symtab, ev, &path_index(range_path, k), errors);
+                    validate_fs_with(
+                        fs,
+                        symtab,
+                        ev,
+                        &path_index(range_path, k),
+                        Some(&constraint),
+                        errors,
+                    );
                 }
             }
         }
@@ -1992,19 +2012,23 @@ pub fn validate_format_strings(
                         );
                     }
                     TaskParameterDefinition::FLOAT(t) => {
-                        // §3.4.1.2: an element that is a format string is
-                        // validated like any other; it resolves to a string at
-                        // job creation (`resolve_float_range`), so no target
-                        // type applies. Literal elements are skipped by
-                        // `validate_fs`.
+                        // §3.4.1.2: a format string element is typed as a
+                        // list item, with the target `resolve_float_range`
+                        // resolves it with. Literal elements are skipped by
+                        // `validate_fs_with`.
                         if let crate::template::FloatRange::List(items) = &t.range {
+                            let constraint = ResolvedConstraint::NumericListItem {
+                                target: crate::types::TaskParameterType::Float
+                                    .range_list_item_target(),
+                            };
                             for (k, item) in items.iter().enumerate() {
                                 if let crate::template::FloatRangeItem::FormatString(fs) = item {
-                                    validate_fs(
+                                    validate_fs_with(
                                         fs,
                                         &range_symtab,
                                         &template_ev,
                                         &path_index(&path_field(&p_path, "range"), k),
+                                        Some(&constraint),
                                         errors,
                                     );
                                 }
