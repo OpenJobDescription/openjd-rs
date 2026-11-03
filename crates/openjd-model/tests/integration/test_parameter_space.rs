@@ -239,6 +239,44 @@ fn numeric_range_list_element_static_type_error() {
     }
 }
 
+/// Element 0 is checked like any other, for INT and CHUNK[INT].
+#[test]
+fn int_range_list_first_element_validated() {
+    for (param_type, extensions, chunks) in [
+        ("INT", "", ""),
+        (
+            "CHUNK[INT]",
+            r#""extensions": ["TASK_CHUNKING"],"#,
+            r#", "chunks": {"defaultTaskCount": 1, "rangeConstraint": "NONCONTIGUOUS"}"#,
+        ),
+    ] {
+        let template = format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            {extensions}
+            "name": "Test",
+            "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}, "parameterSpace": {{"taskParameterDefinitions": [
+                {{"name": "foo", "type": "{param_type}", "range": ["{{{{Param.Nope}}}}"]{chunks}}}
+            ]}}}}]
+        }}"#
+        );
+        let err = decode_job_template(
+            yaml_val(&template),
+            Some(&["TASK_CHUNKING"]),
+            &CallerLimits::default(),
+        )
+        .expect_err(param_type)
+        .to_string();
+        assert_eq!(
+            err,
+            "Model validation error: 1 validation error for JobTemplate\n\
+             steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\
+             \tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'.\n  Param.Nope\n  ~~~~~~^~~~",
+            "{param_type}"
+        );
+    }
+}
+
 #[test]
 fn int_format_string_unterminated() {
     check_err(

@@ -141,9 +141,9 @@ pub(super) fn resolve_string_list(
 
 /// Resolve a StepParameterSpaceDefinition into a StepParameterSpace with concrete ranges.
 ///
-/// `expr` says whether the EXPR extension is active, which decides how a
-/// numeric range list element resolves (see
-/// `TaskParameterType::range_list_item_target`).
+/// `expr` says whether the template enables the EXPR extension (not whether
+/// the `create_job` context does), which decides how a numeric range list
+/// element resolves (see `TaskParameterType::range_list_item_target`).
 pub(super) fn resolve_parameter_space(
     ps: &template::StepParameterSpaceDefinition,
     symtab: &SymbolTable,

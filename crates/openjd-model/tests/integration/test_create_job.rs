@@ -1688,6 +1688,81 @@ fn test_create_job_chunk_int_range_list_format_string_beyond_bound() {
         err,
         "Validation error: Task parameter 'Frame': value 4611686018427387904 exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)"
     );
+    // The error names the parameter it is about.
+    let err = parse_and_create_err(
+        &int_range_list_template("CHUNK[INT]", r#"[1, "{{Param.Value}}"]"#).replacen(
+            r#""name": "Frame""#,
+            r#""name": "Shot""#,
+            1,
+        ),
+        &[("Value", "-4611686018427387904")],
+    );
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'Shot': value -4611686018427387904 exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)"
+    );
+}
+
+/// The 1024-element limit (Template Schemas §3.4) is checked at decode on the
+/// list as written, and again on the resolved list, which flattening can make
+/// longer.
+#[test]
+fn test_create_job_range_list_flattened_past_element_limit() {
+    // Each case: the type, the expression member, and the same value as a
+    // literal element.
+    for (param_type, member, literal) in [
+        ("INT", "1", "1"),
+        ("CHUNK[INT]", "1", "1"),
+        ("FLOAT", "1.5", "1.5"),
+        ("STRING", "'a'", r#""a""#),
+        ("PATH", "'a'", r#""a""#),
+    ] {
+        let flattened = format!(r#""{{{{ [{member}] * 1024 }}}}""#);
+        let job = parse_and_create(
+            &expr_range_list_template(param_type, &format!("[{flattened}]")),
+            &[],
+        );
+        let ps = job.steps[0].parameter_space.as_ref().unwrap();
+        let len = match &ps.task_parameter_definitions["Frame"] {
+            job::TaskParameter::Int { range, .. } | job::TaskParameter::ChunkInt { range, .. } => {
+                match range {
+                    job::TaskParamRange::List(v) => v.len(),
+                    other => panic!("Expected List, got {other:?}"),
+                }
+            }
+            job::TaskParameter::Float { range } => range.len(),
+            job::TaskParameter::String { range } | job::TaskParameter::Path { range } => {
+                range.len()
+            }
+        };
+        assert_eq!(len, 1024, "{param_type}");
+        let err = parse_and_create_err(
+            &expr_range_list_template(param_type, &format!("[{literal}, {flattened}]")),
+            &[],
+        );
+        assert_eq!(
+            err,
+            "Validation error: Task parameter 'Frame' range exceeds 1024 elements (1025 elements)",
+            "{param_type}"
+        );
+    }
+}
+
+/// An evaluation error in a STRING or PATH range list element fails job
+/// creation with the expression error and its caret.
+#[test]
+fn test_create_job_string_and_path_range_list_element_evaluation_error() {
+    for param_type in ["STRING", "PATH"] {
+        let err = parse_and_create_err(
+            &expr_range_list_template(param_type, r#"["a", "{{ 1 // (Param.Value - 10) }}"]"#),
+            &[],
+        );
+        assert_eq!(
+            err,
+            "Expression error: Division by zero\n  1 // (Param.Value - 10)\n  ~~^~~~~~~~~~~~~~~~~~~~~",
+            "{param_type}"
+        );
+    }
 }
 
 #[test]

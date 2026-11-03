@@ -344,7 +344,8 @@ impl TaskParameterType {
 
     /// The target type of a format string element of this parameter's
     /// `range` list (Template Schemas §3.4.1), or `None` when the element
-    /// resolves to a string. `expr` says whether the EXPR extension is active.
+    /// resolves to a string. `expr` says whether the template enables the
+    /// EXPR extension, not whether a wider context does.
     ///
     /// Each element is a list item, so Expression Language §1.3.2 gives it
     /// `T? | list[T]`, where `T` is the element type: `null` drops the

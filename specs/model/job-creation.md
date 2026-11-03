@@ -252,8 +252,9 @@ budgets template validation and the session runtime apply.
      For a whole-field list-item expression the target's coercion applies
      (Expression Language §1.2.3), as for the chunks fields above: `{{ 3.0 }}` is 3
      in an INT range, a STRING job parameter `"7"` is 7, and a value that cannot
-     coerce, such as a STRING `"abc"` or `" 7 "`, or a `list[string]`, fails with
-     the coercion error, for example `Task parameter '<name>' range[<k>]: Cannot
+     coerce, such as a STRING `"abc"` or `" 7 "`, or a `list[string]` with a
+     non-numeric member (`["a"]`; `["1", "2"]` coerces member by member to `[1, 2]`),
+     fails with the coercion error, for example `Task parameter '<name>' range[<k>]: Cannot
      coerce string to int | list[int] | nulltype`, followed by the expression and
      its caret. Evaluation errors in INT, CHUNK[INT] and FLOAT elements are reported
      the same way. CHUNK[INT] then applies its value bound to the resolved list.
@@ -273,7 +274,8 @@ budgets template validation and the session runtime apply.
      FLOAT elements, only to STRING and PATH ones. An INT element only has to parse,
      and a FLOAT element longer than the limit keeps its value but not its text
      (see `float_range_value`). The reference implementation applies no limit to
-     them either.
+     an element that parses as a number either. It does apply the limit to one that
+     does not, which openjd-rs rejects at any length.
 
      **Divergence from the Python reference:** openjd-model-for-python 0.14 does
      not apply §1.3.2 to range list elements of any type, with or without EXPR. It
@@ -286,7 +288,8 @@ budgets template validation and the session runtime apply.
      `７`), and integers of any size, all of which openjd-rs rejects. The same
      applies to a literal `<intstring>` element, which openjd-rs rejects at decode
      with `Cannot parse '1_10' as integer`. When `int()` fails, Python keeps the
-     text as the value of an INT task parameter (`abc`, `2.5`) and raises an
+     text, if at most 1024 characters, as the value of an INT task parameter
+     (`abc`, `2.5`) and raises an
      uncaught `ValueError` for a CHUNK[INT] one. §3.4.1.1 requires a base-10
      integer, so openjd-rs rejects a resolved value like these at job creation and
      a literal one at decode. Python's template validation also does no static
