@@ -271,9 +271,9 @@ impl TempDir {
 
     /// Remove the directory and all contents.
     ///
-    /// On Windows a failed removal is retried after each delay in
-    /// [`CLEANUP_RETRY_DELAYS`], because a process that has just exited, or been
-    /// terminated, can hold its file handles for a short time afterwards.
+    /// On Windows a failed removal is retried after 1 s and then 2 s, because a
+    /// process that has just exited, or been terminated, can hold its file
+    /// handles for a short time afterwards.
     pub fn cleanup(&mut self) -> Result<(), SessionError> {
         if self.cleaned_up {
             return Ok(());
@@ -298,10 +298,11 @@ impl TempDir {
 /// handle to it. Other platforms do not retry: a failure there is a permission
 /// problem that waiting will not fix.
 #[cfg(windows)]
-pub const CLEANUP_RETRY_DELAYS: &[Duration] = &[Duration::from_secs(1), Duration::from_secs(2)];
+pub(crate) const CLEANUP_RETRY_DELAYS: &[Duration] =
+    &[Duration::from_secs(1), Duration::from_secs(2)];
 /// Delays before each retry of a failed [`TempDir::cleanup`]. None off Windows.
 #[cfg(not(windows))]
-pub const CLEANUP_RETRY_DELAYS: &[Duration] = &[];
+pub(crate) const CLEANUP_RETRY_DELAYS: &[Duration] = &[];
 
 /// Calls `remove` on `path`, and again after each of `delays` until it succeeds.
 ///
@@ -548,6 +549,7 @@ mod tests {
         let held = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(false)
             .share_mode(0)
             .open(td.path().join("locked.bin"))
             .unwrap();
@@ -570,6 +572,7 @@ mod tests {
         let held = std::fs::OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(false)
             .share_mode(0)
             .open(td.path().join("locked.bin"))
             .unwrap();

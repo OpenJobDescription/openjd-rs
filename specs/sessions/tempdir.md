@@ -168,3 +168,17 @@ This matches openjd-sessions-for-python PR #348, with two differences:
    characters after `embedded_files`; that difference is not yet resolved.
 
 Both are stored in the `Session` struct and cleaned up by `Session::cleanup()`.
+
+### Cleanup retries on Windows
+
+On Windows, `TempDir::cleanup()` retries a failed `remove_dir_all` after 1 s and then
+2 s, so cleanup can block for about 3 s per directory. A process that has exited or
+been terminated can still hold handles in the directory for a short time, and Windows
+will not delete a file while a handle to it is open. `NotFound` on a retry counts as
+success, because the attempt that failed may still have removed the directory.
+`NotFound` on the first attempt is still an error. Other platforms do not retry: a
+failure there is a permission problem that waiting will not fix. This matches Python's
+`TempDir.cleanup`.
+
+`Session::cleanup()` logs each directory it could not remove at error level, with the
+path and the reason, and continues.
