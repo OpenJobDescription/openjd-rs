@@ -489,8 +489,9 @@ by both `INT` and `CHUNK[INT]`) and the type of the two `ChunksDefinition`
 count fields. A JSON integer, an integer-valued float, or a string that
 parses as a base-10 integer (surrounding whitespace allowed) decodes to
 `Int`. A string containing `{{` decodes to `FormatString`, which is
-resolved at job creation. Decoding fails for any other string, a
-non-integral float, a boolean or `null`. `as_i64()` returns the integer of
+resolved at job creation, or fails to decode when it is not a valid
+format string. Decoding also fails for any other string, a non-integral
+float, a boolean or `null`. `as_i64()` returns the integer of
 an `Int`, or `None` for a `FormatString`.
 
 `FlexInt` and `FlexFloat` are coercion-permissive newtypes around

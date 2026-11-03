@@ -1304,24 +1304,73 @@ fn test_create_job_int_range_list_format_string_whitespace_and_text() {
 }
 
 /// A format string element that resolves to something other than a base-10
-/// integer fails job creation, naming the parameter and the resolved text.
+/// integer fails job creation, naming the parameter, the element, and the
+/// resolved text.
 #[test]
 fn test_create_job_int_range_list_format_string_not_an_integer() {
     for param_type in ["INT", "CHUNK[INT]"] {
-        for (element, resolved) in [("{{Param.Text}}", "abc"), ("{{Param.Ratio}}", "2.5")] {
+        for (element, resolved) in [
+            ("{{Param.Text}}", "abc"),
+            ("{{Param.Ratio}}", "2.5"),
+            ("1_{{Param.Value}}", "1_10"),
+        ] {
             let err = parse_and_create_err(
-                &int_range_list_template(param_type, &format!(r#"[1, "{element}"]"#)),
+                &int_range_list_template(param_type, &format!(r#"[1, 2, "{element}"]"#)),
                 &[],
             );
             assert_eq!(
                 err,
                 format!(
-                    "Expression error: Task parameter 'Frame' range value '{resolved}' is not an integer"
+                    "Expression error: Task parameter 'Frame' range[2]: value '{resolved}' is not an integer"
                 ),
                 "{param_type} {element}"
             );
         }
     }
+}
+
+/// An integer that does not fit in an i64 is reported as out of range, not
+/// as "not an integer".
+#[test]
+fn test_create_job_int_range_list_format_string_out_of_range() {
+    for (value, resolved) in [
+        (
+            "9{{Param.Value}}000000000000000000",
+            "910000000000000000000",
+        ),
+        (
+            "-9{{Param.Value}}000000000000000000",
+            "-910000000000000000000",
+        ),
+    ] {
+        let err = parse_and_create_err(
+            &int_range_list_template("INT", &format!(r#"["{value}"]"#)),
+            &[],
+        );
+        assert_eq!(
+            err,
+            format!(
+                "Expression error: Task parameter 'Frame' range[0]: value '{resolved}' is out of range for a 64-bit integer"
+            ),
+        );
+    }
+}
+
+/// An evaluation error in an element is reported with the parameter and the
+/// element, followed by the expression error and its caret.
+#[test]
+fn test_create_job_int_range_list_format_string_evaluation_error() {
+    let template = int_range_list_template("INT", r#"[1, "{{ 5 // (Param.Value - 10) }}"]"#)
+        .replacen(
+            r#""specificationVersion": "jobtemplate-2023-09","#,
+            r#""specificationVersion": "jobtemplate-2023-09", "extensions": ["EXPR"],"#,
+            1,
+        );
+    let err = parse_and_create_err(&template, &[]);
+    assert_eq!(
+        err,
+        "Expression error: Task parameter 'Frame' range[1]: Division by zero\n  5 // (Param.Value - 10)\n  ~~^~~~~~~~~~~~~~~~~~~~~"
+    );
 }
 
 /// The resolved value goes through the same CHUNK[INT] value bound as a

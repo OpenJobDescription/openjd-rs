@@ -896,9 +896,11 @@ fn validate_fs(
 /// Validate the format strings in an INT or CHUNK[INT] `range` at
 /// `range_path`: the whole-field `<IntRangeExpr>`, or each
 /// `<TaskParameterStringValue>` element of an `<IntRangeList>` (Template
-/// Schemas §3.4.1.1) at `range_path[k]`. No target type applies to either:
-/// job creation resolves both to strings (`resolve_int_range`). Literal
-/// elements were checked at decode.
+/// Schemas §3.4.1.1) at `range_path[k]`. No target type applies to either,
+/// because `resolve_int_range` gives neither one: a list element resolves to
+/// a string, and the expression is evaluated untyped and then, failing a
+/// range or list result, resolved to a string. Literal elements were checked
+/// at decode.
 fn validate_int_range_fs(
     range: &crate::template::IntRange,
     symtab: &SymbolTable,

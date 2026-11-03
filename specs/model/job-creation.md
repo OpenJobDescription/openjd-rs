@@ -220,18 +220,35 @@ budgets template validation and the session runtime apply.
      treatment in `instantiate`. String-backed FLOAT range elements are trimmed
      and must resolve to finite `f64` values. Format string elements of an INT or
      CHUNK[INT] range list (Template Schemas §3.4.1.1 `<TaskParameterStringValue>`)
-     resolve to a string, are trimmed, and must parse as an `i64`; otherwise job
-     creation fails with `Task parameter '<name>' range value '<resolved>' is not an
-     integer`. CHUNK[INT] then applies its value bound to the resolved list. INT and
-     FLOAT list elements do not get the §1.3.2 list-item treatment that STRING/PATH
-     elements do: an element resolves to exactly one value, so a whole-field `null`
-     or list is an error rather than a skip or a flatten. This matches the reference
-     implementation, which resolves numeric range elements to strings too. Applying
-     §1.3.2 to numeric list elements is a known gap in both. **Divergence from the
-     Python reference:** openjd-model-for-python 0.14 does not check the resolved
-     string, so an INT element that resolves to `abc` or `2.5` becomes a task
-     parameter value of that text. §3.4.1.1 requires it to resolve to a base-10
-     integer, so openjd-rs rejects it at job creation.
+     resolve to a string, are trimmed, and must parse as an `i64` (Rust's integer
+     syntax: an optional sign and ASCII digits). Otherwise job creation fails with
+     `Task parameter '<name>' range[<k>]: value '<resolved>' is not an integer`, or
+     `... is out of range for a 64-bit integer` when it is an integer that does not
+     fit. An evaluation error is reported as `Task parameter '<name>' range[<k>]: `
+     followed by the expression error. CHUNK[INT] then applies its value bound to the
+     resolved list.
+
+     INT and FLOAT list elements do not get the §1.3.2 treatment that STRING/PATH
+     elements do. An element resolves to exactly one string with no target type, so
+     a whole-field `null` or list is an error rather than a skip or a flatten, and
+     there is no target-type coercion: `{{ 3.0 }}` resolves to `3.0`, which is not
+     an integer, where the `chunks.defaultTaskCount` field above coerces it to 3.
+     The reference implementation also resolves numeric range elements to strings.
+     Applying §1.3.2 to numeric list elements is a known gap in both.
+
+     The §3.4.2 limit of 1024 characters after resolution is not applied to INT or
+     FLOAT elements, only to STRING and PATH ones. An INT element only has to parse,
+     and a FLOAT element longer than the limit keeps its value but not its text
+     (see `resolve_float_range`). The reference implementation applies no limit
+     to them either.
+
+     **Divergence from the Python reference:** openjd-model-for-python 0.14 converts
+     a resolved INT or CHUNK[INT] element with Python's `int()`. That accepts
+     underscores (`1_10` is 110) and integers of any size, both of which openjd-rs
+     rejects. When `int()` fails, Python keeps the text as the value of an INT task
+     parameter (`abc`, `2.5`) and raises an uncaught `ValueError` for a CHUNK[INT]
+     one. §3.4.1.1 requires a base-10 integer, so openjd-rs rejects all of these
+     at job creation with the errors above.
    - Step-level let bindings (template scope; a failure is reported at
      `steps[i] -> let[j]` — see the carried-forward checks below)
 3. With EXPR extension: inject `Job.Name` (before step instantiation)

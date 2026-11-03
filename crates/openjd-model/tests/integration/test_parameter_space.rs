@@ -722,6 +722,20 @@ fn int_disallow_float_strings() {
     );
 }
 
+// INT failure: only `{{` starts a format string, so a string with single
+// braces is a literal and must parse as an integer.
+#[test]
+fn int_literal_string_with_single_braces_not_int() {
+    for literal in ["{5}", "1}}"] {
+        check_err(
+            &job_with_param_space(&format!(
+                r#"{{"taskParameterDefinitions": [{{"name": "foo", "type": "INT", "range": ["{literal}"]}}]}}"#
+            )),
+            &[&format!("Cannot parse '{literal}' as integer")],
+        );
+    }
+}
+
 // INT failure: literal string not an int
 #[test]
 fn int_literal_string_not_int() {

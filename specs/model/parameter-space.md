@@ -141,9 +141,10 @@ A literal (`{{`-free) range expression is also checked during template validatio
 range expression error: value <v> exceeds the CHUNK[INT] range value bound (magnitude must be
 below 2^62)`.
 
-**Deviation from Template Schemas §3.4.1.5:** a `CHUNK[INT]` range is an `<IntRangeExpr>` or
-a list of `<Int>`, and `<Int>` is any integer value (§3.4.1.1.1), so the bound is a limit of
-this implementation, not of the specification.
+**Deviation from Template Schemas §3.4.1.5:** a `CHUNK[INT]` range is an `<IntRangeList>` or
+an `<IntRangeExpr>`, whose values can be any integer (§3.4.1.1, §3.4.1.1.1), so the bound is a
+limit of this implementation, not of the specification. It applies to a list's values after
+any format string elements are resolved.
 
 **Divergence from the Python reference:** openjd-model-for-python has no such bound: with
 range `"1-3,4611686018427387904"` and `NONCONTIGUOUS`, its CLI runs a chunk

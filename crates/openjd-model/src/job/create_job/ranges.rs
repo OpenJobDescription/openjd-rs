@@ -286,25 +286,11 @@ fn resolve_int_range(
         template::IntRange::List(items) => {
             let ints = items
                 .iter()
-                .map(|item| match item {
+                .enumerate()
+                .map(|(k, item)| match item {
                     template::IntOrFormatString::Int(i) => Ok(*i),
-                    // Template Schemas §3.4.1.1: a `<TaskParameterStringValue>`
-                    // element must resolve to a base-10 integer. It resolves to
-                    // a string and parses like an `<intstring>`, surrounding
-                    // whitespace tolerated — the same treatment as a FLOAT
-                    // list's format string elements in `resolve_float_range`,
-                    // and the reference implementation's. Expression Language
-                    // §1.3.2 list-item typing (`int? | list[int]`) is not
-                    // applied; see specs/model/job-creation.md.
                     template::IntOrFormatString::FormatString(fs) => {
-                        let resolved = fs
-                            .resolve_string_with(symtab, &budgets.fs_options())
-                            .map_err(ModelError::Expression)?;
-                        resolved.trim().parse::<i64>().map_err(|_| {
-                            ModelError::Expression(ExpressionError::new(format!(
-                                "Task parameter '{param_name}' range value '{resolved}' is not an integer"
-                            )))
-                        })
+                        resolve_int_range_list_element(fs, k, symtab, param_name, budgets)
                     }
                 })
                 .collect::<Result<Vec<i64>, ModelError>>()?;
@@ -366,6 +352,38 @@ fn resolve_int_range(
             Ok(job::TaskParamRange::RangeExpr(range_expr))
         }
     }
+}
+
+/// Resolve element `k` of an `<IntRangeList>`, a `<TaskParameterStringValue>`
+/// that Template Schemas §3.4.1.1 requires to resolve to a base-10 integer.
+///
+/// It resolves to a string and parses like an `<intstring>`, with surrounding
+/// whitespace tolerated, the same way `resolve_float_range` treats a FLOAT
+/// list's format string elements. Expression Language §1.3.2 list-item typing
+/// (`int? | list[int]`) is not applied; see specs/model/job-creation.md. Errors
+/// name the parameter and `range[k]`.
+fn resolve_int_range_list_element(
+    fs: &openjd_expr::FormatString,
+    k: usize,
+    symtab: &SymbolTable,
+    param_name: &str,
+    budgets: super::EvalBudgets,
+) -> Result<i64, ModelError> {
+    let context = format!("Task parameter '{param_name}' range[{k}]");
+    let resolved = fs
+        .resolve_string_with(symtab, &budgets.fs_options())
+        .map_err(|e| ModelError::Expression(ExpressionError::new(format!("{context}: {e}"))))?;
+    resolved.trim().parse::<i64>().map_err(|e| {
+        let problem = match e.kind() {
+            std::num::IntErrorKind::PosOverflow | std::num::IntErrorKind::NegOverflow => {
+                "is out of range for a 64-bit integer"
+            }
+            _ => "is not an integer",
+        };
+        ModelError::Expression(ExpressionError::new(format!(
+            "{context}: value '{resolved}' {problem}"
+        )))
+    })
 }
 
 /// A `Float64` with no preserved spelling — a `<float>` literal, or a value whose

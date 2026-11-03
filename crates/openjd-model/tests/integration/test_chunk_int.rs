@@ -135,6 +135,30 @@ fn range_list_format_string() {
     decode_ok(s);
 }
 
+/// Template validation checks a CHUNK[INT] range list's format string
+/// elements, reporting at the element.
+#[test]
+fn range_list_format_string_undefined_variable() {
+    check_err(
+        &chunk_job(
+            r#"{"name": "foo", "type": "CHUNK[INT]", "range": [1, "{{Param.Nope}}"], "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}}"#,
+        ),
+        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'.\n  Param.Nope\n  ~~~~~~^~~~"],
+    );
+}
+
+/// Ported from Python test_chunk_int_task_parameter_type.py "malformed format
+/// string in range".
+#[test]
+fn range_list_malformed_format_string() {
+    check_err(
+        &chunk_job(
+            r#"{"name": "foo", "type": "CHUNK[INT]", "range": ["{{ Job.Parameter.Foo"], "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}}"#,
+        ),
+        &["Failed to parse interpolation expression at [0, 20]. Reason: Braces mismatch.\n  {{ Job.Parameter.Foo\n  ^~"],
+    );
+}
+
 #[test]
 fn target_runtime_seconds_zero() {
     decode_ok(&chunk_job(

@@ -290,10 +290,13 @@ pub struct ChunkIntTaskParameterDefinition {
 /// [`ChunksDefinition`] count fields.
 ///
 /// Accepts:
-/// - YAML integer → `IntOrFormatString::Int(n)`
-/// - String that parses as i64 → `IntOrFormatString::Int(n)`
-/// - String containing `{{…}}` → `IntOrFormatString::FormatString(fs)`
-/// - Boolean/null → error
+/// - YAML integer, or integer-valued float such as `4.0` → `IntOrFormatString::Int(n)`
+/// - String that parses as i64, surrounding whitespace allowed → `IntOrFormatString::Int(n)`
+/// - String containing `{{` that parses as a format string →
+///   `IntOrFormatString::FormatString(fs)`
+///
+/// Rejects any other string (including a malformed format string), a
+/// non-integral float, a boolean, and null.
 #[derive(Debug, Clone)]
 #[allow(
     missing_docs,
