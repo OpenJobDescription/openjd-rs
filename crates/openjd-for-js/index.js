@@ -47,8 +47,8 @@ FunctionLibrary.withPathMappingRules = function (rules) {
   // error thrown from inside wasm, such as its "array contains a value of
   // the wrong type" for a wrong-typed `Vec<PathMappingRule>` element or its
   // "null pointer passed to rust" for a freed object, leaves the wasm heap
-  // inconsistent, and some thousands to tens of thousands of them corrupt it. A non-iterable
-  // would also be read as an empty list.
+  // inconsistent, and some thousands to tens of thousands of them corrupt
+  // it. A non-iterable would also be read as an empty list.
   if (rules == null || typeof rules[Symbol.iterator] !== "function") {
     throw new TypeError(
       "FunctionLibrary.withPathMappingRules: rules must be an array (or other iterable) of PathMappingRule",
@@ -66,7 +66,9 @@ FunctionLibrary.withPathMappingRules = function (rules) {
     i++;
   }
   // Check the pointers only after iteration has finished: an iterator could
-  // free a rule it already yielded. No user code runs from here to the call.
+  // free a rule it already yielded. After this point no code the caller
+  // passed in runs, except from hostile objects (getters, Proxies) or
+  // replaced built-ins, which can misuse the raw wasm-bindgen glue anyway.
   // A freed rule, or an object made with Object.create(PathMappingRule.prototype),
   // has no live wasm pointer. `__wbg_ptr` is wasm-bindgen's handle field, a
   // positive 32-bit integer for a live object.
