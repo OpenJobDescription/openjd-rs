@@ -423,6 +423,53 @@ describe("FunctionLibrary.withPathMappingRules", () => {
     st.free();
   });
 
+  it("rejects a freed library before calling into wasm", () => {
+    const st = new mod.SymbolTable();
+    const parsed = mod.parseExpression("1 + 1");
+    const lib = mod.getDefaultLibrary();
+    lib.free();
+    const forged = Object.create(mod.FunctionLibrary.prototype);
+    for (const bad of [lib, forged]) {
+      for (const [call, caller] of [
+        [() => parsed.evaluate(st, bad), "ParsedExpression.evaluate"],
+        [() => parsed.evaluate(st, bad, { operationLimit: 10 }), "ParsedExpression.evaluate"],
+        [() => mod.evaluateExpression("1 + 1", st, bad), "evaluateExpression"],
+      ]) {
+        let error;
+        try {
+          call();
+        } catch (e) {
+          error = e;
+        }
+        expect(error).toBeInstanceOf(TypeError);
+        expect(error.message).toBe(`${caller}: lib has been freed`);
+      }
+    }
+    // Inside wasm, the error left `parsed` marked as borrowed, so freeing
+    // it threw "attempted to take ownership of Rust value while it was
+    // borrowed".
+    expect(() => parsed.free()).not.toThrow();
+    st.free();
+  });
+
+  it("survives many calls with a freed library", () => {
+    // Inside wasm, call 8,187 failed with "memory access out of bounds".
+    const st = new mod.SymbolTable();
+    const parsed = mod.parseExpression("1 + 1");
+    const lib = mod.getDefaultLibrary();
+    lib.free();
+    for (let n = 0; n < 30_000; n++) {
+      expect(() => parsed.evaluate(st, lib)).toThrow(TypeError);
+      expect(() => mod.evaluateExpression("1 + 1", st, lib)).toThrow(TypeError);
+    }
+    const good = mod.getDefaultLibrary();
+    const r = parsed.evaluate(st, good);
+    expect(r.toString()).toBe("2");
+    r.free();
+    good.free();
+    parsed.free();
+    st.free();
+  });
   it("rejects an argument that is not an iterable of live PathMappingRules", () => {
     const rule = new mod.PathMappingRule(mod.PathFormat.Posix, "/mnt", "/local");
     const freed = new mod.PathMappingRule(mod.PathFormat.Posix, "/b", "/y");

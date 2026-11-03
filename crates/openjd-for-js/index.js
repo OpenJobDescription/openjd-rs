@@ -10,13 +10,14 @@
 // argument is borrowed instead. So Rust exports one entry point without a
 // library and one that borrows a required library, and the functions below
 // pick between them. `withPathMappingRules` takes its rules by value for the
-// same reason, so it is given copies. It also checks its argument first,
-// because a wasm-bindgen error thrown from inside wasm leaves the heap
-// inconsistent and repeated ones corrupt it.
+// same reason, so it is given copies. Both check their arguments first
+// (a freed `lib`; wrong-typed or freed rules), because a wasm-bindgen error
+// thrown from inside wasm leaves the heap inconsistent and repeated ones
+// corrupt it.
 //
 // The library wrappers can go once wasm-bindgen supports `Option<&T>` for
 // exported structs (https://github.com/wasm-bindgen/wasm-bindgen/pull/4873);
-// the argument check in withPathMappingRules has to stay or move to Rust.
+// the argument checks have to stay or move to Rust.
 
 import {
   FunctionLibrary,
@@ -29,16 +30,36 @@ import {
 export * from "./pkg/openjd_for_js.js";
 export { default } from "./pkg/openjd_for_js.js";
 
+// True if `obj` holds a live wasm pointer. `__wbg_ptr` is wasm-bindgen's
+// handle field: a positive 32-bit integer for a live object, and 0 once the
+// object is freed (or for an object made with Object.create(Class.prototype)).
+// Passing a dead object into wasm makes wasm-bindgen throw "null pointer
+// passed to rust" from inside wasm, which skips wasm's stack cleanup: one
+// call leaves the receiver marked as borrowed, and some thousands corrupt the
+// wasm heap. So every object this file passes to wasm is checked first.
+function isLive(obj) {
+  const ptr = obj.__wbg_ptr;
+  return Number.isInteger(ptr) && ptr > 0 && ptr <= 0xffffffff;
+}
+
+// A `lib` that is not a FunctionLibrary is left to wasm-bindgen's own
+// `expected instance of FunctionLibrary` check, which throws in JS.
+function checkLibrary(lib, caller) {
+  if (lib instanceof FunctionLibrary && !isLive(lib)) {
+    throw new TypeError(`${caller}: lib has been freed`);
+  }
+}
+
 ParsedExpression.prototype.evaluate = function evaluate(symbols, lib, options) {
-  return lib == null
-    ? this.__evaluate(symbols, options)
-    : this.__evaluateWithLibrary(symbols, lib, options);
+  if (lib == null) return this.__evaluate(symbols, options);
+  checkLibrary(lib, "ParsedExpression.evaluate");
+  return this.__evaluateWithLibrary(symbols, lib, options);
 };
 
 export function evaluateExpression(expr, symbols, lib, options) {
-  return lib == null
-    ? __evaluateExpression(expr, symbols, options)
-    : __evaluateExpressionWithLibrary(expr, symbols, lib, options);
+  if (lib == null) return __evaluateExpression(expr, symbols, options);
+  checkLibrary(lib, "evaluateExpression");
+  return __evaluateExpressionWithLibrary(expr, symbols, lib, options);
 }
 
 const withPathMappingRules = FunctionLibrary.withPathMappingRules;
@@ -69,12 +90,8 @@ FunctionLibrary.withPathMappingRules = function (rules) {
   // free a rule it already yielded. After this point no code the caller
   // passed in runs, except from hostile objects (getters, Proxies) or
   // replaced built-ins, which can misuse the raw wasm-bindgen glue anyway.
-  // A freed rule, or an object made with Object.create(PathMappingRule.prototype),
-  // has no live wasm pointer. `__wbg_ptr` is wasm-bindgen's handle field, a
-  // positive 32-bit integer for a live object.
   checked.forEach((rule, index) => {
-    const ptr = rule.__wbg_ptr;
-    if (!(Number.isInteger(ptr) && ptr > 0 && ptr <= 0xffffffff)) {
+    if (!isLive(rule)) {
       throw new TypeError(
         `FunctionLibrary.withPathMappingRules: rules[${index}] has been freed`,
       );
