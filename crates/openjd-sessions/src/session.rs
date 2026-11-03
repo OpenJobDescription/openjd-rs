@@ -187,6 +187,23 @@ fn format_exit_code(code: Option<i32>) -> String {
     }
 }
 
+/// Log a temporary directory that `Session::cleanup` could not delete. Cleanup
+/// continues, so without this the directory is left on disk with no trace.
+fn log_cleanup_failure(session_id: &str, path: &Path, err: &SessionError) {
+    let reason = match err {
+        SessionError::TempDir { source, .. } => source.to_string(),
+        other => other.to_string(),
+    };
+    session_log!(
+        error,
+        session_id,
+        LogContent::EXCEPTION_INFO | LogContent::FILE_PATH,
+        "Files within temporary directory {} could not be deleted: {}",
+        path.display(),
+        reason
+    );
+}
+
 /// Normalize an environment variable name for the current platform.
 /// On Windows, env vars are case-insensitive, so we uppercase all keys
 /// to avoid undefined behavior from mixed-case duplicates in the Win32 API.
@@ -1186,10 +1203,14 @@ impl Session {
 
             // If we own TempDirs, clean them up; otherwise fall back to remove_dir_all
             if let Some(ref mut files_dir) = self._files_dir {
-                let _ = files_dir.cleanup();
+                if let Err(e) = files_dir.cleanup() {
+                    log_cleanup_failure(&self.session_id, files_dir.path(), &e);
+                }
             }
             if let Some(ref mut working_dir) = self._working_dir {
-                let _ = working_dir.cleanup();
+                if let Err(e) = working_dir.cleanup() {
+                    log_cleanup_failure(&self.session_id, working_dir.path(), &e);
+                }
             } else {
                 let _ = std::fs::remove_dir_all(&self.working_directory);
             }
@@ -3486,6 +3507,28 @@ mod wrap_actions_tests {
             symtab.get_value("WrappedAction.Cancelation.NotifyPeriodInSeconds"),
             Some(&ExprValue::Null)
         );
+    }
+}
+
+#[cfg(test)]
+mod cleanup_failure_log_tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_failure_is_logged_as_an_error_with_path_and_reason() {
+        testing_logger::setup();
+        let err = SessionError::TempDir {
+            path: PathBuf::from("session-dir"),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "file in use"),
+        };
+        log_cleanup_failure("session-1", Path::new("session-dir"), &err);
+        testing_logger::validate(|logs| {
+            assert_eq!(logs.len(), 1);
+            assert_eq!(logs[0].level, log::Level::Error);
+            assert!(logs[0]
+                .body
+                .contains("session-dir could not be deleted: file in use"));
+        });
     }
 }
 

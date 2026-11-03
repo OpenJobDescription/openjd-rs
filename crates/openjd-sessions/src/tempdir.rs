@@ -5,6 +5,7 @@
 //! Secure temporary directory creation — mirrors Python `_tempdir.py`.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::error::SessionError;
 use crate::session_user::SessionUser;
@@ -269,16 +270,64 @@ impl TempDir {
     }
 
     /// Remove the directory and all contents.
+    ///
+    /// On Windows a failed removal is retried after each delay in
+    /// [`CLEANUP_RETRY_DELAYS`], because a process that has just exited, or been
+    /// terminated, can hold its file handles for a short time afterwards.
     pub fn cleanup(&mut self) -> Result<(), SessionError> {
         if self.cleaned_up {
             return Ok(());
         }
         self.cleaned_up = true;
-        std::fs::remove_dir_all(&self.path).map_err(|e| SessionError::TempDir {
+        remove_dir_all_with_retry(
+            &self.path,
+            CLEANUP_RETRY_DELAYS,
+            |p| std::fs::remove_dir_all(p),
+            std::thread::sleep,
+        )
+        .map_err(|e| SessionError::TempDir {
             path: self.path.clone(),
             source: e,
         })
     }
+}
+
+/// Delays before each retry of a failed [`TempDir::cleanup`].
+///
+/// Windows refuses to delete a file or directory while any process holds a
+/// handle to it. Other platforms do not retry: a failure there is a permission
+/// problem that waiting will not fix.
+#[cfg(windows)]
+pub const CLEANUP_RETRY_DELAYS: &[Duration] = &[Duration::from_secs(1), Duration::from_secs(2)];
+/// Delays before each retry of a failed [`TempDir::cleanup`]. None off Windows.
+#[cfg(not(windows))]
+pub const CLEANUP_RETRY_DELAYS: &[Duration] = &[];
+
+/// Calls `remove` on `path`, and again after each of `delays` until it succeeds.
+///
+/// `NotFound` on the first attempt is returned as is. On a retry it counts as
+/// success: an earlier attempt that reported a failure partway through can
+/// still have removed the directory.
+fn remove_dir_all_with_retry(
+    path: &Path,
+    delays: &[Duration],
+    mut remove: impl FnMut(&Path) -> std::io::Result<()>,
+    mut sleep: impl FnMut(Duration),
+) -> std::io::Result<()> {
+    let mut result = remove(path);
+    for &delay in delays {
+        match &result {
+            Ok(()) => break,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => break,
+            Err(_) => {}
+        }
+        sleep(delay);
+        result = match remove(path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        };
+    }
+    result
 }
 
 impl Drop for TempDir {
@@ -398,6 +447,141 @@ mod tests {
         let td = TempDir::new(None, None, None).unwrap();
         let p: &std::path::Path = td.as_ref();
         assert_eq!(p, td.path());
+    }
+
+    fn sharing_violation() -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "file in use")
+    }
+
+    #[test]
+    fn remove_retry_stops_at_the_first_success() {
+        let mut calls = 0;
+        let mut slept = Vec::new();
+        let delays = [
+            Duration::from_millis(1),
+            Duration::from_millis(2),
+            Duration::from_millis(3),
+        ];
+        let result = remove_dir_all_with_retry(
+            Path::new("unused"),
+            &delays,
+            |_| {
+                calls += 1;
+                if calls < 3 {
+                    Err(sharing_violation())
+                } else {
+                    Ok(())
+                }
+            },
+            |d| slept.push(d),
+        );
+        assert!(result.is_ok());
+        assert_eq!(calls, 3);
+        assert_eq!(slept, delays[..2]);
+    }
+
+    #[test]
+    fn remove_retry_returns_the_last_error_when_exhausted() {
+        let mut calls = 0;
+        let delays = [Duration::ZERO, Duration::ZERO];
+        let result = remove_dir_all_with_retry(
+            Path::new("unused"),
+            &delays,
+            |_| {
+                calls += 1;
+                Err(sharing_violation())
+            },
+            |_| {},
+        );
+        let err = result.expect_err("every attempt failed");
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(calls, 3, "one attempt plus one per delay");
+    }
+
+    #[test]
+    fn remove_retry_treats_not_found_on_a_retry_as_success() {
+        let mut calls = 0;
+        let result = remove_dir_all_with_retry(
+            Path::new("unused"),
+            &[Duration::ZERO],
+            |_| {
+                calls += 1;
+                if calls == 1 {
+                    Err(sharing_violation())
+                } else {
+                    Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+                }
+            },
+            |_| {},
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn remove_retry_keeps_not_found_on_the_first_attempt_as_an_error() {
+        let result = remove_dir_all_with_retry(
+            Path::new("unused"),
+            &[Duration::ZERO],
+            |_| Err(std::io::Error::from(std::io::ErrorKind::NotFound)),
+            |_| {},
+        );
+        assert_eq!(
+            result.expect_err("directory was never there").kind(),
+            std::io::ErrorKind::NotFound
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn cleanup_does_not_retry_off_windows() {
+        assert!(CLEANUP_RETRY_DELAYS.is_empty());
+    }
+
+    /// A file held open without `FILE_SHARE_DELETE` for less time than the
+    /// retries cover: the first removal fails with a sharing violation, a
+    /// retry succeeds.
+    #[cfg(windows)]
+    #[test]
+    fn cleanup_waits_for_a_briefly_held_file() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let mut td = TempDir::new(None, None, None).unwrap();
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .share_mode(0)
+            .open(td.path().join("locked.bin"))
+            .unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(500));
+            drop(held);
+        });
+        let result = td.cleanup();
+        release.join().unwrap();
+        result.unwrap();
+        assert!(!td.path().exists());
+    }
+
+    /// A file held open for the whole cleanup is still reported.
+    #[cfg(windows)]
+    #[test]
+    fn cleanup_reports_a_file_held_throughout() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let td = TempDir::new(None, None, None).unwrap();
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .share_mode(0)
+            .open(td.path().join("locked.bin"))
+            .unwrap();
+        let result = remove_dir_all_with_retry(
+            td.path(),
+            &[Duration::from_millis(100)],
+            |p| std::fs::remove_dir_all(p),
+            std::thread::sleep,
+        );
+        assert!(result.is_err());
+        drop(held);
+        drop(td);
     }
 
     /// The naming parameters match tempdir.md, written as literals so a
