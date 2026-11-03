@@ -104,8 +104,10 @@ pub enum IntRange {
     /// or a `<TaskParameterStringValue>` format string, kept as
     /// [`IntOrFormatString::FormatString`] and resolved at job creation.
     List(Vec<IntOrFormatString>),
-    /// An `<IntRangeExpr>` (Template Schemas §3.4.1.1.1), possibly with
-    /// format string interpolations.
+    /// A whole-field range string: an `<IntRangeExpr>` (Template Schemas
+    /// §3.4.1.1.1), possibly with format string interpolations, or with the
+    /// EXPR extension an expression that evaluates to a `range_expr` or a
+    /// `list[int]` (Expression Language §1.3.12).
     Expression(FormatString),
 }
 

@@ -1226,8 +1226,8 @@ fn test_create_job_parameter_space_int_list() {
 
 /// Template for the INT range-list format string tests: one step whose task
 /// parameter `Frame` has type `param_type` and range `range_json`, under a
-/// job with an INT parameter `Value`, a STRING parameter `Text`, and a FLOAT
-/// parameter `Ratio`.
+/// job with an INT parameter `Value`, STRING parameters `Text` and `Empty`,
+/// and a FLOAT parameter `Ratio`.
 fn int_range_list_template(param_type: &str, range_json: &str) -> String {
     let (extensions, chunks) = if param_type == "CHUNK[INT]" {
         (
@@ -1245,6 +1245,7 @@ fn int_range_list_template(param_type: &str, range_json: &str) -> String {
         "parameterDefinitions": [
             {{"name": "Value", "type": "INT", "default": 10}},
             {{"name": "Text", "type": "STRING", "default": "abc"}},
+            {{"name": "Empty", "type": "STRING", "default": ""}},
             {{"name": "Ratio", "type": "FLOAT", "default": 2.5}}
         ],
         "steps": [{{
@@ -1311,6 +1312,10 @@ fn test_create_job_int_range_list_format_string_not_an_integer() {
     for param_type in ["INT", "CHUNK[INT]"] {
         for (element, resolved) in [
             ("{{Param.Text}}", "abc"),
+            // The message quotes the resolved text before it is trimmed.
+            (" {{Param.Text}} ", " abc "),
+            // Resolving to nothing is not an integer, not out of range.
+            ("{{Param.Empty}}", ""),
             ("{{Param.Ratio}}", "2.5"),
             ("1_{{Param.Value}}", "1_10"),
         ] {

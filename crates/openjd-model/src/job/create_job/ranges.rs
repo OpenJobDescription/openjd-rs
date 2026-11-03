@@ -369,10 +369,14 @@ fn resolve_int_range_list_element(
     param_name: &str,
     budgets: super::EvalBudgets,
 ) -> Result<i64, ModelError> {
-    let context = format!("Task parameter '{param_name}' range[{k}]");
+    let error = |detail: std::fmt::Arguments<'_>| {
+        ModelError::Expression(ExpressionError::new(format!(
+            "Task parameter '{param_name}' range[{k}]: {detail}"
+        )))
+    };
     let resolved = fs
         .resolve_string_with(symtab, &budgets.fs_options())
-        .map_err(|e| ModelError::Expression(ExpressionError::new(format!("{context}: {e}"))))?;
+        .map_err(|e| error(format_args!("{e}")))?;
     resolved.trim().parse::<i64>().map_err(|e| {
         let problem = match e.kind() {
             std::num::IntErrorKind::PosOverflow | std::num::IntErrorKind::NegOverflow => {
@@ -380,9 +384,7 @@ fn resolve_int_range_list_element(
             }
             _ => "is not an integer",
         };
-        ModelError::Expression(ExpressionError::new(format!(
-            "{context}: value '{resolved}' {problem}"
-        )))
+        error(format_args!("value '{resolved}' {problem}"))
     })
 }
 

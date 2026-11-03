@@ -244,8 +244,10 @@ budgets template validation and the session runtime apply.
 
      **Divergence from the Python reference:** openjd-model-for-python 0.14 converts
      a resolved INT or CHUNK[INT] element with Python's `int()`. That accepts
-     underscores (`1_10` is 110) and integers of any size, both of which openjd-rs
-     rejects. When `int()` fails, Python keeps the text as the value of an INT task
+     underscores (`1_10` is 110), non-ASCII decimal digits (`١٠` and fullwidth `７`),
+     and integers of any size, all of which openjd-rs rejects. The same applies to
+     a literal `<intstring>` element, which openjd-rs rejects at decode with
+     `Cannot parse '1_10' as integer`. When `int()` fails, Python keeps the text as the value of an INT task
      parameter (`abc`, `2.5`) and raises an uncaught `ValueError` for a CHUNK[INT]
      one. §3.4.1.1 requires a base-10 integer, so openjd-rs rejects all of these
      at job creation with the errors above.

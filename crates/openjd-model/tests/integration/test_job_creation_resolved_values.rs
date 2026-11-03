@@ -520,6 +520,40 @@ fn lowered_memory_budget_fails_carried_forward_expression_at_create_job() {
     );
 }
 
+/// A format string element of an INT task parameter's range list resolves
+/// under the caller's evaluation budgets too.
+#[test]
+fn lowered_memory_budget_fails_int_range_list_element() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "N", "type": "INT"}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "F", "type": "INT", "range": [1, "{{ len('A' * Param.N) }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    let err = create_with_limits(
+        template,
+        &[("N", "10000000")],
+        CallerLimits {
+            max_eval_memory_bytes: Some(1024 * 1024),
+            ..Default::default()
+        },
+    )
+    .expect_err("expected the range element to exceed the memory budget");
+    assert!(
+        err.starts_with(
+            "Expression error: Task parameter 'F' range[1]: Expression memory usage (10000136 bytes) exceeded limit (1048576 bytes)"
+        ),
+        "Got:\n{err}"
+    );
+}
+
 #[test]
 fn lowered_memory_budget_fails_job_name_resolution() {
     let template = format!(
