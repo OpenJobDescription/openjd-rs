@@ -781,7 +781,9 @@ fn int_literal_string_with_single_braces_not_int() {
             &job_with_param_space(&format!(
                 r#"{{"taskParameterDefinitions": [{{"name": "foo", "type": "INT", "range": ["{literal}"]}}]}}"#
             )),
-            &[&format!("Cannot parse '{literal}' as integer")],
+            &[&format!(
+                "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '{literal}' as integer"
+            )],
         );
     }
 }

@@ -213,7 +213,9 @@ budgets template validation and the session runtime apply.
    - Parameter space ranges (evaluate range expressions, resolve FormatString ranges).
      A format string element of a range list resolves through one helper
      (`resolve_list_item`) for every task parameter type, with the target from
-     `TaskParameterType::range_list_item_target`, which template validation uses too.
+     `TaskParameterType::range_list_item_target`. Template validation types the
+     element with the same target (for STRING and PATH through
+     `string_list_item_target`, which that function returns for them).
 
      STRING and PATH elements are always list items (Expression Language §1.3.2),
      with the target `string? | list[string]`. INT, CHUNK[INT] and FLOAT elements are
@@ -224,8 +226,11 @@ budgets template validation and the session runtime apply.
      element when it is `null`, and flattens a list inline, one range element per
      member, mixable with literal elements. A range emptied by drops is rejected
      (`Task parameter '<name>' range has no elements after resolution`), since the
-     ≥1-element rule was checked on the list as written, at decode. Attribute
-     `anyOf`/`allOf` values get the same treatment in `instantiate`.
+     ≥1-element rule was checked on the list as written, at decode. For the same
+     reason the 1024-element limit is checked again on the resolved list, so a list
+     that flattens past it fails (`Task parameter '<name>' range exceeds 1024
+     elements (<n> elements)`). Attribute `anyOf`/`allOf` values get the same
+     treatment in `instantiate`.
 
      Without EXPR an INT, CHUNK[INT] or FLOAT element is the base 2023-09
      `<TaskParameterStringValue>` and resolves to a string. A base format string

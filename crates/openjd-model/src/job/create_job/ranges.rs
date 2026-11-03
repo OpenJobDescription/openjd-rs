@@ -534,7 +534,8 @@ pub(crate) fn strip_redundant_leading_zeros(text: &str) -> Cow<'_, str> {
 /// for a spelling equal to that rendering, storing it would change only the
 /// serialized job. A string (from a format string that is not a single
 /// whole-field expression, or from any element without EXPR) is a
-/// `<floatstring>`, and its spelling is always stored.
+/// `<floatstring>`, and its spelling is stored unless it is longer than
+/// `max_task_param_string_len`.
 fn float_range_value(value: ExprValue, limits: &EffectiveLimits) -> Result<Float64, String> {
     let resolved = match value {
         ExprValue::Float(f)

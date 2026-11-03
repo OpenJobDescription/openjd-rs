@@ -363,8 +363,10 @@ impl TaskParameterType {
     /// written (`10`, not `10.0`), the way the `<floatstring>` it denotes
     /// would.
     ///
-    /// Template validation and job creation both take the target from here,
-    /// so the two stages cannot disagree about what an element accepts.
+    /// Template validation and job creation both take the target from here
+    /// (validation of STRING and PATH elements through
+    /// [`string_list_item_target`], which this returns for them), so the two
+    /// stages cannot disagree about what an element accepts.
     pub(crate) fn range_list_item_target(&self, expr: bool) -> Option<ExprType> {
         let (item, also_int) = match self {
             Self::String | Self::Path => return Some(string_list_item_target()),

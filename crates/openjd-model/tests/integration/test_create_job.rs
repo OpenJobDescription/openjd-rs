@@ -6828,6 +6828,30 @@ fn test_create_job_attr_all_values_null_rejected() {
     );
 }
 
+/// An attribute value resolves through the same list-item helper as range
+/// list elements; an evaluation error keeps its message and caret.
+#[test]
+fn test_create_job_attr_value_evaluation_error() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "OS", "type": "STRING", "default": "abc"}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.custom.tag", "anyOf": ["{{ string(int(Param.OS)) }}"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Format string error: Cannot convert 'abc' to int\n  string(int(Param.OS))\n         ^~~~~~~~~~~~~"
+    );
+}
+
 #[test]
 fn test_create_job_attr_value_list_flattens() {
     let job = parse_and_create(
