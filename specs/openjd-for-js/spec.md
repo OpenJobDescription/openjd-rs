@@ -92,7 +92,13 @@ is borrowed. So Rust exports, with `skip_typescript`:
 The public signatures of `evaluate` and `evaluateExpression`, and the
 `EvalOptions` type, come from a `typescript_custom_section` in `src/expr.rs`,
 so they appear in the generated `pkg/openjd_for_js.d.ts`. A `lib` that is not
-a `FunctionLibrary` throws `expected instance of FunctionLibrary`. Because
+a `FunctionLibrary` throws `expected instance of FunctionLibrary`. A freed
+`FunctionLibrary` (or one made with `Object.create(FunctionLibrary.prototype)`)
+throws a `TypeError`, `ParsedExpression.evaluate: lib has been freed` or
+`evaluateExpression: lib has been freed`, before calling into wasm. Without
+that check, wasm-bindgen would throw from inside wasm: one call leaves the
+`ParsedExpression` marked as borrowed, so it can no longer be freed, and some
+thousands corrupt the wasm heap. Because
 `index.js` uses `export *`, the two free functions `__evaluateExpression` and
 `__evaluateExpressionWithLibrary` are also exported at runtime, though not in
 the types. Neither takes a library by value, so calling them directly is safe
@@ -107,9 +113,10 @@ wrong type` for a wrong-typed element of a `Vec<PathMappingRule>` or `null
 pointer passed to rust` for a freed object, leaves the wasm heap inconsistent,
 and some thousands to tens of thousands of them corrupt it (`RuntimeError:
 memory access out of bounds`). So the check must run in JS, or in Rust as a returned `Err`, not as
-a wasm-bindgen conversion error. Calling any method on a freed object has the
-same effect; that is a wasm-bindgen limitation this package does not guard
-against beyond `withPathMappingRules`.
+a wasm-bindgen conversion error. Calling any method on a freed object, or
+passing a freed `SymbolTable` or other object as an argument, has the same
+effect; that is a wasm-bindgen limitation this package guards against only
+for `lib` and the rules of `withPathMappingRules`.
 
 ### Binding Pattern
 
