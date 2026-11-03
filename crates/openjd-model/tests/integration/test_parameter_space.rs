@@ -196,22 +196,31 @@ fn int_format_string_undefined_variable() {
 fn numeric_range_list_element_static_type_error() {
     for (param_type, target) in [
         ("INT", "int | list[int] | nulltype"),
+        ("CHUNK[INT]", "int | list[int] | nulltype"),
         ("FLOAT", "float | int | list[float] | nulltype"),
     ] {
+        let (extensions, chunks) = if param_type == "CHUNK[INT]" {
+            (
+                r#""EXPR", "TASK_CHUNKING""#,
+                r#", "chunks": {"defaultTaskCount": 1, "rangeConstraint": "NONCONTIGUOUS"}"#,
+            )
+        } else {
+            (r#""EXPR""#, "")
+        };
         let template = format!(
             r#"{{
             "specificationVersion": "jobtemplate-2023-09",
-            "extensions": ["EXPR"],
+            "extensions": [{extensions}],
             "name": "Test",
             "parameterDefinitions": [{{"name": "B", "type": "BOOL", "default": true}}],
             "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}, "parameterSpace": {{"taskParameterDefinitions": [
-                {{"name": "foo", "type": "{param_type}", "range": [1, "{{{{ null }}}}", "{{{{ [2] }}}}", "{{{{ Param.B }}}}", "{{{{ ['a'] }}}}"]}}
+                {{"name": "foo", "type": "{param_type}", "range": [1, "{{{{ null }}}}", "{{{{ [2] }}}}", "{{{{ Param.B }}}}", "{{{{ ['a'] }}}}"]{chunks}}}
             ]}}}}]
         }}"#
         );
         let err = decode_job_template(
             yaml_val(&template),
-            Some(&["EXPR"]),
+            Some(&["EXPR", "TASK_CHUNKING"]),
             &CallerLimits::default(),
         )
         .expect_err(param_type)

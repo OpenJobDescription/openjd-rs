@@ -1367,14 +1367,79 @@ fn test_create_job_numeric_range_list_without_expr_resolves_to_string() {
             "FLOAT",
             r#"["{{Param.Padded}}", "{{Param.Value}}", "{{Param.Ratio}}"]"#,
         ),
+        &[],
+    );
+    // A <floatstring> keeps its spelling, even one `format_float` would give.
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        r#"{"float":{"range":["7","10","2.5"]}}"#
+    );
+    let job = parse_and_create(
+        &template("FLOAT", r#"["{{Param.Ratio}}"]"#),
         &[("Ratio", "2.50")],
     );
-    assert_eq!(frame_float_renderings(&job), ["7", "10", "2.50"]);
-    let err = parse_and_create_err(&template("FLOAT", r#"["{{Param.Text}}"]"#), &[]);
-    assert_eq!(
-        err,
-        "Expression error: Task parameter 'Frame' range[0]: value 'abc' is not a number"
+    assert_eq!(frame_float_renderings(&job), ["2.50"]);
+    // An element that resolves to nothing is an error, never a dropped
+    // element: a base format string cannot produce `null`.
+    for (param_type, problem) in [
+        ("INT", "is not an integer"),
+        ("CHUNK[INT]", "is not an integer"),
+        ("FLOAT", "is not a number"),
+    ] {
+        let err = parse_and_create_err(&template(param_type, r#"[1, "{{Param.Empty}}"]"#), &[]);
+        assert_eq!(
+            err,
+            format!("Expression error: Task parameter 'Frame' range[1]: value '' {problem}"),
+            "{param_type}"
+        );
+    }
+    // The message quotes the resolved text before it is trimmed.
+    for (element, resolved) in [("{{Param.Text}}", "abc"), (" x{{Param.Empty}} ", " x ")] {
+        let err = parse_and_create_err(&template("FLOAT", &format!(r#"["{element}"]"#)), &[]);
+        assert_eq!(
+            err,
+            format!(
+                "Expression error: Task parameter 'Frame' range[0]: value '{resolved}' is not a number"
+            )
+        );
+    }
+}
+
+/// `create_job` accepts a context that enables more extensions than the
+/// template declares. Range list elements still resolve the way the template
+/// was validated, without EXPR.
+#[test]
+fn test_create_job_numeric_range_list_follows_template_expr_not_context() {
+    let td = TestDirs::new();
+    let template = int_range_list_template("INT", r#"["{{Param.Padded}}"]"#).replacen(
+        r#"{"name": "Text", "type": "STRING", "default": "abc"},"#,
+        r#"{"name": "Text", "type": "STRING", "default": "abc"},
+            {"name": "Padded", "type": "STRING", "default": " 8 "},"#,
+        1,
     );
+    let jt = decode_job_template(
+        serde_saphyr::from_str(&template).unwrap(),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let processed = preprocess_job_parameters(
+        &jt,
+        &std::collections::HashMap::new(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    let ctx = openjd_model::ValidationContext::from_profile(openjd_model::ModelProfile::latest());
+    let job = create_job(&jt, &processed, &ctx).unwrap();
+    assert_eq!(frame_int_list(&job), vec![8]);
 }
 
 /// With EXPR a whole-field element is typed `int? | list[int]` (Expression
@@ -1479,6 +1544,17 @@ fn test_create_job_float_range_list_null_drops_and_list_flattens() {
         serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
         r#"{"float":{"range":[1.5,2.5,3.75,3.0,4.0,"10","2.50"]}}"#
     );
+    // A spelling is kept whenever it differs from what `format_float` gives,
+    // including one of the same length.
+    let job = parse_and_create(
+        &expr_range_list_template("FLOAT", r#"["{{ Param.Ratio }}"]"#),
+        &[("Ratio", "1.0e2")],
+    );
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        r#"{"float":{"range":["1.0e2"]}}"#
+    );
 }
 
 /// A `<floatstring>` keeps its spelling up to `max_task_param_string_len`
@@ -1496,6 +1572,23 @@ fn test_create_job_float_range_list_spelling_length_cap() {
         serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
         format!(r#"{{"float":{{"range":["{at_cap}",1.0]}}}}"#)
     );
+}
+
+/// STRING and PATH range list elements are list items, with or without EXPR.
+#[test]
+fn test_create_job_string_and_path_range_list_null_drops_and_list_flattens() {
+    for (param_type, key) in [("STRING", "string"), ("PATH", "path")] {
+        let job = parse_and_create(
+            &expr_range_list_template(param_type, r#"["/c", "{{ null }}", "{{ Param.Strs }}"]"#),
+            &[],
+        );
+        let ps = job.steps[0].parameter_space.as_ref().unwrap();
+        assert_eq!(
+            serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+            format!(r#"{{"{key}":{{"range":["/c","a","b"]}}}}"#),
+            "{param_type}"
+        );
+    }
 }
 
 /// A list whose members do not coerce to the element type is rejected.
@@ -4166,9 +4259,9 @@ fn test_create_job_float_range_resolved_string_non_finite() {
                 )
             );
         }
-        // With EXPR a whole-field element is typed `float? | list[float]`
-        // (Expression Language §1.3.2), and a non-finite string does not
-        // coerce.
+        // With EXPR a whole-field element is typed `float? | int |
+        // list[float]` (Expression Language §1.3.2), and a non-finite string
+        // does not coerce.
         let err = parse_and_create_err(&with_expr("{{Param.Value}}"), &[("Value", value)]);
         assert_eq!(
             err,

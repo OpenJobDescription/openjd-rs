@@ -218,7 +218,9 @@ budgets template validation and the session runtime apply.
      STRING and PATH elements are always list items (Expression Language §1.3.2),
      with the target `string? | list[string]`. INT, CHUNK[INT] and FLOAT elements are
      list items when the template enables EXPR, with `int? | list[int]` and
-     `float? | int | list[float]`. A whole-field list-item expression drops the
+     `float? | int | list[float]`. Whether EXPR is enabled is read from the template,
+     as template validation reads it, not from the `create_job` context, which may
+     enable extensions the template does not declare. A whole-field list-item expression drops the
      element when it is `null`, and flattens a list inline, one range element per
      member, mixable with literal elements. A range emptied by drops is rejected
      (`Task parameter '<name>' range has no elements after resolution`), since the
@@ -229,10 +231,11 @@ budgets template validation and the session runtime apply.
      `<TaskParameterStringValue>` and resolves to a string. A base format string
      only interpolates value references, so it cannot produce `null` or a list, and
      the string form keeps the surrounding-whitespace tolerance of `<intstring>` and
-     `<floatstring>`, which §1.2.3 coercion lacks. The same is true with EXPR of a
-     format string with literal text around its expressions, or with no expressions
-     (a literal FLOAT string such as `"02.50"`). A string is interpreted for the
-     element type:
+     `<floatstring>`, which §1.2.3 coercion lacks. The same is true with EXPR of any
+     format string that is not a single whole-field `{{...}}`: literal text around
+     its expressions, two or more expressions (`{{ Param.A }}{{ Param.B }}`), or no
+     expressions (a literal FLOAT string such as `"02.50"`). A string is interpreted
+     for the element type:
      - INT and CHUNK[INT]: trimmed, then parsed as an `i64` (Rust's integer syntax:
        an optional sign and ASCII digits). Otherwise job creation fails with `Task
        parameter '<name>' range[<k>]: value '<resolved>' is not an integer`, or `...
@@ -253,8 +256,9 @@ budgets template validation and the session runtime apply.
      A FLOAT element's target accepts `int` so that an integer renders as written:
      an INT job parameter `10` gives the task parameter value `10`, as the
      `<floatstring>` `"10"` would, not `10.0`. A float keeps the spelling it carries,
-     alone or as a list member: a FLOAT job parameter given as `2.50` renders
-     `2.50`, and so does `{{ [Param.F] }}` as an element (the whole-field range
+     alone or as a list member, when that spelling differs from what `format_float`
+     gives (an equal one renders the same, and is not stored): a FLOAT job parameter
+     given as `2.50` renders `2.50`, and so does `{{ [Param.F] }}` as an element (the whole-field range
      expression `"{{ [Param.F] }}"` renders `2.5`, because `resolve_float_range`
      drops spellings there). A float with no spelling, such as a computed one or an
      integer list member converted to float, renders through `format_float`:

@@ -341,8 +341,9 @@ enum ResolvedConstraint<'a> {
         forbid_control_chars: bool,
         forbid_empty: bool,
     },
-    /// A list-item string field (task-parameter range elements,
-    /// Template Schemas §3.4.2). Per Expression Language §1.3.2 a
+    /// A list-item string field (STRING and PATH task-parameter range
+    /// elements, Template Schemas §3.4.2; INT, CHUNK[INT] and FLOAT
+    /// elements use [`Self::NumericListItem`]). Per Expression Language §1.3.2 a
     /// whole-field expression targets `string? | list[string]`: `null`
     /// skips the element, a list flattens inline, and `max_len` applies
     /// to each resulting element. `forbid_empty` applies §3.4.2's
@@ -1670,6 +1671,10 @@ pub fn validate_format_strings(
     errors: &mut ValidationErrors,
 ) {
     let expr_active = ctx.profile.has_extension(ModelExtension::Expr);
+    // Whether the template itself enables EXPR, for the numeric range list
+    // element target. `create_job` takes it from the template too, since its
+    // context may enable more extensions than the template declares.
+    let template_expr = jt.profile().has_extension(ModelExtension::Expr);
     let fb1_active = ctx.profile.has_extension(ModelExtension::FeatureBundle1);
     // Template/task-range validation uses HostContext::None (host functions
     // are not available in those scopes). Session/task scopes use
@@ -2005,10 +2010,11 @@ pub fn validate_format_strings(
                 };
                 // INT, CHUNK[INT] and FLOAT elements are typed with the
                 // target job creation resolves them with, which depends on
-                // EXPR (see `TaskParameterType::range_list_item_target`).
+                // whether the template enables EXPR (see
+                // `TaskParameterType::range_list_item_target`).
                 let numeric_item_constraint = tp
                     .task_param_type()
-                    .range_list_item_target(expr_active)
+                    .range_list_item_target(template_expr)
                     .map(|target| ResolvedConstraint::NumericListItem { target });
                 let numeric_item_constraint = numeric_item_constraint.as_ref();
                 match tp {

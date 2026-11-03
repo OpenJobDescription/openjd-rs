@@ -38,6 +38,7 @@ pub(super) fn instantiate_step(
     st: &template::StepTemplate,
     symtab: &SymbolTable,
     has_expr: bool,
+    template_expr: bool,
     limits: &EffectiveLimits,
     ctx: &crate::types::ValidationContext,
     step_index: usize,
@@ -165,7 +166,7 @@ pub(super) fn instantiate_step(
     let parameter_space = st
         .parameter_space
         .as_ref()
-        .map(|ps| ranges::resolve_parameter_space(ps, &step_symtab, has_expr, limits, budgets))
+        .map(|ps| ranges::resolve_parameter_space(ps, &step_symtab, template_expr, limits, budgets))
         .transpose()?;
 
     // Validate the resolved parameter space (e.g. association length mismatches)

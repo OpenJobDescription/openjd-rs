@@ -76,9 +76,10 @@ pub(super) fn resolve_to_f64(
 /// `TaskParameterType::range_list_item_target`), the item follows Expression
 /// Language §1.3.2: none for `null`, one per member for a list, and the
 /// value itself otherwise. The target applies to a whole-field expression
-/// only. A format string with literal text around its expressions, or with
-/// none at all, resolves to a string. With no target the item always
-/// resolves to one string. The caller interprets a string for its element
+/// only, a format string that is exactly one `{{...}}`. Any other format
+/// string (literal text around its expressions, two or more expressions, or
+/// no expressions at all) resolves to a string. With no target the item
+/// always resolves to one string. The caller interprets a string for its element
 /// type. Task parameter range lists of every type and `hostRequirements`
 /// attribute values share this, so they cannot drift apart in how they skip
 /// and flatten.
@@ -525,13 +526,15 @@ pub(crate) fn strip_redundant_leading_zeros(text: &str) -> Cow<'_, str> {
 /// One value a FLOAT range list's format string element contributed, or why
 /// it is not a valid one.
 ///
-/// A float that carries a spelling, alone or as a member of a list, and an
-/// integer render as written: the text is what a `<floatstring>` would
-/// carry (§7.5). A float with no spelling, such as one the expression
-/// computed or an integer member of a list converted to `float`, renders
-/// through `format_float`. A string (from a format string with text around
-/// its expressions, from one with none, or from any element without EXPR) is
-/// a `<floatstring>`.
+/// A float that carries a spelling different from what `format_float` gives,
+/// alone or as a member of a list, and an integer render as written: the
+/// text is what a `<floatstring>` would carry (§7.5). Any other float, such
+/// as one the expression computed or an integer member of a list converted
+/// to `float`, has no spelling stored and renders through `format_float`;
+/// for a spelling equal to that rendering, storing it would change only the
+/// serialized job. A string (from a format string that is not a single
+/// whole-field expression, or from any element without EXPR) is a
+/// `<floatstring>`, and its spelling is always stored.
 fn float_range_value(value: ExprValue, limits: &EffectiveLimits) -> Result<Float64, String> {
     let resolved = match value {
         ExprValue::Float(f)

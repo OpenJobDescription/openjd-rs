@@ -475,9 +475,10 @@ Consequences of the target types worth naming:
   a list-valued resolution distributes its characters across elements,
   so the display-form length says nothing about any single element.
 - **Empty range elements are rejected for PATH only.** §3.4.2 sets a
-  minimum length of 1 on `<TaskParameterStringValue>` (which STRING and
-  PATH ranges share), but the reference implementation enforces it only
-  for PATH — its rationale being that an empty string is not a valid
+  minimum length of 1 on `<TaskParameterStringValue>` (which the range
+  lists of every type share; an empty INT or FLOAT element fails anyway,
+  because it does not parse as a number), but the reference
+  implementation enforces it only for PATH — its rationale being that an empty string is not a valid
   path on any OS — and accepts empty STRING elements end to end
   (`TaskParameterStringValueAsJob` is explicitly `min_length=0`). We
   match that for compatibility. PATH elements are rejected at every

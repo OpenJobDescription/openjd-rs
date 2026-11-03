@@ -242,7 +242,8 @@ exactly this purpose, so the range reuses it rather than defining a parallel typ
 `resolve_float_range` builds each element. A `<float>` literal, an element of a
 whole-field range expression, and a list-element value with no spelling of its own go
 through `Float64::new`, which renders via `format_float`. A `<floatstring>`, and a
-list-element value that is an integer or a float carrying a spelling, go through
+list-element value that is an integer or a float carrying a spelling other than its
+`format_float` rendering, go through
 `Float64::with_str` after trimming, stripping redundant leading zeros (§7.5 rule 1) and
 checking the text against `max_task_param_string_len`. Over that cap the element keeps only
 its value, which is how it rendered before the text was carried at all. See
