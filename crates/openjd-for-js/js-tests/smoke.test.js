@@ -554,6 +554,7 @@ describe("FunctionLibrary.withPathMappingRules", () => {
     a.free();
     b.free();
   });
+
   it("throws for a relative source path, naming the rule", () => {
     expect(() =>
       mod.FunctionLibrary.withPathMappingRules([
