@@ -105,8 +105,8 @@ Keep the argument check in `withPathMappingRules` when they go. An error that
 wasm-bindgen throws from inside wasm, such as `array contains a value of the
 wrong type` for a wrong-typed element of a `Vec<PathMappingRule>` or `null
 pointer passed to rust` for a freed object, leaves the wasm heap inconsistent,
-and some thousands to tens of thousands of them corrupt it (`RuntimeError: memory access out of
-bounds`). So the check must run in JS, or in Rust as a returned `Err`, not as
+and some thousands to tens of thousands of them corrupt it (`RuntimeError:
+memory access out of bounds`). So the check must run in JS, or in Rust as a returned `Err`, not as
 a wasm-bindgen conversion error. Calling any method on a freed object has the
 same effect; that is a wasm-bindgen limitation this package does not guard
 against beyond `withPathMappingRules`.
