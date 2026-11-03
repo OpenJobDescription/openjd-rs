@@ -5,7 +5,6 @@
 //! Task parameter definitions per spec §3.4.
 
 use super::constrained_strings::Identifier;
-use super::parameters::FlexInt;
 use crate::format_string::FormatString;
 use serde::Deserialize;
 
@@ -100,7 +99,13 @@ impl TaskParameterDefinition {
     reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
 )]
 pub enum IntRange {
-    List(Vec<FlexInt>),
+    /// An `<IntRangeList>` (Template Schemas §3.4.1.1). Each element is an
+    /// `<integer>` or `<intstring>`, decoded to [`IntOrFormatString::Int`],
+    /// or a `<TaskParameterStringValue>` format string, kept as
+    /// [`IntOrFormatString::FormatString`] and resolved at job creation.
+    List(Vec<IntOrFormatString>),
+    /// An `<IntRangeExpr>` (Template Schemas §3.4.1.1.1), possibly with
+    /// format string interpolations.
     Expression(FormatString),
 }
 
@@ -109,7 +114,7 @@ impl<'de> Deserialize<'de> for IntRange {
         let val = serde_json::Value::deserialize(deserializer)?;
         match val {
             serde_json::Value::Array(seq) => {
-                let items: Result<Vec<FlexInt>, _> = seq
+                let items: Result<Vec<IntOrFormatString>, _> = seq
                     .into_iter()
                     .map(|v| serde_json::from_value(v).map_err(serde::de::Error::custom))
                     .collect();
@@ -280,6 +285,9 @@ pub struct ChunkIntTaskParameterDefinition {
 }
 
 /// An integer value or a format string (e.g. `{{Param.ChunkSize}}`).
+///
+/// Used for the elements of an [`IntRange::List`] and for the
+/// [`ChunksDefinition`] count fields.
 ///
 /// Accepts:
 /// - YAML integer → `IntOrFormatString::Int(n)`

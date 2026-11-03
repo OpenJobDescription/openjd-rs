@@ -1224,6 +1224,120 @@ fn test_create_job_parameter_space_int_list() {
     }
 }
 
+/// Template for the INT range-list format string tests: one step whose task
+/// parameter `Frame` has type `param_type` and range `range_json`, under a
+/// job with an INT parameter `Value`, a STRING parameter `Text`, and a FLOAT
+/// parameter `Ratio`.
+fn int_range_list_template(param_type: &str, range_json: &str) -> String {
+    let (extensions, chunks) = if param_type == "CHUNK[INT]" {
+        (
+            r#""extensions": ["TASK_CHUNKING"],"#,
+            r#", "chunks": {"defaultTaskCount": 1, "rangeConstraint": "NONCONTIGUOUS"}"#,
+        )
+    } else {
+        ("", "")
+    };
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        {extensions}
+        "name": "Test",
+        "parameterDefinitions": [
+            {{"name": "Value", "type": "INT", "default": 10}},
+            {{"name": "Text", "type": "STRING", "default": "abc"}},
+            {{"name": "Ratio", "type": "FLOAT", "default": 2.5}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "parameterSpace": {{
+                "taskParameterDefinitions": [{{"name": "Frame", "type": "{param_type}", "range": {range_json}{chunks}}}]
+            }},
+            "script": {{"actions": {{"onRun": {{"command": "render"}}}}}}
+        }}]
+    }}"#
+    )
+}
+
+/// The resolved list of an INT or CHUNK[INT] task parameter `Frame`.
+fn frame_int_list(job: &job::Job) -> Vec<i64> {
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    let range = match &ps.task_parameter_definitions["Frame"] {
+        job::TaskParameter::Int { range, .. } | job::TaskParameter::ChunkInt { range, .. } => range,
+        other => panic!("Expected Int or ChunkInt, got {other:?}"),
+    };
+    match range {
+        job::TaskParamRange::List(v) => v.clone(),
+        other => panic!("Expected List, got {other:?}"),
+    }
+}
+
+/// Template Schemas §3.4.1.1: an `<IntRangeList>` element may be a
+/// `<TaskParameterStringValue>` that resolves to an integer.
+#[test]
+fn test_create_job_int_range_list_format_string() {
+    for param_type in ["INT", "CHUNK[INT]"] {
+        let job = parse_and_create(
+            &int_range_list_template(param_type, r#"[1, "2", "{{Param.Value}}"]"#),
+            &[],
+        );
+        assert_eq!(frame_int_list(&job), vec![1, 2, 10], "{param_type}");
+        let job = parse_and_create(
+            &int_range_list_template(param_type, r#"[1, "{{Param.Value}}"]"#),
+            &[("Value", "42")],
+        );
+        assert_eq!(frame_int_list(&job), vec![1, 42], "{param_type}");
+    }
+}
+
+/// Surrounding whitespace in the resolved string is ignored, as for an
+/// `<intstring>`, and text around the expression is part of the integer.
+#[test]
+fn test_create_job_int_range_list_format_string_whitespace_and_text() {
+    let job = parse_and_create(
+        &int_range_list_template(
+            "INT",
+            r#"[" {{Param.Value}} ", "{{ Param.Value }}", "1{{Param.Value}}", "-{{Param.Value}}"]"#,
+        ),
+        &[],
+    );
+    assert_eq!(frame_int_list(&job), vec![10, 10, 110, -10]);
+}
+
+/// A format string element that resolves to something other than a base-10
+/// integer fails job creation, naming the parameter and the resolved text.
+#[test]
+fn test_create_job_int_range_list_format_string_not_an_integer() {
+    for param_type in ["INT", "CHUNK[INT]"] {
+        for (element, resolved) in [("{{Param.Text}}", "abc"), ("{{Param.Ratio}}", "2.5")] {
+            let err = parse_and_create_err(
+                &int_range_list_template(param_type, &format!(r#"[1, "{element}"]"#)),
+                &[],
+            );
+            assert_eq!(
+                err,
+                format!(
+                    "Expression error: Task parameter 'Frame' range value '{resolved}' is not an integer"
+                ),
+                "{param_type} {element}"
+            );
+        }
+    }
+}
+
+/// The resolved value goes through the same CHUNK[INT] value bound as a
+/// literal element.
+#[test]
+fn test_create_job_chunk_int_range_list_format_string_beyond_bound() {
+    let err = parse_and_create_err(
+        &int_range_list_template("CHUNK[INT]", r#"[1, "{{Param.Value}}"]"#),
+        &[("Value", "4611686018427387904")],
+    );
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'Frame': value 4611686018427387904 exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)"
+    );
+}
+
 #[test]
 fn test_create_job_parameter_space_range_expr() {
     let job = parse_and_create(

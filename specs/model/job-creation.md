@@ -218,7 +218,20 @@ budgets template validation and the session runtime apply.
      ("has no elements after resolution"), since the ≥1-element rule was checked
      on field presence at decode. Attribute `anyOf`/`allOf` values get the same
      treatment in `instantiate`. String-backed FLOAT range elements are trimmed
-     and must resolve to finite `f64` values.
+     and must resolve to finite `f64` values. Format string elements of an INT or
+     CHUNK[INT] range list (Template Schemas §3.4.1.1 `<TaskParameterStringValue>`)
+     resolve to a string, are trimmed, and must parse as an `i64`; otherwise job
+     creation fails with `Task parameter '<name>' range value '<resolved>' is not an
+     integer`. CHUNK[INT] then applies its value bound to the resolved list. INT and
+     FLOAT list elements do not get the §1.3.2 list-item treatment that STRING/PATH
+     elements do: an element resolves to exactly one value, so a whole-field `null`
+     or list is an error rather than a skip or a flatten. This matches the reference
+     implementation, which resolves numeric range elements to strings too. Applying
+     §1.3.2 to numeric list elements is a known gap in both. **Divergence from the
+     Python reference:** openjd-model-for-python 0.14 does not check the resolved
+     string, so an INT element that resolves to `abc` or `2.5` becomes a task
+     parameter value of that text. §3.4.1.1 requires it to resolve to a base-10
+     integer, so openjd-rs rejects it at job creation.
    - Step-level let bindings (template scope; a failure is reported at
      `steps[i] -> let[j]` — see the carried-forward checks below)
 3. With EXPR extension: inject `Job.Name` (before step instantiation)

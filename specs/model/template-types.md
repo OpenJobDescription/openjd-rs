@@ -326,7 +326,7 @@ Ranges accept either a list of values or a range expression string:
 
 ```rust
 pub enum IntRange {
-    List(Vec<FlexInt>),
+    List(Vec<IntOrFormatString>),
     Expression(FormatString),
 }
 
@@ -340,6 +340,12 @@ pub enum FloatRange {
     Expression(FormatString),
 }
 ```
+
+`IntRange::List` holds `IntOrFormatString` elements (Template Schemas §3.4.1.1
+`<IntRangeList>`, shared by `CHUNK[INT]`): a YAML integer, an integer-valued float, or a
+string that parses as an integer becomes `Int`; a string containing `{{` becomes a
+`FormatString` (a `<TaskParameterStringValue>`), resolved at job creation. Any other
+string is a decode error (`Cannot parse 'abc' as integer`).
 
 `FloatRange::List` uses `FloatRangeItem` — an enum that accepts either a plain `f64` or
 a `FormatString` — to handle YAML float edge cases and format string interpolation in

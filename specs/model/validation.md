@@ -373,6 +373,7 @@ deferring it to job submission or the worker. Two stages of checking:
 | attribute `anyOf`/`allOf` values (Template Schemas §3.3.2.2) | `string? \| list[string]` | when certainly a string: ≤ 100; for a standard capability, ≤ longest allowed value | `validate_attribute_capability_value` (charset / allowed set) on the value, or on each element when a list flattens; `null` skips the element |
 | amount / attribute `name` (Template Schemas §3.3.1.1 / §3.3.2.1) | `string` | ≤ 100 | `helpers::check_capability_name` (length, pattern, reserved scope); then, across the requirements, uniqueness of the known names, and for a standard attribute name the standard-value and single-valued `allOf` checks on literal values |
 | task param STRING/PATH range elements (Template Schemas §3.4.2) | `string? \| list[string]` | when certainly a string: ≤ 1024 | ≤ 1024 chars per element (a list flattens); PATH elements additionally must be non-empty (see below); `null` skips the element |
+| task param INT/CHUNK[INT]/FLOAT range list elements (Template Schemas §3.4.1.1, §3.4.1.2) | none (resolution is `resolve_string_with`) | none | none: expressions and variable references are checked, and the value is checked at job creation |
 | environment variable values (Template Schemas §4.4.2) | `string` | ≤ `max_env_var_value_len` (2048) | (length is the whole constraint) |
 | action `timeout` (FB1 `<posintstring>`, Template Schemas §5) | `int?` | soft cap: 100 chars | coerced integer > 0; `null` = unset |
 | `notifyPeriodInSeconds` (Template Schemas §5.3.2, FB1) | `int?` | soft cap: 100 chars | coerced integer > 0, ≤ 600; `null` = unset |
@@ -424,8 +425,10 @@ derived from the schema context:
 - a required field of type `T` targets `T`;
 - an optional field targets `T?` — a `null` result means "field omitted";
 - a list item targets `T? | list[T]` — `null` skips the item, a list
-  flattens inline (the spec's worked example is `args`; range elements
-  and attribute values are list items under the same rule);
+  flattens inline (the spec's worked example is `args`; STRING/PATH
+  range elements and attribute values are list items under the same
+  rule; INT and FLOAT range list elements are not yet, see
+  `specs/model/job-creation.md`);
 - a format string with surrounding text always concatenates to a string,
   with each expression evaluated unconstrained.
 
@@ -456,8 +459,9 @@ Consequences of the target types worth naming:
   minimum — §4.4.2's minimum length is 0 characters, so an empty
   resolution is legal. Null (and lists) *inside* surrounding text remain
   ordinary interpolation and render their display form.
-- For the list-item fields (range elements, attribute values), a
-  whole-field `null` skips the element and a list flattens inline —
+- For the list-item fields (STRING/PATH range elements, attribute
+  values), a whole-field `null` skips the element and a list flattens
+  inline —
   `range: ["first", "{{ RawParam.Paths }}", "last"]` yields one element
   per path between the literals. The per-element constraints apply to
   each flattened element. Because null-skips can empty a list whose

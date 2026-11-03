@@ -893,6 +893,33 @@ fn validate_fs(
     validate_fs_with(fs, symtab, ev, path, None, errors);
 }
 
+/// Validate the format strings in an INT or CHUNK[INT] `range` at
+/// `range_path`: the whole-field `<IntRangeExpr>`, or each
+/// `<TaskParameterStringValue>` element of an `<IntRangeList>` (Template
+/// Schemas §3.4.1.1) at `range_path[k]`. No target type applies to either:
+/// job creation resolves both to strings (`resolve_int_range`). Literal
+/// elements were checked at decode.
+fn validate_int_range_fs(
+    range: &crate::template::IntRange,
+    symtab: &SymbolTable,
+    ev: &FsEval<'_>,
+    range_path: &[PathElement],
+    errors: &mut ValidationErrors,
+) {
+    match range {
+        crate::template::IntRange::Expression(expr) => {
+            validate_fs(expr, symtab, ev, range_path, errors);
+        }
+        crate::template::IntRange::List(items) => {
+            for (k, item) in items.iter().enumerate() {
+                if let crate::template::IntOrFormatString::FormatString(fs) = item {
+                    validate_fs(fs, symtab, ev, &path_index(range_path, k), errors);
+                }
+            }
+        }
+    }
+}
+
 /// A `hostRequirements` capability name whose value template validation
 /// knows: a literal, or a format string that is fully static.
 struct KnownCapabilityName {
@@ -1954,14 +1981,32 @@ pub fn validate_format_strings(
                 };
                 match tp {
                     TaskParameterDefinition::INT(t) => {
-                        if let crate::template::IntRange::Expression(expr) = &t.range {
-                            validate_fs(
-                                expr,
-                                &range_symtab,
-                                &template_ev,
-                                &path_field(&p_path, "range"),
-                                errors,
-                            );
+                        validate_int_range_fs(
+                            &t.range,
+                            &range_symtab,
+                            &template_ev,
+                            &path_field(&p_path, "range"),
+                            errors,
+                        );
+                    }
+                    TaskParameterDefinition::FLOAT(t) => {
+                        // §3.4.1.2: an element that is a format string is
+                        // validated like any other; it resolves to a string at
+                        // job creation (`resolve_float_range`), so no target
+                        // type applies. Literal elements are skipped by
+                        // `validate_fs`.
+                        if let crate::template::FloatRange::List(items) = &t.range {
+                            for (k, item) in items.iter().enumerate() {
+                                if let crate::template::FloatRangeItem::FormatString(fs) = item {
+                                    validate_fs(
+                                        fs,
+                                        &range_symtab,
+                                        &template_ev,
+                                        &path_index(&path_field(&p_path, "range"), k),
+                                        errors,
+                                    );
+                                }
+                            }
                         }
                     }
                     TaskParameterDefinition::STRING(t) => {
@@ -1993,15 +2038,13 @@ pub fn validate_format_strings(
                         }
                     }
                     TaskParameterDefinition::CHUNK_INT(t) => {
-                        if let crate::template::IntRange::Expression(expr) = &t.range {
-                            validate_fs(
-                                expr,
-                                &range_symtab,
-                                &template_ev,
-                                &path_field(&p_path, "range"),
-                                errors,
-                            );
-                        }
+                        validate_int_range_fs(
+                            &t.range,
+                            &range_symtab,
+                            &template_ev,
+                            &path_field(&p_path, "range"),
+                            errors,
+                        );
                         // TASK_CHUNKING chunks fields are `<intstring>`
                         // format strings resolved at job creation; their
                         // literal forms are checked in the task-chunking
@@ -2044,7 +2087,6 @@ pub fn validate_format_strings(
                             );
                         }
                     }
-                    _ => {}
                 }
             }
         }

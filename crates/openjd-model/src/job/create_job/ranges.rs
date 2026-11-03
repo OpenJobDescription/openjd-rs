@@ -284,7 +284,30 @@ fn resolve_int_range(
 ) -> Result<job::TaskParamRange<i64>, ModelError> {
     match range {
         template::IntRange::List(items) => {
-            let ints: Vec<i64> = items.iter().map(|i| i.0).collect();
+            let ints = items
+                .iter()
+                .map(|item| match item {
+                    template::IntOrFormatString::Int(i) => Ok(*i),
+                    // Template Schemas §3.4.1.1: a `<TaskParameterStringValue>`
+                    // element must resolve to a base-10 integer. It resolves to
+                    // a string and parses like an `<intstring>`, surrounding
+                    // whitespace tolerated — the same treatment as a FLOAT
+                    // list's format string elements in `resolve_float_range`,
+                    // and the reference implementation's. Expression Language
+                    // §1.3.2 list-item typing (`int? | list[int]`) is not
+                    // applied; see specs/model/job-creation.md.
+                    template::IntOrFormatString::FormatString(fs) => {
+                        let resolved = fs
+                            .resolve_string_with(symtab, &budgets.fs_options())
+                            .map_err(ModelError::Expression)?;
+                        resolved.trim().parse::<i64>().map_err(|_| {
+                            ModelError::Expression(ExpressionError::new(format!(
+                                "Task parameter '{param_name}' range value '{resolved}' is not an integer"
+                            )))
+                        })
+                    }
+                })
+                .collect::<Result<Vec<i64>, ModelError>>()?;
             if ints.len() > limits.max_task_param_range_len {
                 return Err(ModelError::DecodeValidation(format!(
                     "Task parameter '{}' range exceeds {} elements ({} elements)",

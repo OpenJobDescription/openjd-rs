@@ -77,9 +77,49 @@ fn int_mixed_types() {
     ));
 }
 
-// NOTE: Format strings in INT list ranges (e.g. ["{{Param.Value}}"]) are accepted
-// by Python but rejected by the Rust implementation which validates literal values
-// at parse time. Format strings in range expressions (string form) are supported.
+/// A step with one task parameter, under a job that defines the INT job
+/// parameter `Value`, so a range element can reference `{{Param.Value}}`.
+fn job_with_int_value_param(task_param_json: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "Value", "type": "INT", "default": 10}}],
+        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}, "parameterSpace": {{"taskParameterDefinitions": [{task_param_json}]}}}}]
+    }}"#
+    )
+}
+
+// Template Schemas §3.4.1.1: an `<IntRangeList>` element may be a
+// `<TaskParameterStringValue>`, a format string that resolves to an integer.
+
+#[test]
+fn int_format_string() {
+    decode_ok(&job_with_int_value_param(
+        r#"{"name": "foo", "type": "INT", "range": ["{{Param.Value}}"]}"#,
+    ));
+}
+
+#[test]
+fn int_mixed_item_types() {
+    decode_ok(&job_with_int_value_param(
+        r#"{"name": "foo", "type": "INT", "range": [1, "2", "{{Param.Value}}"]}"#,
+    ));
+}
+
+#[test]
+fn int_format_string_surrounding_whitespace() {
+    decode_ok(&job_with_int_value_param(
+        r#"{"name": "foo", "type": "INT", "range": [" {{Param.Value}} ", "{{ Param.Value }}"]}"#,
+    ));
+}
+
+#[test]
+fn int_format_string_with_surrounding_text() {
+    decode_ok(&job_with_int_value_param(
+        r#"{"name": "foo", "type": "INT", "range": ["1{{Param.Value}}"]}"#,
+    ));
+}
 
 #[test]
 fn int_range_expression() {
@@ -140,6 +180,24 @@ fn int_range_too_long() {
 }
 
 #[test]
+fn int_format_string_undefined_variable() {
+    check_err(
+        &job_with_int_value_param(
+            r#"{"name": "foo", "type": "INT", "range": [1, "{{Param.Nope}}"]}"#,
+        ),
+        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'. Did you mean: Param.Value\n  Param.Nope\n  ~~~~~~^~~~"],
+    );
+}
+
+#[test]
+fn int_format_string_unterminated() {
+    check_err(
+        &job_with_int_value_param(r#"{"name": "foo", "type": "INT", "range": ["{{Param.Value"]}"#),
+        &["Failed to parse interpolation expression at [0, 13]. Reason: Braces mismatch.\n  {{Param.Value\n  ^~"],
+    );
+}
+
+#[test]
 fn int_empty_range_expression() {
     check_err(&job_with_param_space(r#"{"taskParameterDefinitions": [{"name": "foo", "type": "INT", "range": ""}]}"#), &[
         "steps[0] -> parameterSpace -> taskParameterDefinitions[0]:\n\tINT parameter 'foo' range expression error:",
@@ -180,9 +238,26 @@ fn float_mixed_types() {
 
 #[test]
 fn float_format_string() {
-    decode_ok(&job_with_param_space(
-        r#"{"taskParameterDefinitions": [{"name": "foo", "type": "FLOAT", "range": ["{{Param.Value}}"]}]}"#,
+    decode_ok(&job_with_int_value_param(
+        r#"{"name": "foo", "type": "FLOAT", "range": ["{{Param.Value}}"]}"#,
     ));
+}
+
+#[test]
+fn float_mixed_item_types() {
+    decode_ok(&job_with_int_value_param(
+        r#"{"name": "foo", "type": "FLOAT", "range": [1, "2", 3.3, "3.4", " {{Param.Value}} "]}"#,
+    ));
+}
+
+#[test]
+fn float_format_string_undefined_variable() {
+    check_err(
+        &job_with_int_value_param(
+            r#"{"name": "foo", "type": "FLOAT", "range": [1.5, "{{Param.Nope}}"]}"#,
+        ),
+        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'. Did you mean: Param.Value\n  Param.Nope\n  ~~~~~~^~~~"],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════

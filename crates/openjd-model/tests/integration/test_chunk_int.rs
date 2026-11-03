@@ -112,6 +112,29 @@ fn mixed_int_types() {
     ));
 }
 
+/// Template Schemas §3.4.1.5 reuses §3.4.1.1's `<IntRangeList>`, so its
+/// elements may be format strings too.
+#[test]
+fn range_list_format_string() {
+    let s = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Value", "type": "INT", "default": 5}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "foo", "type": "CHUNK[INT]", "range": [-1, 0, 1, "2", "{{Param.Value}}"],
+                     "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}}
+                ]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    decode_ok(s);
+}
+
 #[test]
 fn target_runtime_seconds_zero() {
     decode_ok(&chunk_job(
