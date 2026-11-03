@@ -351,11 +351,14 @@ enum ResolvedConstraint<'a> {
     /// (see `resolve_string_range` in create_job/ranges.rs).
     TextListItem { max_len: usize, forbid_empty: bool },
     /// A format string element of an INT, CHUNK[INT] or FLOAT range list
-    /// (Template Schemas §3.4.1.1, §3.4.1.2), with the list-item `target`
-    /// from [`TaskParameterType::range_list_item_target`]: `null` skips the
+    /// (Template Schemas §3.4.1.1, §3.4.1.2) with the EXPR extension, with
+    /// the list-item `target` from
+    /// [`TaskParameterType::range_list_item_target`]: `null` skips the
     /// element and a list flattens. Static typing against the target is
     /// the whole check here. A value that only fails once known, such as a
     /// string that does not parse as a number, fails at job creation.
+    /// Without EXPR these elements resolve to strings and have no
+    /// constraint.
     ///
     /// [`TaskParameterType::range_list_item_target`]: crate::types::TaskParameterType::range_list_item_target
     NumericListItem { target: ExprType },
@@ -439,7 +442,7 @@ impl ResolvedConstraint<'_> {
         match self {
             Self::Text { .. } | Self::CapabilityName { .. } => Some(ExprType::STRING),
             Self::TextListItem { .. } | Self::AttributeValue { .. } => {
-                Some(crate::types::TaskParameterType::String.range_list_item_target())
+                Some(crate::types::string_list_item_target())
             }
             Self::NumericListItem { target } => Some(target.clone()),
             Self::Float { .. } => Some(ExprType::union(vec![ExprType::FLOAT, ExprType::NULLTYPE])),
@@ -906,13 +909,15 @@ fn validate_fs(
 /// Validate the format strings in an INT or CHUNK[INT] `range` at
 /// `range_path`: the whole-field `<IntRangeExpr>`, or each
 /// `<TaskParameterStringValue>` element of an `<IntRangeList>` (Template
-/// Schemas §3.4.1.1) at `range_path[k]`. A list element is typed as a list
-/// item, with the target `resolve_int_range` resolves it with. The
-/// expression has no target: `resolve_int_range` evaluates it untyped and
-/// then, failing a range or list result, resolves it to a string. Literal
-/// elements were checked at decode.
+/// Schemas §3.4.1.1) at `range_path[k]`. A list element is checked with
+/// `item_constraint`, which carries the target `resolve_int_range` resolves
+/// it with (none without EXPR). The expression has no target:
+/// `resolve_int_range` evaluates it untyped and then, failing a range or
+/// list result, resolves it to a string. Literal elements were checked at
+/// decode.
 fn validate_int_range_fs(
     range: &crate::template::IntRange,
+    item_constraint: Option<&ResolvedConstraint<'_>>,
     symtab: &SymbolTable,
     ev: &FsEval<'_>,
     range_path: &[PathElement],
@@ -923,9 +928,6 @@ fn validate_int_range_fs(
             validate_fs(expr, symtab, ev, range_path, errors);
         }
         crate::template::IntRange::List(items) => {
-            let constraint = ResolvedConstraint::NumericListItem {
-                target: crate::types::TaskParameterType::Int.range_list_item_target(),
-            };
             for (k, item) in items.iter().enumerate() {
                 if let crate::template::IntOrFormatString::FormatString(fs) = item {
                     validate_fs_with(
@@ -933,7 +935,7 @@ fn validate_int_range_fs(
                         symtab,
                         ev,
                         &path_index(range_path, k),
-                        Some(&constraint),
+                        item_constraint,
                         errors,
                     );
                 }
@@ -2001,10 +2003,19 @@ pub fn validate_format_strings(
                     max_len: limits.max_task_param_string_len,
                     forbid_empty: true,
                 };
+                // INT, CHUNK[INT] and FLOAT elements are typed with the
+                // target job creation resolves them with, which depends on
+                // EXPR (see `TaskParameterType::range_list_item_target`).
+                let numeric_item_constraint = tp
+                    .task_param_type()
+                    .range_list_item_target(expr_active)
+                    .map(|target| ResolvedConstraint::NumericListItem { target });
+                let numeric_item_constraint = numeric_item_constraint.as_ref();
                 match tp {
                     TaskParameterDefinition::INT(t) => {
                         validate_int_range_fs(
                             &t.range,
+                            numeric_item_constraint,
                             &range_symtab,
                             &template_ev,
                             &path_field(&p_path, "range"),
@@ -2012,15 +2023,10 @@ pub fn validate_format_strings(
                         );
                     }
                     TaskParameterDefinition::FLOAT(t) => {
-                        // §3.4.1.2: a format string element is typed as a
-                        // list item, with the target `resolve_float_range`
-                        // resolves it with. Literal elements are skipped by
-                        // `validate_fs_with`.
+                        // §3.4.1.2: a format string element is checked with
+                        // the target `resolve_float_range` resolves it with.
+                        // Literal elements are skipped by `validate_fs_with`.
                         if let crate::template::FloatRange::List(items) = &t.range {
-                            let constraint = ResolvedConstraint::NumericListItem {
-                                target: crate::types::TaskParameterType::Float
-                                    .range_list_item_target(),
-                            };
                             for (k, item) in items.iter().enumerate() {
                                 if let crate::template::FloatRangeItem::FormatString(fs) = item {
                                     validate_fs_with(
@@ -2028,7 +2034,7 @@ pub fn validate_format_strings(
                                         &range_symtab,
                                         &template_ev,
                                         &path_index(&path_field(&p_path, "range"), k),
-                                        Some(&constraint),
+                                        numeric_item_constraint,
                                         errors,
                                     );
                                 }
@@ -2066,6 +2072,7 @@ pub fn validate_format_strings(
                     TaskParameterDefinition::CHUNK_INT(t) => {
                         validate_int_range_fs(
                             &t.range,
+                            numeric_item_constraint,
                             &range_symtab,
                             &template_ev,
                             &path_field(&p_path, "range"),

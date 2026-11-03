@@ -373,7 +373,7 @@ deferring it to job submission or the worker. Two stages of checking:
 | attribute `anyOf`/`allOf` values (Template Schemas §3.3.2.2) | `string? \| list[string]` | when certainly a string: ≤ 100; for a standard capability, ≤ longest allowed value | `validate_attribute_capability_value` (charset / allowed set) on the value, or on each element when a list flattens; `null` skips the element |
 | amount / attribute `name` (Template Schemas §3.3.1.1 / §3.3.2.1) | `string` | ≤ 100 | `helpers::check_capability_name` (length, pattern, reserved scope); then, across the requirements, uniqueness of the known names, and for a standard attribute name the standard-value and single-valued `allOf` checks on literal values |
 | task param STRING/PATH range elements (Template Schemas §3.4.2) | `string? \| list[string]` | when certainly a string: ≤ 1024 | ≤ 1024 chars per element (a list flattens); PATH elements additionally must be non-empty (see below); `null` skips the element |
-| task param INT/CHUNK[INT]/FLOAT range list elements (Template Schemas §3.4.1.1, §3.4.1.2) | `int? \| list[int]`; FLOAT `float? \| int \| list[float]` (`TaskParameterType::range_list_item_target`) | none | none beyond static typing against the target, which rejects a value that can never coerce (a `bool`, a `list[string]`); a value that only fails once known is checked at job creation; `null` skips the element |
+| task param INT/CHUNK[INT]/FLOAT range list elements (Template Schemas §3.4.1.1, §3.4.1.2) | with EXPR `int? \| list[int]`, FLOAT `float? \| int \| list[float]`; without EXPR none, the element resolves to a string (`TaskParameterType::range_list_item_target`) | none | none beyond static typing against the target, which rejects a value that can never coerce (a `bool`, a `list[string]`); a value that only fails once known is checked at job creation; `null` skips the element. The reference implementation does no static typing here, so its `check` accepts these templates and they fail when the job runs |
 | environment variable values (Template Schemas §4.4.2) | `string` | ≤ `max_env_var_value_len` (2048) | (length is the whole constraint) |
 | action `timeout` (FB1 `<posintstring>`, Template Schemas §5) | `int?` | soft cap: 100 chars | coerced integer > 0; `null` = unset |
 | `notifyPeriodInSeconds` (Template Schemas §5.3.2, FB1) | `int?` | soft cap: 100 chars | coerced integer > 0, ≤ 600; `null` = unset |
@@ -426,8 +426,10 @@ derived from the schema context:
 - an optional field targets `T?` — a `null` result means "field omitted";
 - a list item targets `T? | list[T]` — `null` skips the item, a list
   flattens inline (the spec's worked example is `args`; task parameter
-  range list elements of every type and attribute values are list
-  items under the same rule, see `specs/model/job-creation.md`);
+  range list elements and attribute values are list items under the
+  same rule, except that INT, CHUNK[INT] and FLOAT range elements of a
+  template without EXPR resolve to strings, see
+  `specs/model/job-creation.md`);
 - a format string with surrounding text always concatenates to a string,
   with each expression evaluated unconstrained.
 

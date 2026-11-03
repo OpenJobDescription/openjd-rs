@@ -70,21 +70,28 @@ pub(super) fn resolve_to_f64(
     Ok(Some(value))
 }
 
-/// Resolve one list item (Expression Language §1.3.2) with `target`, a
-/// `T? | list[T]` type, to the values it contributes: none for `null`, one
-/// per member for a list, and the value itself otherwise.
+/// Resolve one list item to the values it contributes.
 ///
-/// The target applies to a whole-field expression only. A format string with
-/// literal text around its expressions, or with none at all, resolves to a
-/// string, which the caller interprets for its element type. Task parameter
-/// range lists of every type and `hostRequirements` attribute values share
-/// this, so they cannot drift apart in how they skip and flatten.
+/// With a `target` (a `T? | list[T]` type from
+/// `TaskParameterType::range_list_item_target`), the item follows Expression
+/// Language §1.3.2: none for `null`, one per member for a list, and the
+/// value itself otherwise. The target applies to a whole-field expression
+/// only. A format string with literal text around its expressions, or with
+/// none at all, resolves to a string. With no target the item always
+/// resolves to one string. The caller interprets a string for its element
+/// type. Task parameter range lists of every type and `hostRequirements`
+/// attribute values share this, so they cannot drift apart in how they skip
+/// and flatten.
 fn resolve_list_item(
     fs: &openjd_expr::FormatString,
-    target: &openjd_expr::ExprType,
+    target: Option<&openjd_expr::ExprType>,
     symtab: &SymbolTable,
     budgets: super::EvalBudgets,
 ) -> Result<Vec<ExprValue>, ExpressionError> {
+    let Some(target) = target else {
+        let text = fs.resolve_string_with(symtab, &budgets.fs_options())?;
+        return Ok(vec![ExprValue::String(text)]);
+    };
     let value = fs.resolve_with(symtab, &budgets.fs_options().with_target_type(target))?;
     Ok(match value {
         ExprValue::Null => Vec::new(),
@@ -115,10 +122,10 @@ pub(super) fn resolve_string_list(
     symtab: &SymbolTable,
     budgets: super::EvalBudgets,
 ) -> Result<Vec<String>, ModelError> {
-    let target = crate::types::TaskParameterType::String.range_list_item_target();
+    let target = crate::types::string_list_item_target();
     let mut out = Vec::new();
     for fs in vals {
-        let values = resolve_list_item(fs, &target, symtab, budgets).map_err(|e| {
+        let values = resolve_list_item(fs, Some(&target), symtab, budgets).map_err(|e| {
             ModelError::FormatStringError {
                 message: e.to_string(),
                 input: Some(fs.raw().to_string()),
@@ -132,16 +139,21 @@ pub(super) fn resolve_string_list(
 }
 
 /// Resolve a StepParameterSpaceDefinition into a StepParameterSpace with concrete ranges.
+///
+/// `expr` says whether the EXPR extension is active, which decides how a
+/// numeric range list element resolves (see
+/// `TaskParameterType::range_list_item_target`).
 pub(super) fn resolve_parameter_space(
     ps: &template::StepParameterSpaceDefinition,
     symtab: &SymbolTable,
+    expr: bool,
     limits: &EffectiveLimits,
     budgets: super::EvalBudgets,
 ) -> Result<job::StepParameterSpace, ModelError> {
     let mut defs = IndexMap::new();
     for tp in &ps.task_parameter_definitions {
         let name = tp.name().to_string();
-        let param = resolve_task_parameter(tp, symtab, limits, budgets)?;
+        let param = resolve_task_parameter(tp, symtab, expr, limits, budgets)?;
         defs.insert(name, param);
     }
     Ok(job::StepParameterSpace {
@@ -153,33 +165,73 @@ pub(super) fn resolve_parameter_space(
 fn resolve_task_parameter(
     tp: &template::TaskParameterDefinition,
     symtab: &SymbolTable,
+    expr: bool,
     limits: &EffectiveLimits,
     budgets: super::EvalBudgets,
 ) -> Result<job::TaskParameter, ModelError> {
+    // The list-item target for this parameter's type (Expression Language
+    // §1.3.2), shared with template validation.
+    let item_target = tp.task_param_type().range_list_item_target(expr);
+    let item_target = item_target.as_ref();
     match tp {
         template::TaskParameterDefinition::INT(p) => {
-            let range = resolve_int_range(&p.range, symtab, p.name.as_str(), limits, budgets)?;
+            let range = resolve_int_range(
+                &p.range,
+                item_target,
+                symtab,
+                p.name.as_str(),
+                limits,
+                budgets,
+            )?;
             Ok(job::TaskParameter::Int {
                 range,
                 chunks: None,
             })
         }
         template::TaskParameterDefinition::FLOAT(p) => {
-            let range = resolve_float_range(&p.range, symtab, p.name.as_str(), limits, budgets)?;
+            let range = resolve_float_range(
+                &p.range,
+                item_target,
+                symtab,
+                p.name.as_str(),
+                limits,
+                budgets,
+            )?;
             Ok(job::TaskParameter::Float { range })
         }
         template::TaskParameterDefinition::STRING(p) => {
-            let range =
-                resolve_string_range(&p.range, symtab, p.name.as_str(), false, limits, budgets)?;
+            let range = resolve_string_range(
+                &p.range,
+                item_target,
+                symtab,
+                p.name.as_str(),
+                false,
+                limits,
+                budgets,
+            )?;
             Ok(job::TaskParameter::String { range })
         }
         template::TaskParameterDefinition::PATH(p) => {
-            let range =
-                resolve_string_range(&p.range, symtab, p.name.as_str(), true, limits, budgets)?;
+            let range = resolve_string_range(
+                &p.range,
+                item_target,
+                symtab,
+                p.name.as_str(),
+                true,
+                limits,
+                budgets,
+            )?;
             Ok(job::TaskParameter::Path { range })
         }
         template::TaskParameterDefinition::CHUNK_INT(p) => {
-            let range = resolve_int_range(&p.range, symtab, p.name.as_str(), limits, budgets)?;
+            let range = resolve_int_range(
+                &p.range,
+                item_target,
+                symtab,
+                p.name.as_str(),
+                limits,
+                budgets,
+            )?;
             // CHUNK[INT] chunking bounds values to |v| < 2^62, below what
             // list and range-expression ranges accept, so reject
             // out-of-bound values here — at job creation, with a
@@ -296,6 +348,7 @@ fn resolve_task_parameter(
 
 fn resolve_int_range(
     range: &template::IntRange,
+    item_target: Option<&openjd_expr::ExprType>,
     symtab: &SymbolTable,
     param_name: &str,
     limits: &EffectiveLimits,
@@ -303,14 +356,18 @@ fn resolve_int_range(
 ) -> Result<job::TaskParamRange<i64>, ModelError> {
     match range {
         template::IntRange::List(items) => {
-            let target = crate::types::TaskParameterType::Int.range_list_item_target();
             let mut ints = Vec::with_capacity(items.len());
             for (k, item) in items.iter().enumerate() {
                 match item {
                     template::IntOrFormatString::Int(i) => ints.push(*i),
                     template::IntOrFormatString::FormatString(fs) => {
                         ints.extend(resolve_int_range_list_element(
-                            fs, k, &target, symtab, param_name, budgets,
+                            fs,
+                            k,
+                            item_target,
+                            symtab,
+                            param_name,
+                            budgets,
                         )?)
                     }
                 }
@@ -379,15 +436,15 @@ fn resolve_int_range(
 /// Resolve element `k` of an `<IntRangeList>`, a `<TaskParameterStringValue>`
 /// (Template Schemas §3.4.1.1), to the integers it contributes.
 ///
-/// It is a list item (Expression Language §1.3.2), resolved with `target`
-/// (`int? | list[int]`): `null` contributes nothing and a list one integer
-/// per member. A string result, from a format string with text around its
-/// expressions, parses like an `<intstring>` with surrounding whitespace
-/// tolerated. Errors name the parameter and `range[k]`.
+/// With the EXPR extension it is a list item (Expression Language §1.3.2),
+/// resolved with `target` (`int? | list[int]`): `null` contributes nothing
+/// and a list one integer per member. A string result (always, without
+/// EXPR) parses like an `<intstring>` with surrounding whitespace tolerated.
+/// Errors name the parameter and `range[k]`.
 fn resolve_int_range_list_element(
     fs: &openjd_expr::FormatString,
     k: usize,
-    target: &openjd_expr::ExprType,
+    target: Option<&openjd_expr::ExprType>,
     symtab: &SymbolTable,
     param_name: &str,
     budgets: super::EvalBudgets,
@@ -465,38 +522,31 @@ pub(crate) fn strip_redundant_leading_zeros(text: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-/// One value a FLOAT range list's format string element contributed.
+/// One value a FLOAT range list's format string element contributed, or why
+/// it is not a valid one.
 ///
-/// A float that carries its spelling, and an integer, render as written: the
-/// text is what a `<floatstring>` would carry (§7.5). A float with no
-/// spelling, such as a member of a list the expression built, renders through
-/// `format_float`, as a whole-field range expression's elements do. A string
-/// (from a format string with text around its expressions, or with none) is a
-/// `<floatstring>`.
-fn float_range_value(
-    value: ExprValue,
-    param_name: &str,
-    limits: &EffectiveLimits,
-) -> Result<Float64, ModelError> {
+/// A float that carries a spelling, alone or as a member of a list, and an
+/// integer render as written: the text is what a `<floatstring>` would
+/// carry (§7.5). A float with no spelling, such as one the expression
+/// computed or an integer member of a list converted to `float`, renders
+/// through `format_float`. A string (from a format string with text around
+/// its expressions, from one with none, or from any element without EXPR) is
+/// a `<floatstring>`.
+fn float_range_value(value: ExprValue, limits: &EffectiveLimits) -> Result<Float64, String> {
     let resolved = match value {
         ExprValue::Float(f)
             if f.to_display_string() == openjd_expr::value::format_float(f.value()) =>
         {
-            return float64(f.value(), param_name);
+            return Float64::new(f.value()).map_err(|e| e.to_string());
         }
         other => list_item_text(other),
     };
     let trimmed = resolved.trim();
-    let value = trimmed.parse::<f64>().map_err(|_| {
-        ModelError::Expression(ExpressionError::new(format!(
-            "Cannot parse '{}' as float",
-            resolved
-        )))
-    })?;
+    let value = trimmed
+        .parse::<f64>()
+        .map_err(|_| format!("value '{resolved}' is not a number"))?;
     if !value.is_finite() {
-        return Err(ModelError::Expression(ExpressionError::new(format!(
-            "FLOAT parameter '{param_name}' range value '{resolved}' is not finite"
-        ))));
+        return Err(format!("value '{resolved}' is not finite"));
     }
     // §7.5 rule 2: the f64 cannot carry the decimal places, so
     // the text rides alongside it.
@@ -511,13 +561,14 @@ fn float_range_value(
     // so erroring would reject templates that were valid, whereas
     // a STRING element over the cap was always an error.
     if text.chars().count() > limits.max_task_param_string_len {
-        return float64(value, param_name);
+        return Float64::new(value).map_err(|e| e.to_string());
     }
-    Float64::with_str(value, text.into_owned()).map_err(ModelError::Expression)
+    Float64::with_str(value, text.into_owned()).map_err(|e| e.to_string())
 }
 
 fn resolve_float_range(
     range: &template::FloatRange,
+    item_target: Option<&openjd_expr::ExprType>,
     symtab: &SymbolTable,
     param_name: &str,
     limits: &EffectiveLimits,
@@ -525,26 +576,28 @@ fn resolve_float_range(
 ) -> Result<Vec<Float64>, ModelError> {
     let floats: Vec<Float64> = match range {
         template::FloatRange::List(items) => {
-            let target = crate::types::TaskParameterType::Float.range_list_item_target();
             let mut floats = Vec::with_capacity(items.len());
             for (k, item) in items.iter().enumerate() {
                 match item {
                     // `2.50` and `2.5` are the same literal after parsing, so a
                     // `<float>` makes no request about how it renders.
                     template::FloatRangeItem::Float(f) => floats.push(float64(*f, param_name)?),
-                    // A list item (Expression Language §1.3.2): `null`
-                    // contributes nothing and a list one value per member.
-                    // Evaluation errors name the element, as for INT; the
-                    // number checks below keep their earlier messages.
+                    // With EXPR a list item (Expression Language §1.3.2):
+                    // `null` contributes nothing and a list one value per
+                    // member. Errors name the parameter and the element.
                     template::FloatRangeItem::FormatString(fs) => {
-                        for value in
-                            resolve_list_item(fs, &target, symtab, budgets).map_err(|e| {
-                                ModelError::Expression(ExpressionError::new(format!(
-                                    "Task parameter '{param_name}' range[{k}]: {e}"
-                                )))
-                            })?
-                        {
-                            floats.push(float_range_value(value, param_name, limits)?);
+                        let error = |detail: std::fmt::Arguments<'_>| {
+                            ModelError::Expression(ExpressionError::new(format!(
+                                "Task parameter '{param_name}' range[{k}]: {detail}"
+                            )))
+                        };
+                        let values = resolve_list_item(fs, item_target, symtab, budgets)
+                            .map_err(|e| error(format_args!("{e}")))?;
+                        for value in values {
+                            floats.push(
+                                float_range_value(value, limits)
+                                    .map_err(|detail| error(format_args!("{detail}")))?,
+                            );
                         }
                     }
                 }
@@ -598,6 +651,7 @@ fn resolve_float_range(
 
 fn resolve_string_range(
     range: &template::StringRange,
+    item_target: Option<&openjd_expr::ExprType>,
     symtab: &SymbolTable,
     param_name: &str,
     is_path: bool,
@@ -615,10 +669,9 @@ fn resolve_string_range(
         // that is entirely one expression can also use the whole-field
         // `<ListExpressionString>` form (§1.3.12) handled below.
         template::StringRange::List(items) => {
-            let target = crate::types::TaskParameterType::String.range_list_item_target();
             let mut out = Vec::new();
             for fs in items {
-                let values = resolve_list_item(fs, &target, symtab, budgets)
+                let values = resolve_list_item(fs, item_target, symtab, budgets)
                     .map_err(ModelError::Expression)?;
                 out.extend(values.into_iter().map(list_item_text));
             }

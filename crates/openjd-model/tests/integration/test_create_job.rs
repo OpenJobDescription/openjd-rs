@@ -1334,9 +1334,54 @@ fn test_create_job_int_range_list_format_string_not_an_integer() {
     }
 }
 
-/// A whole-field element is typed `int? | list[int]` (Expression Language
-/// §1.3.2), so a value that does not coerce to an integer fails with the
-/// coercion error and its caret, named by parameter and element.
+/// Without EXPR a format string element is the base 2023-09
+/// `<TaskParameterStringValue>`: it resolves to a string, which parses as an
+/// `<intstring>` or `<floatstring>` with surrounding whitespace tolerated.
+#[test]
+fn test_create_job_numeric_range_list_without_expr_resolves_to_string() {
+    let template = |param_type: &str, range_json: &str| {
+        int_range_list_template(param_type, range_json).replacen(
+            r#"{"name": "Text", "type": "STRING", "default": "abc"},"#,
+            r#"{"name": "Text", "type": "STRING", "default": "abc"},
+            {"name": "Padded", "type": "STRING", "default": " 7 "},"#,
+            1,
+        )
+    };
+    for param_type in ["INT", "CHUNK[INT]"] {
+        let job = parse_and_create(&template(param_type, r#"["{{Param.Padded}}"]"#), &[]);
+        assert_eq!(frame_int_list(&job), vec![7], "{param_type}");
+        for (element, resolved) in [("{{Param.Text}}", "abc"), ("{{Param.Ratio}}", "2.5")] {
+            let err =
+                parse_and_create_err(&template(param_type, &format!(r#"["{element}"]"#)), &[]);
+            assert_eq!(
+                err,
+                format!(
+                    "Expression error: Task parameter 'Frame' range[0]: value '{resolved}' is not an integer"
+                ),
+                "{param_type} {element}"
+            );
+        }
+    }
+    let job = parse_and_create(
+        &template(
+            "FLOAT",
+            r#"["{{Param.Padded}}", "{{Param.Value}}", "{{Param.Ratio}}"]"#,
+        ),
+        &[("Ratio", "2.50")],
+    );
+    assert_eq!(frame_float_renderings(&job), ["7", "10", "2.50"]);
+    let err = parse_and_create_err(&template("FLOAT", r#"["{{Param.Text}}"]"#), &[]);
+    assert_eq!(
+        err,
+        "Expression error: Task parameter 'Frame' range[0]: value 'abc' is not a number"
+    );
+}
+
+/// With EXPR a whole-field element is typed `int? | list[int]` (Expression
+/// Language §1.3.2), so a value that does not coerce to an integer fails with
+/// the coercion error and its caret, named by parameter and element. Without
+/// EXPR the same element resolves to a string and fails to parse, as tested
+/// above.
 #[test]
 fn test_create_job_int_range_list_whole_field_does_not_coerce() {
     for param_type in ["INT", "CHUNK[INT]"] {
@@ -1346,7 +1391,7 @@ fn test_create_job_int_range_list_whole_field_does_not_coerce() {
             ("Param.Ratio", "float", "~~~~~~^~~~~"),
         ] {
             let err = parse_and_create_err(
-                &int_range_list_template(param_type, &format!(r#"[1, 2, "{{{{{expr}}}}}"]"#)),
+                &expr_range_list_template(param_type, &format!(r#"[1, 2, "{{{{{expr}}}}}"]"#)),
                 &[],
             );
             assert_eq!(
@@ -1422,10 +1467,34 @@ fn test_create_job_float_range_list_null_drops_and_list_flattens() {
         &[("Ratio", "2.50")],
     );
     // An integer renders as written, a float keeps the spelling it was given,
-    // and the members of a list render like a whole-field range expression's.
+    // and the integer members of a list, converted to float, have none.
     assert_eq!(
         frame_float_renderings(&job),
         ["1.5", "2.5", "3.75", "3.0", "4.0", "10", "2.50"]
+    );
+    // Rendering cannot tell `2.5` with the spelling "2.5" from `2.5` with no
+    // spelling; the serialized job can (a spelling serializes as a string).
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        r#"{"float":{"range":[1.5,2.5,3.75,3.0,4.0,"10","2.50"]}}"#
+    );
+}
+
+/// A `<floatstring>` keeps its spelling up to `max_task_param_string_len`
+/// characters, and only its value past that.
+#[test]
+fn test_create_job_float_range_list_spelling_length_cap() {
+    let at_cap = format!("1.{}", "0".repeat(1022));
+    let over_cap = format!("1.{}", "0".repeat(1023));
+    let job = parse_and_create(
+        &int_range_list_template("FLOAT", &format!(r#"["{at_cap}", "{over_cap}"]"#)),
+        &[],
+    );
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        format!(r#"{{"float":{{"range":["{at_cap}",1.0]}}}}"#)
     );
 }
 
@@ -4049,7 +4118,7 @@ fn test_create_job_float_range_string_non_finite() {
         assert_eq!(
             err,
             format!(
-                "Expression error: FLOAT parameter 'Weight' range value '{value}' is not finite"
+                "Expression error: Task parameter 'Weight' range[0]: value '{value}' is not finite"
             )
         );
     }
@@ -4073,19 +4142,34 @@ fn test_create_job_float_range_resolved_string_non_finite() {
         }}"#
         )
     };
+    let with_expr = |element: &str| {
+        template(element).replacen(
+            r#""name": "Test","#,
+            r#""name": "Test", "extensions": ["EXPR"],"#,
+            1,
+        )
+    };
     for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
-        // With text around the expression, the element resolves to a string,
-        // which must be a finite <floatstring>.
-        let err = parse_and_create_err(&template(" {{Param.Value}}"), &[("Value", value)]);
-        assert_eq!(
-            err,
-            format!(
-                "Expression error: FLOAT parameter 'Weight' range value ' {value}' is not finite"
-            )
-        );
-        // A whole-field element is typed `float? | list[float]` (Expression
-        // Language §1.3.2), and a non-finite string does not coerce.
-        let err = parse_and_create_err(&template("{{Param.Value}}"), &[("Value", value)]);
+        // Without EXPR the element resolves to a string, which must be a
+        // finite <floatstring>. So does an element with text around its
+        // expression, with or without EXPR.
+        for (template, element) in [
+            (template("{{Param.Value}}"), value.to_string()),
+            (template(" {{Param.Value}}"), format!(" {value}")),
+            (with_expr(" {{Param.Value}}"), format!(" {value}")),
+        ] {
+            let err = parse_and_create_err(&template, &[("Value", value)]);
+            assert_eq!(
+                err,
+                format!(
+                    "Expression error: Task parameter 'Weight' range[0]: value '{element}' is not finite"
+                )
+            );
+        }
+        // With EXPR a whole-field element is typed `float? | list[float]`
+        // (Expression Language §1.3.2), and a non-finite string does not
+        // coerce.
+        let err = parse_and_create_err(&with_expr("{{Param.Value}}"), &[("Value", value)]);
         assert_eq!(
             err,
             "Expression error: Task parameter 'Weight' range[0]: Cannot coerce string to float | int | list[float] | nulltype\n  Param.Value\n  ~~~~~~^~~~~"

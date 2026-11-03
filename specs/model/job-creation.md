@@ -211,43 +211,53 @@ budgets template validation and the session runtime apply.
      multi-segment strings concatenate and parse with surrounding whitespace
      tolerated.
    - Parameter space ranges (evaluate range expressions, resolve FormatString ranges).
-     The format string elements of a range list, of every task parameter type, are
-     list items (Expression Language §1.3.2). A whole-field expression resolves with
-     the target `T? | list[T]` from `TaskParameterType::range_list_item_target`, the
-     same target template validation types it with, and one helper
-     (`resolve_list_item`) applies it for every type: `null` drops the element and a
-     list flattens inline, one range element per member, mixable with literal
-     elements. `T` is `string` for STRING and PATH, `int` for INT and CHUNK[INT], and
-     `float` for FLOAT, whose target also accepts `int` (see below). A range emptied
-     by drops is rejected (`Task parameter '<name>' range has no elements after
-     resolution`), since the ≥1-element rule was checked on the list as written, at
-     decode. Attribute `anyOf`/`allOf` values get the same treatment in `instantiate`.
+     A format string element of a range list resolves through one helper
+     (`resolve_list_item`) for every task parameter type, with the target from
+     `TaskParameterType::range_list_item_target`, which template validation uses too.
 
-     A format string with literal text around its expressions, or with no
-     expressions (a literal FLOAT string such as `"02.50"`), resolves to a string
-     instead, which is interpreted for the element type:
+     STRING and PATH elements are always list items (Expression Language §1.3.2),
+     with the target `string? | list[string]`. INT, CHUNK[INT] and FLOAT elements are
+     list items when the template enables EXPR, with `int? | list[int]` and
+     `float? | int | list[float]`. A whole-field list-item expression drops the
+     element when it is `null`, and flattens a list inline, one range element per
+     member, mixable with literal elements. A range emptied by drops is rejected
+     (`Task parameter '<name>' range has no elements after resolution`), since the
+     ≥1-element rule was checked on the list as written, at decode. Attribute
+     `anyOf`/`allOf` values get the same treatment in `instantiate`.
+
+     Without EXPR an INT, CHUNK[INT] or FLOAT element is the base 2023-09
+     `<TaskParameterStringValue>` and resolves to a string. A base format string
+     only interpolates value references, so it cannot produce `null` or a list, and
+     the string form keeps the surrounding-whitespace tolerance of `<intstring>` and
+     `<floatstring>`, which §1.2.3 coercion lacks. The same is true with EXPR of a
+     format string with literal text around its expressions, or with no expressions
+     (a literal FLOAT string such as `"02.50"`). A string is interpreted for the
+     element type:
      - INT and CHUNK[INT]: trimmed, then parsed as an `i64` (Rust's integer syntax:
        an optional sign and ASCII digits). Otherwise job creation fails with `Task
        parameter '<name>' range[<k>]: value '<resolved>' is not an integer`, or `...
        is out of range for a 64-bit integer` for an integer that does not fit.
-     - FLOAT: trimmed, and must parse as a finite `f64`. The text is kept as the
-       `<floatstring>` spelling (§7.5).
+     - FLOAT: trimmed, and must parse as a finite `f64`, or job creation fails with
+       `Task parameter '<name>' range[<k>]: value '<resolved>' is not a number` or
+       `... is not finite`. The text is kept as the `<floatstring>` spelling (§7.5).
 
-     For a whole-field expression the target's coercion applies (Expression
-     Language §1.2.3), as for the chunks fields above: `{{ 3.0 }}` is 3 in an INT
-     range, a STRING job parameter `"7"` is 7, and a value that cannot coerce, such
-     as a STRING `"abc"` or `" 7 "`, or a `list[string]`, fails with the coercion
-     error, for example `Task parameter '<name>' range[<k>]: Cannot coerce string to
-     int | list[int] | nulltype`, followed by the expression and its caret. An
-     evaluation error in an INT, CHUNK[INT] or FLOAT element is reported the same
-     way. CHUNK[INT] then applies its value bound to the resolved list.
+     For a whole-field list-item expression the target's coercion applies
+     (Expression Language §1.2.3), as for the chunks fields above: `{{ 3.0 }}` is 3
+     in an INT range, a STRING job parameter `"7"` is 7, and a value that cannot
+     coerce, such as a STRING `"abc"` or `" 7 "`, or a `list[string]`, fails with
+     the coercion error, for example `Task parameter '<name>' range[<k>]: Cannot
+     coerce string to int | list[int] | nulltype`, followed by the expression and
+     its caret. Evaluation errors in INT, CHUNK[INT] and FLOAT elements are reported
+     the same way. CHUNK[INT] then applies its value bound to the resolved list.
 
      A FLOAT element's target accepts `int` so that an integer renders as written:
      an INT job parameter `10` gives the task parameter value `10`, as the
-     `<floatstring>` `"10"` would, not `10.0`. A float keeps the spelling it carries
-     (a FLOAT job parameter given as `2.50` renders `2.50`). The members of a
-     flattened list have no spelling of their own and render through `format_float`,
-     the same as the elements of a whole-field FLOAT range expression, so
+     `<floatstring>` `"10"` would, not `10.0`. A float keeps the spelling it carries,
+     alone or as a list member: a FLOAT job parameter given as `2.50` renders
+     `2.50`, and so does `{{ [Param.F] }}` as an element (the whole-field range
+     expression `"{{ [Param.F] }}"` renders `2.5`, because `resolve_float_range`
+     drops spellings there). A float with no spelling, such as a computed one or an
+     integer list member converted to float, renders through `format_float`:
      `{{ Param.Ints }}` with `[3, 4]` gives `3.0` and `4.0`.
 
      The §3.4.2 limit of 1024 characters after resolution is not applied to INT or
@@ -257,10 +267,12 @@ budgets template validation and the session runtime apply.
      them either.
 
      **Divergence from the Python reference:** openjd-model-for-python 0.14 does
-     not apply §1.3.2 to range list elements of any type. It resolves each element
-     to a string, so a `null` becomes an empty element and a list becomes its
-     display text (`["b", "c"]`) instead of being dropped or flattened. It converts
-     a resolved INT or CHUNK[INT] element with Python's `int()`, which accepts
+     not apply §1.3.2 to range list elements of any type, with or without EXPR. It
+     resolves each element to a string, so a `null` becomes an empty element and a
+     list becomes its display text (`["b", "c"]`) instead of being dropped or
+     flattened, and there is no coercion: with EXPR, Python accepts a whole-field
+     STRING value `" 7 "` or `" 2.50 "` that openjd-rs rejects. It converts a
+     resolved INT or CHUNK[INT] element with Python's `int()`, which accepts
      underscores (`1_10` is 110), non-ASCII decimal digits (`١٠` and fullwidth
      `７`), and integers of any size, all of which openjd-rs rejects. The same
      applies to a literal `<intstring>` element, which openjd-rs rejects at decode
@@ -268,7 +280,8 @@ budgets template validation and the session runtime apply.
      text as the value of an INT task parameter (`abc`, `2.5`) and raises an
      uncaught `ValueError` for a CHUNK[INT] one. §3.4.1.1 requires a base-10
      integer, so openjd-rs rejects a resolved value like these at job creation and
-     a literal one at decode.
+     a literal one at decode. Python's template validation also does no static
+     typing of these elements (see [validation.md](validation.md)).
    - Step-level let bindings (template scope; a failure is reported at
      `steps[i] -> let[j]` — see the carried-forward checks below)
 3. With EXPR extension: inject `Job.Name` (before step instantiation)

@@ -165,7 +165,7 @@ pub(super) fn instantiate_step(
     let parameter_space = st
         .parameter_space
         .as_ref()
-        .map(|ps| ranges::resolve_parameter_space(ps, &step_symtab, limits, budgets))
+        .map(|ps| ranges::resolve_parameter_space(ps, &step_symtab, has_expr, limits, budgets))
         .transpose()?;
 
     // Validate the resolved parameter space (e.g. association length mismatches)
