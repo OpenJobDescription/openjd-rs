@@ -343,7 +343,7 @@ enum ResolvedConstraint<'a> {
     },
     /// A list-item string field (STRING and PATH task-parameter range
     /// elements, Template Schemas §3.4.2; INT, CHUNK[INT] and FLOAT
-    /// elements use [`Self::NumericListItem`]). Per Expression Language §1.3.2 a
+    /// elements of a template with EXPR use [`Self::NumericListItem`]). Per Expression Language §1.3.2 a
     /// whole-field expression targets `string? | list[string]`: `null`
     /// skips the element, a list flattens inline, and `max_len` applies
     /// to each resulting element. `forbid_empty` applies §3.4.2's
