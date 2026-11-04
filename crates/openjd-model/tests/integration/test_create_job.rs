@@ -1751,23 +1751,50 @@ fn test_create_job_range_list_flattened_past_element_limit() {
 /// Resolution stops at the first element that takes the list past the
 /// element limit, so a template cannot make job creation build an
 /// arbitrarily long list before rejecting it. The count in the message is the
-/// elements resolved so far, not the whole list's.
+/// elements resolved up to and including that element, not the whole list's.
 #[test]
 fn test_create_job_range_list_stops_at_element_limit() {
-    for (param_type, element) in [
-        ("INT", "{{ range_expr('1-2000') }}"),
-        ("CHUNK[INT]", "{{ range_expr('1-2000') }}"),
-        ("FLOAT", "{{ [1.5] * 2000 }}"),
-        ("STRING", "{{ ['a'] * 2000 }}"),
-        ("PATH", "{{ ['a'] * 2000 }}"),
+    // Each case: the type, a flattened element, and a scalar element.
+    for (param_type, flattened, scalar) in [
+        ("INT", "{{ range_expr('1-1024') }}", "7"),
+        ("CHUNK[INT]", "{{ range_expr('1-1024') }}", "7"),
+        ("FLOAT", "{{ [1.5] * 1024 }}", "2.5"),
+        ("STRING", "{{ ['a'] * 1024 }}", r#""b""#),
+        ("PATH", "{{ ['a'] * 1024 }}", r#""b""#),
     ] {
-        let err = parse_and_create_err(
-            &expr_range_list_template(param_type, &format!(r#"["{element}", "{element}"]"#)),
-            &[],
-        );
+        for (range, count) in [
+            // The second list goes over, and the third is never resolved.
+            (
+                format!(r#"["{flattened}", "{flattened}", "{flattened}"]"#),
+                2048,
+            ),
+            // A scalar element after a full list goes over.
+            (format!(r#"["{flattened}", {scalar}, "{flattened}"]"#), 1025),
+        ] {
+            let err = parse_and_create_err(&expr_range_list_template(param_type, &range), &[]);
+            assert_eq!(
+                err,
+                format!(
+                    "Validation error: Task parameter 'Frame' range exceeds 1024 elements ({count} elements)"
+                ),
+                "{param_type} {range}"
+            );
+        }
+    }
+}
+
+/// A whole-field range expression is held to the same element limit.
+#[test]
+fn test_create_job_range_expression_past_element_limit() {
+    for (param_type, range) in [
+        ("FLOAT", r#""{{ [1.5] * 1025 }}""#),
+        ("STRING", r#""{{ ['a'] * 1025 }}""#),
+        ("PATH", r#""{{ ['a'] * 1025 }}""#),
+    ] {
+        let err = parse_and_create_err(&expr_range_list_template(param_type, range), &[]);
         assert_eq!(
             err,
-            "Validation error: Task parameter 'Frame' range exceeds 1024 elements (2000 elements)",
+            "Validation error: Task parameter 'Frame' range exceeds 1024 elements (1025 elements)",
             "{param_type}"
         );
     }
@@ -7026,6 +7053,48 @@ fn test_create_job_single_valued_attr_flatten_past_one_rejected() {
         err,
         "Validation error: steps[0] -> hostRequirements -> attributes[0] -> allOf: single-valued attribute cannot have more than 1 element after resolution"
     );
+}
+
+/// The 50-value maximum counts the values every element of `anyOf` or
+/// `allOf` resolved to, and resolution stops at the element that goes over.
+#[test]
+fn test_create_job_attr_values_accumulate_past_50_rejected() {
+    let template = |field: &str, values: &str| {
+        format!(
+            r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{{
+            "name": "S",
+            "hostRequirements": {{"attributes": [{{"name": "attr.custom.tag", "{field}": {values}}}]}},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#
+        )
+    };
+    for field in ["anyOf", "allOf"] {
+        let job = parse_and_create(&template(field, r#"["{{ ['v'] * 49 }}", "w"]"#), &[]);
+        let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+        let attr = &hr.attributes.as_ref().expect("attributes")[0];
+        let values = if field == "anyOf" {
+            &attr.any_of
+        } else {
+            &attr.all_of
+        };
+        assert_eq!(values.as_ref().expect(field).len(), 50, "{field}");
+        for values in [
+            r#"["{{ ['v'] * 50 }}", "w"]"#,
+            r#"["{{ ['v'] * 50 }}", "{{ ['w'] * 100000 }}"]"#,
+        ] {
+            let err = parse_and_create_err(&template(field, values), &[]);
+            assert_eq!(
+                err,
+                format!("Validation error: steps[0] -> hostRequirements -> attributes[0] -> {field}: exceeds 50 elements after resolution"),
+                "{field} {values}"
+            );
+        }
+    }
 }
 
 #[test]

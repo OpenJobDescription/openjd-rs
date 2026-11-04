@@ -230,12 +230,17 @@ budgets template validation and the session runtime apply.
      reason the 1024-element limit is checked again on the resolved list, so a list
      that flattens past it fails (`Task parameter '<name>' range exceeds 1024
      elements (<n> elements)`). Resolution stops at the first element that takes the
-     list past the limit, before that element's members are copied, so `<n>` counts
-     the elements resolved up to and including that one, not the whole list. The
-     work for a single element is bounded by the evaluation budgets, and a
+     list past the limit, before a flattened element's members are copied, so `<n>`
+     counts the elements resolved up to and including that one, not the whole list.
+     The work for a single element is bounded by the evaluation budgets, and a
      `range_expr` that coerces to `list[int]` by the expression engine's cap of 10
-     million members. Attribute `anyOf`/`allOf` values get the same
-     treatment in `instantiate`.
+     million members. A `range_expr` past that cap fails with the generic coercion
+     error (`Cannot coerce range_expr to int | list[int] | nulltype`): coercion to a
+     union target reports no member's own diagnostic (see `ExprValue::coerce`), so
+     the cap's message is not shown. Attribute `anyOf`/`allOf` values get the same
+     list-item treatment in `instantiate`, with their §3.3.2.2 maximum of 50 values
+     applied the same way: resolution stops at the element that takes the list past
+     50 (`... -> anyOf: exceeds 50 elements after resolution`).
 
      Without EXPR an INT, CHUNK[INT] or FLOAT element is the base 2023-09
      `<TaskParameterStringValue>` and resolves to a string. A base format string

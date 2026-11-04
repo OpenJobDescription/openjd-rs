@@ -128,8 +128,9 @@ fn resolve_list_item(
     })
 }
 
-/// The error for a range list with more than the element limit: `count`
-/// elements resolved so far, counting the element that went over.
+/// The error for a range with more than the element limit. For a range
+/// list, `count` is the elements resolved up to and including the element
+/// that went over; for a whole-field range expression, its length.
 fn range_too_long(param_name: &str, limits: &EffectiveLimits, count: usize) -> ModelError {
     ModelError::DecodeValidation(format!(
         "Task parameter '{}' range exceeds {} elements ({} elements)",
@@ -151,7 +152,7 @@ fn list_item_text(value: ExprValue) -> String {
     }
 }
 
-/// Resolve a list of FormatStrings to strings.
+/// Resolve a list of FormatStrings to strings, at most `max_len` of them.
 ///
 /// Each element is a list item, so per Expression Language §1.3.2 a
 /// whole-field expression resolves with target type
@@ -159,16 +160,22 @@ fn list_item_text(value: ExprValue) -> String {
 /// result flattens inline, and a string is a single element. Callers
 /// enforcing a non-empty list must re-check after resolution, since
 /// null-skips can empty it.
+///
+/// Returns `Ok(None)` as soon as the resolved list would hold more than
+/// `max_len` strings, before a flattened element's members are copied, so
+/// the caller can report its own limit without the work of building an
+/// over-long list.
 pub(super) fn resolve_string_list(
     vals: &[openjd_expr::FormatString],
     symtab: &SymbolTable,
     budgets: super::EvalBudgets,
-) -> Result<Vec<String>, ModelError> {
+    max_len: usize,
+) -> Result<Option<Vec<String>>, ModelError> {
     let target = crate::types::string_list_item_target();
     let mut out = Vec::new();
     for fs in vals {
-        // Attribute values have no count limit.
-        let values = match resolve_list_item(fs, Some(&target), symtab, budgets, usize::MAX) {
+        let room = max_len.saturating_sub(out.len());
+        let values = match resolve_list_item(fs, Some(&target), symtab, budgets, room) {
             Ok(values) => values,
             Err(ListItemError::Expression(e)) => {
                 return Err(ModelError::FormatStringError {
@@ -178,11 +185,14 @@ pub(super) fn resolve_string_list(
                     end: None,
                 })
             }
-            Err(ListItemError::TooMany { .. }) => unreachable!("no list is longer than usize::MAX"),
+            Err(ListItemError::TooMany { .. }) => return Ok(None),
         };
         out.extend(values.into_iter().map(list_item_text));
+        if out.len() > max_len {
+            return Ok(None);
+        }
     }
-    Ok(out)
+    Ok(Some(out))
 }
 
 /// Resolve a StepParameterSpaceDefinition into a StepParameterSpace with concrete ranges.
@@ -426,11 +436,11 @@ fn resolve_int_range(
                         ints.extend(values);
                     }
                 }
+                if ints.len() > limits.max_task_param_range_len {
+                    return Err(range_too_long(param_name, limits, ints.len()));
+                }
             }
             check_range_not_emptied(ints.len(), param_name)?;
-            if ints.len() > limits.max_task_param_range_len {
-                return Err(range_too_long(param_name, limits, ints.len()));
-            }
             Ok(job::TaskParamRange::List(ints))
         }
         template::IntRange::Expression(expr) => {
@@ -675,6 +685,9 @@ fn resolve_float_range(
                         }
                     }
                 }
+                if floats.len() > limits.max_task_param_range_len {
+                    return Err(range_too_long(param_name, limits, floats.len()));
+                }
             }
             check_range_not_emptied(floats.len(), param_name)?;
             floats
@@ -749,6 +762,9 @@ fn resolve_string_range(
                     }
                 };
                 out.extend(values.into_iter().map(list_item_text));
+                if out.len() > limits.max_task_param_range_len {
+                    return Err(range_too_long(param_name, limits, out.len()));
+                }
             }
             check_range_not_emptied(out.len(), param_name)?;
             out
