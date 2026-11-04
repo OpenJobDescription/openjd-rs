@@ -853,15 +853,19 @@ fn range_expr_two_ranges_opposite_signs() {
     ));
 }
 
-// INT failure: disallow floats
+// INT failure: disallow floats, positive or negative
 #[test]
 fn int_disallow_floats() {
-    check_err_exact(
-        &job_with_param_space(
-            r#"{"taskParameterDefinitions": [{"name": "foo", "type": "INT", "range": [1.1]}]}"#,
-        ),
-        "Validation error: 'jobtemplate-2023-09' failed checks: Expected integer, got float: 1.1",
-    );
+    for (value, shown) in [("1.1", "1.1"), ("-4.5", "-4.5"), ("-0.5", "-0.5")] {
+        check_err_exact(
+            &job_with_param_space(&format!(
+                r#"{{"taskParameterDefinitions": [{{"name": "foo", "type": "INT", "range": [1, {value}]}}]}}"#
+            )),
+            &format!(
+                "Validation error: 'jobtemplate-2023-09' failed checks: Expected integer, got float: {shown}"
+            ),
+        );
+    }
 }
 
 /// An `<IntRangeList>` element that is neither a number nor a string fails

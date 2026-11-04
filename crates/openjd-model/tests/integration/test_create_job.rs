@@ -1557,6 +1557,16 @@ fn test_create_job_float_range_list_null_drops_and_list_flattens() {
         serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
         r#"{"float":{"range":[1.5,2.5,3.75,3.0,4.0,"10","2.50"]}}"#
     );
+    // A float the expression computed has no spelling of its own.
+    let job = parse_and_create(
+        &expr_range_list_template("FLOAT", r#"["{{ Param.Ratio * 2 }}", "{{ Param.Ratio }}"]"#),
+        &[("Ratio", "2.5")],
+    );
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        r#"{"float":{"range":[5.0,2.5]}}"#
+    );
     // A spelling is kept whenever it differs from what `format_float` gives,
     // including one of the same length.
     let job = parse_and_create(
@@ -1800,6 +1810,8 @@ fn test_create_job_range_list_stops_at_element_limit() {
 #[test]
 fn test_create_job_range_expression_past_element_limit() {
     for (param_type, range) in [
+        ("INT", r#""{{ [1] * 1025 }}""#),
+        ("CHUNK[INT]", r#""{{ [1] * 1025 }}""#),
         ("FLOAT", r#""{{ [1.5] * 1025 }}""#),
         ("STRING", r#""{{ ['a'] * 1025 }}""#),
         ("PATH", r#""{{ ['a'] * 1025 }}""#),
