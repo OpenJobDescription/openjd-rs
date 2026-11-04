@@ -281,7 +281,11 @@ budgets template validation and the session runtime apply.
      expression `"{{ [Param.F] }}"` renders `2.5`, because `resolve_float_range`
      drops spellings there). A float with no spelling, such as a computed one or an
      integer list member converted to float, renders through `format_float`:
-     `{{ Param.Ints }}` with `[3, 4]` gives `3.0` and `4.0`.
+     `{{ Param.Ints }}` with `[3, 4]` gives `3.0` and `4.0`. A STRING value that is an integer coerces to `int`
+     first (Expression Language §1.2.3 prefers `int` for a string), so it renders as
+     that integer: `"+5"` renders `5`, where the same text as a `<floatstring>`, or
+     as the element without EXPR, keeps its sign and renders `+5`. A decimal string
+     keeps its spelling either way (`"+2.5"` renders `+2.5`).
 
      The §3.4.2 limit of 1024 characters after resolution is not applied to INT or
      FLOAT elements, only to STRING and PATH ones. An INT element only has to parse,
@@ -295,7 +299,8 @@ budgets template validation and the session runtime apply.
      resolves each element to a string, so a `null` becomes an empty element and a
      list becomes its display text (`["b", "c"]`) instead of being dropped or
      flattened, and there is no coercion: with EXPR, Python accepts a whole-field
-     STRING value `" 7 "` or `" 2.50 "` that openjd-rs rejects. It converts a
+     STRING value `" 7 "` or `" 2.50 "` that openjd-rs rejects, and renders a STRING
+     value `"+5"` in a FLOAT element as `+5` where openjd-rs renders `5`. It converts a
      resolved INT or CHUNK[INT] element with Python's `int()`, which accepts
      underscores (`1_10` is 110), non-ASCII decimal digits (`١٠` and fullwidth
      `７`), and integers of any size, all of which openjd-rs rejects. The same

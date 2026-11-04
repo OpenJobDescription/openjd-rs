@@ -32,6 +32,13 @@ fn decode_ok(s: &str) {
         .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
+/// Decode `s` and assert that it fails with exactly `expected`.
+fn check_err_exact(s: &str, expected: &str) {
+    let err = decode_job_template(yaml_val(s), None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
+    assert_eq!(err.to_string(), expected);
+}
+
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
     let err = decode_job_template(v, None, &CallerLimits::default())
@@ -849,11 +856,11 @@ fn range_expr_two_ranges_opposite_signs() {
 // INT failure: disallow floats
 #[test]
 fn int_disallow_floats() {
-    check_err(
+    check_err_exact(
         &job_with_param_space(
             r#"{"taskParameterDefinitions": [{"name": "foo", "type": "INT", "range": [1.1]}]}"#,
         ),
-        &["Validation error: 'jobtemplate-2023-09' failed checks: Expected integer, got float: 1.1"],
+        "Validation error: 'jobtemplate-2023-09' failed checks: Expected integer, got float: 1.1",
     );
 }
 
@@ -867,13 +874,11 @@ fn int_range_list_element_of_wrong_kind() {
         ("[1]", "Expected integer or string"),
         (r#"{"a": 1}"#, "Expected integer or string"),
     ] {
-        check_err(
+        check_err_exact(
             &job_with_param_space(&format!(
                 r#"{{"taskParameterDefinitions": [{{"name": "foo", "type": "INT", "range": [1, {element}]}}]}}"#
             )),
-            &[&format!(
-                "Validation error: 'jobtemplate-2023-09' failed checks: {message}"
-            )],
+            &format!("Validation error: 'jobtemplate-2023-09' failed checks: {message}"),
         );
     }
 }
@@ -881,22 +886,22 @@ fn int_range_list_element_of_wrong_kind() {
 // INT failure: disallow bool
 #[test]
 fn int_disallow_bool() {
-    check_err(
+    check_err_exact(
         &job_with_param_space(
             r#"{"taskParameterDefinitions": [{"name": "foo", "type": "INT", "range": [true]}]}"#,
         ),
-        &["Expected integer, got boolean"],
+        "Validation error: 'jobtemplate-2023-09' failed checks: Expected integer, got boolean",
     );
 }
 
 // INT failure: disallow float strings
 #[test]
 fn int_disallow_float_strings() {
-    check_err(
+    check_err_exact(
         &job_with_param_space(
             r#"{"taskParameterDefinitions": [{"name": "foo", "type": "INT", "range": ["1.1"]}]}"#,
         ),
-        &["Cannot parse '1.1' as integer"],
+        "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '1.1' as integer",
     );
 }
 
@@ -905,13 +910,13 @@ fn int_disallow_float_strings() {
 #[test]
 fn int_literal_string_with_single_braces_not_int() {
     for literal in ["{5}", "1}}"] {
-        check_err(
+        check_err_exact(
             &job_with_param_space(&format!(
                 r#"{{"taskParameterDefinitions": [{{"name": "foo", "type": "INT", "range": ["{literal}"]}}]}}"#
             )),
-            &[&format!(
+            &format!(
                 "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '{literal}' as integer"
-            )],
+            ),
         );
     }
 }
@@ -919,11 +924,11 @@ fn int_literal_string_with_single_braces_not_int() {
 // INT failure: literal string not an int
 #[test]
 fn int_literal_string_not_int() {
-    check_err(
+    check_err_exact(
         &job_with_param_space(
             r#"{"taskParameterDefinitions": [{"name": "foo", "type": "INT", "range": ["notint"]}]}"#,
         ),
-        &["Cannot parse 'notint' as integer"],
+        "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse 'notint' as integer",
     );
 }
 
