@@ -1272,6 +1272,19 @@ fn frame_int_list(job: &job::Job) -> Vec<i64> {
     }
 }
 
+/// An `<integer>` element may be an integer-valued float, and an
+/// `<intstring>` may have surrounding white space.
+#[test]
+fn test_create_job_int_range_list_literal_forms() {
+    for param_type in ["INT", "CHUNK[INT]"] {
+        let job = parse_and_create(
+            &int_range_list_template(param_type, r#"[4.0, " 5 ", "6"]"#),
+            &[],
+        );
+        assert_eq!(frame_int_list(&job), vec![4, 5, 6], "{param_type}");
+    }
+}
+
 /// Template Schemas §3.4.1.1: an `<IntRangeList>` element may be a
 /// `<TaskParameterStringValue>` that resolves to an integer.
 #[test]

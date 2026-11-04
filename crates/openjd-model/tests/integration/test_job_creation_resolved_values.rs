@@ -552,6 +552,37 @@ fn lowered_memory_budget_fails_int_range_list_element() {
     );
 }
 
+/// Without EXPR a range list element resolves to a string, under the same
+/// budgets.
+#[test]
+fn lowered_budgets_apply_to_range_list_elements_without_expr() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{"name": "S", "type": "STRING"}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "F", "type": "INT", "range": [1, "{{Param.S}}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    let err = create_with_limits(
+        template,
+        &[("S", "5")],
+        CallerLimits {
+            max_eval_operations: Some(0),
+            ..Default::default()
+        },
+    )
+    .expect_err("expected the range element to exceed the operation budget");
+    assert_eq!(
+        err,
+        "Expression error: Task parameter 'F' range[1]: Expression operation count (1) exceeded limit (0)\n  Param.S\n  ~~~~~~^"
+    );
+}
+
 /// The operation budget applies to a range list element as well.
 #[test]
 fn lowered_operation_budget_fails_int_range_list_element() {

@@ -853,8 +853,29 @@ fn int_disallow_floats() {
         &job_with_param_space(
             r#"{"taskParameterDefinitions": [{"name": "foo", "type": "INT", "range": [1.1]}]}"#,
         ),
-        &["Expected integer, got float"],
+        &["Validation error: 'jobtemplate-2023-09' failed checks: Expected integer, got float: 1.1"],
     );
+}
+
+/// An `<IntRangeList>` element that is neither a number nor a string fails
+/// to decode, with a message for its kind.
+#[test]
+fn int_range_list_element_of_wrong_kind() {
+    for (element, message) in [
+        ("null", "Expected integer, got null"),
+        ("true", "Expected integer, got boolean"),
+        ("[1]", "Expected integer or string"),
+        (r#"{"a": 1}"#, "Expected integer or string"),
+    ] {
+        check_err(
+            &job_with_param_space(&format!(
+                r#"{{"taskParameterDefinitions": [{{"name": "foo", "type": "INT", "range": [1, {element}]}}]}}"#
+            )),
+            &[&format!(
+                "Validation error: 'jobtemplate-2023-09' failed checks: {message}"
+            )],
+        );
+    }
 }
 
 // INT failure: disallow bool

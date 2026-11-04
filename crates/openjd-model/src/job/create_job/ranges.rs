@@ -982,10 +982,13 @@ mod tests {
                 .map(|v| v.len()),
             Some(50)
         );
-        let over = [fs("{{ ['v'] * 50 }}"), fs("w")];
+        let over = [fs("{{ ['v'] * 49 }}"), fs("{{ ['a', 'b'] }}")];
+        LAST_ROOM.with(|last| last.set(None));
         assert_eq!(
             super::resolve_string_list(&over, &symtab, no_budgets(), 50).unwrap(),
             None
         );
+        // The second element had room for one value.
+        assert_eq!(LAST_ROOM.with(|last| last.get()), Some(1));
     }
 }
