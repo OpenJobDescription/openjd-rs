@@ -17,7 +17,7 @@ use openjd_expr::ExpressionError;
 
 use super::ranges;
 
-/// Template Schemas §3.3.2.2: an attribute's `anyOf` or `allOf` holds at
+/// Template Schemas §3.3.2: an attribute's `anyOf` or `allOf` holds at
 /// most 50 values.
 const MAX_ATTRIBUTE_VALUES: usize = 50;
 
@@ -586,7 +586,7 @@ fn resolve_host_requirements(
                 .zip(names)
                 .enumerate()
                 .map(|(attr_index, (a, name))| {
-                    // §3.3.2.2 allows at most 50 values. Resolution stops as
+                    // §3.3.2 allows at most 50 values. Resolution stops as
                     // soon as a list would go past that, so a template cannot
                     // make job creation build a long list just to reject it.
                     let resolve = |field: &str,

@@ -861,4 +861,68 @@ mod tests {
         assert!(matches!(strip("0.50"), Cow::Borrowed(_)));
         assert!(matches!(strip("02.50"), Cow::Owned(_)));
     }
+
+    fn no_budgets() -> crate::job::create_job::EvalBudgets {
+        crate::job::create_job::EvalBudgets {
+            memory: None,
+            operations: None,
+        }
+    }
+
+    /// A list item longer than the room left fails with its length, before
+    /// its members are copied out (Template Schemas §3.4 element limit). The
+    /// callers' per-element checks give the same message, so only the error
+    /// variant shows the early stop.
+    #[test]
+    fn list_item_longer_than_room_stops_before_copying() {
+        let symtab = openjd_expr::symbol_table::SymbolTable::new();
+        let target = crate::types::TaskParameterType::Int
+            .range_list_item_target(true)
+            .unwrap();
+        let fs = openjd_expr::FormatString::new("{{ range_expr('1-9000000') }}").unwrap();
+        match super::resolve_list_item(&fs, Some(&target), &symtab, no_budgets(), 1024) {
+            Err(super::ListItemError::TooMany { len }) => assert_eq!(len, 9_000_000),
+            Err(super::ListItemError::Expression(e)) => panic!("unexpected error: {e}"),
+            Ok(values) => panic!("expected TooMany, got {} values", values.len()),
+        }
+        // Exactly the room left fits.
+        let fs = openjd_expr::FormatString::new("{{ range_expr('1-3') }}").unwrap();
+        let values = super::resolve_list_item(&fs, Some(&target), &symtab, no_budgets(), 3)
+            .unwrap_or_else(|_| panic!("three members fit in a room of three"));
+        assert_eq!(values.len(), 3);
+        // The INT element resolver passes the room on.
+        match super::resolve_int_range_list_element(
+            &fs,
+            0,
+            Some(&target),
+            &symtab,
+            "Frame",
+            no_budgets(),
+            2,
+        ) {
+            Err(super::IntElementError::TooMany { len }) => assert_eq!(len, 3),
+            Err(super::IntElementError::Model(e)) => panic!("unexpected error: {e}"),
+            Ok(values) => panic!("expected TooMany, got {values:?}"),
+        }
+    }
+
+    /// `resolve_string_list` reports a list over its maximum as `None`,
+    /// without copying the element that goes over.
+    #[test]
+    fn string_list_stops_at_its_maximum() {
+        let symtab = openjd_expr::symbol_table::SymbolTable::new();
+        let fs = |s: &str| openjd_expr::FormatString::new(s).unwrap();
+        let fits = [fs("{{ ['v'] * 49 }}"), fs("w")];
+        assert_eq!(
+            super::resolve_string_list(&fits, &symtab, no_budgets(), 50)
+                .unwrap()
+                .map(|v| v.len()),
+            Some(50)
+        );
+        let over = [fs("{{ ['v'] * 50 }}"), fs("w")];
+        assert_eq!(
+            super::resolve_string_list(&over, &symtab, no_budgets(), 50).unwrap(),
+            None
+        );
+    }
 }

@@ -7097,6 +7097,34 @@ fn test_create_job_attr_values_accumulate_past_50_rejected() {
     }
 }
 
+/// The 50-value error names the step and the attribute it is about.
+#[test]
+fn test_create_job_attr_values_past_50_error_location() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [
+            {"name": "A", "script": {"actions": {"onRun": {"command": "echo"}}}},
+            {
+                "name": "B",
+                "hostRequirements": {"attributes": [
+                    {"name": "attr.custom.a", "anyOf": ["x"]},
+                    {"name": "attr.custom.b", "allOf": ["{{ ['v'] * 51 }}"]}
+                ]},
+                "script": {"actions": {"onRun": {"command": "echo"}}}
+            }
+        ]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[1] -> hostRequirements -> attributes[1] -> allOf: exceeds 50 elements after resolution"
+    );
+}
+
 #[test]
 fn test_create_job_attr_flatten_past_50_elements_rejected() {
     let err = parse_and_create_err(

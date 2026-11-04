@@ -238,7 +238,7 @@ budgets template validation and the session runtime apply.
      error (`Cannot coerce range_expr to int | list[int] | nulltype`): coercion to a
      union target reports no member's own diagnostic (see `ExprValue::coerce`), so
      the cap's message is not shown. Attribute `anyOf`/`allOf` values get the same
-     list-item treatment in `instantiate`, with their §3.3.2.2 maximum of 50 values
+     list-item treatment in `instantiate`, with their §3.3.2 maximum of 50 values
      applied the same way: resolution stops at the element that takes the list past
      50 (`... -> anyOf: exceeds 50 elements after resolution`).
 
@@ -301,9 +301,9 @@ budgets template validation and the session runtime apply.
      `７`), and integers of any size, all of which openjd-rs rejects. The same
      applies to a literal `<intstring>` element, which openjd-rs rejects at decode
      with `Cannot parse '1_10' as integer`. When `int()` fails, Python keeps the
-     text, if at most 1024 characters, as the value of an INT task parameter
-     (`abc`, `2.5`) and raises an
-     uncaught `ValueError` for a CHUNK[INT] one. §3.4.1.1 requires a base-10
+     text, if at most 1024 characters, as the value of an INT or CHUNK[INT] task
+     parameter (`abc`, `2.5`); iterating a CHUNK[INT] parameter space then raises an
+     uncaught `ValueError`. §3.4.1.1 requires a base-10
      integer, so openjd-rs rejects a resolved value like these at job creation and
      a literal one at decode. Python's template validation also does no static
      typing of these elements (see [validation.md](validation.md)).
