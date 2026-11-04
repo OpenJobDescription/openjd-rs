@@ -110,6 +110,8 @@ fn resolve_list_item(
     budgets: super::EvalBudgets,
     room: usize,
 ) -> Result<Vec<ExprValue>, ListItemError> {
+    #[cfg(test)]
+    tests::LAST_ROOM.with(|last| last.set(Some(room)));
     let Some(target) = target else {
         let text = fs.resolve_string_with(symtab, &budgets.fs_options())?;
         return Ok(vec![ExprValue::String(text)]);
@@ -820,6 +822,14 @@ fn resolve_string_range(
 mod tests {
     use std::borrow::Cow;
 
+    thread_local! {
+        /// The `room` the most recent `resolve_list_item` call on this
+        /// thread received, so a test can check what each caller passes.
+        /// The early stop's only observable effect is the memory it saves.
+        pub(super) static LAST_ROOM: std::cell::Cell<Option<usize>> =
+            const { std::cell::Cell::new(None) };
+    }
+
     use super::strip_redundant_leading_zeros as strip;
 
     /// §7.5 rule 1. openjd-model-for-python asserts the same cases against its
@@ -904,6 +914,59 @@ mod tests {
             Err(super::IntElementError::Model(e)) => panic!("unexpected error: {e}"),
             Ok(values) => panic!("expected TooMany, got {values:?}"),
         }
+    }
+
+    /// Each range list type hands `resolve_list_item` the room left in the
+    /// list: the element limit less the elements resolved so far.
+    #[test]
+    fn range_lists_pass_the_room_left() {
+        use crate::template::{
+            FloatRange, FloatRangeItem, IntOrFormatString, IntRange, StringRange,
+        };
+        use crate::types::TaskParameterType;
+
+        let symtab = openjd_expr::symbol_table::SymbolTable::new();
+        let ctx = crate::types::ValidationContext::from_profile(crate::ModelProfile::latest());
+        let limits = super::EffectiveLimits::from_context(&ctx);
+        let fs = |s: &str| openjd_expr::FormatString::new(s).unwrap();
+        let expected = Some(limits.max_task_param_range_len - 3);
+
+        let int = IntRange::List(vec![
+            IntOrFormatString::Int(1),
+            IntOrFormatString::FormatString(fs("{{ [2, 3] }}")),
+            IntOrFormatString::FormatString(fs("{{ [4] }}")),
+        ]);
+        let target = TaskParameterType::Int.range_list_item_target(true);
+        LAST_ROOM.with(|last| last.set(None));
+        super::resolve_int_range(&int, target.as_ref(), &symtab, "X", &limits, no_budgets())
+            .unwrap();
+        assert_eq!(LAST_ROOM.with(|last| last.get()), expected, "INT");
+
+        let float = FloatRange::List(vec![
+            FloatRangeItem::Float(1.5),
+            FloatRangeItem::FormatString(fs("{{ [2.5, 3.5] }}")),
+            FloatRangeItem::FormatString(fs("{{ [4.5] }}")),
+        ]);
+        let target = TaskParameterType::Float.range_list_item_target(true);
+        LAST_ROOM.with(|last| last.set(None));
+        super::resolve_float_range(&float, target.as_ref(), &symtab, "X", &limits, no_budgets())
+            .unwrap();
+        assert_eq!(LAST_ROOM.with(|last| last.get()), expected, "FLOAT");
+
+        let string = StringRange::List(vec![fs("a"), fs("{{ ['b', 'c'] }}"), fs("{{ ['d'] }}")]);
+        let target = TaskParameterType::String.range_list_item_target(true);
+        LAST_ROOM.with(|last| last.set(None));
+        super::resolve_string_range(
+            &string,
+            target.as_ref(),
+            &symtab,
+            "X",
+            false,
+            &limits,
+            no_budgets(),
+        )
+        .unwrap();
+        assert_eq!(LAST_ROOM.with(|last| last.get()), expected, "STRING");
     }
 
     /// `resolve_string_list` reports a list over its maximum as `None`,
