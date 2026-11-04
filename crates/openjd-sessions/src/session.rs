@@ -1201,17 +1201,23 @@ impl Session {
                 }
             }
 
-            // If we own TempDirs, clean them up; otherwise fall back to remove_dir_all
-            if let Some(ref mut files_dir) = self._files_dir {
-                if let Err(e) = files_dir.cleanup() {
-                    log_cleanup_failure(&self.session_id, files_dir.path(), &e);
-                }
-            }
+            // If we own TempDirs, clean them up; otherwise fall back to remove_dir_all.
+            // The files directory is inside the working directory, so removing the
+            // working directory removes it too; removing it first would wait out the
+            // retries twice when it is the one holding a locked file.
             if let Some(ref mut working_dir) = self._working_dir {
-                if let Err(e) = working_dir.cleanup() {
+                if let Some(ref mut files_dir) = self._files_dir {
+                    files_dir.mark_cleaned_up();
+                }
+                if let Err(e) = working_dir.cleanup_logged(Some(&self.session_id)) {
                     log_cleanup_failure(&self.session_id, working_dir.path(), &e);
                 }
             } else {
+                if let Some(ref mut files_dir) = self._files_dir {
+                    if let Err(e) = files_dir.cleanup_logged(Some(&self.session_id)) {
+                        log_cleanup_failure(&self.session_id, files_dir.path(), &e);
+                    }
+                }
                 let _ = std::fs::remove_dir_all(&self.working_directory);
             }
         }

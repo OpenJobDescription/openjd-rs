@@ -70,7 +70,11 @@ impl Log for SessionLogger {
         let mut v = Visitor { bits: None };
         let _ = record.key_values().visit(&mut v);
         if let Some(bits) = v.bits {
-            if bits & 8 != 0 {
+            // Command output, plus warnings and errors openjd reports about the
+            // session itself, such as a working directory it could not delete.
+            let is_output = bits & 8 != 0;
+            let is_problem = bits & 16 != 0 && record.level() <= log::Level::Warn;
+            if is_output || is_problem {
                 let ts = format_log_timestamp();
                 println!("{ts}\t{}", record.args());
             }
