@@ -161,11 +161,18 @@ fn range_list_format_string_undefined_variable() {
 /// The format strings of a CHUNK[INT] range expression are checked too.
 #[test]
 fn range_expression_format_string_undefined_variable() {
-    check_err(
-        &chunk_job(
+    let err = decode_job_template(
+        yaml_val(&chunk_job(
             r#"{"name": "foo", "type": "CHUNK[INT]", "range": "1-{{Param.Nope}}", "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}}"#,
-        ),
-        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range:\n\tFailed to parse interpolation expression at [2, 16]. Undefined variable: 'Param.Nope'.\n  Param.Nope\n  ~~~~~~^~~~"],
+        )),
+        Some(&["TASK_CHUNKING"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("undefined variable")
+    .to_string();
+    assert_eq!(
+        err,
+        "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range:\n\tFailed to parse interpolation expression at [2, 16]. Undefined variable: 'Param.Nope'.\n  Param.Nope\n  ~~~~~~^~~~"
     );
 }
 
@@ -173,11 +180,18 @@ fn range_expression_format_string_undefined_variable() {
 /// string in range".
 #[test]
 fn range_list_malformed_format_string() {
-    check_err(
-        &chunk_job(
+    let err = decode_job_template(
+        yaml_val(&chunk_job(
             r#"{"name": "foo", "type": "CHUNK[INT]", "range": ["{{ Job.Parameter.Foo"], "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}}"#,
-        ),
-        &["Failed to parse interpolation expression at [0, 20]. Reason: Braces mismatch.\n  {{ Job.Parameter.Foo\n  ^~"],
+        )),
+        Some(&["TASK_CHUNKING"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("malformed format string")
+    .to_string();
+    assert_eq!(
+        err,
+        "Validation error: 'jobtemplate-2023-09' failed checks: Failed to parse interpolation expression at [0, 20]. Reason: Braces mismatch.\n  {{ Job.Parameter.Foo\n  ^~"
     );
 }
 

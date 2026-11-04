@@ -94,10 +94,6 @@ impl TaskParameterDefinition {
 
 /// Int range: either a list of values or a range expression string.
 #[derive(Debug, Clone)]
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
 pub enum IntRange {
     /// An `<IntRangeList>` (Template Schemas §3.4.1.1). Each element is an
     /// `<integer>` or `<intstring>`, decoded to [`IntOrFormatString::Int`],

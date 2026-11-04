@@ -188,11 +188,11 @@ fn int_range_too_long() {
 
 #[test]
 fn int_format_string_undefined_variable() {
-    check_err(
+    check_err_exact(
         &job_with_int_value_param(
             r#"{"name": "foo", "type": "INT", "range": [1, "{{Param.Nope}}"]}"#,
         ),
-        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'. Did you mean: Param.Value\n  Param.Nope\n  ~~~~~~^~~~"],
+        "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'. Did you mean: Param.Value\n  Param.Nope\n  ~~~~~~^~~~",
     );
 }
 
@@ -355,9 +355,9 @@ fn numeric_range_format_strings_use_template_scope() {
 
 #[test]
 fn int_format_string_unterminated() {
-    check_err(
+    check_err_exact(
         &job_with_int_value_param(r#"{"name": "foo", "type": "INT", "range": ["{{Param.Value"]}"#),
-        &["Failed to parse interpolation expression at [0, 13]. Reason: Braces mismatch.\n  {{Param.Value\n  ^~"],
+        "Validation error: 'jobtemplate-2023-09' failed checks: Failed to parse interpolation expression at [0, 13]. Reason: Braces mismatch.\n  {{Param.Value\n  ^~",
     );
 }
 
@@ -416,11 +416,11 @@ fn float_mixed_item_types() {
 
 #[test]
 fn float_format_string_undefined_variable() {
-    check_err(
+    check_err_exact(
         &job_with_int_value_param(
             r#"{"name": "foo", "type": "FLOAT", "range": [1.5, "{{Param.Nope}}"]}"#,
         ),
-        &["steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'. Did you mean: Param.Value\n  Param.Nope\n  ~~~~~~^~~~"],
+        "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'. Did you mean: Param.Value\n  Param.Nope\n  ~~~~~~^~~~",
     );
 }
 
