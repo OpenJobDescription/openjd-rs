@@ -311,10 +311,11 @@ budgets template validation and the session runtime apply.
      uncaught `ValueError`. §3.4.1.1 requires a base-10
      integer, so openjd-rs rejects a resolved value like these at job creation and
      a literal one at decode. Python reads a FLOAT element with `float()`, which
-     likewise accepts underscores (`1_0.5`) and non-ASCII digits. §3.4.1.2 requires
-     a base-10 floating point value, so openjd-rs rejects such a FLOAT element,
-     literal or resolved, at job creation (a literal `<floatstring>` is not parsed
-     at decode). Python's template validation also does no static
+     likewise accepts underscores (`1_0.5`) and non-ASCII digits, and also `inf`,
+     `nan` and `1e999`, which Python keeps as task parameter values. §3.4.1.2
+     requires a base-10 floating point value, and a FLOAT value must be finite, so
+     openjd-rs rejects such a FLOAT element, literal or resolved, at job creation (a
+     literal `<floatstring>` is not parsed at decode). Python's template validation also does no static
      typing of these elements (see [validation.md](validation.md)).
    - Step-level let bindings (template scope; a failure is reported at
      `steps[i] -> let[j]` — see the carried-forward checks below)
