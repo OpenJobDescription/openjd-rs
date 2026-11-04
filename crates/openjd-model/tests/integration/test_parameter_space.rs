@@ -239,11 +239,12 @@ fn numeric_range_list_element_static_type_error() {
     }
 }
 
-/// Element 0 is checked like any other, for INT and CHUNK[INT].
+/// Element 0 is checked like any other, for INT, CHUNK[INT] and FLOAT.
 #[test]
 fn int_range_list_first_element_validated() {
     for (param_type, extensions, chunks) in [
         ("INT", "", ""),
+        ("FLOAT", "", ""),
         (
             "CHUNK[INT]",
             r#""extensions": ["TASK_CHUNKING"],"#,
@@ -274,6 +275,74 @@ fn int_range_list_first_element_validated() {
              \tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'.\n  Param.Nope\n  ~~~~~~^~~~",
             "{param_type}"
         );
+    }
+}
+
+/// Range elements are validated in template scope (specs/model/validation.md
+/// "Template scope"), where host functions such as `apply_path_mapping` are
+/// not available.
+#[test]
+fn numeric_range_format_strings_use_template_scope() {
+    for (param_type, range, path, at) in [
+        (
+            "INT",
+            r#"[1, "1{{ apply_path_mapping('/a') }}"]"#,
+            "range[1]",
+            "[1, 31]",
+        ),
+        (
+            "CHUNK[INT]",
+            r#"[1, "1{{ apply_path_mapping('/a') }}"]"#,
+            "range[1]",
+            "[1, 31]",
+        ),
+        (
+            "FLOAT",
+            r#"[1, "1{{ apply_path_mapping('/a') }}"]"#,
+            "range[1]",
+            "[1, 31]",
+        ),
+        (
+            "INT",
+            r#""1-{{ apply_path_mapping('/a') }}""#,
+            "range",
+            "[2, 32]",
+        ),
+    ] {
+        let (extensions, chunks) = if param_type == "CHUNK[INT]" {
+            (
+                r#""EXPR", "TASK_CHUNKING""#,
+                r#", "chunks": {"defaultTaskCount": 1, "rangeConstraint": "NONCONTIGUOUS"}"#,
+            )
+        } else {
+            (r#""EXPR""#, "")
+        };
+        let template = format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": [{extensions}],
+            "name": "Test",
+            "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}, "parameterSpace": {{"taskParameterDefinitions": [
+                {{"name": "foo", "type": "{param_type}", "range": {range}{chunks}}}
+            ]}}}}]
+        }}"#
+        );
+        let err = decode_job_template(
+            yaml_val(&template),
+            Some(&["EXPR", "TASK_CHUNKING"]),
+            &CallerLimits::default(),
+        )
+        .expect_err(param_type)
+        .to_string();
+        assert_eq!(
+            err,
+            format!(
+                "Model validation error: 1 validation error for JobTemplate\n\
+                 steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> {path}:\n\
+                 \tFailed to parse interpolation expression at {at}. Unknown function: 'apply_path_mapping'\n  \
+                 apply_path_mapping('/a')\n  ^~~~~~~~~~~~~~~~~~~~~~~~"
+            ),
+            "{param_type} {range}");
     }
 }
 

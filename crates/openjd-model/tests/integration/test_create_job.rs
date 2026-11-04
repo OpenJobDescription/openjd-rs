@@ -1748,6 +1748,31 @@ fn test_create_job_range_list_flattened_past_element_limit() {
     }
 }
 
+/// Resolution stops at the first element that takes the list past the
+/// element limit, so a template cannot make job creation build an
+/// arbitrarily long list before rejecting it. The count in the message is the
+/// elements resolved so far, not the whole list's.
+#[test]
+fn test_create_job_range_list_stops_at_element_limit() {
+    for (param_type, element) in [
+        ("INT", "{{ range_expr('1-2000') }}"),
+        ("CHUNK[INT]", "{{ range_expr('1-2000') }}"),
+        ("FLOAT", "{{ [1.5] * 2000 }}"),
+        ("STRING", "{{ ['a'] * 2000 }}"),
+        ("PATH", "{{ ['a'] * 2000 }}"),
+    ] {
+        let err = parse_and_create_err(
+            &expr_range_list_template(param_type, &format!(r#"["{element}", "{element}"]"#)),
+            &[],
+        );
+        assert_eq!(
+            err,
+            "Validation error: Task parameter 'Frame' range exceeds 1024 elements (2000 elements)",
+            "{param_type}"
+        );
+    }
+}
+
 /// An evaluation error in a STRING or PATH range list element fails job
 /// creation with the expression error and its caret.
 #[test]

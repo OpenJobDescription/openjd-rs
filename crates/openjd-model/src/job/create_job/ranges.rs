@@ -70,7 +70,23 @@ pub(super) fn resolve_to_f64(
     Ok(Some(value))
 }
 
-/// Resolve one list item to the values it contributes.
+/// Why a list item could not be resolved.
+enum ListItemError {
+    /// Evaluation or coercion failed.
+    Expression(ExpressionError),
+    /// The item flattened into `len` values, more than the room left in its
+    /// list. Detected before the values are copied out of the list.
+    TooMany { len: usize },
+}
+
+impl From<ExpressionError> for ListItemError {
+    fn from(e: ExpressionError) -> Self {
+        Self::Expression(e)
+    }
+}
+
+/// Resolve one list item to the values it contributes, at most `room` of
+/// them.
 ///
 /// With a `target` (a `T? | list[T]` type from
 /// `TaskParameterType::range_list_item_target`), the item follows Expression
@@ -79,16 +95,21 @@ pub(super) fn resolve_to_f64(
 /// only, a format string that is exactly one `{{...}}`. Any other format
 /// string (literal text around its expressions, two or more expressions, or
 /// no expressions at all) resolves to a string. With no target the item
-/// always resolves to one string. The caller interprets a string for its element
-/// type. Task parameter range lists of every type and `hostRequirements`
-/// attribute values share this, so they cannot drift apart in how they skip
-/// and flatten.
+/// always resolves to one string. The caller interprets a string for its
+/// element type. Task parameter range lists of every type and
+/// `hostRequirements` attribute values share this, so they cannot drift
+/// apart in how they skip and flatten.
+///
+/// A list longer than `room` fails with [`ListItemError::TooMany`] before
+/// its members are copied, so a range list's element limit bounds the work
+/// for each element, not only the final count.
 fn resolve_list_item(
     fs: &openjd_expr::FormatString,
     target: Option<&openjd_expr::ExprType>,
     symtab: &SymbolTable,
     budgets: super::EvalBudgets,
-) -> Result<Vec<ExprValue>, ExpressionError> {
+    room: usize,
+) -> Result<Vec<ExprValue>, ListItemError> {
     let Some(target) = target else {
         let text = fs.resolve_string_with(symtab, &budgets.fs_options())?;
         return Ok(vec![ExprValue::String(text)]);
@@ -96,9 +117,29 @@ fn resolve_list_item(
     let value = fs.resolve_with(symtab, &budgets.fs_options().with_target_type(target))?;
     Ok(match value {
         ExprValue::Null => Vec::new(),
-        val if val.is_list() => val.list_elements().unwrap_or_default(),
+        val if val.is_list() => {
+            let len = val.list_len().unwrap_or_default();
+            if len > room {
+                return Err(ListItemError::TooMany { len });
+            }
+            val.list_elements().unwrap_or_default()
+        }
         val => vec![val],
     })
+}
+
+/// The error for a range list with more than the element limit: `count`
+/// elements resolved so far, counting the element that went over.
+fn range_too_long(param_name: &str, limits: &EffectiveLimits, count: usize) -> ModelError {
+    ModelError::DecodeValidation(format!(
+        "Task parameter '{}' range exceeds {} elements ({} elements)",
+        param_name, limits.max_task_param_range_len, count
+    ))
+}
+
+/// The room left in a range list that already holds `len` elements.
+fn room_left(limits: &EffectiveLimits, len: usize) -> usize {
+    limits.max_task_param_range_len.saturating_sub(len)
 }
 
 /// The text of a resolved string list item value: a string as is, any other
@@ -126,14 +167,19 @@ pub(super) fn resolve_string_list(
     let target = crate::types::string_list_item_target();
     let mut out = Vec::new();
     for fs in vals {
-        let values = resolve_list_item(fs, Some(&target), symtab, budgets).map_err(|e| {
-            ModelError::FormatStringError {
-                message: e.to_string(),
-                input: Some(fs.raw().to_string()),
-                start: None,
-                end: None,
+        // Attribute values have no count limit.
+        let values = match resolve_list_item(fs, Some(&target), symtab, budgets, usize::MAX) {
+            Ok(values) => values,
+            Err(ListItemError::Expression(e)) => {
+                return Err(ModelError::FormatStringError {
+                    message: e.to_string(),
+                    input: Some(fs.raw().to_string()),
+                    start: None,
+                    end: None,
+                })
             }
-        })?;
+            Err(ListItemError::TooMany { .. }) => unreachable!("no list is longer than usize::MAX"),
+        };
         out.extend(values.into_iter().map(list_item_text));
     }
     Ok(out)
@@ -362,25 +408,28 @@ fn resolve_int_range(
                 match item {
                     template::IntOrFormatString::Int(i) => ints.push(*i),
                     template::IntOrFormatString::FormatString(fs) => {
-                        ints.extend(resolve_int_range_list_element(
+                        let values = resolve_int_range_list_element(
                             fs,
                             k,
                             item_target,
                             symtab,
                             param_name,
                             budgets,
-                        )?)
+                            room_left(limits, ints.len()),
+                        )
+                        .map_err(|e| match e {
+                            IntElementError::Model(e) => e,
+                            IntElementError::TooMany { len } => {
+                                range_too_long(param_name, limits, ints.len() + len)
+                            }
+                        })?;
+                        ints.extend(values);
                     }
                 }
             }
             check_range_not_emptied(ints.len(), param_name)?;
             if ints.len() > limits.max_task_param_range_len {
-                return Err(ModelError::DecodeValidation(format!(
-                    "Task parameter '{}' range exceeds {} elements ({} elements)",
-                    param_name,
-                    limits.max_task_param_range_len,
-                    ints.len()
-                )));
+                return Err(range_too_long(param_name, limits, ints.len()));
             }
             Ok(job::TaskParamRange::List(ints))
         }
@@ -449,14 +498,17 @@ fn resolve_int_range_list_element(
     symtab: &SymbolTable,
     param_name: &str,
     budgets: super::EvalBudgets,
-) -> Result<Vec<i64>, ModelError> {
+    room: usize,
+) -> Result<Vec<i64>, IntElementError> {
     let error = |detail: std::fmt::Arguments<'_>| {
-        ModelError::Expression(ExpressionError::new(format!(
+        IntElementError::Model(ModelError::Expression(ExpressionError::new(format!(
             "Task parameter '{param_name}' range[{k}]: {detail}"
-        )))
+        ))))
     };
-    let values =
-        resolve_list_item(fs, target, symtab, budgets).map_err(|e| error(format_args!("{e}")))?;
+    let values = resolve_list_item(fs, target, symtab, budgets, room).map_err(|e| match e {
+        ListItemError::Expression(e) => error(format_args!("{e}")),
+        ListItemError::TooMany { len } => IntElementError::TooMany { len },
+    })?;
     values
         .into_iter()
         .map(|value| match value {
@@ -476,6 +528,15 @@ fn resolve_int_range_list_element(
             }
         })
         .collect()
+}
+
+/// Why an `<IntRangeList>` element could not be resolved.
+enum IntElementError {
+    /// A located error, ready to report.
+    Model(ModelError),
+    /// The element flattened past the room left in the list; the caller
+    /// reports it with the list's count.
+    TooMany { len: usize },
 }
 
 /// The ≥1-element rule (Template Schemas §3.4.1) is checked on the list as
@@ -595,8 +656,17 @@ fn resolve_float_range(
                                 "Task parameter '{param_name}' range[{k}]: {detail}"
                             )))
                         };
-                        let values = resolve_list_item(fs, item_target, symtab, budgets)
-                            .map_err(|e| error(format_args!("{e}")))?;
+                        let room = room_left(limits, floats.len());
+                        let values = match resolve_list_item(fs, item_target, symtab, budgets, room)
+                        {
+                            Ok(values) => values,
+                            Err(ListItemError::Expression(e)) => {
+                                return Err(error(format_args!("{e}")))
+                            }
+                            Err(ListItemError::TooMany { len }) => {
+                                return Err(range_too_long(param_name, limits, floats.len() + len))
+                            }
+                        };
                         for value in values {
                             floats.push(
                                 float_range_value(value, limits)
@@ -643,12 +713,7 @@ fn resolve_float_range(
         }
     };
     if floats.len() > limits.max_task_param_range_len {
-        return Err(ModelError::DecodeValidation(format!(
-            "Task parameter '{}' range exceeds {} elements ({} elements)",
-            param_name,
-            limits.max_task_param_range_len,
-            floats.len()
-        )));
+        return Err(range_too_long(param_name, limits, floats.len()));
     }
     Ok(floats)
 }
@@ -675,8 +740,14 @@ fn resolve_string_range(
         template::StringRange::List(items) => {
             let mut out = Vec::new();
             for fs in items {
-                let values = resolve_list_item(fs, item_target, symtab, budgets)
-                    .map_err(ModelError::Expression)?;
+                let room = room_left(limits, out.len());
+                let values = match resolve_list_item(fs, item_target, symtab, budgets, room) {
+                    Ok(values) => values,
+                    Err(ListItemError::Expression(e)) => return Err(ModelError::Expression(e)),
+                    Err(ListItemError::TooMany { len }) => {
+                        return Err(range_too_long(param_name, limits, out.len() + len))
+                    }
+                };
                 out.extend(values.into_iter().map(list_item_text));
             }
             check_range_not_emptied(out.len(), param_name)?;
@@ -704,12 +775,7 @@ fn resolve_string_range(
         }
     };
     if resolved.len() > limits.max_task_param_range_len {
-        return Err(ModelError::DecodeValidation(format!(
-            "Task parameter '{}' range exceeds {} elements ({} elements)",
-            param_name,
-            limits.max_task_param_range_len,
-            resolved.len()
-        )));
+        return Err(range_too_long(param_name, limits, resolved.len()));
     }
     for (i, s) in resolved.iter().enumerate() {
         let char_count = s.chars().count();

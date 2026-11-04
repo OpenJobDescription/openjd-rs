@@ -491,7 +491,7 @@ parses as a base-10 integer (surrounding whitespace allowed) decodes to
 `Int`. A string containing `{{` decodes to `FormatString`, which is
 resolved at job creation, or fails to decode when it is not a valid
 format string. Decoding also fails for any other string, a non-integral
-float, a boolean or `null`. `as_i64()` returns the integer of
+float, a boolean, `null`, an array or an object. `as_i64()` returns the integer of
 an `Int`, or `None` for a `FormatString`.
 
 `FlexInt` and `FlexFloat` are coercion-permissive newtypes around

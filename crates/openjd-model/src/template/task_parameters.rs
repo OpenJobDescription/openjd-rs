@@ -298,7 +298,7 @@ pub struct ChunkIntTaskParameterDefinition {
 ///   `IntOrFormatString::FormatString(fs)`
 ///
 /// Rejects any other string (including a malformed format string), a
-/// non-integral float, a boolean, and null.
+/// non-integral float, a boolean, null, an array, and an object.
 #[derive(Debug, Clone)]
 #[allow(
     missing_docs,

@@ -229,7 +229,12 @@ budgets template validation and the session runtime apply.
      ≥1-element rule was checked on the list as written, at decode. For the same
      reason the 1024-element limit is checked again on the resolved list, so a list
      that flattens past it fails (`Task parameter '<name>' range exceeds 1024
-     elements (<n> elements)`). Attribute `anyOf`/`allOf` values get the same
+     elements (<n> elements)`). Resolution stops at the first element that takes the
+     list past the limit, before that element's members are copied, so `<n>` counts
+     the elements resolved up to and including that one, not the whole list. The
+     work for a single element is bounded by the evaluation budgets, and a
+     `range_expr` that coerces to `list[int]` by the expression engine's cap of 10
+     million members. Attribute `anyOf`/`allOf` values get the same
      treatment in `instantiate`.
 
      Without EXPR an INT, CHUNK[INT] or FLOAT element is the base 2023-09
@@ -240,7 +245,10 @@ budgets template validation and the session runtime apply.
      format string that is not a single whole-field `{{...}}`: literal text around
      its expressions, two or more expressions (`{{ Param.A }}{{ Param.B }}`), or no
      expressions (a literal FLOAT string such as `"02.50"`). A string is interpreted
-     for the element type:
+     for the element type. In these messages and the ones below, `<k>` is the
+     element's index in the list as written. (The STRING and PATH per-element length
+     and empty-value checks in `resolve_string_range` count the resolved list
+     instead, after flattening.)
      - INT and CHUNK[INT]: trimmed, then parsed as an `i64` (Rust's integer syntax:
        an optional sign and ASCII digits). Otherwise job creation fails with `Task
        parameter '<name>' range[<k>]: value '<resolved>' is not an integer`, or `...
