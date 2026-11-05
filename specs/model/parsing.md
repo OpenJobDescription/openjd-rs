@@ -57,7 +57,8 @@ live in the `parse` module; passes 5–9 live in the `validate_v2023_09` module 
 `DocumentType` parameter selects JSON or YAML parsing. This pass catches syntax errors
 (malformed YAML, invalid JSON).
 
-YAML scalars resolve by the YAML 1.2 Core schema, with strict booleans:
+Booleans, nulls and non-finite floats in YAML resolve by the YAML 1.2 Core schema, with
+strict booleans:
 
 - `true`, `True`, `TRUE`, `false`, `False` and `FALSE` are booleans.
 - `null`, `Null`, `NULL`, `~` and an empty value are null.
@@ -68,7 +69,9 @@ YAML scalars resolve by the YAML 1.2 Core schema, with strict booleans:
 - A `!!bool` or `!!float` tag on a value that isn't one of that type's Core spellings, such as
   `!!bool tRUE` or `!!float .NAn`, is a syntax error.
 
-Job parameter files and `--tasks` files in the CLI resolve scalars the same way.
+Integers don't strictly follow the Core schema: `1_000` and `0b101` are read as integers, and
+`0755` as the float 755.0. Job parameter files and `--tasks` files in the CLI resolve scalars
+the same way.
 
 Callers typically handle this pass themselves — the `decode_*` functions accept a
 pre-parsed `serde_yaml::Value`.

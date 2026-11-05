@@ -130,8 +130,8 @@ openjd run template.yaml --tasks file://tasks.yaml
 
 The file or inline string must parse to a JSON array of objects. Each object maps parameter
 names to string or numeric values. Numeric values are stringified. YAML task files resolve
-scalars by the YAML 1.2 Core schema with strict booleans, as templates do (see
-[parsing.md](../model/parsing.md#pass-1-raw-parsing)). Only `true`, `True`, `TRUE`, `false`,
+booleans, nulls and non-finite floats by the YAML 1.2 Core schema with strict booleans, as
+templates do (see [parsing.md](../model/parsing.md#pass-1-raw-parsing)). Only `true`, `True`, `TRUE`, `false`,
 `False` and `FALSE` are booleans, and a boolean value is rejected. Shorthand words such as
 `yes`, `no`, `on`, and `off`, and other casings such as `tRUE`, remain strings.
 

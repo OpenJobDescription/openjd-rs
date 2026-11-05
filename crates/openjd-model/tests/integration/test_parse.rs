@@ -137,38 +137,6 @@ fn yaml_core_schema_scalar_spellings() {
     }
 }
 
-/// An explicit `!!bool` or `!!float` tag only accepts that type's YAML 1.2
-/// Core spellings, so a wrong-case value under one is a parse error rather
-/// than a string. The Python implementation accepts these.
-#[test]
-fn yaml_core_tag_with_wrong_case_value_is_a_parse_error() {
-    for (doc, expected) in [
-        ("a: !!bool True\n", Ok(serde_json::json!({"a": true}))),
-        (
-            "a: !!bool tRUE\n",
-            Err(
-                "Validation error: The document is not a valid YAML document consisting of \
-                 key-value pairs. error: line 1 column 11: invalid boolean (strict mode expects \
-                 true/false)\n --> <input>:1:11\n  |\n1 | a: !!bool tRUE\n  |           ^ \
-                 invalid boolean (strict mode expects true/false)",
-            ),
-        ),
-        (
-            "a: !!float .NAn\n",
-            Err(
-                "Validation error: The document is not a valid YAML document consisting of \
-                 key-value pairs. error: line 1 column 12: invalid floating point\n --> \
-                 <input>:1:12\n  |\n1 | a: !!float .NAn\n  |            ^ invalid floating \
-                 point",
-            ),
-        ),
-    ] {
-        let result = document_string_to_object(doc, DocumentType::Yaml, &CallerLimits::default())
-            .map_err(|e| e.to_string());
-        assert_eq!(result, expected.map_err(str::to_string), "{doc:?}");
-    }
-}
-
 // ══════════════════════════════════════════════════════════════
 // document_string_to_object — not a dict
 // ══════════════════════════════════════════════════════════════
@@ -211,6 +179,38 @@ fn bad_parse_yaml() {
         DocumentType::Yaml,
         &["not a valid Yaml document consisting of key-value pairs"],
     );
+}
+
+/// An explicit `!!bool` or `!!float` tag only accepts that type's YAML 1.2
+/// Core spellings, so a wrong-case value under one is a parse error rather
+/// than a string. The Python implementation accepts these.
+#[test]
+fn yaml_core_tag_with_wrong_case_value_is_a_parse_error() {
+    for (doc, expected) in [
+        ("a: !!bool True\n", Ok(serde_json::json!({"a": true}))),
+        (
+            "a: !!bool tRUE\n",
+            Err(
+                "Validation error: The document is not a valid YAML document consisting of \
+                 key-value pairs. error: line 1 column 11: invalid boolean (strict mode expects \
+                 true/false)\n --> <input>:1:11\n  |\n1 | a: !!bool tRUE\n  |           ^ \
+                 invalid boolean (strict mode expects true/false)",
+            ),
+        ),
+        (
+            "a: !!float .NAn\n",
+            Err(
+                "Validation error: The document is not a valid YAML document consisting of \
+                 key-value pairs. error: line 1 column 12: invalid floating point\n --> \
+                 <input>:1:12\n  |\n1 | a: !!float .NAn\n  |            ^ invalid floating \
+                 point",
+            ),
+        ),
+    ] {
+        let result = document_string_to_object(doc, DocumentType::Yaml, &CallerLimits::default())
+            .map_err(|e| e.to_string());
+        assert_eq!(result, expected.map_err(str::to_string), "{doc:?}");
+    }
 }
 
 // ══════════════════════════════════════════════════════════════
