@@ -137,55 +137,6 @@ fn yaml_core_schema_scalar_spellings() {
     }
 }
 
-/// A wrong-case boolean spelling is a string, so a BOOL-typed field rejects it.
-#[test]
-fn yaml_wrong_case_boolean_is_rejected_for_bool_field() {
-    let doc = "specificationVersion: jobtemplate-2023-09\n\
-               name: J\n\
-               steps:\n\
-               - name: S\n  \
-                 script:\n    \
-                   embeddedFiles:\n    \
-                   - name: f\n      \
-                     type: TEXT\n      \
-                     runnable: tRUE\n      \
-                     data: x\n    \
-                   actions:\n      \
-                     onRun:\n        \
-                       command: echo\n";
-    let v = document_string_to_object(doc, DocumentType::Yaml, &CallerLimits::default()).unwrap();
-    let err = decode_job_template(v, None, &CallerLimits::default()).unwrap_err();
-    assert_eq!(
-        err.to_string(),
-        "Validation error: 'jobtemplate-2023-09' failed checks: \
-         invalid type: string \"tRUE\", expected a boolean"
-    );
-}
-
-/// A wrong-case boolean spelling is a string, so a STRING parameter accepts it.
-#[test]
-fn yaml_wrong_case_boolean_is_accepted_as_string_default() {
-    let doc = "specificationVersion: jobtemplate-2023-09\n\
-               name: J\n\
-               parameterDefinitions:\n\
-               - name: P\n  \
-                 type: STRING\n  \
-                 default: FAlse\n\
-               steps:\n\
-               - name: S\n  \
-                 script:\n    \
-                   actions:\n      \
-                     onRun:\n        \
-                       command: echo\n";
-    let v = document_string_to_object(doc, DocumentType::Yaml, &CallerLimits::default()).unwrap();
-    let template = decode_job_template(v, None, &CallerLimits::default()).unwrap();
-    match &template.parameter_definitions.as_deref().unwrap()[0] {
-        openjd_model::template::JobParameterDefinition::STRING(p) => {
-            assert_eq!(p.default.as_deref(), Some("FAlse"));
-        }
-        other => panic!("expected a STRING parameter, got {other:?}"),
-    }
-}
 // ══════════════════════════════════════════════════════════════
 // document_string_to_object — not a dict
 // ══════════════════════════════════════════════════════════════
@@ -278,6 +229,60 @@ fn job_decode_success() {
     }"#,
     );
     decode_job_template(v, None, &CallerLimits::default()).unwrap();
+}
+
+// ══════════════════════════════════════════════════════════════
+// decode_job_template — YAML Core schema scalar spellings
+// ══════════════════════════════════════════════════════════════
+
+/// A wrong-case boolean spelling is a string, so a BOOL-typed field rejects it.
+#[test]
+fn yaml_wrong_case_boolean_is_rejected_for_bool_field() {
+    let doc = "specificationVersion: jobtemplate-2023-09\n\
+               name: J\n\
+               steps:\n\
+               - name: S\n  \
+                 script:\n    \
+                   embeddedFiles:\n    \
+                   - name: f\n      \
+                     type: TEXT\n      \
+                     runnable: tRUE\n      \
+                     data: x\n    \
+                   actions:\n      \
+                     onRun:\n        \
+                       command: echo\n";
+    let v = document_string_to_object(doc, DocumentType::Yaml, &CallerLimits::default()).unwrap();
+    let err = decode_job_template(v, None, &CallerLimits::default()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: 'jobtemplate-2023-09' failed checks: \
+         invalid type: string \"tRUE\", expected a boolean"
+    );
+}
+
+/// A wrong-case boolean spelling is a string, so a STRING parameter accepts it.
+#[test]
+fn yaml_wrong_case_boolean_is_accepted_as_string_default() {
+    let doc = "specificationVersion: jobtemplate-2023-09\n\
+               name: J\n\
+               parameterDefinitions:\n\
+               - name: P\n  \
+                 type: STRING\n  \
+                 default: FAlse\n\
+               steps:\n\
+               - name: S\n  \
+                 script:\n    \
+                   actions:\n      \
+                     onRun:\n        \
+                       command: echo\n";
+    let v = document_string_to_object(doc, DocumentType::Yaml, &CallerLimits::default()).unwrap();
+    let template = decode_job_template(v, None, &CallerLimits::default()).unwrap();
+    match &template.parameter_definitions.as_deref().unwrap()[0] {
+        openjd_model::template::JobParameterDefinition::STRING(p) => {
+            assert_eq!(p.default.as_deref(), Some("FAlse"));
+        }
+        other => panic!("expected a STRING parameter, got {other:?}"),
+    }
 }
 
 // ══════════════════════════════════════════════════════════════

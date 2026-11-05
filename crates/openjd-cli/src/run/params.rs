@@ -335,6 +335,26 @@ mod tests {
     }
 
     #[test]
+    fn yaml_tasks_keep_wrong_case_core_scalars_as_strings() {
+        // YAML 1.2 Core resolves only lowercase, capitalized and uppercase
+        // spellings of true, false, null and the non-finite floats. Any
+        // other casing is a string, as in the Python implementation.
+        let values = ["tRUE", "FAlse", "NUlL", ".NAn", "-.iNF"];
+        let mut file = tempfile::NamedTempFile::with_suffix(".yaml").unwrap();
+        for value in values {
+            writeln!(file, "- Value: {value}").unwrap();
+        }
+        let arg = format!("file://{}", file.path().display());
+
+        let tasks = parse_tasks_arg(&arg).unwrap();
+
+        assert_eq!(tasks.len(), values.len());
+        for (task, expected) in tasks.iter().zip(values) {
+            assert_eq!(task["Value"], expected);
+        }
+    }
+
+    #[test]
     fn yaml_tasks_keep_non_finite_floats_as_strings() {
         // Task parameter values are strings, so YAML's non-finite float
         // spellings must reach validation as text rather than be rejected
