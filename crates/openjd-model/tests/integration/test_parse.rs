@@ -137,9 +137,9 @@ fn yaml_core_schema_scalar_spellings() {
     }
 }
 
-/// A YAML 1.2 Core tag only accepts its own schema's spellings, so a
-/// wrong-case value under an explicit `!!bool` or `!!float` tag is a parse
-/// error rather than a string. The Python implementation accepts these.
+/// An explicit `!!bool` or `!!float` tag only accepts that type's YAML 1.2
+/// Core spellings, so a wrong-case value under one is a parse error rather
+/// than a string. The Python implementation accepts these.
 #[test]
 fn yaml_core_tag_with_wrong_case_value_is_a_parse_error() {
     for (doc, expected) in [
