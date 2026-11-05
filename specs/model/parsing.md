@@ -57,6 +57,13 @@ live in the `parse` module; passes 5–9 live in the `validate_v2023_09` module 
 `DocumentType` parameter selects JSON or YAML parsing. This pass catches syntax errors
 (malformed YAML, invalid JSON).
 
+YAML scalars resolve by the YAML 1.2 Core schema, with strict booleans. Only the lowercase,
+capitalized and uppercase spellings of `true`, `false` and `null` (and `~`) resolve to a
+boolean or null. Any other spelling, such as `yes`, `on` or `tRUE`, is a string. Non-finite
+floats (`.nan`, `.inf`, `-.inf`) are kept as strings so that field validation can report them.
+An explicit core tag whose value that tag doesn't accept, such as `!!bool tRUE`, is a syntax
+error. Job parameter files and `--tasks` files in the CLI resolve scalars the same way.
+
 Callers typically handle this pass themselves — the `decode_*` functions accept a
 pre-parsed `serde_yaml::Value`.
 
