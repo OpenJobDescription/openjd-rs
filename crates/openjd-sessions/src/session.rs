@@ -623,6 +623,9 @@ impl Session {
 
     /// Test-only: force the session state (typically to `Running`) so `cancel_action`
     /// will proceed without needing a full action run.
+    ///
+    /// It bypasses the brittle-session rule: setting `Ready` on an ending-only
+    /// session lets it accept new actions, which no public API path allows.
     #[cfg(any(test, feature = "test-utils"))]
     pub fn set_state_for_test(&mut self, state: SessionState) {
         self.state = state;
