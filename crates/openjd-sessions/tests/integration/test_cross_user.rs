@@ -454,6 +454,61 @@ async fn test_cross_user_session_cancel_handle_mark_failed_helper_subprocess() {
     session.cleanup();
 }
 
+// === Cross-user brittle-session tests ===
+
+/// A subprocess that fails through the cross-user helper makes the session
+/// ending-only (specs/sessions/session.md § Brittle Sessions), so exiting an
+/// environment with `keep_session_running = true` must not bring it back to
+/// Ready. A succeeding helper subprocess leaves the session Ready.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_failed_helper_subprocess_makes_session_ending_only() {
+    use openjd_model::job::Environment;
+    use openjd_sessions::session::SessionState;
+
+    let user = require_target_user();
+    let mut session = make_session(user);
+    let env = Environment {
+        name: "Env".into(),
+        description: None,
+        script: None,
+        variables: None,
+        resolved_symtab: None,
+    };
+    let id = session
+        .enter_environment(&env, None, None, None)
+        .await
+        .unwrap();
+
+    let ok = session
+        .run_subprocess("true", None, None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(ok.state, ActionState::Success);
+    assert_eq!(session.state(), SessionState::Ready);
+
+    let args = ["-c".to_string(), "exit 5".to_string()];
+    let failed = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(failed.state, ActionState::Failed);
+    assert_eq!(session.state(), SessionState::ReadyEnding);
+
+    session
+        .exit_environment(&id, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(session.state(), SessionState::ReadyEnding);
+    assert!(matches!(
+        session
+            .run_subprocess("true", None, None, None, true, None)
+            .await,
+        Err(openjd_sessions::SessionError::InvalidState { .. })
+    ));
+    session.cleanup();
+}
+
 // === Cross-user TempDir tests ===
 
 /// TempDir with target user has correct group ownership and mode 0o770.

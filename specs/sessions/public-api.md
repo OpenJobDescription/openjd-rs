@@ -157,7 +157,9 @@ impl Session {
     /// `SessionError::LifoViolation` if called out of order.
     ///
     /// `keep_session_running: true` keeps the session in the Ready
-    /// state for subsequent `run_task` / `enter_environment` calls.
+    /// state for subsequent `run_task` / `enter_environment` calls,
+    /// unless the session is already ending-only because an earlier
+    /// action ended Failed, Canceled or Timeout.
     /// `false` transitions the session to ReadyEnding after this
     /// exit completes, blocking further work.
     pub async fn exit_environment(

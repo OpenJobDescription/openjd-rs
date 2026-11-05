@@ -12,6 +12,8 @@
 //! module path (e.g. `cargo test --test integration cross_user_windows`).
 //! The Unix cross-user tests are `#![cfg(unix)]` gated similarly.
 
+#[path = "integration/test_brittle_session.rs"]
+mod test_brittle_session;
 #[path = "integration/test_cross_user.rs"]
 mod test_cross_user;
 #[path = "integration/test_cross_user_windows.rs"]

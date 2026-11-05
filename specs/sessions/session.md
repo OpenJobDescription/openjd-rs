@@ -26,8 +26,8 @@ Ready ──────────► Running         (enter_environment / exi
 Running ────────► Ready           (action succeeded, session not in ending-only mode)
 Running ────────► ReadyEnding     (action failed/canceled, OR session is in ending-only mode)
 Running ────────► Canceling       (cancel_action called)
-Canceling ──────► Ready           (canceled action completes, session not ending)
-Canceling ──────► ReadyEnding     (canceled action completes, session is ending)
+Canceling ──────► Ready           (action still ended Success, session not in ending-only mode)
+Canceling ──────► ReadyEnding     (action ended Canceled/Failed/Timeout, OR session is in ending-only mode)
 ReadyEnding ───► Running          (exit_environment started)
 Ready ──────────► Ended           (cleanup)
 ReadyEnding ───► Ended            (cleanup)
@@ -41,8 +41,20 @@ new tasks or entering new environments after a failure, matching the Python libr
 behavior.
 
 The `ending_only` flag is set when:
-- An action completes with `ActionState::Failed`, `Canceled`, or `Timeout`
+- An action completes with `ActionState::Failed`, `Canceled`, or `Timeout`. This covers
+  every way an action can end that way: a non-zero exit or `openjd_fail`, a cancel
+  (including one with `mark_action_failed`, which reports `Failed`), a timeout, a runner
+  error such as a command that can't be started, a failure while setting up the action
+  before its subprocess starts, and the same outcomes for `run_subprocess` through the
+  cross-user helper
 - `exit_environment()` is called without `keep_session_running` (the default)
+
+Once set, `ending_only` is never cleared. When an action ends, the session goes to
+`ReadyEnding` if `ending_only` is set and to `Ready` otherwise, so `keep_session_running`
+can't bring an ending-only session back to `Ready`. All of these paths settle the state
+through one private helper, `settle_after_action`, so `state == Ready` implies the session
+isn't ending-only, and the `Ready` checks in `run_task`, `enter_environment` and
+`run_subprocess` enforce the contract without checking `ending_only` themselves.
 
 This design reflects the worker agent's pattern: after a task fails, the agent exits all
 environments in reverse order and cleans up. There's no recovery path.
@@ -198,7 +210,7 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 7. Processes `ActionMessage` values via `drive_action()` — env var changes from
    `openjd_env`/`openjd_unset_env` are applied to the environment's change set
 8. On success: state → `Ready` (or `ReadyEnding` if `ending_only`)
-9. On failure: state → `ReadyEnding`
+9. On failure: `ending_only` is set and state → `ReadyEnding`
 
 ### Exit
 
@@ -210,6 +222,9 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 4. Runs `onExit` action via `EnvironmentScriptRunner::exit()`
 5. Pops the environment from `environments_entered`
 6. Removes the environment's variable changes from the cumulative set
+7. On completion: state → `Ready` or `ReadyEnding` as for any other action. With
+   `keep_session_running` true, the state is `Ready` only if the session wasn't already
+   ending-only (see [Brittle Sessions](#brittle-sessions))
 
 ### Why LIFO enforcement
 

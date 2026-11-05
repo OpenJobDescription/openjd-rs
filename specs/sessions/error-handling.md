@@ -147,9 +147,13 @@ the identifier that should be exited next; `got` is the identifier that was requ
 
 Runners return `Result<SubprocessResult, SessionError>`. The session maps these to
 state transitions:
-- `Ok(result)` with `result.state == Success` → `Ready` (or `ReadyEnding`)
-- `Ok(result)` with `result.state == Failed` → `ReadyEnding`
-- `Err(e)` → `ReadyEnding` + error logged
+- `Ok(result)` with `result.state == Success` → `Ready` (or `ReadyEnding` if the session
+  is ending-only)
+- `Ok(result)` with `result.state` `Failed`, `Canceled` or `Timeout` → ending-only,
+  `ReadyEnding`
+- `Err(e)` → ending-only, `ReadyEnding` + error logged
+
+See [session.md § Brittle Sessions](session.md#brittle-sessions).
 
 ### Format string errors
 

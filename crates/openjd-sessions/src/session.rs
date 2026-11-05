@@ -1101,6 +1101,27 @@ impl Session {
         }
     }
 
+    /// Leave `Running`/`Canceling` once an action has reached the terminal
+    /// state `final_state` (spec § Brittle Sessions).
+    ///
+    /// A `Failed`, `Canceled` or `Timeout` action makes the session
+    /// ending-only for the rest of its life. The between-action state is
+    /// then derived from `ending_only` alone, so `Ready` is reachable only
+    /// while the session is not ending-only. Every path that ends an action
+    /// goes through here, which is what lets the `state == Ready` checks in
+    /// `run_task`, `enter_environment` and `run_subprocess` enforce the
+    /// contract on their own.
+    fn settle_after_action(&mut self, final_state: ActionState) {
+        if final_state != ActionState::Success {
+            self.ending_only = true;
+        }
+        self.state = if self.ending_only {
+            SessionState::ReadyEnding
+        } else {
+            SessionState::Ready
+        };
+    }
+
     /// Record a failure that occurred while setting up an action that has
     /// already been reported as Running (e.g. wrap-symbol seeding or path
     /// mapping materialization failing before the subprocess dispatch).
@@ -1125,7 +1146,7 @@ impl Session {
         self.action.ended_at = Some(std::time::SystemTime::now());
         self.action.exit_code = None;
         self.cancel.reset();
-        self.state = SessionState::ReadyEnding;
+        self.settle_after_action(ActionState::Failed);
         self.notify_callback();
         e
     }
@@ -1540,17 +1561,16 @@ impl Session {
             String::new()
         };
 
-        if self.state == SessionState::Running {
-            self.state = SessionState::Ready;
-        }
         Ok((identifier, output))
     }
 
     /// Exit an environment asynchronously, identified by its environment identifier.
     ///
     /// Environments must be exited in LIFO order (last entered, first exited).
-    /// The `keep_session_running` parameter controls whether the session transitions
-    /// to `ReadyEnding` after exit — if `false`, the session becomes ending-only.
+    /// If `keep_session_running` is `false`, the session becomes ending-only and
+    /// is `ReadyEnding` after the exit. If it is `true`, the session returns to
+    /// `Ready` only if it was not already ending-only: once any action has ended
+    /// `Failed`, `Canceled` or `Timeout`, the session stays `ReadyEnding`.
     pub async fn exit_environment(
         &mut self,
         identifier: &EnvironmentIdentifier,
@@ -1783,7 +1803,6 @@ impl Session {
             let result = result?;
 
             if result.state != ActionState::Success {
-                self.state = SessionState::ReadyEnding;
                 return Err(SessionError::EnvironmentScriptFailed {
                     name: env.name.clone(),
                     action: "onExit".into(),
@@ -1792,7 +1811,7 @@ impl Session {
             }
             result.stdout.clone()
         } else {
-            // No exit script — set state based on ending_only (drive_action not called)
+            // No exit script, so drive_action is not called: settle here.
             let now = std::time::SystemTime::now();
             self.action.state = Some(ActionState::Success);
             self.action.started_at = Some(now);
@@ -1800,11 +1819,7 @@ impl Session {
             self.action.status_message = None;
             self.action.fail_message = None;
             self.action.exit_code = None;
-            self.state = if self.ending_only {
-                SessionState::ReadyEnding
-            } else {
-                SessionState::Ready
-            };
+            self.settle_after_action(ActionState::Success);
 
             log_section_banner(
                 &self.session_id,
@@ -2245,11 +2260,7 @@ impl Session {
         self.action.ended_at = Some(std::time::SystemTime::now());
         self.action.exit_code = r.exit_code;
         self.cancel.reset();
-        self.state = if final_state == ActionState::Success {
-            SessionState::Ready
-        } else {
-            SessionState::ReadyEnding
-        };
+        self.settle_after_action(final_state);
         self.notify_callback();
         Ok(crate::subprocess::SubprocessResult {
             state: final_state,
@@ -2313,7 +2324,7 @@ impl Session {
                 self.action.ended_at = Some(std::time::SystemTime::now());
                 self.action.exit_code = None;
                 self.cancel.reset();
-                self.state = SessionState::ReadyEnding;
+                self.settle_after_action(ActionState::Failed);
 
                 if let Some(cb) = &self.callback {
                     if let Some(status) = self.action_status() {
@@ -2337,12 +2348,7 @@ impl Session {
         self.action.ended_at = Some(std::time::SystemTime::now());
         self.action.exit_code = r.exit_code;
         self.cancel.reset();
-
-        self.state = if self.ending_only || final_state != ActionState::Success {
-            SessionState::ReadyEnding
-        } else {
-            SessionState::Ready
-        };
+        self.settle_after_action(final_state);
 
         if let Some(cb) = &self.callback {
             if let Some(status) = self.action_status() {
