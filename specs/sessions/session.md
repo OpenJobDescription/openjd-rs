@@ -24,9 +24,9 @@ pub enum SessionState {
 ```
 Ready ──────────► Running         (enter_environment / exit_environment / run_task / run_subprocess)
 Running ────────► Ready           (action succeeded, session not in ending-only mode)
-Running ────────► ReadyEnding     (action failed/canceled, OR session is in ending-only mode)
+Running ────────► ReadyEnding     (action failed/canceled/timed out, OR session is in ending-only mode)
 Running ────────► Canceling       (cancel_action called)
-Canceling ──────► Ready           (action still ended Success, session not in ending-only mode)
+Canceling ──────► Ready           (action finished Success before the cancel reached it, session not in ending-only mode)
 Canceling ──────► ReadyEnding     (action ended Canceled/Failed/Timeout, OR session is in ending-only mode)
 ReadyEnding ───► Running          (exit_environment started)
 Ready ──────────► Ended           (cleanup)
@@ -37,8 +37,9 @@ ReadyEnding ───► Ended            (cleanup)
 
 After any action failure or cancelation, the session transitions to `ReadyEnding`. In
 this state, only `exit_environment()` and `cleanup()` are allowed. This prevents running
-new tasks or entering new environments after a failure, matching the Python library's
-behavior.
+new tasks or entering new environments after a failure. The Python library follows the
+same rule, except in the case described in
+[architecture.md § Python-vs-Rust Design Comparison](architecture.md#python-vs-rust-design-comparison).
 
 The `ending_only` flag is set when:
 - An action completes with `ActionState::Failed`, `Canceled`, or `Timeout`. This covers

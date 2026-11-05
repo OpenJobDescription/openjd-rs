@@ -322,11 +322,11 @@ async fn runner_error_then_exit_keep_running() {
     assert_refuses_new_actions(&mut s).await;
 }
 
-/// A failure while setting up an action, before any subprocess starts (here
-/// a format string that names an unknown symbol in the task's args), makes
-/// the session ending-only.
+/// A runner error while resolving the action's command line (here a format
+/// string that names an unknown symbol in the task's args) makes the
+/// session ending-only.
 #[tokio::test]
-async fn setup_failure_then_exit_keep_running() {
+async fn unresolvable_arg_then_exit_keep_running() {
     let tmp = TempDir::new().unwrap();
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
     let id = s
@@ -337,6 +337,34 @@ async fn setup_failure_then_exit_keep_running() {
         .run_task("t", &step("echo {{ No.Such.Symbol }}"), None, None, None)
         .await;
     assert!(result.is_err(), "an unresolvable arg must fail the action");
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    assert_eq!(s.action_status().unwrap().state, ActionState::Failed);
+
+    s.exit_environment(&id, None, true, None).await.unwrap();
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    assert_refuses_new_actions(&mut s).await;
+}
+
+/// A failure while setting up an action, before the runner starts, makes
+/// the session ending-only. Here a wrap environment's `onWrapTaskRun`
+/// intercepts the task, and seeding `WrappedAction.Timeout` fails because
+/// the task's `onRun.timeout` names an unknown symbol.
+#[tokio::test]
+async fn setup_failure_then_exit_keep_running() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    let mut wrap = env("Wrap", None, None);
+    wrap.script.as_mut().unwrap().actions.on_wrap_task_run = Some(action("echo wrapped"));
+    let id = s.enter_environment(&wrap, None, None, None).await.unwrap();
+    let script = step_action(Action {
+        timeout: Some(fs("{{ Param.Missing }}")),
+        ..action("echo inner")
+    });
+    let err = s
+        .run_task("t", &script, None, None, None)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, SessionError::FormatString { .. }), "{err:?}");
     assert_eq!(s.state(), SessionState::ReadyEnding);
     assert_eq!(s.action_status().unwrap().state, ActionState::Failed);
 
