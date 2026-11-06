@@ -90,7 +90,7 @@ module:
 | `p.with_name(x)` | `path_parse::with_name` |
 | `p.with_stem(x)` | derived from `parent` + new name with extension |
 | `p.with_suffix(x)` | derived from `parent` + stem + new suffix |
-| `p / child` | concatenation with canonical separator |
+| `p / child` | `functions::path::join`: concatenation with canonical separator; an empty (`""` or `.`) operand gives the other one (see [path-mapping.md § Path Operators](path-mapping.md#path-operators)) |
 
 URI paths (`PathFormat::Uri`) are handled separately by `uri_path.rs`, which does
 **not** normalize. The two modules are disjoint: `path_parse` functions called with

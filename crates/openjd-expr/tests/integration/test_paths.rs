@@ -1472,7 +1472,8 @@ fn join_posix_trailing_backslash_not_stripped() {
 
 #[test]
 fn join_posix_empty_right() {
-    assert_eq!(path_join("/a/b", "", PathFormat::Posix), "/a/b/");
+    // pathlib: PurePosixPath("/a/b") / "" == PurePosixPath("/a/b").
+    assert_eq!(path_join("/a/b", "", PathFormat::Posix), "/a/b");
 }
 
 #[test]
@@ -3246,4 +3247,101 @@ fn with_name_drive_letter_pattern_prepended_with_dot_slash() {
         windows_eval("P.with_name('x:y')", &windows_st("P", "foo")).to_display_string(),
         ".\\x:y"
     );
+}
+
+// ══════════════════════════════════════════════════════════════
+// Joins with an empty operand (pathlib: the empty path is `''` or `.`)
+// ══════════════════════════════════════════════════════════════
+
+/// Every expected value is what `PurePosixPath(left) / right` or
+/// `PureWindowsPath(left) / right` gives.
+#[test]
+fn join_empty_left_gives_right() {
+    for fmt in [PathFormat::Posix, PathFormat::Windows] {
+        assert_eq!(path_join("", "k", fmt), "k");
+        assert_eq!(path_join(".", "k", fmt), "k");
+        assert_eq!(non_uri_join("", "k", fmt), "k");
+        assert_eq!(non_uri_join(".", "k", fmt), "k");
+        assert_eq!(path_join("", "..", fmt), "..");
+    }
+    assert_eq!(path_join("", "a/b", PathFormat::Posix), "a/b");
+    assert_eq!(path_join("", "a\\b", PathFormat::Windows), "a\\b");
+    // An absolute or Windows root-relative right side still wins.
+    assert_eq!(path_join("", "/k", PathFormat::Posix), "/k");
+    assert_eq!(path_join("", "\\k", PathFormat::Windows), "\\k");
+    // A Windows drive-relative right side keeps its drive.
+    assert_eq!(path_join("", "x:y", PathFormat::Windows), "x:y");
+    assert_eq!(path_join(".", "x:y", PathFormat::Windows), "x:y");
+    assert_eq!(path_join("", "s3://b/k", PathFormat::Posix), "s3://b/k");
+}
+
+#[test]
+fn join_empty_right_gives_left() {
+    for fmt in [PathFormat::Posix, PathFormat::Windows] {
+        assert_eq!(path_join("a", "", fmt), "a");
+        assert_eq!(path_join("a", ".", fmt), "a");
+        assert_eq!(non_uri_join("a", "", fmt), "a");
+        assert_eq!(non_uri_join("a", ".", fmt), "a");
+    }
+    assert_eq!(path_join("/", "", PathFormat::Posix), "/");
+    assert_eq!(path_join("/a/b", ".", PathFormat::Posix), "/a/b");
+    assert_eq!(path_join("C:\\", "", PathFormat::Windows), "C:\\");
+    assert_eq!(path_join("C:", "", PathFormat::Windows), "C:");
+    assert_eq!(
+        path_join("\\\\srv\\share\\", ".", PathFormat::Windows),
+        "\\\\srv\\share\\"
+    );
+    // A URI left operand: joining no parts leaves it unchanged.
+    for fmt in [PathFormat::Posix, PathFormat::Windows] {
+        assert_eq!(path_join("s3://b/p", "", fmt), "s3://b/p");
+        assert_eq!(path_join("s3://b/p", ".", fmt), "s3://b/p");
+        assert_eq!(path_join("s3://b", "", fmt), "s3://b");
+    }
+}
+
+#[test]
+fn join_both_empty_gives_dot() {
+    for fmt in [PathFormat::Posix, PathFormat::Windows] {
+        for (l, r) in [("", ""), ("", "."), (".", ""), (".", ".")] {
+            assert_eq!(path_join(l, r, fmt), ".", "{l:?} / {r:?}");
+            assert_eq!(non_uri_join(l, r, fmt), ".", "{l:?} / {r:?}");
+        }
+    }
+}
+
+#[test]
+fn div_operator_with_empty_operands() {
+    let empty_posix = posix_st("P", "");
+    let empty_windows = windows_st("P", "");
+    let cases: [(&str, &SymbolTable, PathFormat, &str); 14] = [
+        // An empty PATH value (job parameter) on the left.
+        ("P / 'k'", &empty_posix, PathFormat::Posix, "k"),
+        ("P / 'k'", &empty_windows, PathFormat::Windows, "k"),
+        ("P / path('k')", &empty_posix, PathFormat::Posix, "k"),
+        ("P / 'a' / 'b'", &empty_posix, PathFormat::Posix, "a/b"),
+        ("P / 'a' / 'b'", &empty_windows, PathFormat::Windows, "a\\b"),
+        ("P / ''", &empty_posix, PathFormat::Posix, "."),
+        // `path('')` is `.`, the empty path.
+        ("path('') / 'k'", &empty_posix, PathFormat::Posix, "k"),
+        ("path('') / 'k'", &empty_windows, PathFormat::Windows, "k"),
+        ("path('') / path('k')", &empty_posix, PathFormat::Posix, "k"),
+        ("path('') / ''", &empty_posix, PathFormat::Posix, "."),
+        // An empty right operand.
+        ("path('a') / ''", &empty_posix, PathFormat::Posix, "a"),
+        ("path('a') / path('')", &empty_posix, PathFormat::Posix, "a"),
+        ("path('a') / P", &empty_windows, PathFormat::Windows, "a"),
+        (
+            "path('s3://b/p') / P",
+            &empty_posix,
+            PathFormat::Posix,
+            "s3://b/p",
+        ),
+    ];
+    for (expr, st, fmt, want) in cases {
+        assert_eq!(
+            eval_with_fmt(expr, st, fmt).to_display_string(),
+            want,
+            "{expr} ({fmt:?})"
+        );
+    }
 }
