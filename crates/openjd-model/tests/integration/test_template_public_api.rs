@@ -583,11 +583,12 @@ fn task_parameter_definition_int_variant_field_access() {
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo",
+        "parameterDefinitions": [{"name": "Last", "type": "INT", "default": 4}],
         "steps": [{
             "name": "S",
             "parameterSpace": {
                 "taskParameterDefinitions": [
-                    {"name": "Frame", "type": "INT", "range": [1, 2, 3]}
+                    {"name": "Frame", "type": "INT", "range": [1, "2", 3, "{{Param.Last}}"]}
                 ]
             },
             "script": {"actions": {"onRun": {"command": "echo"}}}
@@ -602,8 +603,17 @@ fn task_parameter_definition_int_variant_field_access() {
             assert_eq!(p.name.as_str(), "Frame");
             match &p.range {
                 IntRange::List(items) => {
-                    let nums: Vec<i64> = items.iter().map(|f| f.0).collect();
-                    assert_eq!(nums, vec![1, 2, 3]);
+                    let _: &[IntOrFormatString] = items;
+                    // An `<intstring>` element decodes to its integer; a
+                    // format string element stays a format string.
+                    let nums: Vec<Option<i64>> = items.iter().map(|i| i.as_i64()).collect();
+                    assert_eq!(nums, vec![Some(1), Some(2), Some(3), None]);
+                    match &items[3] {
+                        IntOrFormatString::FormatString(fs) => {
+                            assert_eq!(fs.raw(), "{{Param.Last}}")
+                        }
+                        IntOrFormatString::Int(_) => panic!("expected FormatString"),
+                    }
                 }
                 IntRange::Expression(_) => panic!("expected List, got Expression"),
             }
@@ -652,6 +662,7 @@ fn task_parameter_definition_float_variant_field_access() {
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Foo",
         "extensions": ["EXPR"],
+        "parameterDefinitions": [{"name": "X", "type": "FLOAT", "default": 2.5}],
         "steps": [{
             "name": "S",
             "parameterSpace": {

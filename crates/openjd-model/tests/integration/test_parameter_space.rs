@@ -32,6 +32,13 @@ fn decode_ok(s: &str) {
         .unwrap_or_else(|_| panic!("Expected success for: {s}"));
 }
 
+/// Decode `s` and assert that it fails with exactly `expected`.
+fn check_err_exact(s: &str, expected: &str) {
+    let err = decode_job_template(yaml_val(s), None, &CallerLimits::default())
+        .expect_err(&format!("Expected error for: {s}"));
+    assert_eq!(err.to_string(), expected);
+}
+
 fn check_err(s: &str, expected: &[&str]) {
     let v = yaml_val(s);
     let err = decode_job_template(v, None, &CallerLimits::default())
@@ -77,9 +84,49 @@ fn int_mixed_types() {
     ));
 }
 
-// NOTE: Format strings in INT list ranges (e.g. ["{{Param.Value}}"]) are accepted
-// by Python but rejected by the Rust implementation which validates literal values
-// at parse time. Format strings in range expressions (string form) are supported.
+/// A step with one task parameter, under a job that defines the INT job
+/// parameter `Value`, so a range element can reference `{{Param.Value}}`.
+fn job_with_int_value_param(task_param_json: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "Value", "type": "INT", "default": 10}}],
+        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}, "parameterSpace": {{"taskParameterDefinitions": [{task_param_json}]}}}}]
+    }}"#
+    )
+}
+
+// Template Schemas §3.4.1.1: an `<IntRangeList>` element may be a
+// `<TaskParameterStringValue>`, a format string that resolves to an integer.
+
+#[test]
+fn int_format_string() {
+    decode_ok(&job_with_int_value_param(
+        r#"{"name": "foo", "type": "INT", "range": ["{{Param.Value}}"]}"#,
+    ));
+}
+
+#[test]
+fn int_mixed_item_types() {
+    decode_ok(&job_with_int_value_param(
+        r#"{"name": "foo", "type": "INT", "range": [1, "2", "{{Param.Value}}"]}"#,
+    ));
+}
+
+#[test]
+fn int_format_string_surrounding_whitespace() {
+    decode_ok(&job_with_int_value_param(
+        r#"{"name": "foo", "type": "INT", "range": [" {{Param.Value}} ", "{{ Param.Value }}"]}"#,
+    ));
+}
+
+#[test]
+fn int_format_string_with_surrounding_text() {
+    decode_ok(&job_with_int_value_param(
+        r#"{"name": "foo", "type": "INT", "range": ["1{{Param.Value}}"]}"#,
+    ));
+}
 
 #[test]
 fn int_range_expression() {
@@ -140,6 +187,181 @@ fn int_range_too_long() {
 }
 
 #[test]
+fn int_format_string_undefined_variable() {
+    check_err_exact(
+        &job_with_int_value_param(
+            r#"{"name": "foo", "type": "INT", "range": [1, "{{Param.Nope}}"]}"#,
+        ),
+        "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'. Did you mean: Param.Value\n  Param.Nope\n  ~~~~~~^~~~",
+    );
+}
+
+/// Template validation types a format string element as a list item
+/// (Expression Language §1.3.2), with the same target job creation uses, so a
+/// value that can never coerce to the element type fails `check`.
+#[test]
+fn numeric_range_list_element_static_type_error() {
+    for (param_type, target) in [
+        ("INT", "int | list[int] | nulltype"),
+        ("CHUNK[INT]", "int | list[int] | nulltype"),
+        ("FLOAT", "float | int | list[float] | nulltype"),
+    ] {
+        let (extensions, chunks) = if param_type == "CHUNK[INT]" {
+            (
+                r#""EXPR", "TASK_CHUNKING""#,
+                r#", "chunks": {"defaultTaskCount": 1, "rangeConstraint": "NONCONTIGUOUS"}"#,
+            )
+        } else {
+            (r#""EXPR""#, "")
+        };
+        let template = format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": [{extensions}],
+            "name": "Test",
+            "parameterDefinitions": [{{"name": "B", "type": "BOOL", "default": true}}],
+            "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}, "parameterSpace": {{"taskParameterDefinitions": [
+                {{"name": "foo", "type": "{param_type}", "range": [1, "{{{{ null }}}}", "{{{{ [2] }}}}", "{{{{ Param.B }}}}", "{{{{ ['a'] }}}}"]{chunks}}}
+            ]}}}}]
+        }}"#
+        );
+        let err = decode_job_template(
+            yaml_val(&template),
+            Some(&["EXPR", "TASK_CHUNKING"]),
+            &CallerLimits::default(),
+        )
+        .expect_err(param_type)
+        .to_string();
+        assert_eq!(
+            err,
+            format!(
+                "Model validation error: 2 validation errors for JobTemplate\n\
+                 steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[3]:\n\
+                 \tFailed to parse interpolation expression at [0, 13]. Cannot coerce bool to {target}\n  Param.B\n  ~~~~~~^\n\
+                 steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[4]:\n\
+                 \tFailed to parse interpolation expression at [0, 11]. Cannot coerce list[string] to {target}\n  ['a']\n  ^~~~~"
+            ),
+            "{param_type}"
+        );
+    }
+}
+
+/// Element 0 is checked like any other, for INT, CHUNK[INT] and FLOAT.
+#[test]
+fn int_range_list_first_element_validated() {
+    for (param_type, extensions, chunks) in [
+        ("INT", "", ""),
+        ("FLOAT", "", ""),
+        (
+            "CHUNK[INT]",
+            r#""extensions": ["TASK_CHUNKING"],"#,
+            r#", "chunks": {"defaultTaskCount": 1, "rangeConstraint": "NONCONTIGUOUS"}"#,
+        ),
+    ] {
+        let template = format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            {extensions}
+            "name": "Test",
+            "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}, "parameterSpace": {{"taskParameterDefinitions": [
+                {{"name": "foo", "type": "{param_type}", "range": ["{{{{Param.Nope}}}}"]{chunks}}}
+            ]}}}}]
+        }}"#
+        );
+        let err = decode_job_template(
+            yaml_val(&template),
+            Some(&["TASK_CHUNKING"]),
+            &CallerLimits::default(),
+        )
+        .expect_err(param_type)
+        .to_string();
+        assert_eq!(
+            err,
+            "Model validation error: 1 validation error for JobTemplate\n\
+             steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\
+             \tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'.\n  Param.Nope\n  ~~~~~~^~~~",
+            "{param_type}"
+        );
+    }
+}
+
+/// Range elements are validated in template scope (specs/model/validation.md
+/// "Template scope"), where host functions such as `apply_path_mapping` are
+/// not available.
+#[test]
+fn numeric_range_format_strings_use_template_scope() {
+    for (param_type, range, path, at) in [
+        (
+            "INT",
+            r#"[1, "1{{ apply_path_mapping('/a') }}"]"#,
+            "range[1]",
+            "[1, 31]",
+        ),
+        (
+            "CHUNK[INT]",
+            r#"[1, "1{{ apply_path_mapping('/a') }}"]"#,
+            "range[1]",
+            "[1, 31]",
+        ),
+        (
+            "FLOAT",
+            r#"[1, "1{{ apply_path_mapping('/a') }}"]"#,
+            "range[1]",
+            "[1, 31]",
+        ),
+        (
+            "INT",
+            r#""1-{{ apply_path_mapping('/a') }}""#,
+            "range",
+            "[2, 32]",
+        ),
+    ] {
+        let (extensions, chunks) = if param_type == "CHUNK[INT]" {
+            (
+                r#""EXPR", "TASK_CHUNKING""#,
+                r#", "chunks": {"defaultTaskCount": 1, "rangeConstraint": "NONCONTIGUOUS"}"#,
+            )
+        } else {
+            (r#""EXPR""#, "")
+        };
+        let template = format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": [{extensions}],
+            "name": "Test",
+            "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "foo"}}}}}}, "parameterSpace": {{"taskParameterDefinitions": [
+                {{"name": "foo", "type": "{param_type}", "range": {range}{chunks}}}
+            ]}}}}]
+        }}"#
+        );
+        let err = decode_job_template(
+            yaml_val(&template),
+            Some(&["EXPR", "TASK_CHUNKING"]),
+            &CallerLimits::default(),
+        )
+        .expect_err(param_type)
+        .to_string();
+        assert_eq!(
+            err,
+            format!(
+                "Model validation error: 1 validation error for JobTemplate\n\
+                 steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> {path}:\n\
+                 \tFailed to parse interpolation expression at {at}. Unknown function: 'apply_path_mapping'\n  \
+                 apply_path_mapping('/a')\n  ^~~~~~~~~~~~~~~~~~~~~~~~"
+            ),
+            "{param_type} {range}");
+    }
+}
+
+#[test]
+fn int_format_string_unterminated() {
+    check_err_exact(
+        &job_with_int_value_param(r#"{"name": "foo", "type": "INT", "range": ["{{Param.Value"]}"#),
+        "Validation error: 'jobtemplate-2023-09' failed checks: Failed to parse interpolation expression at [0, 13]. Reason: Braces mismatch.\n  {{Param.Value\n  ^~",
+    );
+}
+
+#[test]
 fn int_empty_range_expression() {
     check_err(&job_with_param_space(r#"{"taskParameterDefinitions": [{"name": "foo", "type": "INT", "range": ""}]}"#), &[
         "steps[0] -> parameterSpace -> taskParameterDefinitions[0]:\n\tINT parameter 'foo' range expression error:",
@@ -180,9 +402,26 @@ fn float_mixed_types() {
 
 #[test]
 fn float_format_string() {
-    decode_ok(&job_with_param_space(
-        r#"{"taskParameterDefinitions": [{"name": "foo", "type": "FLOAT", "range": ["{{Param.Value}}"]}]}"#,
+    decode_ok(&job_with_int_value_param(
+        r#"{"name": "foo", "type": "FLOAT", "range": ["{{Param.Value}}"]}"#,
     ));
+}
+
+#[test]
+fn float_mixed_item_types() {
+    decode_ok(&job_with_int_value_param(
+        r#"{"name": "foo", "type": "FLOAT", "range": [1, "2", 3.3, "3.4", " {{Param.Value}} "]}"#,
+    ));
+}
+
+#[test]
+fn float_format_string_undefined_variable() {
+    check_err_exact(
+        &job_with_int_value_param(
+            r#"{"name": "foo", "type": "FLOAT", "range": [1.5, "{{Param.Nope}}"]}"#,
+        ),
+        "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'. Did you mean: Param.Value\n  Param.Nope\n  ~~~~~~^~~~",
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -614,47 +853,86 @@ fn range_expr_two_ranges_opposite_signs() {
     ));
 }
 
-// INT failure: disallow floats
+// INT failure: disallow floats, positive or negative
 #[test]
 fn int_disallow_floats() {
-    check_err(
-        &job_with_param_space(
-            r#"{"taskParameterDefinitions": [{"name": "foo", "type": "INT", "range": [1.1]}]}"#,
-        ),
-        &["Expected integer, got float"],
-    );
+    for (value, shown) in [("1.1", "1.1"), ("-4.5", "-4.5"), ("-0.5", "-0.5")] {
+        check_err_exact(
+            &job_with_param_space(&format!(
+                r#"{{"taskParameterDefinitions": [{{"name": "foo", "type": "INT", "range": [1, {value}]}}]}}"#
+            )),
+            &format!(
+                "Validation error: 'jobtemplate-2023-09' failed checks: Expected integer, got float: {shown}"
+            ),
+        );
+    }
+}
+
+/// An `<IntRangeList>` element that is neither a number nor a string fails
+/// to decode, with a message for its kind.
+#[test]
+fn int_range_list_element_of_wrong_kind() {
+    for (element, message) in [
+        ("null", "Expected integer, got null"),
+        ("true", "Expected integer, got boolean"),
+        ("[1]", "Expected integer or string"),
+        (r#"{"a": 1}"#, "Expected integer or string"),
+    ] {
+        check_err_exact(
+            &job_with_param_space(&format!(
+                r#"{{"taskParameterDefinitions": [{{"name": "foo", "type": "INT", "range": [1, {element}]}}]}}"#
+            )),
+            &format!("Validation error: 'jobtemplate-2023-09' failed checks: {message}"),
+        );
+    }
 }
 
 // INT failure: disallow bool
 #[test]
 fn int_disallow_bool() {
-    check_err(
+    check_err_exact(
         &job_with_param_space(
             r#"{"taskParameterDefinitions": [{"name": "foo", "type": "INT", "range": [true]}]}"#,
         ),
-        &["Expected integer, got boolean"],
+        "Validation error: 'jobtemplate-2023-09' failed checks: Expected integer, got boolean",
     );
 }
 
 // INT failure: disallow float strings
 #[test]
 fn int_disallow_float_strings() {
-    check_err(
+    check_err_exact(
         &job_with_param_space(
             r#"{"taskParameterDefinitions": [{"name": "foo", "type": "INT", "range": ["1.1"]}]}"#,
         ),
-        &["Cannot parse '1.1' as integer"],
+        "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '1.1' as integer",
     );
+}
+
+// INT failure: only `{{` starts a format string, so a string with single
+// braces is a literal and must parse as an integer.
+#[test]
+fn int_literal_string_with_single_braces_not_int() {
+    for literal in ["{5}", "1}}"] {
+        check_err_exact(
+            &job_with_param_space(&format!(
+                r#"{{"taskParameterDefinitions": [{{"name": "foo", "type": "INT", "range": ["{literal}"]}}]}}"#
+            )),
+            &format!(
+                "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '{literal}' as integer"
+            ),
+        );
+    }
 }
 
 // INT failure: literal string not an int
 #[test]
 fn int_literal_string_not_int() {
-    check_err(
+    check_err_exact(
         &job_with_param_space(
             r#"{"taskParameterDefinitions": [{"name": "foo", "type": "INT", "range": ["notint"]}]}"#,
         ),
-        &["Cannot parse 'notint' as integer"],
+        "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse 'notint' as integer",
     );
 }
 

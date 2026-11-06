@@ -520,6 +520,100 @@ fn lowered_memory_budget_fails_carried_forward_expression_at_create_job() {
     );
 }
 
+/// A format string element of an INT task parameter's range list resolves
+/// under the caller's evaluation budgets too.
+#[test]
+fn lowered_memory_budget_fails_int_range_list_element() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "N", "type": "INT"}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "F", "type": "INT", "range": [1, "{{ len('A' * Param.N) }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    let err = create_with_limits(
+        template,
+        &[("N", "10000000")],
+        CallerLimits {
+            max_eval_memory_bytes: Some(1024 * 1024),
+            ..Default::default()
+        },
+    )
+    .expect_err("expected the range element to exceed the memory budget");
+    assert_eq!(
+        err,
+        "Expression error: Task parameter 'F' range[1]: Expression memory usage (10000136 bytes) exceeded limit (1048576 bytes)\n  len('A' * Param.N)\n      ~~~~^~~~~~~~~"
+    );
+}
+
+/// Without EXPR a range list element resolves to a string, under the same
+/// budgets.
+#[test]
+fn lowered_budgets_apply_to_range_list_elements_without_expr() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{"name": "S", "type": "STRING"}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "F", "type": "INT", "range": [1, "{{Param.S}}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    let err = create_with_limits(
+        template,
+        &[("S", "5")],
+        CallerLimits {
+            max_eval_operations: Some(0),
+            ..Default::default()
+        },
+    )
+    .expect_err("expected the range element to exceed the operation budget");
+    assert_eq!(
+        err,
+        "Expression error: Task parameter 'F' range[1]: Expression operation count (1) exceeded limit (0)\n  Param.S\n  ~~~~~~^"
+    );
+}
+
+/// The operation budget applies to a range list element as well.
+#[test]
+fn lowered_operation_budget_fails_int_range_list_element() {
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "N", "type": "INT"}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "F", "type": "INT", "range": [1, "{{ sum([1] * Param.N) }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    let err = create_with_limits(
+        template,
+        &[("N", "1000")],
+        CallerLimits {
+            max_eval_operations: Some(50),
+            ..Default::default()
+        },
+    )
+    .expect_err("expected the range element to exceed the operation budget");
+    assert_eq!(
+        err,
+        "Expression error: Task parameter 'F' range[1]: Expression operation count (1003) exceeded limit (50)\n  sum([1] * Param.N)\n      ~~~~^~~~~~~~~"
+    );
+}
+
 #[test]
 fn lowered_memory_budget_fails_job_name_resolution() {
     let template = format!(

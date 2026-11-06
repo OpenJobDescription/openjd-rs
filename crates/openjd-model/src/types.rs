@@ -317,6 +317,17 @@ pub enum TaskParameterType {
     ChunkInt,
 }
 
+/// The Expression Language §1.3.2 target of a string list item,
+/// `string? | list[string]`: a STRING or PATH task parameter's range list
+/// element, or a `hostRequirements` attribute `anyOf`/`allOf` value.
+pub(crate) fn string_list_item_target() -> ExprType {
+    ExprType::union(vec![
+        ExprType::NULLTYPE,
+        ExprType::STRING,
+        ExprType::list(ExprType::STRING),
+    ])
+}
+
 impl TaskParameterType {
     /// Parse from the spec string (case-insensitive).
     pub fn from_spec_str(s: &str) -> Option<Self> {
@@ -329,6 +340,48 @@ impl TaskParameterType {
             "CHUNK[INT]" => Some(Self::ChunkInt),
             _ => None,
         }
+    }
+
+    /// The target type of a format string element of this parameter's
+    /// `range` list (Template Schemas §3.4.1), or `None` when the element
+    /// resolves to a string. `expr` says whether the template enables the
+    /// EXPR extension, not whether a wider context does.
+    ///
+    /// Each element is a list item, so Expression Language §1.3.2 gives it
+    /// `T? | list[T]`, where `T` is the element type: `null` drops the
+    /// element and a list flattens into one element per member. STRING and
+    /// PATH elements always use it, with `T = string` (see
+    /// [`string_list_item_target`]). INT, CHUNK[INT] and FLOAT elements use
+    /// it only with EXPR. Without EXPR they resolve to a string, the base
+    /// `<TaskParameterStringValue>`, which parses as an `<intstring>` or a
+    /// `<floatstring>`. A base format string cannot produce `null` or a
+    /// list, and the string parse tolerates surrounding whitespace, which
+    /// §1.2.3 coercion does not, so base templates keep the 2023-09
+    /// behavior. For STRING and PATH the two forms give the same result
+    /// without EXPR.
+    ///
+    /// A FLOAT element's target also accepts `int`, so an integer renders as
+    /// written (`10`, not `10.0`), the way the `<floatstring>` it denotes
+    /// would.
+    ///
+    /// Template validation and job creation both take the target from here
+    /// (validation of STRING and PATH elements through
+    /// [`string_list_item_target`], which this returns for them), so the two
+    /// stages cannot disagree about what an element accepts.
+    pub(crate) fn range_list_item_target(&self, expr: bool) -> Option<ExprType> {
+        let (item, also_int) = match self {
+            Self::String | Self::Path => return Some(string_list_item_target()),
+            _ if !expr => return None,
+            Self::Int | Self::ChunkInt => (ExprType::INT, false),
+            Self::Float => (ExprType::FLOAT, true),
+        };
+        let mut choices = vec![ExprType::NULLTYPE];
+        if also_int {
+            choices.push(ExprType::INT);
+        }
+        choices.push(item.clone());
+        choices.push(ExprType::list(item));
+        Some(ExprType::union(choices))
     }
 
     /// Returns the canonical spec string.

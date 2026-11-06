@@ -112,6 +112,89 @@ fn mixed_int_types() {
     ));
 }
 
+/// Template Schemas §3.4.1.5 reuses §3.4.1.1's `<IntRangeList>`, so its
+/// elements may be format strings too.
+#[test]
+fn range_list_format_string() {
+    let s = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Value", "type": "INT", "default": 5}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "foo", "type": "CHUNK[INT]", "range": [-1, 0, 1, "2", "{{Param.Value}}"],
+                     "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}}
+                ]
+            },
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#;
+    decode_ok(s);
+}
+
+/// Template validation checks a CHUNK[INT] range list's format string
+/// elements, reporting each at its own element.
+#[test]
+fn range_list_format_string_undefined_variable() {
+    let err = decode_job_template(
+        yaml_val(&chunk_job(
+            r#"{"name": "foo", "type": "CHUNK[INT]", "range": [1, "{{Param.Nope}}", 3, "{{Param.Gone}}"], "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}}"#,
+        )),
+        Some(&["TASK_CHUNKING"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("undefined variables")
+    .to_string();
+    assert_eq!(
+        err,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n\
+         \tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Nope'.\n  Param.Nope\n  ~~~~~~^~~~\n\
+         steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[3]:\n\
+         \tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'Param.Gone'.\n  Param.Gone\n  ~~~~~~^~~~"
+    );
+}
+
+/// The format strings of a CHUNK[INT] range expression are checked too.
+#[test]
+fn range_expression_format_string_undefined_variable() {
+    let err = decode_job_template(
+        yaml_val(&chunk_job(
+            r#"{"name": "foo", "type": "CHUNK[INT]", "range": "1-{{Param.Nope}}", "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}}"#,
+        )),
+        Some(&["TASK_CHUNKING"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("undefined variable")
+    .to_string();
+    assert_eq!(
+        err,
+        "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range:\n\tFailed to parse interpolation expression at [2, 16]. Undefined variable: 'Param.Nope'.\n  Param.Nope\n  ~~~~~~^~~~"
+    );
+}
+
+/// Ported from Python test_chunk_int_task_parameter_type.py "malformed format
+/// string in range".
+#[test]
+fn range_list_malformed_format_string() {
+    let err = decode_job_template(
+        yaml_val(&chunk_job(
+            r#"{"name": "foo", "type": "CHUNK[INT]", "range": ["{{ Job.Parameter.Foo"], "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}}"#,
+        )),
+        Some(&["TASK_CHUNKING"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("malformed format string")
+    .to_string();
+    assert_eq!(
+        err,
+        "Validation error: 'jobtemplate-2023-09' failed checks: Failed to parse interpolation expression at [0, 20]. Reason: Braces mismatch.\n  {{ Job.Parameter.Foo\n  ^~"
+    );
+}
+
 #[test]
 fn target_runtime_seconds_zero() {
     decode_ok(&chunk_job(

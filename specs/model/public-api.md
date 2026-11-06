@@ -442,8 +442,8 @@ These appear as fields on the `TaskParameterDefinition::*` variants:
 
 ```rust
 pub enum IntRange {
-    List(Vec<FlexInt>),       // a concrete list of integers
-    Expression(FormatString), // a range expression string to evaluate
+    List(Vec<IntOrFormatString>), // an <IntRangeList>: integers and format strings
+    Expression(FormatString),     // a range expression string to evaluate
 }
 
 pub enum StringRange {
@@ -482,6 +482,17 @@ pub struct StepParameterSpaceDefinition {
     pub combination: Option<String>,
 }
 ```
+
+`IntOrFormatString` is an integer or a format string. It is the element
+type of `IntRange::List` (Template Schemas §3.4.1.1 `<IntRangeList>`, used
+by both `INT` and `CHUNK[INT]`) and the type of the two `ChunksDefinition`
+count fields. A JSON integer, an integer-valued float, or a string that
+parses as a base-10 integer (surrounding whitespace allowed) decodes to
+`Int`. A string containing `{{` decodes to `FormatString`, which is
+resolved at job creation, or fails to decode when it is not a valid
+format string. Decoding also fails for any other string, a non-integral
+float, a boolean, `null`, an array or an object. `as_i64()` returns the integer of
+an `Int`, or `None` for a `FormatString`.
 
 `FlexInt` and `FlexFloat` are coercion-permissive newtypes around
 `i64` and `f64` respectively — they accept either a JSON number or

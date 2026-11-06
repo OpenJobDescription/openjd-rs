@@ -719,7 +719,7 @@ impl<'de> serde_core::de::Deserialize<'de> for openjd_model::template::IntOrForm
 pub fn openjd_model::template::IntOrFormatString::deserialize<D: serde_core::de::Deserializer<'de>>(D) -> core::result::Result<Self, <D as serde_core::de::Deserializer>::Error>
 pub enum openjd_model::template::IntRange
 pub openjd_model::template::IntRange::Expression(openjd_expr::format_string::FormatString)
-pub openjd_model::template::IntRange::List(alloc::vec::Vec<openjd_model::template::FlexInt>)
+pub openjd_model::template::IntRange::List(alloc::vec::Vec<openjd_model::template::IntOrFormatString>)
 impl core::clone::Clone for openjd_model::template::IntRange
 pub fn openjd_model::template::IntRange::clone(&self) -> openjd_model::template::IntRange
 impl core::fmt::Debug for openjd_model::template::IntRange

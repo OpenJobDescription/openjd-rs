@@ -86,6 +86,8 @@ Custom deserializers handle:
   delegating to variant-specific deserialization
 - **`TaskParameterDefinition`** — Uses serde's `#[serde(tag = "type")]`
 - **`IntRange`/`StringRange`/`FloatRange`** — Distinguishes list vs expression string
+- **`IntOrFormatString`/`FloatRangeItem`** — A list element that is a number or a
+  format string (`IntRange::List`, `FloatRange::List`, and the CHUNK[INT] chunks counts)
 - **`FlexInt`/`FlexFloat`** — Accepts multiple YAML value representations
 - **`BoolValue`** — Accepts boolean, numeric, and string representations
 

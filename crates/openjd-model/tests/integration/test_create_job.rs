@@ -1224,6 +1224,624 @@ fn test_create_job_parameter_space_int_list() {
     }
 }
 
+/// Template for the INT range-list format string tests: one step whose task
+/// parameter `Frame` has type `param_type` and range `range_json`, under a
+/// job with an INT parameter `Value`, STRING parameters `Text` and `Empty`,
+/// and a FLOAT parameter `Ratio`.
+fn int_range_list_template(param_type: &str, range_json: &str) -> String {
+    let (extensions, chunks) = if param_type == "CHUNK[INT]" {
+        (
+            r#""extensions": ["TASK_CHUNKING"],"#,
+            r#", "chunks": {"defaultTaskCount": 1, "rangeConstraint": "NONCONTIGUOUS"}"#,
+        )
+    } else {
+        ("", "")
+    };
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        {extensions}
+        "name": "Test",
+        "parameterDefinitions": [
+            {{"name": "Value", "type": "INT", "default": 10}},
+            {{"name": "Text", "type": "STRING", "default": "abc"}},
+            {{"name": "Empty", "type": "STRING", "default": ""}},
+            {{"name": "Ratio", "type": "FLOAT", "default": 2.5}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "parameterSpace": {{
+                "taskParameterDefinitions": [{{"name": "Frame", "type": "{param_type}", "range": {range_json}{chunks}}}]
+            }},
+            "script": {{"actions": {{"onRun": {{"command": "render"}}}}}}
+        }}]
+    }}"#
+    )
+}
+
+/// The resolved list of an INT or CHUNK[INT] task parameter `Frame`.
+fn frame_int_list(job: &job::Job) -> Vec<i64> {
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    let range = match &ps.task_parameter_definitions["Frame"] {
+        job::TaskParameter::Int { range, .. } | job::TaskParameter::ChunkInt { range, .. } => range,
+        other => panic!("Expected Int or ChunkInt, got {other:?}"),
+    };
+    match range {
+        job::TaskParamRange::List(v) => v.clone(),
+        other => panic!("Expected List, got {other:?}"),
+    }
+}
+
+/// An `<integer>` element may be an integer-valued float, and an
+/// `<intstring>` may have surrounding white space.
+#[test]
+fn test_create_job_int_range_list_literal_forms() {
+    for param_type in ["INT", "CHUNK[INT]"] {
+        let job = parse_and_create(
+            &int_range_list_template(param_type, r#"[4.0, " 5 ", "6"]"#),
+            &[],
+        );
+        assert_eq!(frame_int_list(&job), vec![4, 5, 6], "{param_type}");
+    }
+}
+
+/// Template Schemas §3.4.1.1: an `<IntRangeList>` element may be a
+/// `<TaskParameterStringValue>` that resolves to an integer.
+#[test]
+fn test_create_job_int_range_list_format_string() {
+    for param_type in ["INT", "CHUNK[INT]"] {
+        let job = parse_and_create(
+            &int_range_list_template(param_type, r#"[1, "2", "{{Param.Value}}"]"#),
+            &[],
+        );
+        assert_eq!(frame_int_list(&job), vec![1, 2, 10], "{param_type}");
+        let job = parse_and_create(
+            &int_range_list_template(param_type, r#"[1, "{{Param.Value}}"]"#),
+            &[("Value", "42")],
+        );
+        assert_eq!(frame_int_list(&job), vec![1, 42], "{param_type}");
+    }
+}
+
+/// Surrounding whitespace in the resolved string is ignored, as for an
+/// `<intstring>`, and text around the expression is part of the integer.
+#[test]
+fn test_create_job_int_range_list_format_string_whitespace_and_text() {
+    let job = parse_and_create(
+        &int_range_list_template(
+            "INT",
+            r#"[" {{Param.Value}} ", "{{ Param.Value }}", "1{{Param.Value}}", "-{{Param.Value}}"]"#,
+        ),
+        &[],
+    );
+    assert_eq!(frame_int_list(&job), vec![10, 10, 110, -10]);
+}
+
+/// A format string element with text around its expression resolves to a
+/// string, which must parse as a base-10 integer. Otherwise job creation
+/// fails, naming the parameter, the element, and the resolved text.
+#[test]
+fn test_create_job_int_range_list_format_string_not_an_integer() {
+    for param_type in ["INT", "CHUNK[INT]"] {
+        for (element, resolved) in [
+            ("x{{Param.Text}}", "xabc"),
+            // The message quotes the resolved text before it is trimmed.
+            (" {{Param.Text}} ", " abc "),
+            // Resolving to nothing is not an integer, not out of range.
+            (" {{Param.Empty}} ", "  "),
+            ("{{Param.Ratio}} ", "2.5 "),
+            ("1_{{Param.Value}}", "1_10"),
+        ] {
+            let err = parse_and_create_err(
+                &int_range_list_template(param_type, &format!(r#"[1, 2, "{element}"]"#)),
+                &[],
+            );
+            assert_eq!(
+                err,
+                format!(
+                    "Expression error: Task parameter 'Frame' range[2]: value '{resolved}' is not an integer"
+                ),
+                "{param_type} {element}"
+            );
+        }
+    }
+}
+
+/// Without EXPR a format string element is the base 2023-09
+/// `<TaskParameterStringValue>`: it resolves to a string, which parses as an
+/// `<intstring>` or `<floatstring>` with surrounding whitespace tolerated.
+#[test]
+fn test_create_job_numeric_range_list_without_expr_resolves_to_string() {
+    let template = |param_type: &str, range_json: &str| {
+        int_range_list_template(param_type, range_json).replacen(
+            r#"{"name": "Text", "type": "STRING", "default": "abc"},"#,
+            r#"{"name": "Text", "type": "STRING", "default": "abc"},
+            {"name": "Padded", "type": "STRING", "default": " 7 "},"#,
+            1,
+        )
+    };
+    for param_type in ["INT", "CHUNK[INT]"] {
+        let job = parse_and_create(&template(param_type, r#"["{{Param.Padded}}"]"#), &[]);
+        assert_eq!(frame_int_list(&job), vec![7], "{param_type}");
+        for (element, resolved) in [("{{Param.Text}}", "abc"), ("{{Param.Ratio}}", "2.5")] {
+            let err =
+                parse_and_create_err(&template(param_type, &format!(r#"["{element}"]"#)), &[]);
+            assert_eq!(
+                err,
+                format!(
+                    "Expression error: Task parameter 'Frame' range[0]: value '{resolved}' is not an integer"
+                ),
+                "{param_type} {element}"
+            );
+        }
+    }
+    let job = parse_and_create(
+        &template(
+            "FLOAT",
+            r#"["{{Param.Padded}}", "{{Param.Value}}", "{{Param.Ratio}}"]"#,
+        ),
+        &[],
+    );
+    // A <floatstring> keeps its spelling, even one `format_float` would give.
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        r#"{"float":{"range":["7","10","2.5"]}}"#
+    );
+    let job = parse_and_create(
+        &template("FLOAT", r#"["{{Param.Ratio}}"]"#),
+        &[("Ratio", "2.50")],
+    );
+    assert_eq!(frame_float_renderings(&job), ["2.50"]);
+    // An element that resolves to nothing is an error, never a dropped
+    // element: a base format string cannot produce `null`.
+    for (param_type, problem) in [
+        ("INT", "is not an integer"),
+        ("CHUNK[INT]", "is not an integer"),
+        ("FLOAT", "is not a number"),
+    ] {
+        let err = parse_and_create_err(&template(param_type, r#"[1, "{{Param.Empty}}"]"#), &[]);
+        assert_eq!(
+            err,
+            format!("Expression error: Task parameter 'Frame' range[1]: value '' {problem}"),
+            "{param_type}"
+        );
+    }
+    // The message quotes the resolved text before it is trimmed.
+    for (element, resolved) in [("{{Param.Text}}", "abc"), (" x{{Param.Empty}} ", " x ")] {
+        let err = parse_and_create_err(&template("FLOAT", &format!(r#"["{element}"]"#)), &[]);
+        assert_eq!(
+            err,
+            format!(
+                "Expression error: Task parameter 'Frame' range[0]: value '{resolved}' is not a number"
+            )
+        );
+    }
+}
+
+/// `create_job` accepts a context that enables more extensions than the
+/// template declares. Range list elements still resolve the way the template
+/// was validated, without EXPR.
+#[test]
+fn test_create_job_numeric_range_list_follows_template_expr_not_context() {
+    let td = TestDirs::new();
+    let template = int_range_list_template("INT", r#"["{{Param.Padded}}"]"#).replacen(
+        r#"{"name": "Text", "type": "STRING", "default": "abc"},"#,
+        r#"{"name": "Text", "type": "STRING", "default": "abc"},
+            {"name": "Padded", "type": "STRING", "default": " 8 "},"#,
+        1,
+    );
+    let jt = decode_job_template(
+        serde_saphyr::from_str(&template).unwrap(),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let processed = preprocess_job_parameters(
+        &jt,
+        &std::collections::HashMap::new(),
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+    .unwrap();
+    let ctx = openjd_model::ValidationContext::from_profile(openjd_model::ModelProfile::latest());
+    let job = create_job(&jt, &processed, &ctx).unwrap();
+    assert_eq!(frame_int_list(&job), vec![8]);
+}
+
+/// With EXPR a whole-field element is typed `int? | list[int]` (Expression
+/// Language §1.3.2), so a value that does not coerce to an integer fails with
+/// the coercion error and its caret, named by parameter and element. Without
+/// EXPR the same element resolves to a string and fails to parse, as tested
+/// above.
+#[test]
+fn test_create_job_int_range_list_whole_field_does_not_coerce() {
+    for param_type in ["INT", "CHUNK[INT]"] {
+        for (expr, source_type, caret) in [
+            ("Param.Text", "string", "~~~~~~^~~~"),
+            ("Param.Empty", "string", "~~~~~~^~~~~"),
+            ("Param.Ratio", "float", "~~~~~~^~~~~"),
+        ] {
+            let err = parse_and_create_err(
+                &expr_range_list_template(param_type, &format!(r#"[1, 2, "{{{{{expr}}}}}"]"#)),
+                &[],
+            );
+            assert_eq!(
+                err,
+                format!(
+                    "Expression error: Task parameter 'Frame' range[2]: Cannot coerce {source_type} to int | list[int] | nulltype\n  {expr}\n  {caret}"
+                ),
+                "{param_type} {expr}"
+            );
+        }
+    }
+}
+
+/// The resolved values of a FLOAT task parameter `Frame`, each as it renders.
+fn frame_float_renderings(job: &job::Job) -> Vec<String> {
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    match &ps.task_parameter_definitions["Frame"] {
+        job::TaskParameter::Float { range } => range.iter().map(|f| f.to_string()).collect(),
+        other => panic!("Expected Float, got {other:?}"),
+    }
+}
+
+/// Like `int_range_list_template`, with the EXPR extension and the list job
+/// parameters `Ints` (LIST[INT]), `Floats` (LIST[FLOAT]) and `Strs`
+/// (LIST[STRING]).
+fn expr_range_list_template(param_type: &str, range_json: &str) -> String {
+    int_range_list_template(param_type, range_json)
+        .replacen(
+            r#""specificationVersion": "jobtemplate-2023-09","#,
+            r#""specificationVersion": "jobtemplate-2023-09", "extensions": ["EXPR"],"#,
+            1,
+        )
+        .replacen(
+            r#""extensions": ["EXPR"],
+        "extensions": ["TASK_CHUNKING"],"#,
+            r#""extensions": ["EXPR", "TASK_CHUNKING"],"#,
+            1,
+        )
+        .replacen(
+            r#"{"name": "Value", "type": "INT", "default": 10},"#,
+            r#"{"name": "Value", "type": "INT", "default": 10},
+            {"name": "Ints", "type": "LIST[INT]", "default": [3, 4]},
+            {"name": "Floats", "type": "LIST[FLOAT]", "default": [2.5, 3.75]},
+            {"name": "Strs", "type": "LIST[STRING]", "default": ["a", "b"]},"#,
+            1,
+        )
+}
+
+/// Expression Language §1.3.2: a range list element is a list item. A
+/// whole-field `null` drops the element, and a list (or a range expression,
+/// which coerces to `list[int]`) flattens into one element per member.
+#[test]
+fn test_create_job_int_range_list_null_drops_and_list_flattens() {
+    for param_type in ["INT", "CHUNK[INT]"] {
+        let job = parse_and_create(
+            &expr_range_list_template(
+                param_type,
+                r#"[1, "{{ null }}", "{{ Param.Ints }}", "{{ range_expr('7-8') }}", "{{ 3.0 * 3 }}"]"#,
+            ),
+            &[],
+        );
+        assert_eq!(frame_int_list(&job), vec![1, 3, 4, 7, 8, 9], "{param_type}");
+    }
+}
+
+#[test]
+fn test_create_job_float_range_list_null_drops_and_list_flattens() {
+    let job = parse_and_create(
+        &expr_range_list_template(
+            "FLOAT",
+            r#"[1.5, "{{ null }}", "{{ Param.Floats }}", "{{ Param.Ints }}", "{{ Param.Value }}", "{{ Param.Ratio }}"]"#,
+        ),
+        &[("Ratio", "2.50")],
+    );
+    // An integer renders as written, a float keeps the spelling it was given,
+    // and the integer members of a list, converted to float, have none.
+    assert_eq!(
+        frame_float_renderings(&job),
+        ["1.5", "2.5", "3.75", "3.0", "4.0", "10", "2.50"]
+    );
+    // Rendering cannot tell `2.5` with the spelling "2.5" from `2.5` with no
+    // spelling; the serialized job can (a spelling serializes as a string).
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        r#"{"float":{"range":[1.5,2.5,3.75,3.0,4.0,"10","2.50"]}}"#
+    );
+    // A float the expression computed has no spelling of its own.
+    let job = parse_and_create(
+        &expr_range_list_template("FLOAT", r#"["{{ Param.Ratio * 2 }}", "{{ Param.Ratio }}"]"#),
+        &[("Ratio", "2.5")],
+    );
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        r#"{"float":{"range":[5.0,2.5]}}"#
+    );
+    // A spelling is kept whenever it differs from what `format_float` gives,
+    // including one of the same length.
+    let job = parse_and_create(
+        &expr_range_list_template("FLOAT", r#"["{{ Param.Ratio }}"]"#),
+        &[("Ratio", "1.0e2")],
+    );
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        r#"{"float":{"range":["1.0e2"]}}"#
+    );
+}
+
+/// A `<floatstring>` keeps its spelling up to `max_task_param_string_len`
+/// characters, and only its value past that.
+#[test]
+fn test_create_job_float_range_list_spelling_length_cap() {
+    let at_cap = format!("1.{}", "0".repeat(1022));
+    let over_cap = format!("1.{}", "0".repeat(1023));
+    let job = parse_and_create(
+        &int_range_list_template("FLOAT", &format!(r#"["{at_cap}", "{over_cap}"]"#)),
+        &[],
+    );
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        format!(r#"{{"float":{{"range":["{at_cap}",1.0]}}}}"#)
+    );
+}
+
+/// STRING and PATH range list elements are list items, with or without EXPR.
+#[test]
+fn test_create_job_string_and_path_range_list_null_drops_and_list_flattens() {
+    for (param_type, key) in [("STRING", "string"), ("PATH", "path")] {
+        let job = parse_and_create(
+            &expr_range_list_template(param_type, r#"["/c", "{{ null }}", "{{ Param.Strs }}"]"#),
+            &[],
+        );
+        let ps = job.steps[0].parameter_space.as_ref().unwrap();
+        assert_eq!(
+            serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+            format!(r#"{{"{key}":{{"range":["/c","a","b"]}}}}"#),
+            "{param_type}"
+        );
+    }
+}
+
+/// A list whose members do not coerce to the element type is rejected.
+#[test]
+fn test_create_job_range_list_element_list_of_wrong_type() {
+    for (param_type, target) in [
+        ("INT", "int | list[int] | nulltype"),
+        ("CHUNK[INT]", "int | list[int] | nulltype"),
+        ("FLOAT", "float | int | list[float] | nulltype"),
+    ] {
+        let err = parse_and_create_err(
+            &expr_range_list_template(param_type, r#"[1, "{{ Param.Strs }}"]"#),
+            &[],
+        );
+        assert_eq!(
+            err,
+            format!(
+                "Expression error: Task parameter 'Frame' range[1]: Cannot coerce list[string] to {target}\n  Param.Strs\n  ~~~~~~^~~~"
+            ),
+            "{param_type}"
+        );
+    }
+}
+
+/// The ≥1-element rule is checked at decode on the list as written, so a list
+/// whose every element drops is rejected at job creation.
+#[test]
+fn test_create_job_numeric_range_list_emptied_by_nulls() {
+    for param_type in ["INT", "CHUNK[INT]", "FLOAT"] {
+        let err = parse_and_create_err(
+            &expr_range_list_template(
+                param_type,
+                r#"["{{ null }}", "{{ null if Param.Value > 0 else 1 }}"]"#,
+            ),
+            &[],
+        );
+        assert_eq!(
+            err, "Validation error: Task parameter 'Frame' range has no elements after resolution",
+            "{param_type}"
+        );
+    }
+}
+
+/// An integer that does not fit in an i64 is reported as out of range, not
+/// as "not an integer".
+#[test]
+fn test_create_job_int_range_list_format_string_out_of_range() {
+    for (value, resolved) in [
+        (
+            "9{{Param.Value}}000000000000000000",
+            "910000000000000000000",
+        ),
+        (
+            "-9{{Param.Value}}000000000000000000",
+            "-910000000000000000000",
+        ),
+    ] {
+        let err = parse_and_create_err(
+            &int_range_list_template("INT", &format!(r#"["{value}"]"#)),
+            &[],
+        );
+        assert_eq!(
+            err,
+            format!(
+                "Expression error: Task parameter 'Frame' range[0]: value '{resolved}' is out of range for a 64-bit integer"
+            ),
+        );
+    }
+}
+
+/// An evaluation error in an element is reported with the parameter and the
+/// element, followed by the expression error and its caret.
+#[test]
+fn test_create_job_int_range_list_format_string_evaluation_error() {
+    let template = int_range_list_template("INT", r#"[1, "{{ 5 // (Param.Value - 10) }}"]"#)
+        .replacen(
+            r#""specificationVersion": "jobtemplate-2023-09","#,
+            r#""specificationVersion": "jobtemplate-2023-09", "extensions": ["EXPR"],"#,
+            1,
+        );
+    let err = parse_and_create_err(&template, &[]);
+    assert_eq!(
+        err,
+        "Expression error: Task parameter 'Frame' range[1]: Division by zero\n  5 // (Param.Value - 10)\n  ~~^~~~~~~~~~~~~~~~~~~~~"
+    );
+}
+
+/// The resolved value goes through the same CHUNK[INT] value bound as a
+/// literal element.
+#[test]
+fn test_create_job_chunk_int_range_list_format_string_beyond_bound() {
+    let err = parse_and_create_err(
+        &int_range_list_template("CHUNK[INT]", r#"[1, "{{Param.Value}}"]"#),
+        &[("Value", "4611686018427387904")],
+    );
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'Frame': value 4611686018427387904 exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)"
+    );
+    // The error names the parameter it is about.
+    let err = parse_and_create_err(
+        &int_range_list_template("CHUNK[INT]", r#"[1, "{{Param.Value}}"]"#).replacen(
+            r#""name": "Frame""#,
+            r#""name": "Shot""#,
+            1,
+        ),
+        &[("Value", "-4611686018427387904")],
+    );
+    assert_eq!(
+        err,
+        "Validation error: Task parameter 'Shot': value -4611686018427387904 exceeds the CHUNK[INT] range value bound (magnitude must be below 2^62)"
+    );
+}
+
+/// The 1024-element limit (Template Schemas §3.4) is checked at decode on the
+/// list as written, and again on the resolved list, which flattening can make
+/// longer.
+#[test]
+fn test_create_job_range_list_flattened_past_element_limit() {
+    // Each case: the type, the expression member, and the same value as a
+    // literal element.
+    for (param_type, member, literal) in [
+        ("INT", "1", "1"),
+        ("CHUNK[INT]", "1", "1"),
+        ("FLOAT", "1.5", "1.5"),
+        ("STRING", "'a'", r#""a""#),
+        ("PATH", "'a'", r#""a""#),
+    ] {
+        let flattened = format!(r#""{{{{ [{member}] * 1024 }}}}""#);
+        let job = parse_and_create(
+            &expr_range_list_template(param_type, &format!("[{flattened}]")),
+            &[],
+        );
+        let ps = job.steps[0].parameter_space.as_ref().unwrap();
+        let len = match &ps.task_parameter_definitions["Frame"] {
+            job::TaskParameter::Int { range, .. } | job::TaskParameter::ChunkInt { range, .. } => {
+                match range {
+                    job::TaskParamRange::List(v) => v.len(),
+                    other => panic!("Expected List, got {other:?}"),
+                }
+            }
+            job::TaskParameter::Float { range } => range.len(),
+            job::TaskParameter::String { range } | job::TaskParameter::Path { range } => {
+                range.len()
+            }
+        };
+        assert_eq!(len, 1024, "{param_type}");
+        let err = parse_and_create_err(
+            &expr_range_list_template(param_type, &format!("[{literal}, {flattened}]")),
+            &[],
+        );
+        assert_eq!(
+            err,
+            "Validation error: Task parameter 'Frame' range exceeds 1024 elements (1025 elements)",
+            "{param_type}"
+        );
+    }
+}
+
+/// Resolution stops at the first element that takes the list past the
+/// element limit, so a template cannot make job creation build an
+/// arbitrarily long list before rejecting it. The count in the message is the
+/// elements resolved up to and including that element, not the whole list's.
+#[test]
+fn test_create_job_range_list_stops_at_element_limit() {
+    // Each case: the type, a flattened element, and a scalar element.
+    for (param_type, flattened, scalar) in [
+        ("INT", "{{ range_expr('1-1024') }}", "7"),
+        ("CHUNK[INT]", "{{ range_expr('1-1024') }}", "7"),
+        ("FLOAT", "{{ [1.5] * 1024 }}", "2.5"),
+        ("STRING", "{{ ['a'] * 1024 }}", r#""b""#),
+        ("PATH", "{{ ['a'] * 1024 }}", r#""b""#),
+    ] {
+        for (range, count) in [
+            // The second list goes over, and the third is never resolved.
+            (
+                format!(r#"["{flattened}", "{flattened}", "{flattened}"]"#),
+                2048,
+            ),
+            // A scalar element after a full list goes over.
+            (format!(r#"["{flattened}", {scalar}, "{flattened}"]"#), 1025),
+        ] {
+            let err = parse_and_create_err(&expr_range_list_template(param_type, &range), &[]);
+            assert_eq!(
+                err,
+                format!(
+                    "Validation error: Task parameter 'Frame' range exceeds 1024 elements ({count} elements)"
+                ),
+                "{param_type} {range}"
+            );
+        }
+    }
+}
+
+/// A whole-field range expression is held to the same element limit.
+#[test]
+fn test_create_job_range_expression_past_element_limit() {
+    for (param_type, range) in [
+        ("INT", r#""{{ [1] * 1025 }}""#),
+        ("CHUNK[INT]", r#""{{ [1] * 1025 }}""#),
+        ("FLOAT", r#""{{ [1.5] * 1025 }}""#),
+        ("STRING", r#""{{ ['a'] * 1025 }}""#),
+        ("PATH", r#""{{ ['a'] * 1025 }}""#),
+    ] {
+        let err = parse_and_create_err(&expr_range_list_template(param_type, range), &[]);
+        assert_eq!(
+            err,
+            "Validation error: Task parameter 'Frame' range exceeds 1024 elements (1025 elements)",
+            "{param_type}"
+        );
+    }
+}
+
+/// An evaluation error in a STRING or PATH range list element fails job
+/// creation with the expression error and its caret.
+#[test]
+fn test_create_job_string_and_path_range_list_element_evaluation_error() {
+    for param_type in ["STRING", "PATH"] {
+        let err = parse_and_create_err(
+            &expr_range_list_template(param_type, r#"["a", "{{ 1 // (Param.Value - 10) }}"]"#),
+            &[],
+        );
+        assert_eq!(
+            err,
+            "Expression error: Division by zero\n  1 // (Param.Value - 10)\n  ~~^~~~~~~~~~~~~~~~~~~~~",
+            "{param_type}"
+        );
+    }
+}
+
 #[test]
 fn test_create_job_parameter_space_range_expr() {
     let job = parse_and_create(
@@ -3745,7 +4363,7 @@ fn test_create_job_float_range_string_non_finite() {
         assert_eq!(
             err,
             format!(
-                "Expression error: FLOAT parameter 'Weight' range value '{value}' is not finite"
+                "Expression error: Task parameter 'Weight' range[0]: value '{value}' is not finite"
             )
         );
     }
@@ -3753,27 +4371,53 @@ fn test_create_job_float_range_string_non_finite() {
 
 #[test]
 fn test_create_job_float_range_resolved_string_non_finite() {
-    for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
-        let err = parse_and_create_err(
-            r#"{
+    let template = |element: &str| {
+        format!(
+            r#"{{
             "specificationVersion": "jobtemplate-2023-09",
             "name": "Test",
-            "parameterDefinitions": [{"name": "Value", "type": "STRING"}],
-            "steps": [{
+            "parameterDefinitions": [{{"name": "Value", "type": "STRING"}}],
+            "steps": [{{
                 "name": "S",
-                "parameterSpace": {
-                    "taskParameterDefinitions": [{"name": "Weight", "type": "FLOAT", "range": ["{{Param.Value}}"]}]
-                },
-                "script": {"actions": {"onRun": {"command": "render"}}}
-            }]
-        }"#,
-            &[("Value", value)],
-        );
+                "parameterSpace": {{
+                    "taskParameterDefinitions": [{{"name": "Weight", "type": "FLOAT", "range": ["{element}"]}}]
+                }},
+                "script": {{"actions": {{"onRun": {{"command": "render"}}}}}}
+            }}]
+        }}"#
+        )
+    };
+    let with_expr = |element: &str| {
+        template(element).replacen(
+            r#""name": "Test","#,
+            r#""name": "Test", "extensions": ["EXPR"],"#,
+            1,
+        )
+    };
+    for value in ["nan", "NaN", "inf", "infinity", "-inf"] {
+        // Without EXPR the element resolves to a string, which must be a
+        // finite <floatstring>. So does an element with text around its
+        // expression, with or without EXPR.
+        for (template, element) in [
+            (template("{{Param.Value}}"), value.to_string()),
+            (template(" {{Param.Value}}"), format!(" {value}")),
+            (with_expr(" {{Param.Value}}"), format!(" {value}")),
+        ] {
+            let err = parse_and_create_err(&template, &[("Value", value)]);
+            assert_eq!(
+                err,
+                format!(
+                    "Expression error: Task parameter 'Weight' range[0]: value '{element}' is not finite"
+                )
+            );
+        }
+        // With EXPR a whole-field element is typed `float? | int |
+        // list[float]` (Expression Language §1.3.2), and a non-finite string
+        // does not coerce.
+        let err = parse_and_create_err(&with_expr("{{Param.Value}}"), &[("Value", value)]);
         assert_eq!(
             err,
-            format!(
-                "Expression error: FLOAT parameter 'Weight' range value '{value}' is not finite"
-            )
+            "Expression error: Task parameter 'Weight' range[0]: Cannot coerce string to float | int | list[float] | nulltype\n  Param.Value\n  ~~~~~~^~~~~"
         );
     }
 }
@@ -6336,6 +6980,30 @@ fn test_create_job_attr_all_values_null_rejected() {
     );
 }
 
+/// An attribute value resolves through the same list-item helper as range
+/// list elements; an evaluation error keeps its message and caret.
+#[test]
+fn test_create_job_attr_value_evaluation_error() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "OS", "type": "STRING", "default": "abc"}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {"attributes": [{"name": "attr.custom.tag", "anyOf": ["{{ string(int(Param.OS)) }}"]}]},
+            "script": {"actions": {"onRun": {"command": "echo"}}}
+        }]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Format string error: Cannot convert 'abc' to int\n  string(int(Param.OS))\n         ^~~~~~~~~~~~~"
+    );
+}
+
 #[test]
 fn test_create_job_attr_value_list_flattens() {
     let job = parse_and_create(
@@ -6409,6 +7077,76 @@ fn test_create_job_single_valued_attr_flatten_past_one_rejected() {
     assert_eq!(
         err,
         "Validation error: steps[0] -> hostRequirements -> attributes[0] -> allOf: single-valued attribute cannot have more than 1 element after resolution"
+    );
+}
+
+/// The 50-value maximum counts the values every element of `anyOf` or
+/// `allOf` resolved to, and resolution stops at the element that goes over.
+#[test]
+fn test_create_job_attr_values_accumulate_past_50_rejected() {
+    let template = |field: &str, values: &str| {
+        format!(
+            r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{{
+            "name": "S",
+            "hostRequirements": {{"attributes": [{{"name": "attr.custom.tag", "{field}": {values}}}]}},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#
+        )
+    };
+    for field in ["anyOf", "allOf"] {
+        let job = parse_and_create(&template(field, r#"["{{ ['v'] * 49 }}", "w"]"#), &[]);
+        let hr = job.steps[0].host_requirements.as_ref().expect("host reqs");
+        let attr = &hr.attributes.as_ref().expect("attributes")[0];
+        let values = if field == "anyOf" {
+            &attr.any_of
+        } else {
+            &attr.all_of
+        };
+        assert_eq!(values.as_ref().expect(field).len(), 50, "{field}");
+        for values in [
+            r#"["{{ ['v'] * 50 }}", "w"]"#,
+            r#"["{{ ['v'] * 50 }}", "{{ ['w'] * 100000 }}"]"#,
+        ] {
+            let err = parse_and_create_err(&template(field, values), &[]);
+            assert_eq!(
+                err,
+                format!("Validation error: steps[0] -> hostRequirements -> attributes[0] -> {field}: exceeds 50 elements after resolution"),
+                "{field} {values}"
+            );
+        }
+    }
+}
+
+/// The 50-value error names the step and the attribute it is about.
+#[test]
+fn test_create_job_attr_values_past_50_error_location() {
+    let err = parse_and_create_err(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [
+            {"name": "A", "script": {"actions": {"onRun": {"command": "echo"}}}},
+            {
+                "name": "B",
+                "hostRequirements": {"attributes": [
+                    {"name": "attr.custom.a", "anyOf": ["x"]},
+                    {"name": "attr.custom.b", "allOf": ["{{ ['v'] * 51 }}"]}
+                ]},
+                "script": {"actions": {"onRun": {"command": "echo"}}}
+            }
+        ]
+    }"#,
+        &[],
+    );
+    assert_eq!(
+        err,
+        "Validation error: steps[1] -> hostRequirements -> attributes[1] -> allOf: exceeds 50 elements after resolution"
     );
 }
 

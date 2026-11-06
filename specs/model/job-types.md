@@ -239,11 +239,15 @@ Schemas §7.5 keeps the decimal places a `<floatstring>` was written with, and `
 cannot carry them; `Float64` already pairs a value with an optional preserved spelling for
 exactly this purpose, so the range reuses it rather than defining a parallel type.
 
-`resolve_float_range` builds each element: a `<float>` literal or an expression result
-through `Float64::new`, which renders via `format_float`, and a `<floatstring>` through
+`resolve_float_range` builds each element. A `<float>` literal, an element of a
+whole-field range expression, and a list-element value with no spelling of its own go
+through `Float64::new`, which renders via `format_float`. A `<floatstring>`, and a
+list-element value that is an integer or a float carrying a spelling other than its
+`format_float` rendering, go through
 `Float64::with_str` after trimming, stripping redundant leading zeros (§7.5 rule 1) and
 checking the text against `max_task_param_string_len`. Over that cap the element keeps only
-its value, which is how it rendered before the text was carried at all.
+its value, which is how it rendered before the text was carried at all. See
+[job-creation.md](job-creation.md) for how list elements resolve.
 
 `TaskParameter`'s `Hash` hashes each element's rendering as well as its value, because
 `Float64::hash` takes only the value while its `PartialEq` compares both: two ranges holding
