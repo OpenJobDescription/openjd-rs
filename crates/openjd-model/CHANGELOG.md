@@ -4,6 +4,17 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.15.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.14.0...openjd-model-v0.15.0) - 2026-11-06
+
+### Bug fixes
+
+- [**breaking**] Accept format strings in INT range lists and type range list elements as list items ([#486](https://github.com/OpenJobDescription/openjd-rs/pull/486)) ([#486](https://github.com/OpenJobDescription/openjd-rs/pull/486))
+
+- Build CHUNK[INT] chunks without listing values or overflowing ([#473](https://github.com/OpenJobDescription/openjd-rs/pull/473)) ([#473](https://github.com/OpenJobDescription/openjd-rs/pull/473))
+
+- [**breaking**] Cap range expression runs at 50,000 in every constructor ([#470](https://github.com/OpenJobDescription/openjd-rs/pull/470)) ([#470](https://github.com/OpenJobDescription/openjd-rs/pull/470))
+
+
 ## [0.14.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.13.0...openjd-model-v0.14.0) - 2026-10-28
 
 ### Bug fixes
