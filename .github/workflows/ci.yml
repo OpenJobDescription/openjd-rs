@@ -555,7 +555,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Must match the wasm-bindgen crate version in Cargo.lock exactly.
-      WASM_BINDGEN_VERSION: 0.2.129
+      WASM_BINDGEN_VERSION: 0.2.130
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Install rust stable with wasm32 target and clippy

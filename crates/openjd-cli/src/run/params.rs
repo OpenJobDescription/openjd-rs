@@ -335,6 +335,53 @@ mod tests {
     }
 
     #[test]
+    fn yaml_tasks_keep_wrong_case_core_scalars_as_strings() {
+        // YAML 1.2 Core resolves only lowercase, capitalized and uppercase
+        // spellings of true, false, null and the non-finite floats. Any
+        // other casing is a string, as in the Python implementation.
+        let values = ["tRUE", "FAlse", "NUlL", ".NAn", "-.iNF"];
+        let mut file = tempfile::NamedTempFile::with_suffix(".yaml").unwrap();
+        for value in values {
+            writeln!(file, "- Value: {value}").unwrap();
+        }
+        let arg = format!("file://{}", file.path().display());
+
+        let tasks = parse_tasks_arg(&arg).unwrap();
+
+        assert_eq!(tasks.len(), values.len());
+        for (task, expected) in tasks.iter().zip(values) {
+            assert_eq!(task["Value"], expected);
+        }
+    }
+
+    #[test]
+    fn yaml_tasks_reject_core_tag_with_wrong_case_value() {
+        // An explicit `!!bool` or `!!float` tag only accepts that type's
+        // YAML 1.2 Core spellings, so the tasks file is not valid YAML.
+        for (value, expected) in [
+            (
+                "!!bool tRUE",
+                "error: line 1 column 17: invalid boolean (strict mode expects true/false)\n \
+                 --> <input>:1:17\n  |\n1 | - Value: !!bool tRUE\n  |                 ^ \
+                 invalid boolean (strict mode expects true/false)",
+            ),
+            (
+                "!!float .NAn",
+                "error: line 1 column 18: invalid floating point\n --> <input>:1:18\n  |\n1 \
+                 | - Value: !!float .NAn\n  |                  ^ invalid floating point",
+            ),
+        ] {
+            let mut file = tempfile::NamedTempFile::with_suffix(".yaml").unwrap();
+            writeln!(file, "- Value: {value}").unwrap();
+            let arg = format!("file://{}", file.path().display());
+
+            let err = parse_tasks_arg(&arg).unwrap_err();
+
+            assert_eq!(err.to_string(), expected, "{value}");
+        }
+    }
+
+    #[test]
     fn yaml_tasks_keep_non_finite_floats_as_strings() {
         // Task parameter values are strings, so YAML's non-finite float
         // spellings must reach validation as text rather than be rejected
