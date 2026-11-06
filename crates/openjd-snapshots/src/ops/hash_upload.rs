@@ -215,7 +215,7 @@ async fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
         }
         let file_size = file.size.unwrap_or(0);
         stats.total_files += 1;
-        stats.total_bytes += file_size;
+        stats.total_bytes = stats.total_bytes.saturating_add(file_size);
         let use_chunks =
             chunk_size > 0 && chunk_size != WHOLE_FILE_CHUNK_SIZE && file_size as i64 > chunk_size;
         work_items.push(WorkItem {
@@ -490,13 +490,13 @@ fn update_progress(
     match fr {
         FileResult::Whole { size, uploaded, .. } => {
             s.hashed_files += 1;
-            s.hashed_bytes += size;
+            s.hashed_bytes = s.hashed_bytes.saturating_add(*size);
             if *uploaded {
                 s.uploaded_files += 1;
-                s.uploaded_bytes += size;
+                s.uploaded_bytes = s.uploaded_bytes.saturating_add(*size);
             } else {
                 s.skipped_files += 1;
-                s.skipped_bytes += size;
+                s.skipped_bytes = s.skipped_bytes.saturating_add(*size);
             }
         }
         FileResult::Chunked {
@@ -505,14 +505,14 @@ fn update_progress(
             ..
         } => {
             s.hashed_files += 1;
-            s.hashed_bytes += hashed_bytes;
+            s.hashed_bytes = s.hashed_bytes.saturating_add(*hashed_bytes);
             if *uploaded {
                 s.uploaded_files += 1;
             }
         }
         FileResult::Skipped { size, .. } => {
             s.skipped_files += 1;
-            s.skipped_bytes += size;
+            s.skipped_bytes = s.skipped_bytes.saturating_add(*size);
         }
     }
     let elapsed = start.elapsed().as_secs_f64();

@@ -473,6 +473,22 @@ fn with_number_padded_i64_min() {
         );
     }
 }
+/// Zero pads to the full width, and a negative number keeps the width with
+/// its `-` sign counted.
+#[test]
+fn with_number_padded_zero_and_negative() {
+    for (n, want) in [("0", "/out/file_0000.exr"), ("-7", "/out/file_-007.exr")] {
+        assert_eq!(
+            eval_posix(
+                &format!("P.with_number({n})"),
+                &posix_st("P", "/out/file_####.exr")
+            )
+            .to_display_string(),
+            want,
+            "{n}"
+        );
+    }
+}
 /// The `#` run's start was computed as "index of the preceding char + 1",
 /// which split a multibyte char. Found by the `expr_function_call` target.
 #[test]

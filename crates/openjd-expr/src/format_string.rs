@@ -1317,6 +1317,11 @@ mod tests {
             escape_format_string("{}}"),
             "{{ \"{\" }}{{ \"}\" + \"}\" }}"
         );
+        // A lone `{` is escaped only when `}}` follows it; elsewhere it
+        // stays literal.
+        for s in ["a{}b", "{x}", "{", "a{"] {
+            assert_eq!(escape_format_string(s), s);
+        }
     }
     #[test]
     fn escape_format_string_no_special_chars() {

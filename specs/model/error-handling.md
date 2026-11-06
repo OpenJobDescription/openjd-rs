@@ -14,7 +14,7 @@ pub enum ModelError {
         input: Option<String>,
         start: Option<usize>,
         end: Option<usize>,
-        source: Option<Box<openjd_expr::ExpressionError>>,
+        source: Option<openjd_expr::ExpressionError>,
     },
     Expression(String),
     Compatibility(String),
@@ -26,7 +26,7 @@ pub enum ModelError {
 |---------|----------|
 | `DecodeValidation` | Structural deserialization failure: bad YAML/JSON, missing required fields, wrong types, unsupported extensions |
 | `ModelValidation` | Semantic validation failure: template parsed but violates spec rules. Contains structured `ValidationErrors` with per-field paths |
-| `FormatStringError` | Format string interpolation error, with optional source position for diagnostics. `source` holds the `ExpressionError` behind a `create_job` resolution failure (also returned by `Error::source()`); it is `None` for static format-string validation errors |
+| `FormatStringError` | Format string interpolation error, with optional source position for diagnostics. `source` holds the `ExpressionError` behind the failure, and `Error::source()` returns it, when `create_job` fails to resolve the job name, a host-requirement amount name or bound, or an attribute value, and when the error converts from a `FormatStringValidationError` that carries one; otherwise it is `None`. `chunks` field resolution failures are reported as `Expression` with a message-only error instead |
 | `Expression` | Expression evaluation error (from `openjd-expr`) |
 | `Compatibility` | Parameter merge conflicts between templates |
 | `UnsupportedSchema` | Unknown `specificationVersion` value |
@@ -152,6 +152,15 @@ for source position information. This enables rich diagnostics that can point to
 exact location in a format string where an error occurred. The fields are optional
 because not all format string errors have position information (e.g., type mismatches
 discovered during evaluation).
+
+### FormatStringError Source
+
+`FormatStringError` also carries the `ExpressionError` behind the failure in its
+`source` field, so a caller can match on the error kind (for example division by
+zero) instead of parsing `message`. The field holds the error unboxed, as
+`ModelError::Expression` does, so `Error::source()` downcasts directly to
+`ExpressionError`. `message` still includes the expression error's text, so the
+`Display` output stays the same with or without the field.
 
 ## Diagnostic Spans
 

@@ -195,7 +195,10 @@ pub async fn cache_sync_manifest(
 
     let mut stats = CacheSyncStatistics {
         total_objects: work_items.len(),
-        total_bytes: work_items.iter().map(|(_, _, s)| *s).sum(),
+        total_bytes: work_items
+            .iter()
+            .map(|(_, _, s)| *s)
+            .fold(0u64, u64::saturating_add),
         ..Default::default()
     };
 
@@ -249,7 +252,7 @@ pub async fn cache_sync_manifest(
             if dst.object_exists(&hash, &alg).await.unwrap_or(false) {
                 let mut s = progress_stats.lock().unwrap();
                 s.skipped_objects += 1;
-                s.skipped_bytes += size_est;
+                s.skipped_bytes = s.skipped_bytes.saturating_add(size_est);
                 let elapsed = start.elapsed().as_secs_f64();
                 s.total_time = elapsed;
                 {
@@ -274,7 +277,7 @@ pub async fn cache_sync_manifest(
                 Ok(CopyResult::ServerSideCopy) => {
                     let mut s = progress_stats.lock().unwrap();
                     s.copied_objects += 1;
-                    s.copied_bytes += size_est;
+                    s.copied_bytes = s.copied_bytes.saturating_add(size_est);
                     let elapsed = start.elapsed().as_secs_f64();
                     s.total_time = elapsed;
                     {
@@ -305,7 +308,7 @@ pub async fn cache_sync_manifest(
             {
                 let mut s = progress_stats.lock().unwrap();
                 s.copied_objects += 1;
-                s.copied_bytes += actual_size;
+                s.copied_bytes = s.copied_bytes.saturating_add(actual_size);
                 let elapsed = start.elapsed().as_secs_f64();
                 s.total_time = elapsed;
                 {

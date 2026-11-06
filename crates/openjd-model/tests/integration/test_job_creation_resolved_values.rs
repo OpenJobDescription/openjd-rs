@@ -1325,21 +1325,11 @@ fn wrap_hook_timeout_from_param_fails_at_create_job() {
 // Resolution failures keep their ExpressionError
 // ══════════════════════════════════════════════════════════════
 
-#[test]
-fn job_name_resolution_failure_keeps_expression_error() {
-    // Division by a parameter is value-dependent, so template validation
-    // accepts it; create_job reports the division by zero, and the error
-    // keeps the ExpressionError so callers can match on its kind.
-    let template = r#"{
-        "specificationVersion": "jobtemplate-2023-09",
-        "extensions": ["EXPR"],
-        "name": "{{ 10 // Param.N }}",
-        "parameterDefinitions": [{"name": "N", "type": "INT"}],
-        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
-    }"#;
+/// Create a job from `template` with `Param.N = 0` and return the error.
+fn create_with_zero_n(template: &str) -> openjd_model::ModelError {
     let jt = decode_job_template(
         yaml_val(template),
-        Some(&["EXPR"]),
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
         &CallerLimits::default(),
     )
     .expect("template passes validation");
@@ -1354,11 +1344,17 @@ fn job_name_resolution_failure_keeps_expression_error() {
         &openjd_model::PathParameterOptions::new(dir, dir),
     )
     .unwrap();
-    let err = create_job(&jt, &processed, &jt.default_validation_context()).unwrap_err();
+    create_job(&jt, &processed, &jt.default_validation_context()).unwrap_err()
+}
+
+/// Assert `err` is a `FormatStringError` whose `source` field, and
+/// `std::error::Error::source()`, both carry a division-by-zero
+/// `ExpressionError`.
+fn assert_division_by_zero_source(err: &openjd_model::ModelError) {
     let openjd_model::ModelError::FormatStringError {
         source: Some(source),
         ..
-    } = &err
+    } = err
     else {
         panic!("expected FormatStringError with a source, got {err:?}");
     };
@@ -1369,9 +1365,87 @@ fn job_name_resolution_failure_keeps_expression_error() {
         ),
         "{source:?}"
     );
+    let dyn_source = std::error::Error::source(err).expect("Error::source() is Some");
+    let expr_err = dyn_source
+        .downcast_ref::<openjd_expr::ExpressionError>()
+        .expect("Error::source() is the ExpressionError");
+    assert!(std::ptr::eq(expr_err, source));
+}
+
+/// A step template whose `hostRequirements` is `host_requirements`.
+fn host_requirements_template(host_requirements: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [{{"name": "N", "type": "INT"}}],
+        "steps": [{{
+            "name": "S",
+            "hostRequirements": {host_requirements},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#
+    )
+}
+
+#[test]
+fn job_name_resolution_failure_keeps_expression_error() {
+    // Division by a parameter is value-dependent, so template validation
+    // accepts it; create_job reports the division by zero, and the error
+    // keeps the ExpressionError so callers can match on its kind.
+    let err = create_with_zero_n(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "{{ 10 // Param.N }}",
+        "parameterDefinitions": [{"name": "N", "type": "INT"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#,
+    );
+    assert_division_by_zero_source(&err);
     assert_eq!(
         err.to_string(),
         "Format string error: Failed to resolve job name: Division by zero\n  \
          10 // Param.N\n  ~~~^~~~~~~~~~"
+    );
+}
+
+#[test]
+fn amount_min_resolution_failure_keeps_expression_error() {
+    let err = create_with_zero_n(&host_requirements_template(
+        r#"{"amounts": [{"name": "amount.worker.vcpu", "min": "{{ 10 // Param.N }}"}]}"#,
+    ));
+    assert_division_by_zero_source(&err);
+    assert!(
+        err.to_string()
+            .starts_with("Format string error: hostRequirements amount min: Division by zero"),
+        "{err}"
+    );
+}
+
+#[test]
+fn amount_name_resolution_failure_keeps_expression_error() {
+    let err = create_with_zero_n(&host_requirements_template(
+        r#"{"amounts": [{"name": "amount.custom.n{{ 10 // Param.N }}", "min": 1}]}"#,
+    ));
+    assert_division_by_zero_source(&err);
+    assert!(
+        err.to_string()
+            .starts_with("Format string error: hostRequirements amount name: Division by zero"),
+        "{err}"
+    );
+}
+
+#[test]
+fn attribute_value_resolution_failure_keeps_expression_error() {
+    let err = create_with_zero_n(&host_requirements_template(
+        r#"{"attributes": [{"name": "attr.worker.os.family", "anyOf": ["v{{ 10 // Param.N }}"]}]}"#,
+    ));
+    assert_division_by_zero_source(&err);
+    assert!(
+        err.to_string()
+            .starts_with("Format string error: Division by zero"),
+        "{err}"
     );
 }

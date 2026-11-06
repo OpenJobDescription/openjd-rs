@@ -35,9 +35,11 @@ pub enum ModelError {
         /// Byte offset of the failing interpolation end.
         end: Option<usize>,
         /// The expression error that caused the failure, when there is one,
-        /// so callers can match on its kind.
+        /// so callers can match on its kind. [`std::error::Error::source`]
+        /// returns the same error, downcastable to
+        /// [`ExpressionError`](openjd_expr::ExpressionError).
         #[source]
-        source: Option<Box<openjd_expr::ExpressionError>>,
+        source: Option<openjd_expr::ExpressionError>,
     },
 
     /// Expression evaluation or symbol table error, preserving the full
@@ -80,7 +82,7 @@ impl From<openjd_expr::FormatStringValidationError> for ModelError {
             input: Some(e.input),
             start: Some(e.start),
             end: Some(e.end),
-            source: None,
+            source: e.expression_error.map(|b| *b),
         }
     }
 }
@@ -347,6 +349,32 @@ mod tests {
             source: None,
         };
         assert_eq!(e.to_string(), "Format string error: something went wrong");
+    }
+
+    #[test]
+    fn test_format_string_validation_error_conversion_keeps_expression_error() {
+        let expr = openjd_expr::ExpressionError::new("inner failure");
+        let make = |expression_error| openjd_expr::FormatStringValidationError {
+            message: "outer".into(),
+            input: "{{ x }}".into(),
+            start: 0,
+            end: 7,
+            expression_error,
+        };
+        let with: ModelError = make(Some(Box::new(expr))).into();
+        let ModelError::FormatStringError {
+            source: Some(ref source),
+            ..
+        } = with
+        else {
+            panic!("expected a source, got {with:?}");
+        };
+        assert_eq!(source.to_string(), "inner failure");
+        let dyn_source = std::error::Error::source(&with).expect("Error::source() is Some");
+        assert_eq!(dyn_source.to_string(), "inner failure");
+
+        let without: ModelError = make(None).into();
+        assert!(std::error::Error::source(&without).is_none());
     }
 
     #[test]

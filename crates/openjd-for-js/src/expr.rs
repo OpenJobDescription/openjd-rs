@@ -564,7 +564,8 @@ pub fn get_default_library() -> JsFunctionLibrary {
     JsFunctionLibrary::get_default()
 }
 
-/// Escape `{{` and `}}` in a string for literal use in format strings.
+/// Escape `{{` and `}}` in a string for literal use in format strings. A
+/// lone `{` directly before `}}` is escaped too, so it cannot join the pair.
 #[wasm_bindgen(js_name = "escapeFormatString")]
 pub fn escape_format_string(s: &str) -> String {
     openjd_expr::escape_format_string(s)

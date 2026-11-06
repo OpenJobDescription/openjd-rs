@@ -149,7 +149,7 @@ Callers who want non-throwing validation use `try { decodeJobTemplate(...) } cat
 | `getDefaultLibrary` | `() → FunctionLibrary` | Get the default function library (includes builtins like `len`, `str`, `int`, etc.). |
 | `getDefaultMemoryLimit` | `() → number` | Report the built-in memory budget (bytes) used when `EvalOptions.memoryLimit` is omitted. Informational only. |
 | `getDefaultOperationLimit` | `() → number` | Report the built-in operation budget used when `EvalOptions.operationLimit` is omitted. Informational only. |
-| `escapeFormatString` | `(s: string) → string` | Escape `{{` and `}}` in a string for literal use in format strings. |
+| `escapeFormatString` | `(s: string) → string` | Escape `{{` and `}}` in a string for literal use in format strings; a lone `{` directly before `}}` is escaped too, so it cannot join the pair. |
 | `parseRangeExpr` | `(expr: string) → number[]` | Parse an IntRangeExpr (e.g., `"1-10:2"`) into an array of integers. |
 
 `EvalOptions` is a structural type (plain JS object) with optional camelCase keys mirroring [`openjd_expr::EvalBuilder`]. Omit or pass `undefined` / `{}` to use the spec-default budgets:

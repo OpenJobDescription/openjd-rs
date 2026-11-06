@@ -187,7 +187,7 @@ fn hash_manifest<P: Clone, K: Clone>(
         let use_chunks = chunk_size > 0 && file_size as i64 > chunk_size;
 
         stats.total_files += 1;
-        stats.total_bytes += file_size;
+        stats.total_bytes = stats.total_bytes.saturating_add(file_size);
 
         // Try cache lookup
         if let Some(ref cache) = options.hash_cache {
@@ -216,7 +216,7 @@ fn hash_manifest<P: Clone, K: Clone>(
                     if all_cached && !cached_hashes.is_empty() {
                         file.chunk_hashes = Some(cached_hashes);
                         stats.skipped_files += 1;
-                        stats.skipped_bytes += file_size;
+                        stats.skipped_bytes = stats.skipped_bytes.saturating_add(file_size);
                         continue;
                     }
                 } else if let Some(h) =
@@ -224,7 +224,7 @@ fn hash_manifest<P: Clone, K: Clone>(
                 {
                     file.hash = Some(h);
                     stats.skipped_files += 1;
-                    stats.skipped_bytes += file_size;
+                    stats.skipped_bytes = stats.skipped_bytes.saturating_add(file_size);
                     continue;
                 }
             }
@@ -296,7 +296,7 @@ fn hash_manifest<P: Clone, K: Clone>(
                 {
                     let mut s = progress_stats.lock().unwrap();
                     s.hashed_files += 1;
-                    s.hashed_bytes += item.file_size;
+                    s.hashed_bytes = s.hashed_bytes.saturating_add(item.file_size);
                     let elapsed = start.elapsed().as_secs_f64();
                     s.total_time = elapsed;
                     {

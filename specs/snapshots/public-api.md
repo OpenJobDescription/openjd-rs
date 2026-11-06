@@ -299,6 +299,11 @@ pub fn encode_snapshot_v2025(m: &Snapshot) -> Result<String>;
 pub fn encode_snapshot_diff_v2025(m: &SnapshotDiff) -> Result<String>;
 ```
 
+Both v2023 encoders write `totalSize` as the sum of the encoded entries'
+sizes and return `SnapshotError::Validation` if that sum exceeds `u64::MAX`;
+they never write a clamped total. The v2025 encoders write the manifest's
+`total_size` field as is.
+
 The generic `encode_v2025` is also public via the `codec` module path:
 
 ```rust
@@ -541,6 +546,10 @@ Accessible via the `ops` module path (e.g., `openjd_snapshots::ops::ProgressFn`)
 ```rust
 pub type ProgressFn<S> = dyn Fn(&S) -> bool + Send + Sync;
 ```
+
+The byte counters in every operation's statistics struct (`total_bytes`,
+`skipped_bytes`, `hashed_bytes`, and so on) saturate at `u64::MAX` rather than
+overflowing, because file sizes come from caller-supplied manifests.
 
 ### COLLECT
 

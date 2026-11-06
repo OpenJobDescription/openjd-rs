@@ -143,6 +143,47 @@ fn v2023_diff_non_whole_file_chunk_size_error() {
     assert!(result.is_err());
 }
 
+const V2023_OVERFLOW_MSG: &str = "v2023 totalSize: the file sizes sum past u64::MAX";
+
+fn overflowing_files() -> Vec<FileEntry> {
+    vec![file("a.txt", "h1", u64::MAX, 1), file("b.txt", "h2", 1, 1)]
+}
+
+#[test]
+fn v2023_snapshot_total_size_overflow_error() {
+    let snap = make_snapshot(overflowing_files());
+    let err = encode_snapshot_v2023(&snap).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!("Manifest validation error: {V2023_OVERFLOW_MSG}")
+    );
+}
+
+#[test]
+fn v2023_diff_total_size_overflow_error() {
+    let diff = make_snapshot_diff(overflowing_files());
+    let err = encode_snapshot_diff_v2023(&diff).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!("Manifest validation error: {V2023_OVERFLOW_MSG}")
+    );
+}
+
+#[test]
+fn v2023_total_size_at_u64_max_is_written_exactly() {
+    let files = vec![
+        file("a.txt", "h1", u64::MAX - 1, 1),
+        file("b.txt", "h2", 1, 1),
+    ];
+    for json in [
+        encode_snapshot_v2023(&make_snapshot(files.clone())).unwrap(),
+        encode_snapshot_diff_v2023(&make_snapshot_diff(files)).unwrap(),
+    ] {
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["totalSize"].as_u64(), Some(u64::MAX));
+    }
+}
+
 #[test]
 fn v2023_empty_snapshot_roundtrip() {
     let snap = make_snapshot(vec![]);
