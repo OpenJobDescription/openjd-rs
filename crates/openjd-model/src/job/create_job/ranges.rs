@@ -42,6 +42,7 @@ pub(super) fn resolve_to_f64(
             input: Some(fs.raw().to_string()),
             start: None,
             end: None,
+            source: Some(Box::new(e)),
         })?;
     let value = match resolved {
         openjd_expr::ExprValue::Null => return Ok(None),
@@ -97,6 +98,7 @@ pub(super) fn resolve_string_list(
                 input: Some(fs.raw().to_string()),
                 start: None,
                 end: None,
+                source: Some(Box::new(e)),
             })?;
         match value {
             openjd_expr::ExprValue::Null => continue,

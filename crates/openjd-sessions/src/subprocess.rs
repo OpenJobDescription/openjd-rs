@@ -1261,7 +1261,9 @@ pub(crate) fn process_line(
                 }
             }
             ActionMessageKind::UnsetEnv => {
-                if let ActionMessageValue::String(name) = cb.value {
+                // A malformed `openjd_unset_env` arrives as a cancel callback
+                // whose string is the parse error, not a variable name.
+                if let (ActionMessageValue::String(name), false) = (cb.value, cancel) {
                     Some(ActionMessage::UnsetEnv { name })
                 } else {
                     None
@@ -1293,6 +1295,38 @@ pub(crate) fn process_line(
 mod tests {
     #[allow(unused_imports)]
     use super::*;
+
+    /// A malformed `openjd_unset_env` cancels the action; its parse error
+    /// must not reach the session as an `UnsetEnv` of a variable named after
+    /// the error message. Found by the `sessions_directives` fuzz target.
+    #[test]
+    fn malformed_unset_env_is_not_an_unset() {
+        for line in ["openjd_unset_env: foo=bar", "openjd_unset_env: 1F"] {
+            let mut filter = ActionFilter::new("s", true, false);
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let mut saw_fail = false;
+            process_line(line, &mut filter, "s", &tx, &mut saw_fail);
+            drop(tx);
+            let mut messages = Vec::new();
+            while let Ok(m) = rx.try_recv() {
+                messages.push(m);
+            }
+            assert!(
+                !messages
+                    .iter()
+                    .any(|m| matches!(m, ActionMessage::UnsetEnv { .. })),
+                "{line:?} produced {messages:?}"
+            );
+            assert!(
+                messages.iter().any(|m| matches!(
+                    m,
+                    ActionMessage::CancelMarkFailed { fail_message }
+                        if fail_message == "Action canceled due to malformed command"
+                )),
+                "{line:?} produced {messages:?}"
+            );
+        }
+    }
 
     #[cfg(unix)]
     #[tokio::test]

@@ -176,6 +176,7 @@ pub fn create_job(
             input: Some(job_template.name.raw().to_string()),
             start: None,
             end: None,
+            source: Some(Box::new(e)),
         })?;
 
     if job_name.chars().count() > limits.max_job_name_len {
