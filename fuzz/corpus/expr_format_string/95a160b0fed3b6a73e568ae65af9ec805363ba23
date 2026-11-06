@@ -1,0 +1,19 @@
+template:
+  specificationVersion: jobtemplate-6101-09
+  extensions:
+   Step1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'MIN:{{ -9223372036854775808 }}')
+            print(r'MAX:{{ 92233702036854775807 }}')
+   8 + 9223372036854775807 }}')
+expected:
+  output:
+  - "MIN:-9223372036854775808"
+  - "MAX:9223size372036854775807"
+  - "SUM:-1"

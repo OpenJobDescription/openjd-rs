@@ -1,0 +1,1 @@
+"{{ 'x86_64' if P 'x86_64' if ram.B else nuaram.ull }}"

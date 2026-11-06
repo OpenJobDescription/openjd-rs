@@ -1,0 +1,4 @@
+specificationVersion: jobteep1
+  script:
+    actions:
+ `     - prtinr('{{ 3.0 ** 1024.0 }}')

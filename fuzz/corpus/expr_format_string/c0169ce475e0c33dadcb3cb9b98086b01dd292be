@@ -1,0 +1,8 @@
+teciOUND:{{ find("hello world", "world") }}')
+            print(r'NOT_FOUND:{{ find("hello world", "xyz") }}')
+            print(r'START:{{ find("hello", "hel") }}')
+expected:
+  output:
+  - FOUND:6
+  - NOT_FOUND:-1
+  - START:0

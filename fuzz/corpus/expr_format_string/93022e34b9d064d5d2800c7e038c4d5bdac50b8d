@@ -1,0 +1,42 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name:jobEnvironmentss:
+  - name: Step1
+    # The path list is built in step-level let (TEMPLATE scope) so that}'''),
+                ('BACKSLASH', r'''{{ string(['a\\b']) }}'''),
+                ('NEWLINE', r'''{{ string(['a\nb']) }}'''),
+                ('TAB', r'''{{ string(['a\tb']) }}'''),
+                ('NUL', r'''{{ string(['\x00']) }}'''),
+                ('N path()
+    # uses PurePosixPath for cross-platform consistency (Expression Language
+    # §2.3.2), while rendering still uses native separators.
+    let:
+    - 'paths = [path("/out/a.exr"), path("/out/b.exr")]'
+ r cross-platform consistency (Expression Language
+    # §2.3.2), while rendering stpath("/out/b.exr")]'
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            import json
+            # Triple-quoted raw strings so the expressions can contain quotes
+         r'''{{ paths }}'''),('NUL', r'''{{ string(['\', r'''{{ string(['a\\b']) }}'''),
+                ('NEWLINE', r'''{{ string(['a\nb']) }}'''),
+                ('TAB', r'''{{ string(['a\tb']) }}'''),
+                ('NUL', r'''{{ string(['\x00']) }}'''),
+       - |
+            import json
+            # Triple-quoted raw strings so the expressions can contain quotes
+            # and backslashes without Python-level escaping.
+            values = [
+                ('QUOTE', r'''{{ string(['a"b']) }}'''),
+                ('BACKSLASH', r'''{{ string(['a\\b']) }}'''),
+                ('NEWLINE', r'''{{ string(['a\nb']) }}'''),
+                ('TAB', r'''{{ string(['a\tb']) }}'''),
+                ('NUL', r'''{{ string(['\x01']) }}'''),
+                ('NESTED', r'''{{ string([['a"b'\out\\\\a.exr\", \"\\\\out\\\\b.exr\"]"

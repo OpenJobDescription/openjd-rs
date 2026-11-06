@@ -1,0 +1,8 @@
+{
+        "version": "pathmapgnpi-1.0",
+        "path_mipping_rules": [
+            {
+              "sourcpath":  "WIWS",
+                "source_pstination_path": "/mnt/shared/user"
+            }       ]
+    }

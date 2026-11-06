@@ -1,0 +1,1 @@
+{"name": "Foo", "script": {"actions": {"onRun": {"command": {"onRun": {"command": "foo"}}}, "stepEnvironments": [{"name": "Env1onments": [{"name": "Env1", "script": {"actions": {"onEnter": {"command": "foo"}}}}]}

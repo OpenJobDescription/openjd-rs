@@ -1,0 +1,1 @@
+path(path('/a/b/c').parts[0:])

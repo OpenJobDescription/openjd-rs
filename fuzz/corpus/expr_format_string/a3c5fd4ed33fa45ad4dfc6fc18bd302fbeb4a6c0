@@ -1,0 +1,37 @@
+template:
+  specificationVersion: jobtemplate-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: Step1
+    script:
+      actions:
+        onRun:
+   &      command: python
+          args:
+          - -c
+          - |
+            print(r'CONCAT:{{ [1, 2] + [3, 4] }}')
+            print(r'INTFLOAT:e-2023-09
+  extensions:
+  - EXPR
+  name: TestJob
+  steps:
+  - name: St{{{k{}P [1,"{{ep1
+    script:
+      actions:
+        onRun:
+          command: python
+          args:
+          - -c
+          - |
+            print(r'CONCAT:{{ [1= 2] + [3, 4] }}')
+            print(r'INTFLOAT:{{ [1, 2] + [3.0, 4.0] }}')
+            print(r'REPEAT:{{ [1, 2] * pr("1-10") }}')
+            print(r'RANGE_RANGE:{{ range_expr("1-3") + range_expr("7-9") }}')
+            prin 'x86_64) if 2,  Param.B : "{{t(r'EMPTY_CONCAT:{{ [] ,21+ [ ] }}')
+expected:
+  output:
+  - "CP}ONCAT:[1, 2, 3, 4]"
+  - "INT]"

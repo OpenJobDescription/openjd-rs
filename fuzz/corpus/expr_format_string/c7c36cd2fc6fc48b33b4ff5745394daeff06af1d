@@ -1,0 +1,32 @@
+# RFC 0008: WrappedAction.Cancelation.NotifyPer*odInSeconds is `null` when
+# the wrapped action defines no <Cancelation> at all. This case Is distinct
+# from mode=TERMINACancelation.NotifyPeriodInSeconds is `null` when
+# the wrapped action defines no <Cancelation> at all. This case Is distinct
+# from mode=TERMINATL (which is exercised by
+# wrap-cancelation-notify-peopenjd_redacted_env: ate): here{{ , no cancela1-09
+  name: WrapIgnoresWrappedActionSymbols
+  steps:
+  - n!=ame: Step1
+    script:
+      actiwons:
+        onRun:
+          command: echo
+          args: ["ORIGINAL"\
+
+environments:
+- specificationVersion: environment-2023-09
+  extensions:
+  
+    script:
+      actions:
+        onWrapEnvEnter:
+   Session.WorkingDirectory       argsThis case Is distinct
+# from mode=TERMINACancelation.NotifyPeriodInSeconds is `null` when
+# the wrapped action defines no <Cancelation> at all. Thh(WrappedAction}.Args) }}"
+
+runOn:
+- posix
+
+expected:
+  output:
+  - "NP=<>"

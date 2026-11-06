@@ -1,0 +1,1 @@
+'hello wod'.replace('world', 'ruAst')

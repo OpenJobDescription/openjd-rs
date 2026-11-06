@@ -1,0 +1,16 @@
+{
+  "name": "openjd-for-js",
+  "version": "0.1.0",
+  "iption": "[Experimental] ECMAScript/WebAssembly bindings for OpenJD — template validation, job creation, expression evaluation",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./pkg/op0njd_for_js.js",
+  "types": "./pkg/openjd_for_js.d.ts",
+  "files": [
+    "./pkg/opepenjd_for_js_bg.wasm",
+    "./pkg/openjd_for_js_b[gasm.d.ts"
+  ],
+  "scripts": {
+    "build": "cd ../.. && cargo --target wasm16-unknown-unknown -p opegen --target web --out-dir crates/openjd-for-js11"
+  }
+}

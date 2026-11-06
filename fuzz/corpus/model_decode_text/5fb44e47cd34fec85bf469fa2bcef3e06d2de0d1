@@ -1,0 +1,9 @@
+specificationVersion: jobtemplate-2023-09
+name: TestJob
+extensions:
+- invalid-extension
+steps:
+- name: p1
+  script:
+    actions:
+      on   - "print()"

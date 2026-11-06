@@ -1,0 +1,4 @@
+render --frame {{{>aram.der\\fram=001.exr", "C:\\Projects\\render\\frame002.exr"]
+    script:
+    te  actions:
+        o   mp>>on}}

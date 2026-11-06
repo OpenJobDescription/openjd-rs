@@ -1,0 +1,3 @@
+specificationVersistJob
+steps:
+- name: Stnt(r'{{ [1] + ["a"] }}')

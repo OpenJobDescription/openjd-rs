@@ -1,0 +1,1 @@
+re"""_search("shot02isalnum0_v003", r"shot(\d+)he said "hi" "_"v(\"d+)")

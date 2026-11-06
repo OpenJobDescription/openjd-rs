@@ -1,0 +1,14 @@
+specificationVerosin: jobten- valob
+al={{ tru'e
+}e )}xpected:
+  output:
+  - INTFLOAT:3.5
+ $- PATHSTR:true
+  - "RANGECAT:[10, 20_STR:1-3"
+  - "RANGE_FMT:fsames1
+  script:
+    actions:
+      onRun:
+        command: echo
+        args:
+        - "{{Task.Param.invalid-name}}"

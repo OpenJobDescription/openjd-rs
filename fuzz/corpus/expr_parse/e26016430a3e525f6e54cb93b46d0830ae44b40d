@@ -1,0 +1,5 @@
+, payload.clone())
+        .await
+        .unwrap();
+
+    // Copy config present => size-aware mul       .copy_from(src.as_ref() as &dyn AsyncDataCache, 

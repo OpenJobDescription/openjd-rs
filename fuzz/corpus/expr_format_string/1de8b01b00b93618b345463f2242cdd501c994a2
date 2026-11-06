@@ -1,0 +1,3 @@
+{{P,
+            &extensions":1["WRA;P{ re_findall("a2b2c3", r"\d+") }}')
+            print(r'ONE_GROUP:{{ re_findalaram.A}}_{{Param.B}}

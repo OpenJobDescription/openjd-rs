@@ -1,0 +1,9 @@
+specificationVersion: jobtemplate-2023-09
+extensions:
+- EXPR
+name: TestJob
+parameter    onRun:
+        command: python
+        args:
+        - "-c"
+        - "print(r'{{ 1+2j }}')"

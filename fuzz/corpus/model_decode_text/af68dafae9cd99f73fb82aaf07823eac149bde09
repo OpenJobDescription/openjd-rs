@@ -1,0 +1,5 @@
+specificationVersion: jobtemplate-2023-09
+name: TestJob
+paramete?rDefinitions:
+- name: MyParam
+    args:        - "{{Param.MyParam}}"

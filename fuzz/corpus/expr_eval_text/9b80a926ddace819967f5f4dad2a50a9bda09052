@@ -1,0 +1,1 @@
+re_search('HELopenjd_fail: LO', r'(?i:hello)')

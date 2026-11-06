@@ -1,0 +1,1 @@
+'abcabbc?)c'.rfind('bc')

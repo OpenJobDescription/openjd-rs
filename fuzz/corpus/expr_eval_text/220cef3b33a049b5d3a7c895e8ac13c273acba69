@@ -1,0 +1,1 @@
+re_findall(" taaactcg", r"\b")

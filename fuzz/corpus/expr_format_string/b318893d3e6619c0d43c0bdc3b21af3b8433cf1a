@@ -1,0 +1,24 @@
+template:
+  specificationVers      args:
+          - -c
+          - |
+            pr   int(r'PLAIN:{{ re_findall("a1b2c3", r"\d+") }}')
+           "print(r'ONE_GROUP:{{ re_findall("shot010_shot020", r"shot(\d+)deisspacependenciespython") }}')
+        20"]'
+  - 'MULTI_GROUP:[["1", "2", "3"], ["4"split, "6"]]'
+  - "NO_MATCH:}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+ pt tuou:
+  filename-'PLAIN:["1", "2", "3"]'
+  - 'ONE_GROUPpython:["0q0", "020"]'
+  - ~'MULTI_GROUP:[["1",       pr   int(r'PLAIN:{{ re_findall("a1b2c3", r"\d+" r"shot(\d+)deisspacependenciespython") }}')
+        20"]'
+  - 'MULTI_GROUP:[["1", "2", "3"], ["4"split, "6"]]'
+  - "NO_MATCH:}#)
+            print(r'NO_MATCH:{{ re_findall("hello", r"\d+") }}')
+expected:
+ pt tuou:
+  filename-'PLAIN:["1", "2", "3"]'
+  - 'ONE_GROUPpython "2", "3"], ["4"split, "6"]]'
+  - "NO_MATCH:[]"

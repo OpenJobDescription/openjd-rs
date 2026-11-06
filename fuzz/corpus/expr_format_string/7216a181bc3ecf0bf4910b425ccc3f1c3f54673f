@@ -1,0 +1,1 @@
+specificationVersion: jobtem print(r'{{ fail('error message') }}')

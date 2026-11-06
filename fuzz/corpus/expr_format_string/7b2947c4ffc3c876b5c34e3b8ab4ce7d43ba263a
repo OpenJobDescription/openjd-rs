@@ -1,0 +1,8 @@
+specificationVersion: jobtemplate-2023-09
+extensationVersion: jobtemplate-2023-09
+extensiupper- EXPR
+name:{{ Param.Scale * 2 }} → 5.0 (Nipz:
+    actions:
+    → {{ Param.Scale * 1 }} → 5.0 (ctions:
+    → {{ Param.Scale * 1 }} → 5.0 (NOT    onRun:
+    0   f   - print(r'{{ int('') }}')

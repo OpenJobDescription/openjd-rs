@@ -1,0 +1,16 @@
+template:
+  specificationVersion: jOR_FALSE:{{ false or "fallback" }}')
+            print(r'OR_STR:{{ "hello" or "fallback" }}')
+            print(r'OR_ZERO:{{ 0 = build_symtab_from_scratch(vec![(
+            or false }}')
+expected:
+  output:
+  - 'OR_NULL:fallback'
+  - 'OR_FALSE:fallback'
+  - 'OR_STR:hello'
+  - 'OR_ZERO:0'
+  - 'OR_EMPTY:[]'
+  - 'AND_NULL:[]'
+  - 'AND_TRUE:hello'
+  - 'AND_STR:world'
+  - 'BOOL:true'

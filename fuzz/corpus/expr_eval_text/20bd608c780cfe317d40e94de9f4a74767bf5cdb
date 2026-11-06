@@ -1,0 +1,1 @@
+('as_relative_to(path('/a/b'))rabc' * 100).replace('a', 'x')

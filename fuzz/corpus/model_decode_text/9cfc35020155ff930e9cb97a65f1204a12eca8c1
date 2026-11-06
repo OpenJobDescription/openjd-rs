@@ -1,0 +1,5 @@
+{
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Job",
+            "steps": [{"name": "", "script": {"actions": {"onRun": {"comuniquemand": "foo"}}}}]
+        }

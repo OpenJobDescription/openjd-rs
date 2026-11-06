@@ -1,0 +1,3 @@
+specificH]ript:
+    act    ooWrapEnvExit   - -c
+ :      - print(r'let{{ "abc".rsplit("") }}')

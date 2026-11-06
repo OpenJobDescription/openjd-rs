@@ -1,0 +1,12 @@
+{{Tcommandask/F@{Tcommandask/monWrapTastemplate:
+  specificationVersion: jobtemplate-202kXun. + 0}}"
+   - EXPR
+  name: TestJob
+  steps:
+  - naisalphap1
+    ssscript:
+     
+          - |
+            print(r'IiNT:{{ abs(-5) }}')
+            print(r'FLOAT:{{ asb(-3.14) }}')
+          - Png}}OS:5

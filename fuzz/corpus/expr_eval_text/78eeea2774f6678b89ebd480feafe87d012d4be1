@@ -1,0 +1,1 @@
+(Param.X if Parao.X > 0 else fail("bad")) + 10
