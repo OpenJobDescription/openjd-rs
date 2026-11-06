@@ -246,11 +246,16 @@ impl ActionFilter {
             if value.is_empty() {
                 continue;
             }
+            // Step past the match's first char, not one byte: a value that
+            // starts with a multibyte char would put `start` mid-char and
+            // panic the slice. Stepping one char still finds overlapping
+            // matches.
+            let first_len = value.chars().next().map_or(1, char::len_utf8);
             let mut start = 0;
             while let Some(pos) = message[start..].find(value.as_str()) {
                 let abs_pos = start + pos;
                 segments.push((abs_pos, abs_pos + value.len()));
-                start = abs_pos + 1;
+                start = abs_pos + first_len;
             }
         }
 
@@ -514,6 +519,18 @@ mod tests {
     }
 
     // === directives suppressed when echo_openjd_directives=false ===
+
+    /// A redacted value starting with a multibyte char panicked the scan
+    /// (it stepped one byte into the char). Found by the
+    /// `sessions_directives` fuzz target.
+    #[test]
+    fn test_redaction_of_multibyte_leading_value() {
+        let mut f = make_filter(true, true);
+        let (_, _, msg) = f.filter_message("openjd_redacted_env: K=éé", "foo");
+        assert_eq!(msg, "openjd_redacted_env: K=********");
+        let (_, _, msg) = f.filter_message("aééé é", "foo");
+        assert_eq!(msg, "a******** é");
+    }
 
     #[test]
     fn test_directives_suppressed_when_echo_false_progress() {

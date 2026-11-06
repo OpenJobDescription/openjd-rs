@@ -75,6 +75,7 @@ pub openjd_model::error::ModelError::FormatStringError
 pub openjd_model::error::ModelError::FormatStringError::end: core::option::Option<usize>
 pub openjd_model::error::ModelError::FormatStringError::input: core::option::Option<alloc::string::String>
 pub openjd_model::error::ModelError::FormatStringError::message: alloc::string::String
+pub openjd_model::error::ModelError::FormatStringError::source: core::option::Option<alloc::boxed::Box<openjd_expr::error::ExpressionError>>
 pub openjd_model::error::ModelError::FormatStringError::start: core::option::Option<usize>
 pub openjd_model::error::ModelError::ModelValidation(openjd_model::error::ValidationErrors)
 pub openjd_model::error::ModelError::UnsupportedSchema(alloc::string::String)
@@ -1874,6 +1875,7 @@ pub openjd_model::ModelError::FormatStringError
 pub openjd_model::ModelError::FormatStringError::end: core::option::Option<usize>
 pub openjd_model::ModelError::FormatStringError::input: core::option::Option<alloc::string::String>
 pub openjd_model::ModelError::FormatStringError::message: alloc::string::String
+pub openjd_model::ModelError::FormatStringError::source: core::option::Option<alloc::boxed::Box<openjd_expr::error::ExpressionError>>
 pub openjd_model::ModelError::FormatStringError::start: core::option::Option<usize>
 pub openjd_model::ModelError::ModelValidation(openjd_model::error::ValidationErrors)
 pub openjd_model::ModelError::UnsupportedSchema(alloc::string::String)

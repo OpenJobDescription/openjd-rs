@@ -1226,3 +1226,58 @@ fn wrap_hook_timeout_from_param_fails_at_create_job() {
     );
     create_default(template, &[("T", "3")]).expect("positive timeout must pass");
 }
+
+// ══════════════════════════════════════════════════════════════
+// Resolution failures keep their ExpressionError
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn job_name_resolution_failure_keeps_expression_error() {
+    // Division by a parameter is value-dependent, so template validation
+    // accepts it; create_job reports the division by zero, and the error
+    // keeps the ExpressionError so callers can match on its kind.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "{{ 10 // Param.N }}",
+        "parameterDefinitions": [{"name": "N", "type": "INT"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#;
+    let jt = decode_job_template(
+        yaml_val(template),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .expect("template passes validation");
+    let input: std::collections::HashMap<String, openjd_expr::ExprValue> =
+        [("N".to_string(), openjd_expr::ExprValue::Int(0))].into();
+    let root = tempfile::TempDir::new().unwrap();
+    let dir = root.path().to_str().unwrap();
+    let processed = preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions::new(dir, dir),
+    )
+    .unwrap();
+    let err = create_job(&jt, &processed, &jt.default_validation_context()).unwrap_err();
+    let openjd_model::ModelError::FormatStringError {
+        source: Some(source),
+        ..
+    } = &err
+    else {
+        panic!("expected FormatStringError with a source, got {err:?}");
+    };
+    assert!(
+        matches!(
+            source.kind(),
+            openjd_expr::ExpressionErrorKind::DivisionByZero { .. }
+        ),
+        "{source:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "Format string error: Failed to resolve job name: Division by zero\n  \
+         10 // Param.N\n  ~~~^~~~~~~~~~"
+    );
+}

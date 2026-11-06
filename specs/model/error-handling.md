@@ -9,7 +9,13 @@ The `error` module defines the crate's error types and validation error infrastr
 pub enum ModelError {
     DecodeValidation(String),
     ModelValidation(ValidationErrors),
-    FormatStringError { message: String, input: Option<String>, start: Option<usize>, end: Option<usize> },
+    FormatStringError {
+        message: String,
+        input: Option<String>,
+        start: Option<usize>,
+        end: Option<usize>,
+        source: Option<Box<openjd_expr::ExpressionError>>,
+    },
     Expression(String),
     Compatibility(String),
     UnsupportedSchema(String),
@@ -20,7 +26,7 @@ pub enum ModelError {
 |---------|----------|
 | `DecodeValidation` | Structural deserialization failure: bad YAML/JSON, missing required fields, wrong types, unsupported extensions |
 | `ModelValidation` | Semantic validation failure: template parsed but violates spec rules. Contains structured `ValidationErrors` with per-field paths |
-| `FormatStringError` | Format string interpolation error, with optional source position for diagnostics |
+| `FormatStringError` | Format string interpolation error, with optional source position for diagnostics. `source` holds the `ExpressionError` behind a `create_job` resolution failure (also returned by `Error::source()`); it is `None` for static format-string validation errors |
 | `Expression` | Expression evaluation error (from `openjd-expr`) |
 | `Compatibility` | Parameter merge conflicts between templates |
 | `UnsupportedSchema` | Unknown `specificationVersion` value |

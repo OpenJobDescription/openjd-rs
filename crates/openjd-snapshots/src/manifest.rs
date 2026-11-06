@@ -504,17 +504,17 @@ impl<P, K> Manifest<P, K> {
         }
     }
 
-    #[allow(
-        missing_docs,
-        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-    )]
+    /// Recalculate `total_size` as the sum of the sizes of the non-deleted,
+    /// non-symlink files, saturating at `u64::MAX` rather than overflowing.
     pub fn recompute_total_size(&mut self) {
+        // Saturating: sizes come from decoded (untrusted) manifests, and a
+        // plain `sum` panics (debug) or wraps (release) on overflow.
         self.total_size = self
             .files
             .iter()
             .filter(|f| !f.deleted && f.symlink_target.is_none())
             .filter_map(|f| f.size)
-            .sum();
+            .fold(0u64, u64::saturating_add);
     }
 
     /// Returns the longest directory prefix that is an ancestor (or equal to)
@@ -978,6 +978,18 @@ mod tests {
         assert!(m.files[0].hash.is_none());
         // Symlink hash fields untouched (they were already None)
         assert!(m.files[1].symlink_target.is_some());
+    }
+
+    /// Found by the `snapshots_ops_gen` fuzz target: file sizes summing past
+    /// `u64::MAX` overflowed.
+    #[test]
+    fn recompute_total_size_saturates() {
+        let m: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE)
+            .with_files(vec![
+                FileEntry::file("/tmp/a.txt", u64::MAX / 2 + 1, 1),
+                FileEntry::file("/tmp/b.txt", u64::MAX / 2 + 1, 2),
+            ]);
+        assert_eq!(m.total_size, u64::MAX);
     }
 
     #[test]
