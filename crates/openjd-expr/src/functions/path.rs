@@ -453,7 +453,15 @@ pub fn is_absolute(path_str: &str, fmt: PathFormat) -> bool {
 /// (root-relative), the drive or UNC root from `left` is preserved; if `left`
 /// has no root, `right` replaces it entirely (matching `ntpath.join` behavior).
 /// Otherwise, `right` is appended to `left` with the appropriate separator.
+///
+/// Before any of the rules above, an empty operand, `""` or `"."` (how
+/// `path("")` displays), is the empty path, as in pathlib: an empty `left` gives `right` alone, an empty `right`
+/// gives `left` unchanged, and two empty operands give `"."`. So an empty
+/// PATH value joined with `"k"` gives `"k"`, not `"/k"`.
 pub fn join(left: &str, right: &str, fmt: PathFormat) -> String {
+    if let Some(joined) = join_empty_operand(left, right) {
+        return joined;
+    }
     if is_absolute(right, fmt) {
         return right.to_string();
     }
@@ -510,8 +518,12 @@ pub fn join(left: &str, right: &str, fmt: PathFormat) -> String {
 /// Like [`join`], but does not check `is_absolute(right)`. Use when `right` has
 /// already been determined to be non-absolute via a URI-unaware check (e.g.,
 /// `is_absolute` without URI recognition). This prevents `scheme://...` strings
-/// from being treated as absolute when URI support is disabled.
+/// from being treated as absolute when URI support is disabled. Empty operands
+/// are handled as in [`join`].
 pub fn non_uri_join(left: &str, right: &str, fmt: PathFormat) -> String {
+    if let Some(joined) = join_empty_operand(left, right) {
+        return joined;
+    }
     // Windows root-relative: keep a drive/UNC root, or replace a rootless left path.
     if fmt == PathFormat::Windows {
         let rb = right.as_bytes();
@@ -532,6 +544,19 @@ pub fn non_uri_join(left: &str, right: &str, fmt: PathFormat) -> String {
     };
     let left = left.trim_end_matches(trim_chars);
     format!("{left}{sep}{right}")
+}
+
+/// The result of joining `left` and `right` when either is the empty path,
+/// `""` or `"."`, matching pathlib, where `PurePath("")` and `PurePath(".")`
+/// both have no parts. `None` when neither operand is empty.
+fn join_empty_operand(left: &str, right: &str) -> Option<String> {
+    let is_empty = |s: &str| s.is_empty() || s == ".";
+    match (is_empty(left), is_empty(right)) {
+        (true, true) => Some(".".to_string()),
+        (true, false) => Some(right.to_string()),
+        (false, true) => Some(left.to_string()),
+        (false, false) => None,
+    }
 }
 
 /// Extract the UNC root from a path: `\\server\share` or `//server/share`.

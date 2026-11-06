@@ -438,6 +438,14 @@ Path-related operations in the expression language:
 | `/` | `(path, path) -> path` | Join paths |
 | `+` | `(path, string) -> path` | Append to last component |
 
+An empty operand is the empty path, as in pathlib, whether it is written `""`
+(an empty PATH value) or `"."` (how `path("")` displays). An empty left operand
+gives the right operand alone, so with `Param.P` empty `Param.P / "k"` and
+`path("") / "k"` both give `k`, not `/k` or `./k`. An empty right operand gives
+the left operand unchanged (`path("a") / ""` is `a`, and a URI stays as it is),
+and two empty operands give `.`. `functions::path::join` and `non_uri_join`
+apply this before any other rule.
+
 On Windows filesystem paths, a root-relative right operand (for example,
 `\renders`) replaces the left path below its root. A drive or UNC root from the
 left operand is retained; if the left operand has no drive or UNC root, the right
