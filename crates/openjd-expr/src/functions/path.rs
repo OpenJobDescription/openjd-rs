@@ -454,8 +454,8 @@ pub fn is_absolute(path_str: &str, fmt: PathFormat) -> bool {
 /// has no root, `right` replaces it entirely (matching `ntpath.join` behavior).
 /// Otherwise, `right` is appended to `left` with the appropriate separator.
 ///
-/// An empty operand, `""` or `"."` (how `path("")` displays), is the empty
-/// path, as in pathlib: an empty `left` gives `right` alone, an empty `right`
+/// Before any of the rules above, an empty operand, `""` or `"."` (how
+/// `path("")` displays), is the empty path, as in pathlib: an empty `left` gives `right` alone, an empty `right`
 /// gives `left` unchanged, and two empty operands give `"."`. So an empty
 /// PATH value joined with `"k"` gives `"k"`, not `"/k"`.
 pub fn join(left: &str, right: &str, fmt: PathFormat) -> String {

@@ -3253,8 +3253,9 @@ fn with_name_drive_letter_pattern_prepended_with_dot_slash() {
 // Joins with an empty operand (pathlib: the empty path is `''` or `.`)
 // ══════════════════════════════════════════════════════════════
 
-/// Every expected value is what `PurePosixPath(left) / right` or
-/// `PureWindowsPath(left) / right` gives.
+/// Every filesystem expected value is what `PurePosixPath(left) / right` or
+/// `PureWindowsPath(left) / right` gives. pathlib has no URIs, so the URI
+/// case follows the spec instead.
 #[test]
 fn join_empty_left_gives_right() {
     for fmt in [PathFormat::Posix, PathFormat::Windows] {
@@ -3307,6 +3308,17 @@ fn join_both_empty_gives_dot() {
             assert_eq!(non_uri_join(l, r, fmt), ".", "{l:?} / {r:?}");
         }
     }
+}
+
+/// Only `""` and `"."` are the empty path. Other spellings that pathlib also
+/// reduces to nothing, such as `./`, are joined as before; `path()` normalizes
+/// them away, and openjd-model normalizes joined PATH values.
+#[test]
+fn join_other_dot_spellings_are_not_empty() {
+    assert_eq!(path_join("./", "k", PathFormat::Posix), "./k");
+    assert_eq!(path_join(".\\", "k", PathFormat::Windows), ".\\k");
+    assert_eq!(path_join("a", "./", PathFormat::Posix), "a/./");
+    assert_eq!(non_uri_join("./", "k", PathFormat::Posix), "./k");
 }
 
 #[test]
