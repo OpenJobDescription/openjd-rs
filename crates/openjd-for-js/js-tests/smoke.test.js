@@ -353,6 +353,206 @@ describe("FunctionLibrary.withPathMappingRules", () => {
     v.free();
     parsed.free();
     st.free();
+    lib.free();
+  });
+
+  it("is borrowed, not used up, by evaluate and evaluateExpression", () => {
+    const lib = mod.FunctionLibrary.withPathMappingRules([
+      new mod.PathMappingRule(mod.PathFormat.Posix, "/mnt", "/local"),
+    ]);
+    const st = new mod.SymbolTable();
+    const parsed = mod.parseExpression("apply_path_mapping('/mnt/f.txt')");
+    const opts = { operationLimit: 100_000 };
+    const results = [
+      parsed.evaluate(st, lib),
+      parsed.evaluate(st, lib, opts),
+      mod.evaluateExpression("apply_path_mapping('/mnt/g.txt')", st, lib),
+      mod.evaluateExpression("apply_path_mapping('/mnt/g.txt')", st, lib, opts),
+    ];
+    expect(results.map((r) => r.toString())).toEqual([
+      "/local/f.txt",
+      "/local/f.txt",
+      "/local/g.txt",
+      "/local/g.txt",
+    ]);
+    results.forEach((r) => r.free());
+    parsed.free();
+    st.free();
+    // The caller still owns the library, so freeing it works.
+    expect(() => lib.free()).not.toThrow();
+  });
+
+  it("leaves the caller's PathMappingRule objects usable", () => {
+    const rule = new mod.PathMappingRule(mod.PathFormat.Posix, "/mnt", "/local");
+    const first = mod.FunctionLibrary.withPathMappingRules([rule]);
+    const second = mod.FunctionLibrary.withPathMappingRules([rule]);
+    const st = new mod.SymbolTable();
+    const v = mod.evaluateExpression("apply_path_mapping('/mnt/f')", st, second);
+    expect(v.toString()).toBe("/local/f");
+    v.free();
+    st.free();
+    first.free();
+    second.free();
+    expect(() => rule.free()).not.toThrow();
+  });
+
+  it("treats a null or omitted library as the default library", () => {
+    const st = new mod.SymbolTable();
+    const parsed = mod.parseExpression("1 + 1");
+    for (const r of [
+      parsed.evaluate(st),
+      parsed.evaluate(st, null),
+      parsed.evaluate(st, undefined, { operationLimit: 1_000 }),
+      mod.evaluateExpression("1 + 1", st, null),
+    ]) {
+      expect(r.toString()).toBe("2");
+      r.free();
+    }
+    parsed.free();
+    st.free();
+  });
+
+  it("rejects a library argument that is not a FunctionLibrary", () => {
+    const st = new mod.SymbolTable();
+    const parsed = mod.parseExpression("1 + 1");
+    expect(() => parsed.evaluate(st, {})).toThrow("expected instance of FunctionLibrary");
+    expect(() => mod.evaluateExpression("1", st, {})).toThrow(
+      "expected instance of FunctionLibrary",
+    );
+    parsed.free();
+    st.free();
+  });
+
+  it("rejects a freed library before calling into wasm", () => {
+    const st = new mod.SymbolTable();
+    const parsed = mod.parseExpression("1 + 1");
+    const lib = mod.getDefaultLibrary();
+    lib.free();
+    const forged = Object.create(mod.FunctionLibrary.prototype);
+    for (const bad of [lib, forged]) {
+      for (const [call, caller] of [
+        [() => parsed.evaluate(st, bad), "ParsedExpression.evaluate"],
+        [() => parsed.evaluate(st, bad, { operationLimit: 10 }), "ParsedExpression.evaluate"],
+        [() => mod.evaluateExpression("1 + 1", st, bad), "evaluateExpression"],
+      ]) {
+        let error;
+        try {
+          call();
+        } catch (e) {
+          error = e;
+        }
+        expect(error).toBeInstanceOf(TypeError);
+        expect(error.message).toBe(`${caller}: lib has been freed`);
+      }
+    }
+    // Inside wasm, the error left `parsed` marked as borrowed, so freeing
+    // it threw "attempted to take ownership of Rust value while it was
+    // borrowed".
+    expect(() => parsed.free()).not.toThrow();
+    st.free();
+  });
+
+  it("survives many calls with a freed library", () => {
+    // Inside wasm, call 8,187 failed with "memory access out of bounds".
+    const st = new mod.SymbolTable();
+    const parsed = mod.parseExpression("1 + 1");
+    const lib = mod.getDefaultLibrary();
+    lib.free();
+    for (let n = 0; n < 30_000; n++) {
+      expect(() => parsed.evaluate(st, lib)).toThrow(TypeError);
+      expect(() => mod.evaluateExpression("1 + 1", st, lib)).toThrow(TypeError);
+    }
+    const good = mod.getDefaultLibrary();
+    const r = parsed.evaluate(st, good);
+    expect(r.toString()).toBe("2");
+    r.free();
+    good.free();
+    parsed.free();
+    st.free();
+  });
+  it("rejects an argument that is not an iterable of live PathMappingRules", () => {
+    const rule = new mod.PathMappingRule(mod.PathFormat.Posix, "/mnt", "/local");
+    const freed = new mod.PathMappingRule(mod.PathFormat.Posix, "/b", "/y");
+    freed.free();
+    const forged = Object.create(mod.PathMappingRule.prototype);
+    const fakePointer = Object.create(mod.PathMappingRule.prototype);
+    fakePointer.__wbg_ptr = "x";
+    const freedDuringIteration = () => {
+      const victim = new mod.PathMappingRule(mod.PathFormat.Posix, "/v", "/w");
+      return (function* () {
+        yield victim;
+        victim.free();
+        yield rule;
+      })();
+    };
+    const prefix = "FunctionLibrary.withPathMappingRules: ";
+    const cases = [
+      ...[undefined, null, 5, {}, rule].map((arg) => [
+        arg,
+        "rules must be an array (or other iterable) of PathMappingRule",
+      ]),
+      [[rule, {}], "rules[1] is not a PathMappingRule"],
+      [[null], "rules[0] is not a PathMappingRule"],
+      [[freed], "rules[0] has been freed"],
+      [[rule, forged], "rules[1] has been freed"],
+      [[fakePointer], "rules[0] has been freed"],
+      [freedDuringIteration(), "rules[0] has been freed"],
+    ];
+    for (const [arg, message] of cases) {
+      let error;
+      try {
+        mod.FunctionLibrary.withPathMappingRules(arg);
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(TypeError);
+      expect(error.message).toBe(prefix + message);
+    }
+    // A rejected call leaves the caller's rule usable.
+    const lib = mod.FunctionLibrary.withPathMappingRules(new Set([rule]));
+    const st = new mod.SymbolTable();
+    const v = mod.evaluateExpression("apply_path_mapping('/mnt/f')", st, lib);
+    expect(v.toString()).toBe("/local/f");
+    v.free();
+    st.free();
+    lib.free();
+    rule.free();
+  });
+
+  it("survives many rejected calls", () => {
+    // A wasm-bindgen error thrown from inside wasm (a wrong-typed element in
+    // the rules array, or a freed rule) left the wasm heap inconsistent, and
+    // some thousands of them failed with "memory access out of bounds".
+    const a = new mod.PathMappingRule(mod.PathFormat.Posix, "/a", "/x");
+    const b = new mod.PathMappingRule(mod.PathFormat.Posix, "/b", "/y");
+    const freed = new mod.PathMappingRule(mod.PathFormat.Posix, "/c", "/z");
+    freed.free();
+    const forged = Object.create(mod.PathMappingRule.prototype);
+    const bad = [[{}, a, b], [a, {}, b], [a, b, {}], [a, freed], [freed, a], [a, forged]];
+    // Frees a rule it already yielded, after the element check saw it live.
+    const freesWhileIterating = () => {
+      const victim = new mod.PathMappingRule(mod.PathFormat.Posix, "/v", "/w");
+      return (function* () {
+        yield a;
+        yield victim;
+        victim.free();
+        yield b;
+      })();
+    };
+    for (let n = 0; n < 30_000; n++) {
+      for (const rules of [...bad, freesWhileIterating()]) {
+        expect(() => mod.FunctionLibrary.withPathMappingRules(rules)).toThrow(TypeError);
+      }
+    }
+    const lib = mod.FunctionLibrary.withPathMappingRules([a, b]);
+    const st = new mod.SymbolTable();
+    const v = mod.evaluateExpression("apply_path_mapping('/b/f')", st, lib);
+    expect(v.toString()).toBe("/y/f");
+    v.free();
+    st.free();
+    lib.free();
+    a.free();
+    b.free();
   });
 
   it("throws for a relative source path, naming the rule", () => {
@@ -834,6 +1034,31 @@ describe("evaluateExpression EvalOptions enforcement (F5)", () => {
 });
 
 describe("ParsedExpression.evaluate EvalOptions enforcement (F5)", () => {
+  it("applies options when a library is passed", () => {
+    const st = new mod.SymbolTable();
+    const lib = mod.getDefaultLibrary();
+    const ops = "sum([i for i in range(100)])";
+    const opsError =
+      "Expression operation count (11) exceeded limit (10)\n" +
+      "  sum([i for i in range(100)])\n" +
+      "                  ^~~~~~~~~~";
+    const mem = "'x' * 1000000";
+    const memError =
+      "Expression memory usage (1000088 bytes) exceeded limit (1000 bytes)\n" +
+      "  'x' * 1000000\n" +
+      "  ~~~~^~~~~~~~~";
+    const parsedOps = mod.parseExpression(ops);
+    const parsedMem = mod.parseExpression(mem);
+    expect(() => parsedOps.evaluate(st, lib, { operationLimit: 10 })).toThrow(opsError);
+    expect(() => mod.evaluateExpression(ops, st, lib, { operationLimit: 10 })).toThrow(opsError);
+    expect(() => parsedMem.evaluate(st, lib, { memoryLimit: 1_000 })).toThrow(memError);
+    expect(() => mod.evaluateExpression(mem, st, lib, { memoryLimit: 1_000 })).toThrow(memError);
+    parsedOps.free();
+    parsedMem.free();
+    lib.free();
+    st.free();
+  });
+
   it("respects memoryLimit override", () => {
     const parsed = mod.parseExpression("'x' * 1000000");
     const st = new mod.SymbolTable();
@@ -857,10 +1082,6 @@ describe("ParsedExpression.evaluate EvalOptions enforcement (F5)", () => {
   it("works with a library argument and options together", () => {
     const parsed = mod.parseExpression("1 + 1");
     const st = new mod.SymbolTable();
-    // Note: passing `lib` by value to evaluate() consumes the JS
-    // handle (wasm-bindgen moves the internal pointer), so we must
-    // NOT call `.free()` on it after. The library is freed by
-    // wasm-bindgen when it's consumed.
     const lib = mod.getDefaultLibrary();
     const r = parsed.evaluate(st, lib, {
       memoryLimit: 10_000_000,
@@ -868,6 +1089,7 @@ describe("ParsedExpression.evaluate EvalOptions enforcement (F5)", () => {
     });
     expect(r.toString()).toBe("2");
     r.free();
+    lib.free();
     st.free();
     parsed.free();
   });

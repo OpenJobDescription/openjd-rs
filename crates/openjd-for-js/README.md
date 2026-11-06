@@ -49,7 +49,10 @@ npm test             # vitest
 ```
 
 The build produces an npm-style package in `pkg/` with `.wasm`, `.js`,
-and `.d.ts` files.
+and `.d.ts` files. The package entry point is `index.js`, which re-exports
+`pkg/` and makes `evaluate` and `evaluateExpression` borrow the
+`FunctionLibrary` you pass rather than use it up (see
+`specs/openjd-for-js/spec.md`, "Package Entry Point").
 
 ## Minimum supported Rust version
 
