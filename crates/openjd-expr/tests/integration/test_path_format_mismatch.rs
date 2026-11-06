@@ -12,6 +12,28 @@ fn eval_fmt(expr: &str, st: &SymbolTable, fmt: PathFormat) -> Result<ExprValue, 
     parsed.with_path_format(fmt).evaluate(&symtabs)
 }
 
+/// Property access on a PATH in the other format used to report the
+/// attribute as an undefined variable (`P.suffix`), hiding the real error.
+/// Found by the `expr_eval_gen` fuzz target.
+#[test]
+fn mismatch_reported_through_property_access() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "P",
+        ExprValue::new_path("/tmp/render.exr", PathFormat::Posix),
+    )
+    .unwrap();
+    for (expr, caret) in [("P.suffix", "  ^"), ("(P).suffix", "   ^")] {
+        let err = eval_fmt(expr, &st, PathFormat::Windows).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Path format mismatch for 'P': value has Posix but evaluator uses Windows\n  {expr}\n{caret}"
+            ),
+        );
+    }
+}
+
 #[test]
 fn matching_format_no_error() {
     let mut st = SymbolTable::new();

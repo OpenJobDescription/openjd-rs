@@ -453,6 +453,35 @@ fn with_number_digits() {
         "/out/file_072.exr"
     );
 }
+/// Padding a negative number negated it, which overflowed for `i64::MIN`.
+/// Found by the `expr_function_call` fuzz target.
+#[test]
+fn with_number_padded_i64_min() {
+    for pattern in [
+        "/out/file_####.exr",
+        "/out/file_%04d.exr",
+        "/out/file_0003.exr",
+    ] {
+        assert_eq!(
+            eval_posix(
+                "P.with_number(-9223372036854775807 - 1)",
+                &posix_st("P", pattern)
+            )
+            .to_display_string(),
+            "/out/file_-9223372036854775808.exr",
+            "{pattern}"
+        );
+    }
+}
+/// The `#` run's start was computed as "index of the preceding char + 1",
+/// which split a multibyte char. Found by the `expr_function_call` target.
+#[test]
+fn with_number_hash_after_multibyte_char() {
+    assert_eq!(
+        eval_posix("P.with_number(7)", &posix_st("P", "/out/frame٣##.exr")).to_display_string(),
+        "/out/frame٣07.exr"
+    );
+}
 #[test]
 fn with_number_printf_d() {
     assert_eq!(

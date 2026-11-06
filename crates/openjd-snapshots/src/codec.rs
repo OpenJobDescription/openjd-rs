@@ -156,7 +156,8 @@ pub fn encode_snapshot_v2023(manifest: &Snapshot) -> Result<String> {
     Ok(canonical_json(&obj))
 }
 
-/// Encode a SnapshotDiff to v2023 JSON (drops deletions).
+/// Encode a SnapshotDiff to v2023 JSON (drops deletions). Fails with
+/// `SnapshotError::Validation` if the file sizes sum past `u64::MAX`.
 pub fn encode_snapshot_diff_v2023(manifest: &SnapshotDiff) -> Result<String> {
     validate_symlink_targets_relative(&manifest.files)?;
     if manifest.file_chunk_size_bytes != WHOLE_FILE_CHUNK_SIZE {
@@ -228,7 +229,16 @@ pub fn encode_snapshot_diff_v2023(manifest: &SnapshotDiff) -> Result<String> {
     });
 
     // Recompute total_size from non-deleted files only
-    let total_size: u64 = paths.iter().map(|p| p["size"].as_u64().unwrap_or(0)).sum();
+    // Checked: sizes are caller data, and a plain `sum` panics (debug) or
+    // wraps (release) once they exceed u64::MAX together.
+    let total_size: u64 = paths
+        .iter()
+        .try_fold(0u64, |acc, p| {
+            acc.checked_add(p["size"].as_u64().unwrap_or(0))
+        })
+        .ok_or_else(|| {
+            SnapshotError::Validation("total file size exceeds the u64 range".to_string())
+        })?;
 
     let obj = serde_json::json!({
         "hashAlg": hash_alg_str(collapsed.hash_alg),
