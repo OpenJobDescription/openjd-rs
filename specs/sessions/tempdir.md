@@ -168,3 +168,33 @@ This matches openjd-sessions-for-python PR #348, with two differences:
    characters after `embedded_files`; that difference is not yet resolved.
 
 Both are stored in the `Session` struct and cleaned up by `Session::cleanup()`.
+
+### Cleanup retries on Windows
+
+On Windows, `TempDir::cleanup()` retries a failed `remove_dir_all` after 1, 2, 4, 8 and
+16 s, so cleanup can block for about 31 s per directory. A process that has exited or
+been terminated can still hold handles in the directory for a while, and Windows will
+not delete a file while a handle to it is open. `NotFound` on a retry counts as
+success, because the attempt that failed may still have removed the directory.
+`NotFound` on the first attempt is still an error. Other platforms do not retry: a
+failure there is a permission problem that waiting will not fix. This matches Python's
+`TempDir.cleanup`.
+
+Each failed Windows attempt is logged as a warning (`FILE_PATH | PROCESS_CONTROL |
+EXCEPTION_INFO`) that names up to three of the files left, and the processes holding
+any of the first 256 of them open, found with the Restart Manager
+(`RmGetList`). It ends with the next delay, or "Giving up." after the last attempt.
+For example:
+
+```
+Could not delete temporary directory C:\ProgramData\Amazon\OpenJD\c46tnxjh: The process
+cannot access the file because it is being used by another process. (os error 32). 3
+file(s) remain, including locked.bin, locked.bin.ready, pathmapping_14bf....json. Files
+are still locked open by: powershell.exe (pid 3604). Retrying in 4 s.
+```
+
+A failed holder lookup is reported in the same line instead of the process list.
+
+`Session::cleanup()` removes only the working directory, which contains the embedded
+files directory, so a lock inside the latter is waited out once. It logs each directory
+it could not remove at error level, with the path and the reason, and continues.

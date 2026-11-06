@@ -24,6 +24,8 @@ pub mod tempdir;
 #[cfg(windows)]
 pub mod win32;
 #[cfg(windows)]
+pub(crate) mod win32_file_locks;
+#[cfg(windows)]
 pub(crate) mod win32_locate;
 #[cfg(all(windows, not(feature = "test-utils")))]
 pub(crate) mod win32_permissions;
