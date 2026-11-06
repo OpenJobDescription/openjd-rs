@@ -112,9 +112,9 @@ including `openjd_redacted_env`. Earlier revisions of this code special-cased
 
 ### Why Vec instead of Option for callbacks
 
-A single line can produce multiple callbacks in edge cases (e.g., a malformed directive
-that produces both a `Fail` callback and a cancel callback). Using `Vec`
-avoids special-casing these.
+A single line produces zero or one callback today (a malformed directive is one
+callback with `cancel: true`, not two). `Vec` keeps the signature open for
+directives that need more without changing callers.
 
 ### Dynamic log level via openjd_session_runtime_loglevel
 
@@ -176,7 +176,9 @@ filter checks specifically for env-related directives:
 
 1. Performs a case-insensitive check for `openjd_env`, `openjd_redacted_env`, or
    `openjd_unset_env` followed by a colon, space, or end-of-string
-2. If it matches, emits `ActionMessage::CancelMarkFailed` with an error message
+2. If it matches, returns a `Fail` callback with `cancel: true` whose value is the
+   error text; `process_line` sends `ActionMessage::Fail` with that text, then
+   `ActionMessage::CancelMarkFailed` with the fixed message described above
 3. The session cancels the action with `Failed` state
 
 Only env-related directives are checked for malformation because they have side effects

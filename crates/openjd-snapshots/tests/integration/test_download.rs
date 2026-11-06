@@ -1858,3 +1858,41 @@ async fn download_restores_mtime_chunked() {
     );
     assert_eq!(result.manifest.files()[0].mtime.unwrap(), on_disk_mtime);
 }
+
+/// Declared sizes come from the caller's manifest. Skipping two files whose
+/// sizes sum past `u64::MAX`, then downloading a third, must not overflow
+/// the downloaded-plus-skipped sum behind `rate` and `progress`.
+#[tokio::test]
+async fn statistics_saturate_on_huge_declared_sizes() {
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let dc = new_data_cache(&cache_dir);
+    let huge = 1u64 << 63;
+    let mut files = Vec::new();
+    for name in ["a.txt", "b.txt"] {
+        let dest = tmp.path().join(name);
+        std::fs::write(&dest, b"x").unwrap();
+        let mut e = hashed_entry(&dest.to_string_lossy(), b"x", &*dc).await;
+        e.size = Some(huge);
+        files.push(e);
+    }
+    let dest = tmp.path().join("c.txt");
+    files.push(hashed_entry(&dest.to_string_lossy(), b"c", &*dc).await);
+
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(make_snapshot(files)),
+        dc.clone(),
+        DownloadOptions {
+            file_conflict_resolution: FileConflictResolution::Skip,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let s = &result.statistics;
+    assert_eq!(s.total_bytes, u64::MAX);
+    assert_eq!(s.skipped_bytes, u64::MAX);
+    assert_eq!(s.downloaded_bytes, 1);
+    assert_eq!(std::fs::read(&dest).unwrap(), b"c");
+}

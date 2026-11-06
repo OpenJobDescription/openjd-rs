@@ -355,15 +355,17 @@ rule that matches:
 
 1. The stem ends in `%d`: replace it with `n`.
 2. The stem ends in `%0Nd`: replace it with `n` padded to width `N`.
-3. The stem contains `#`: replace the last run of `#` with `n` padded to
-   the run's length.
+3. The stem contains `#`: keep the stem up to the last run of `#` and
+   replace that run with `n` padded to the run's length. Any text after the
+   run is dropped (`f_####_v2` becomes `f_0007`); this is a known bug.
 4. The stem ends in ASCII digits: replace them with `n` padded to their
    count.
 5. Otherwise append `_` and `n` padded to width 4.
 
 Padding adds leading zeros; a negative `n` keeps the width with its `-`
 counted (`-7` at width 4 is `-007`), and an `n` wider than the width is
-written in full. A width above 32 raises `ExpressionError`.
+written in full. A `%0Nd` or `#` width above 32 raises `ExpressionError`;
+a trailing digit run of any length is replaced at its own width.
 
 > **URI paths in path methods.** The path properties and the
 > `with_*` methods all detect URI inputs (`uri_path::is_uri`) and

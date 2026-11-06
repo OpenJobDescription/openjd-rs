@@ -2002,3 +2002,24 @@ async fn streaming_file_skipped_when_exists_in_data_cache() {
     assert_eq!(r2.statistics.hashed_files, 0);
     assert_eq!(r2.statistics.uploaded_files, 0);
 }
+
+/// Declared sizes come from the caller's manifest. Re-uploading a file
+/// declared at 2^63 bytes counts it as both hashed and skipped; their sum,
+/// behind `rate` and `progress`, must saturate rather than overflow.
+#[tokio::test]
+async fn statistics_saturate_on_huge_declared_sizes() {
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let dc: Arc<dyn AsyncDataCache> =
+        Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
+    let (path, _, mtime) = make_test_file(tmp.path(), "a.txt", b"a");
+    let huge = 1u64 << 63;
+    let m = AbsManifest::Snapshot(make_snapshot(vec![FileEntry::file(&path, huge, mtime)]));
+
+    for _ in 0..2 {
+        let result = hash_upload_abs_manifest(&m, dc.clone(), HashUploadOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(result.statistics.total_bytes, huge);
+    }
+}

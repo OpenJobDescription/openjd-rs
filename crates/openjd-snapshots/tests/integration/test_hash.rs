@@ -1123,3 +1123,45 @@ fn progress_with_cache_hits_counts_skipped() {
     assert_eq!(result.statistics.skipped_files, 1);
     assert!((result.statistics.progress - 100.0).abs() < 0.01);
 }
+
+/// Declared sizes come from the caller's manifest. Two files whose sizes
+/// sum past `u64::MAX` must not overflow the statistics: the byte counters
+/// and the hashed-plus-skipped sum behind `rate` and `progress` saturate.
+#[test]
+fn statistics_saturate_on_huge_declared_sizes() {
+    let tmp = TempDir::new().unwrap();
+    let (_cache_dir, cache) = new_cache();
+    let (cached_path, _, cached_mtime) = make_file(tmp.path(), "cached.txt", b"a");
+    let (hashed_path, _, hashed_mtime) = make_file(tmp.path(), "hashed.txt", b"b");
+    cache
+        .put(
+            Path::new(&cached_path),
+            "xxh128",
+            0,
+            openjd_snapshots::hash_cache::WHOLE_FILE_RANGE_END,
+            &"a".repeat(32),
+            cached_mtime,
+        )
+        .unwrap();
+
+    let huge = 1u64 << 63;
+    let m = snapshot(vec![
+        FileEntry::file(&cached_path, huge, cached_mtime),
+        FileEntry::file(&hashed_path, huge, hashed_mtime),
+    ]);
+    let result = hash_abs_manifest(
+        &m,
+        HashOptions {
+            hash_cache: Some(cache),
+            max_workers: Some(1),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    let s = &result.statistics;
+    assert_eq!(s.total_bytes, u64::MAX);
+    assert_eq!(s.hashed_bytes, huge);
+    assert_eq!(s.skipped_bytes, huge);
+    assert_eq!(s.progress, 100.0);
+}

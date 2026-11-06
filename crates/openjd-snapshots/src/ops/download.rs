@@ -720,10 +720,10 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
                     s.total_time = elapsed;
                     {
                         let mut rc = rate_calc.lock().unwrap();
-                        s.rate = rc.update(elapsed, s.downloaded_bytes + s.skipped_bytes);
+                        s.rate = rc.update(elapsed, s.downloaded_bytes.saturating_add(s.skipped_bytes));
                     }
                     if s.total_bytes > 0 {
-                        s.progress = ((s.downloaded_bytes + s.skipped_bytes) as f64
+                        s.progress = ((s.downloaded_bytes.saturating_add(s.skipped_bytes)) as f64
                             / s.total_bytes as f64)
                             * 100.0;
                     }
@@ -813,11 +813,11 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
         let mut rc = rate_calc.lock().unwrap();
         stats.rate = rc.update(
             stats.total_time,
-            stats.downloaded_bytes + stats.skipped_bytes,
+            stats.downloaded_bytes.saturating_add(stats.skipped_bytes),
         );
     }
     if stats.total_bytes > 0 {
-        stats.progress = ((stats.downloaded_bytes + stats.skipped_bytes) as f64
+        stats.progress = ((stats.downloaded_bytes.saturating_add(stats.skipped_bytes)) as f64
             / stats.total_bytes as f64)
             * 100.0;
     }

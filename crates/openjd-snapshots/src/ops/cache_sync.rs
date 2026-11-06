@@ -257,11 +257,12 @@ pub async fn cache_sync_manifest(
                 s.total_time = elapsed;
                 {
                     let mut rc = rate_calc.lock().unwrap();
-                    s.rate = rc.update(elapsed, s.copied_bytes + s.skipped_bytes);
+                    s.rate = rc.update(elapsed, s.copied_bytes.saturating_add(s.skipped_bytes));
                 }
                 if s.total_bytes > 0 {
-                    s.progress =
-                        ((s.copied_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+                    s.progress = ((s.copied_bytes.saturating_add(s.skipped_bytes)) as f64
+                        / s.total_bytes as f64)
+                        * 100.0;
                 }
                 if let Some(ref cb) = on_progress {
                     if !cb(&s) {
@@ -282,10 +283,10 @@ pub async fn cache_sync_manifest(
                     s.total_time = elapsed;
                     {
                         let mut rc = rate_calc.lock().unwrap();
-                        s.rate = rc.update(elapsed, s.copied_bytes + s.skipped_bytes);
+                        s.rate = rc.update(elapsed, s.copied_bytes.saturating_add(s.skipped_bytes));
                     }
                     if s.total_bytes > 0 {
-                        s.progress = ((s.copied_bytes + s.skipped_bytes) as f64
+                        s.progress = ((s.copied_bytes.saturating_add(s.skipped_bytes)) as f64
                             / s.total_bytes as f64)
                             * 100.0;
                     }
@@ -313,11 +314,12 @@ pub async fn cache_sync_manifest(
                 s.total_time = elapsed;
                 {
                     let mut rc = rate_calc.lock().unwrap();
-                    s.rate = rc.update(elapsed, s.copied_bytes + s.skipped_bytes);
+                    s.rate = rc.update(elapsed, s.copied_bytes.saturating_add(s.skipped_bytes));
                 }
                 if s.total_bytes > 0 {
-                    s.progress =
-                        ((s.copied_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+                    s.progress = ((s.copied_bytes.saturating_add(s.skipped_bytes)) as f64
+                        / s.total_bytes as f64)
+                        * 100.0;
                 }
                 if let Some(ref cb) = on_progress {
                     if !cb(&s) {
@@ -348,11 +350,15 @@ pub async fn cache_sync_manifest(
     stats.total_time = start_time.elapsed().as_secs_f64();
     {
         let mut rc = rate_calc.lock().unwrap();
-        stats.rate = rc.update(stats.total_time, stats.copied_bytes + stats.skipped_bytes);
+        stats.rate = rc.update(
+            stats.total_time,
+            stats.copied_bytes.saturating_add(stats.skipped_bytes),
+        );
     }
     if stats.total_bytes > 0 {
-        stats.progress =
-            ((stats.copied_bytes + stats.skipped_bytes) as f64 / stats.total_bytes as f64) * 100.0;
+        stats.progress = ((stats.copied_bytes.saturating_add(stats.skipped_bytes)) as f64
+            / stats.total_bytes as f64)
+            * 100.0;
     }
 
     let mut parts = vec![

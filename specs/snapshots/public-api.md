@@ -548,8 +548,9 @@ pub type ProgressFn<S> = dyn Fn(&S) -> bool + Send + Sync;
 ```
 
 The byte counters in every operation's statistics struct (`total_bytes`,
-`skipped_bytes`, `hashed_bytes`, and so on) saturate at `u64::MAX` rather than
-overflowing, because file sizes come from caller-supplied manifests.
+`skipped_bytes`, `hashed_bytes`, and so on), and the done-bytes sums behind
+`rate` and `progress`, saturate at `u64::MAX` rather than overflowing, because
+file sizes come from caller-supplied manifests.
 
 ### COLLECT
 

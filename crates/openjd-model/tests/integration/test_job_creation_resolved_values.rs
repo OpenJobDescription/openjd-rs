@@ -1449,3 +1449,16 @@ fn attribute_value_resolution_failure_keeps_expression_error() {
         "{err}"
     );
 }
+
+#[test]
+fn attribute_name_resolution_failure_keeps_expression_error() {
+    let err = create_with_zero_n(&host_requirements_template(
+        r#"{"attributes": [{"name": "attr.custom.n{{ 10 // Param.N }}", "anyOf": ["a"]}]}"#,
+    ));
+    assert_division_by_zero_source(&err);
+    assert!(
+        err.to_string()
+            .starts_with("Format string error: hostRequirements attribute name: Division by zero"),
+        "{err}"
+    );
+}

@@ -566,3 +566,40 @@ async fn cache_sync_same_cache_is_noop() {
     assert_eq!(result.statistics.skipped_objects, 1);
     assert_eq!(result.statistics.copied_objects, 0);
 }
+
+/// Declared sizes come from the caller's manifests. Skipping two objects
+/// whose sizes sum past `u64::MAX`, then copying a third, must not overflow
+/// the copied-plus-skipped sum behind `rate` and `progress`.
+#[tokio::test]
+async fn statistics_saturate_on_huge_declared_sizes() {
+    let (_src_dir, src) = make_fs_cache();
+    let (_dst_dir, dst) = make_fs_cache();
+    put(&dst, "h1", "xxh128", b"1").await;
+    put(&dst, "h2", "xxh128", b"2").await;
+    put(&src, "h3", "xxh128", b"3").await;
+    let huge = 1u64 << 63;
+    let entry = |name: &str, hash: &str, size: u64| {
+        let mut e = FileEntry::new(name);
+        e.hash = Some(hash.into());
+        e.size = Some(size);
+        e
+    };
+    let manifest = test_manifest(vec![
+        entry("a.txt", "h1", huge),
+        entry("b.txt", "h2", huge),
+        entry("c.txt", "h3", 1),
+    ]);
+
+    let result = cache_sync_manifest(
+        &[&manifest as &dyn ManifestRef],
+        src,
+        dst.clone(),
+        CacheSyncOptions::default(),
+    )
+    .await
+    .unwrap();
+
+    let s = &result.statistics;
+    assert_eq!(s.total_bytes, u64::MAX);
+    assert_eq!(s.skipped_bytes, u64::MAX);
+}
