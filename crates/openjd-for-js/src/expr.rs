@@ -582,7 +582,7 @@ pub fn parse_range_expr(expr: &str) -> Result<Vec<i64>, JsError> {
     let range: openjd_expr::RangeExpr = expr
         .parse()
         .map_err(|e: openjd_expr::ExpressionError| JsError::new(&e.to_string()))?;
-    if range.len() > openjd_expr::DEFAULT_OPERATION_LIMIT {
+    if range.len() > openjd_expr::DEFAULT_OPERATION_LIMIT as u64 {
         return Err(JsError::new(&format!(
             "Range expression has too many elements to materialize \
              ({} > {})",

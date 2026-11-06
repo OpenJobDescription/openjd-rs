@@ -155,7 +155,7 @@ fn test_association_two_params() {
     for i in 0..3 {
         let set = iter.get(i).unwrap();
         assert_eq!(get_int(&set, "A"), (i + 1) as i64);
-        assert_eq!(get_string(&set, "B"), ["x", "y", "z"][i]);
+        assert_eq!(get_string(&set, "B"), ["x", "y", "z"][i as usize]);
     }
 }
 
@@ -207,7 +207,7 @@ fn test_get_matches_iteration() {
     let iter = StepParameterSpaceIterator::new(&space).unwrap();
     let collected: Vec<_> = iter.collect();
     let iter2 = StepParameterSpaceIterator::new(&space).unwrap();
-    for (i, set) in collected.iter().enumerate() {
+    for (i, set) in (0u64..).zip(collected.iter()) {
         let got = iter2.get(i).unwrap();
         assert_eq!(set.len(), got.len());
         for (k, v) in set {
@@ -244,7 +244,7 @@ fn test_get_product_three_params() {
     // Verify get() matches iteration order
     let iter2 = StepParameterSpaceIterator::new(&space).unwrap();
     let collected: Vec<_> = iter2.collect();
-    for (i, expected) in collected.iter().enumerate() {
+    for (i, expected) in (0u64..).zip(collected.iter()) {
         let got = iter.get(i).unwrap();
         assert_eq!(get_int(&got, "A"), get_int(expected, "A"), "index {i} A");
         assert_eq!(
@@ -274,7 +274,7 @@ fn test_get_association_three_params() {
     for i in 0..4 {
         let got = iter.get(i).unwrap();
         assert_eq!(get_int(&got, "A"), (i + 1) as i64);
-        assert_eq!(get_string(&got, "B"), ["a", "b", "c", "d"][i]);
+        assert_eq!(get_string(&got, "B"), ["a", "b", "c", "d"][i as usize]);
         assert_eq!(get_int(&got, "C"), -(i as i64 + 1));
     }
     assert!(iter.get(4).is_none());
@@ -302,7 +302,7 @@ fn test_get_nested_product_association() {
     // Verify get() matches iteration
     let iter2 = StepParameterSpaceIterator::new(&space).unwrap();
     let collected: Vec<_> = iter2.collect();
-    for (i, expected) in collected.iter().enumerate() {
+    for (i, expected) in (0u64..).zip(collected.iter()) {
         let got = iter.get(i).unwrap();
         assert_eq!(get_int(&got, "A"), get_int(expected, "A"), "index {i} A");
         assert_eq!(
@@ -922,7 +922,7 @@ fn collect_chunk_strs(param: TaskParameter, combination: Option<&str>) -> Vec<St
     .collect()
 }
 
-fn chunk_int_list(vals: &[i64], dtc: usize, constraint: RangeConstraint) -> TaskParameter {
+fn chunk_int_list(vals: &[i64], dtc: u64, constraint: RangeConstraint) -> TaskParameter {
     TaskParameter::ChunkInt {
         range: TaskParamRange::List(vals.to_vec()),
         chunks: ResolvedChunks {
@@ -933,7 +933,7 @@ fn chunk_int_list(vals: &[i64], dtc: usize, constraint: RangeConstraint) -> Task
     }
 }
 
-fn chunk_int_range(expr: &str, dtc: usize, constraint: RangeConstraint) -> TaskParameter {
+fn chunk_int_range(expr: &str, dtc: u64, constraint: RangeConstraint) -> TaskParameter {
     TaskParameter::ChunkInt {
         range: TaskParamRange::RangeExpr(expr.parse::<RangeExpr>().unwrap()),
         chunks: ResolvedChunks {
@@ -946,8 +946,8 @@ fn chunk_int_range(expr: &str, dtc: usize, constraint: RangeConstraint) -> TaskP
 
 fn chunk_int_range_adaptive(
     expr: &str,
-    dtc: usize,
-    trs: usize,
+    dtc: u64,
+    trs: u64,
     constraint: RangeConstraint,
 ) -> TaskParameter {
     TaskParameter::ChunkInt {
@@ -1102,8 +1102,8 @@ fn test_py_adaptive_noncontig_chunksize5_negative() {
 
 fn chunk_int_list_adaptive(
     vals: &[i64],
-    dtc: usize,
-    trs: usize,
+    dtc: u64,
+    trs: u64,
     constraint: RangeConstraint,
 ) -> TaskParameter {
     TaskParameter::ChunkInt {
@@ -1120,7 +1120,7 @@ fn chunk_int_list_adaptive(
 fn collect_chunk_product(
     chunk_param: TaskParameter,
     string_vals: &[&str],
-    chunk_override: Option<usize>,
+    chunk_override: Option<u64>,
 ) -> Vec<(String, String)> {
     let iter = make_chunk_product_iter(chunk_param, string_vals, chunk_override);
     extract_chunk_product(iter)
@@ -1129,7 +1129,7 @@ fn collect_chunk_product(
 fn make_chunk_product_iter(
     chunk_param: TaskParameter,
     string_vals: &[&str],
-    chunk_override: Option<usize>,
+    chunk_override: Option<u64>,
 ) -> StepParameterSpaceIterator {
     use crate::job;
     use indexmap::IndexMap;
@@ -1380,7 +1380,7 @@ fn cap_runs_range(head: i64) -> RangeExpr {
     r
 }
 
-fn chunk_int_of(range: TaskParamRange<i64>, dtc: usize, trs: Option<usize>) -> TaskParameter {
+fn chunk_int_of(range: TaskParamRange<i64>, dtc: u64, trs: Option<u64>) -> TaskParameter {
     TaskParameter::ChunkInt {
         range,
         chunks: ResolvedChunks {
@@ -1434,7 +1434,7 @@ fn test_noncontiguous_static_chunks_of_a_cap_run_range_that_fit() {
         let iter = StepParameterSpaceIterator::new(&space).unwrap();
         let got: Vec<RangeExpr> = iter.map(|set| chunk_value(&set)).collect();
         assert_eq!(got.len(), chunks, "head {head}");
-        let total: usize = got.iter().map(RangeExpr::len).sum();
+        let total: u64 = got.iter().map(RangeExpr::len).sum();
         assert_eq!(total, range.len());
         assert!(got.iter().all(|c| c.ranges().len() <= CAP));
     }
@@ -1498,7 +1498,7 @@ fn test_noncontiguous_adaptive_chunk_beyond_the_run_cap_is_shortened() {
     // All but the last value: CAP + 1 runs, so CAP values are taken.
     iter.set_chunks_default_task_count(len - 1);
     let first = chunk_value(&iter.next().unwrap());
-    assert_eq!(first.len(), CAP);
+    assert_eq!(first.len(), CAP as u64);
     assert_eq!(first.to_vec(), range.to_vec()[..CAP]);
     let rest = chunk_value(&iter.next().unwrap());
     assert_eq!(rest.to_vec(), range.to_vec()[CAP..]);
@@ -1521,25 +1521,25 @@ fn test_noncontiguous_adaptive_chunk_beyond_the_run_cap_is_shortened() {
 /// has `2 + isolated + 2` values, each its own run, and the range has
 /// `isolated + 2` runs (`+ 1` with `lead`).
 struct ChunkLayout {
-    chunks: usize,
-    small: usize,
-    larger: usize,
-    failing: usize,
+    chunks: u64,
+    small: u64,
+    larger: u64,
+    failing: u64,
     lead: bool,
 }
 
 impl ChunkLayout {
-    fn size(&self, i: usize) -> usize {
-        self.small + usize::from(i < self.larger)
+    fn size(&self, i: u64) -> u64 {
+        self.small + u64::from(i < self.larger)
     }
 
     /// The range, the `defaultTaskCount` that gives this layout, the
     /// number of runs, and the failing chunk's first and last values.
-    fn build(&self) -> (RangeExpr, usize, usize, i64, i64) {
+    fn build(&self) -> (RangeExpr, u64, usize, i64, i64) {
         let failing_size = self.size(self.failing);
         let isolated = failing_size - 4;
-        let before: usize = (0..self.failing).map(|i| self.size(i)).sum();
-        let after: usize = (self.failing + 1..self.chunks).map(|i| self.size(i)).sum();
+        let before: u64 = (0..self.failing).map(|i| self.size(i)).sum();
+        let after: u64 = (self.failing + 1..self.chunks).map(|i| self.size(i)).sum();
         let mut elements = Vec::new();
         let head_start: i64 = if self.lead {
             elements.push("-1000".to_string());
@@ -1547,7 +1547,7 @@ impl ChunkLayout {
         } else {
             0
         };
-        let head_len = (before + 2 - usize::from(self.lead)) as i64;
+        let head_len = (before + 2 - u64::from(self.lead)) as i64;
         let head_end = head_start + head_len - 1;
         elements.push(format!("{head_start}-{head_end}"));
         let mut last = head_end;
@@ -1573,7 +1573,7 @@ impl ChunkLayout {
     }
 }
 
-fn static_noncontiguous_error(range: RangeExpr, dtc: usize) -> Option<String> {
+fn static_noncontiguous_error(range: RangeExpr, dtc: u64) -> Option<String> {
     let space = make_space(
         vec![(
             "F",
@@ -1616,7 +1616,7 @@ fn test_noncontiguous_static_check_finds_the_failing_chunk_anywhere() {
         let failing_runs = layout.size(failing);
         // The failing chunk is the only one beyond the cap.
         for i in 0..chunks {
-            let offset: usize = (0..i).map(|j| layout.size(j)).sum();
+            let offset: u64 = (0..i).map(|j| layout.size(j)).sum();
             let chunk = range
                 .slice(offset as i64, (offset + layout.size(i)) as i64, 1)
                 .map(|c| c.ranges().len());
@@ -1669,13 +1669,13 @@ fn test_noncontiguous_static_check_with_many_leftovers() {
 
 /// The first chunk beyond the run cap, found by building every chunk, with
 /// the error the check should report for it.
-fn first_chunk_beyond_the_cap(range: &RangeExpr, dtc: usize) -> Option<(usize, String)> {
+fn first_chunk_beyond_the_cap(range: &RangeExpr, dtc: u64) -> Option<(u64, String)> {
     let total = range.len();
     let chunks = total.div_ceil(dtc);
     let (small, larger) = (total / chunks, total % chunks);
     let mut offset = 0;
     (0..chunks).find_map(|i| {
-        let size = small + usize::from(i < larger);
+        let size = small + u64::from(i < larger);
         let (start, stop) = (offset as i64, (offset + size) as i64);
         offset += size;
         range.slice(start, stop, 1).err().map(|e| {

@@ -395,15 +395,51 @@ pub struct JsStepParameterSpaceIterator {
 
 #[wasm_bindgen(js_class = "StepParameterSpaceIterator")]
 impl JsStepParameterSpaceIterator {
-    /// Total number of tasks.
+    /// The tasks of the step named `step_name` in `job`. A step with no
+    /// parameter space has one task with no parameters.
+    #[wasm_bindgen(constructor)]
+    pub fn new(job: &JsJob, step_name: &str) -> Result<JsStepParameterSpaceIterator, JsError> {
+        let step = job
+            .inner
+            .steps
+            .iter()
+            .find(|s| s.name == step_name)
+            .ok_or_else(|| JsError::new(&format!("Job has no step named '{step_name}'")))?;
+        let empty = openjd_model::job::StepParameterSpace {
+            task_parameter_definitions: Default::default(),
+            combination: None,
+        };
+        let space = step.parameter_space.as_ref().unwrap_or(&empty);
+        let inner = openjd_model::StepParameterSpaceIterator::new(space).map_err(to_js_error)?;
+        Ok(JsStepParameterSpaceIterator { inner })
+    }
+
+    /// Total number of tasks (chunks, for a chunked parameter), as a
+    /// `bigint`: exact for counts above 2^53, and above the 2^32 a wasm32
+    /// `usize` could hold. `0n` for adaptive chunking, whose chunk count
+    /// depends on chunk sizes chosen while running.
     #[wasm_bindgen(getter)]
-    pub fn count(&self) -> usize {
+    pub fn count(&self) -> u64 {
         self.inner.len()
     }
 
-    /// Get a specific task's parameter set as a JS object.
-    pub fn get(&self, index: usize) -> Result<JsValue, JsError> {
-        match self.inner.get(index) {
+    /// Get a specific task's parameter set as a JS `Map` from parameter
+    /// name to value string. The index is a `bigint`, so every task is
+    /// reachable; one that is negative or past the last task throws
+    /// `Index <n> out of range`, and a non-`bigint` throws.
+    ///
+    /// Taken as a `BigInt` and range-checked here, not as a `u64`: the
+    /// wasm-bindgen `u64` conversion wraps modulo 2^64, so `2n ** 64n`
+    /// would read task 0 and `-1n` would name index 2^64 - 1.
+    pub fn get(&self, index: js_sys::BigInt) -> Result<JsValue, JsError> {
+        let index = JsValue::from(index);
+        if !index.is_bigint() {
+            return Err(JsError::new("Index must be a bigint"));
+        }
+        let task = u64::try_from(index.clone())
+            .ok()
+            .and_then(|i| self.inner.get(i));
+        match task {
             Some(params) => {
                 // Convert TaskParameterSet to a simple {name: value_string} object
                 let map: HashMap<String, String> = params
@@ -412,7 +448,13 @@ impl JsStepParameterSpaceIterator {
                     .collect();
                 serde_wasm_bindgen::to_value(&map).map_err(serde_wasm_to_js_error)
             }
-            None => Err(JsError::new(&format!("Index {index} out of range"))),
+            None => {
+                let shown = js_sys::BigInt::unchecked_from_js(index)
+                    .to_string(10)
+                    .map(String::from)
+                    .unwrap_or_default();
+                Err(JsError::new(&format!("Index {shown} out of range")))
+            }
         }
     }
 

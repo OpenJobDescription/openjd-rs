@@ -211,12 +211,12 @@ pub fn join_fn(ctx: Ctx, a: &[ExprValue]) -> R {
 pub fn list_from_range(ctx: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::RangeExpr(r) => {
-            ctx.count_ops(r.len())?;
+            ctx.count_ops(r.len_saturating())?;
             // Pre-check the projected allocation before collecting: the
             // op charge alone admits up to the operation limit in
             // elements (~640 MB of ExprValues under default limits)
             // before make_list_checked's post-hoc memory check.
-            let mut elements = BudgetedVec::with_capacity(ctx, r.len())?;
+            let mut elements = BudgetedVec::with_capacity(ctx, r.len_saturating())?;
             for value in r.iter() {
                 elements.push(ctx, ExprValue::Int(value))?;
             }

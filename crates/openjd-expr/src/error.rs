@@ -56,11 +56,16 @@ pub enum ExpressionErrorKind {
     IndexOutOfBounds { message: String },
 
     /// Expression memory usage exceeded the configured limit.
-    #[error("Expression memory usage ({used} bytes) exceeded limit ({limit} bytes)")]
+    ///
+    /// `used` saturates at `usize::MAX`; the message then reads "at least".
+    #[error("Expression memory usage ({} bytes) exceeded limit ({limit} bytes)", saturated_count(*.used))]
     MemoryLimitExceeded { used: usize, limit: usize },
 
     /// Expression operation count exceeded the configured limit.
-    #[error("Expression operation count ({count}) exceeded limit ({limit})")]
+    ///
+    /// `count` saturates at `usize::MAX` (on a 32-bit target, any charge of
+    /// 2^32 or more); the message then reads "at least".
+    #[error("Expression operation count ({}) exceeded limit ({limit})", saturated_count(*.count))]
     OperationLimitExceeded { count: usize, limit: usize },
 
     /// Expression AST nesting depth exceeded the configured limit.
@@ -370,6 +375,16 @@ impl fmt::Display for ExpressionError {
 impl std::error::Error for ExpressionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.inner.kind)
+    }
+}
+
+/// A budget counter for an error message: `usize::MAX` means the counter
+/// saturated, so the true count is at least that.
+fn saturated_count(n: usize) -> String {
+    if n == usize::MAX {
+        format!("at least {n}")
+    } else {
+        n.to_string()
     }
 }
 

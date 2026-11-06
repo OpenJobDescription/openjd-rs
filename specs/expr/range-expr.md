@@ -264,6 +264,20 @@ length field's high bit. Spans between values, however, can reach 2^64 - 2, so
 `IntRange` computes them with `abs_diff` (u64) and applies offsets with
 `wrapping_add_unsigned`, which is exact because each result is a value of the range.
 
+`RangeExpr::len` and `IntRange::len` return that exact `u64` count, and `IntRange::get`
+takes a `u64` index, on every target. A `usize` would be exact only on 64-bit targets: on a
+32-bit target such as wasm32 (openjd-for-js), `"1-5000000000"` has more values than a
+`usize` can count. Where an evaluator function charges an operation or memory budget, both
+`usize`, by a range's length, it uses the crate-private `len_saturating`, which saturates at
+`usize::MAX`, and a sum of two lengths uses `saturating_add` (on 32-bit,
+`range_expr('1-2147483648') + range_expr('1-2147483648')` would otherwise wrap to a charge
+of 0). The evaluator's counters saturate too, and a counter at `usize::MAX` counts as over
+every limit, `usize::MAX` included (see `evaluator.md`, Operation Counting), so a charge
+that does not fit a `usize` is always rejected: on a 32-bit target even the largest limit a
+caller can set rejects what a 64-bit target counts exactly and rejects. The error message
+then reads `Expression operation count (at least 4294967295) exceeded limit (...)`, where a
+64-bit target reports the full count.
+
 **Deviation from Template Schemas §3.4.1.1.1:** the specification does not constrain the
 number of values a range expression expands to, and expects an implementation that bounds
 Tasks to limit the Task count instead. openjd-rs rejects a range expression with more than
