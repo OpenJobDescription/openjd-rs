@@ -129,15 +129,16 @@ fn task_param_type_name(tp: &job::TaskParameter) -> &'static str {
     }
 }
 
-fn step_total_tasks(step: &job::Step) -> usize {
+/// A step's task count, exact on every target (a `u64`, like
+/// `StepParameterSpaceIterator::len`). Fails, naming the step, when the
+/// count cannot be computed: a chunked step can have more than `u64::MAX`
+/// tasks, which counting one task per value overflows.
+fn step_total_tasks(step: &job::Step) -> Result<u64, String> {
     match &step.parameter_space {
-        None => 1,
-        Some(ps) => {
-            match openjd_model::StepParameterSpaceIterator::new_with_chunk_override(ps, Some(1)) {
-                Ok(it) => it.len(),
-                Err(_) => 1,
-            }
-        }
+        None => Ok(1),
+        Some(ps) => openjd_model::StepParameterSpaceIterator::new_with_chunk_override(ps, Some(1))
+            .map(|it| it.len())
+            .map_err(|e| format!("Step '{}': {e}", step.name)),
     }
 }
 
@@ -153,7 +154,7 @@ fn output_job_summary(
         .steps
         .iter()
         .map(|s| {
-            let total_tasks = step_total_tasks(s);
+            let total_tasks = step_total_tasks(s)?;
             let task_params: Vec<(String, String)> = s
                 .parameter_space
                 .as_ref()
@@ -186,18 +187,29 @@ fn output_job_summary(
                 .as_ref()
                 .map(|deps| deps.iter().map(|d| d.depends_on.clone()).collect())
                 .unwrap_or_default();
-            StepInfo {
+            Ok(StepInfo {
                 name: s.name.clone(),
                 description: s.description.clone(),
                 total_tasks,
                 task_params,
                 envs,
                 deps,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<_, String>>()?;
 
-    let total_tasks: usize = step_summaries.iter().map(|s| s.total_tasks).sum();
+    // Each step's count is an exact u64, but their sum can pass u64::MAX
+    // (two steps of 2^63 tasks). Fail rather than print a wrapped total.
+    let total_tasks = step_summaries
+        .iter()
+        .try_fold(0u64, |acc, s| acc.checked_add(s.total_tasks))
+        .ok_or_else(|| {
+            format!(
+                "Job '{}' has more than {} tasks in total, so the total cannot be reported.",
+                job.name,
+                u64::MAX
+            )
+        })?;
     let step_envs: usize = step_summaries.iter().map(|s| s.envs.len()).sum();
     let root_envs: Vec<EnvInfo> = job
         .job_environments
@@ -251,7 +263,7 @@ fn output_step_summary(
         .find(|s| s.name == step_name)
         .ok_or_else(|| format!("Step '{step_name}' does not exist in Job '{}'.", job.name))?;
 
-    let total_tasks = step_total_tasks(step);
+    let total_tasks = step_total_tasks(step)?;
     let task_params: Vec<(String, String)> = step
         .parameter_space
         .as_ref()
@@ -307,7 +319,7 @@ struct JobSummaryResult {
     step_summaries: Vec<StepInfo>,
     root_envs: Vec<EnvInfo>,
     step_envs: Vec<EnvInfo>,
-    total_tasks: usize,
+    total_tasks: u64,
     total_envs: usize,
 }
 
@@ -454,7 +466,7 @@ impl fmt::Display for JobSummaryResult {
 struct StepSummaryResult {
     job_name: String,
     step_name: String,
-    total_tasks: usize,
+    total_tasks: u64,
     task_params: Vec<(String, String)>,
     envs: Vec<EnvInfo>,
     deps: Vec<String>,
@@ -547,7 +559,7 @@ impl fmt::Display for StepSummaryResult {
 struct StepInfo {
     name: String,
     description: Option<String>,
-    total_tasks: usize,
+    total_tasks: u64,
     task_params: Vec<(String, String)>,
     envs: Vec<String>,
     deps: Vec<String>,

@@ -438,7 +438,7 @@ fn huge_range_cases() {
     ];
     for (text, want) in cases {
         let r: RangeExpr = text.parse().unwrap();
-        assert!(r.len() as u64 > 1_000_000_000_000_000_000, "{text}");
+        assert!(r.len() > 1_000_000_000_000_000_000, "{text}");
         assert_eq!(r.to_string(), want, "{text}");
         assert_eq!(canonical(want), want, "{text} (idempotent)");
     }
@@ -511,7 +511,7 @@ fn slice_of_one_value_whose_spacing_overflows_i64() {
 fn int_range_with_more_than_max_len_values_rejected() {
     // i64::MAX values is the largest count; one more is too many.
     assert_eq!(
-        IntRange::new(1, i64::MAX, 1).unwrap().len() as u64,
+        IntRange::new(1, i64::MAX, 1).unwrap().len(),
         openjd_expr::MAX_RANGE_EXPR_LEN
     );
     assert_eq!(

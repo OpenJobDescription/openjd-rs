@@ -3161,6 +3161,141 @@ steps:
     }
 
     #[test]
+    fn test_summary_counts_tasks_beyond_2_pow_32() {
+        // Task counts are u64 on every target; 5e9 is past what a 32-bit
+        // usize can count. The range is text, so nothing lists its values.
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
+extensions: [TASK_CHUNKING]
+name: BigJob
+steps:
+  - name: S1
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: F
+          type: CHUNK[INT]
+          range: "1-5000000000"
+          chunks:
+            defaultTaskCount: 1000000000
+            rangeConstraint: CONTIGUOUS
+    script:
+      actions:
+        onRun:
+          command: echo
+"#
+        )
+        .unwrap();
+        let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap()]);
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(
+            stdout.contains("Total tasks: 5000000000\n"),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("'S1' (5000000000 total Tasks)"),
+            "stdout: {stdout}"
+        );
+        let (code, stdout, stderr) =
+            run_cli(&["summary", f.path().to_str().unwrap(), "--output", "json"]);
+        assert_eq!(code, 0, "stderr: {stderr}");
+        let json: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+        assert_eq!(json["total_tasks"], 5_000_000_000u64, "stdout: {stdout}");
+        assert_eq!(json["steps"][0]["total_tasks"], 5_000_000_000u64);
+    }
+
+    #[test]
+    fn test_summary_rejects_a_total_beyond_u64() {
+        // Two steps of (2^63 - 1) * 2 tasks: each count fits a u64, the
+        // total does not. A wrapped sum printed 18446744073709551612.
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        let step = |name: &str| {
+            format!(
+                r#"  - name: {name}
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: A
+          type: INT
+          range: "1-9223372036854775807"
+        - name: B
+          type: INT
+          range: "1-2"
+    script:
+      actions:
+        onRun:
+          command: echo
+"#
+            )
+        };
+        write!(
+            f,
+            "specificationVersion: \"jobtemplate-2023-09\"\nname: HugeJob\nsteps:\n{}{}",
+            step("S1"),
+            step("S2")
+        )
+        .unwrap();
+        let (code, stdout, stderr) = run_cli(&["summary", f.path().to_str().unwrap()]);
+        assert_ne!(code, 0, "stdout: {stdout}");
+        assert!(
+            stderr.contains(
+                "Job 'HugeJob' has more than 18446744073709551615 tasks in total, \
+                 so the total cannot be reported."
+            ),
+            "stderr: {stderr}"
+        );
+        // One step alone is reported exactly.
+        let (code, stdout, stderr) =
+            run_cli(&["summary", f.path().to_str().unwrap(), "--step", "S1"]);
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(
+            stdout.contains("Total tasks: 18446744073709551614\n"),
+            "stdout: {stdout}"
+        );
+    }
+
+    #[test]
+    fn test_summary_rejects_a_step_beyond_u64() {
+        // 9 chunks x 3 values is a valid job, but one task per value is
+        // about 2.77e19 tasks, past u64::MAX. The count used to read 1.
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
+extensions: [TASK_CHUNKING]
+name: HugeStep
+steps:
+  - name: S
+    parameterSpace:
+      taskParameterDefinitions:
+        - name: F
+          type: CHUNK[INT]
+          range: "-4611686018427387903-4611686018427387903"
+          chunks:
+            defaultTaskCount: 4611686018427387903
+            rangeConstraint: CONTIGUOUS
+        - name: G
+          type: INT
+          range: "1-3"
+    script:
+      actions:
+        onRun:
+          command: echo
+"#
+        )
+        .unwrap();
+        let want = "ERROR: Step 'S': Validation error: Total parameter space size \
+                    overflow: the product of parameter dimensions is too large.";
+        for args in [vec![], vec!["--step", "S"]] {
+            let mut cmd = vec!["summary", f.path().to_str().unwrap()];
+            cmd.extend(args);
+            let (code, stdout, stderr) = run_cli(&cmd);
+            assert_ne!(code, 0, "stdout: {stdout}");
+            assert!(stderr.contains(want), "stderr: {stderr}");
+        }
+    }
+
+    #[test]
     fn test_summary_yaml_output() {
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
         write!(

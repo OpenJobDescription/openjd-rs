@@ -680,6 +680,56 @@ fn create_chunked_job(template_json: &str) -> openjd_model::job::Job {
     create_job(&jt, &processed, &jt.default_validation_context()).unwrap()
 }
 
+/// The resolved `chunks` of a one-step job whose `CHUNK[INT]` parameter has
+/// the `chunks` object `chunks` (JSON text), with job parameters `D = d`
+/// and `T = t` (INT) for format strings to read.
+fn resolved_chunks(chunks: &str, d: i64, t: i64) -> openjd_model::job::ResolvedChunks {
+    let job = create_chunked_job(&format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["TASK_CHUNKING"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {{"name": "D", "type": "INT", "default": {d}}},
+            {{"name": "T", "type": "INT", "default": {t}}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "parameterSpace": {{"taskParameterDefinitions": [
+                {{"name": "F", "type": "CHUNK[INT]", "range": "1-5000000000", "chunks": {chunks}}}
+            ]}},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#
+    ));
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    match &ps.task_parameter_definitions["F"] {
+        openjd_model::job::TaskParameter::ChunkInt { chunks, .. } => chunks.clone(),
+        other => panic!("expected CHUNK[INT], got {other:?}"),
+    }
+}
+
+#[test]
+fn chunks_fields_beyond_2_pow_32_are_kept() {
+    // `ResolvedChunks` fields are u64: values above 2^32 survive on every
+    // target (a 32-bit usize truncated 4294967297 to 1 and 4294967296 to
+    // 0, which also turned adaptive chunking off).
+    let literal = resolved_chunks(
+        r#"{"defaultTaskCount": 4294967297, "targetRuntimeSeconds": 4294967296, "rangeConstraint": "CONTIGUOUS"}"#,
+        0,
+        0,
+    );
+    assert_eq!(literal.default_task_count, 4_294_967_297);
+    assert_eq!(literal.target_runtime_seconds, Some(4_294_967_296));
+    let from_params = resolved_chunks(
+        r#"{"defaultTaskCount": "{{Param.D}}", "targetRuntimeSeconds": "{{Param.T}}", "rangeConstraint": "CONTIGUOUS"}"#,
+        4_294_967_298,
+        4_294_967_299,
+    );
+    assert_eq!(from_params.default_task_count, 4_294_967_298);
+    assert_eq!(from_params.target_runtime_seconds, Some(4_294_967_299));
+}
+
 #[test]
 fn chunked_contiguous_list_chunksize_1() {
     let job = create_chunked_job(
@@ -1245,7 +1295,7 @@ fn noncontiguous_chunk_get_matches_iteration() {
     let iter = StepParameterSpaceIterator::new(ps).unwrap();
     let iterated: Vec<String> = chunk_strings(template);
     assert_eq!(iterated, vec!["1,2,4", "6,9", "12,13"]);
-    let accessed: Vec<String> = (0..iterated.len())
+    let accessed: Vec<String> = (0..iterated.len() as u64)
         .map(|i| match &iter.get(i).unwrap()["P"].value {
             openjd_expr::ExprValue::RangeExpr(r) => r.to_string(),
             other => panic!("expected a RangeExpr chunk value, got {other:?}"),

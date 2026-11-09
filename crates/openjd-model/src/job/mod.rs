@@ -466,8 +466,11 @@ pub enum TaskParamRange<T: Serialize> {
     reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
 )]
 pub struct ResolvedChunks {
-    pub default_task_count: usize,
-    pub target_runtime_seconds: Option<usize>,
+    /// `u64`, not `usize`, so a value above 2^32 is kept on 32-bit targets
+    /// (wasm32) instead of being truncated.
+    pub default_task_count: u64,
+    /// `u64` for the same reason as `default_task_count`.
+    pub target_runtime_seconds: Option<u64>,
     pub range_constraint: RangeConstraint,
 }
 

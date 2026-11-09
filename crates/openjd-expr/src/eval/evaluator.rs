@@ -586,7 +586,7 @@ impl<'a> Evaluator<'a> {
 
     fn count_op(&mut self) -> Result<(), ExpressionError> {
         self.operation_count = self.operation_count.saturating_add(1);
-        if self.operation_count > self.operation_limit {
+        if over_budget(self.operation_count, self.operation_limit) {
             Err(ExpressionError::from_kind(
                 ExpressionErrorKind::OperationLimitExceeded {
                     count: self.operation_count,
@@ -2259,6 +2259,23 @@ impl<'a> Evaluator<'a> {
     }
 }
 
+/// Whether a saturating budget counter at `value` is over `limit`.
+///
+/// The operation counter and the projected memory saturate at
+/// `usize::MAX` rather than wrap, so a counter at `usize::MAX` may stand
+/// for a larger true count: on a 32-bit target (wasm32) a range charge of
+/// 2^32 or more saturates there. Such a counter is treated as over every
+/// limit, `usize::MAX` included, so the largest limit a caller can set on
+/// a 32-bit target still rejects a charge that a 64-bit target counts
+/// exactly and rejects. A true count of exactly `usize::MAX` is rejected
+/// too, and reported as "at least", which splits the targets at that one
+/// count: on a 32-bit target `sum(range_expr('1-4294967293'))` charges
+/// exactly 4294967295 and is rejected under a limit of 4294967295, while a
+/// 64-bit target accepts it under the same limit.
+pub(crate) fn over_budget(value: usize, limit: usize) -> bool {
+    value > limit || value == usize::MAX
+}
+
 /// Try to build a dotted name from an attribute chain.
 /// Applies keyword renames to restore original names.
 impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
@@ -2267,7 +2284,7 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
     }
     fn count_op(&mut self) -> Result<(), ExpressionError> {
         self.operation_count = self.operation_count.saturating_add(1);
-        if self.operation_count > self.operation_limit {
+        if over_budget(self.operation_count, self.operation_limit) {
             Err(ExpressionError::from_kind(
                 ExpressionErrorKind::OperationLimitExceeded {
                     count: self.operation_count,
@@ -2280,7 +2297,7 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
     }
     fn count_ops(&mut self, n: usize) -> Result<(), ExpressionError> {
         self.operation_count = self.operation_count.saturating_add(n);
-        if self.operation_count > self.operation_limit {
+        if over_budget(self.operation_count, self.operation_limit) {
             Err(ExpressionError::from_kind(
                 ExpressionErrorKind::OperationLimitExceeded {
                     count: self.operation_count,
@@ -2294,7 +2311,7 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
     fn count_string_ops(&mut self, len: usize) -> Result<(), ExpressionError> {
         let ops = len.div_ceil(256);
         self.operation_count = self.operation_count.saturating_add(ops);
-        if self.operation_count > self.operation_limit {
+        if over_budget(self.operation_count, self.operation_limit) {
             Err(ExpressionError::from_kind(
                 ExpressionErrorKind::OperationLimitExceeded {
                     count: self.operation_count,
@@ -2307,7 +2324,7 @@ impl<'a> crate::function_library::EvalContext for Evaluator<'a> {
     }
     fn check_memory(&self, bytes: usize) -> Result<(), ExpressionError> {
         let projected = self.current_memory.saturating_add(bytes);
-        if projected > self.memory_limit {
+        if over_budget(projected, self.memory_limit) {
             Err(ExpressionError::from_kind(
                 ExpressionErrorKind::MemoryLimitExceeded {
                     used: projected,

@@ -223,7 +223,8 @@ For each completed task:
 ```
 
 Deferring adjustment when elapsed time is not measurable prevents a zero duration from
-producing an infinite ideal size that would saturate to `usize::MAX`. The blending in step 6
+producing an infinite ideal size that would saturate to `u64::MAX`. Item counts and chunk
+sizes are `u64`, matching `StepParameterSpaceIterator`, so they are exact on 32-bit targets too. The blending in step 6
 prevents wild oscillation when early tasks have atypical durations. After 10 tasks, the
 estimate stabilizes and the ideal size is used directly.
 

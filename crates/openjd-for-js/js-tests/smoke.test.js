@@ -299,6 +299,16 @@ describe("parseRangeExpr", () => {
     const result = mod.parseRangeExpr("1-10:3");
     expect(Array.from(result)).toEqual([1n, 4n, 7n, 10n]);
   });
+
+  it("refuses to materialize more values than the operation limit", () => {
+    expect(() => mod.parseRangeExpr("1-10000001")).toThrow(
+      new Error("Range expression has too many elements to materialize (10000001 > 10000000)")
+    );
+    // The exact count, past what a wasm32 usize can hold.
+    expect(() => mod.parseRangeExpr("1-5000000000")).toThrow(
+      new Error("Range expression has too many elements to materialize (5000000000 > 10000000)")
+    );
+  });
 });
 
 describe("range_expr values", () => {
@@ -1031,5 +1041,391 @@ describe("supportedExtensions on decodeJobTemplateFromObject (F8)", () => {
     expect(() =>
       mod.decodeJobTemplateFromObject(obj, undefined, ["TASK_CHUNKING"])
     ).toThrow(/EXPR|extension/i);
+  });
+});
+
+describe("StepParameterSpaceIterator", () => {
+  const TEMPLATE = JSON.stringify({
+    specificationVersion: "jobtemplate-2023-09",
+    name: "T",
+    steps: [
+      {
+        name: "Frames",
+        parameterSpace: {
+          taskParameterDefinitions: [{ name: "F", type: "INT", range: "1-3" }],
+        },
+        script: { actions: { onRun: { command: "x" } } },
+      },
+      { name: "Bare", script: { actions: { onRun: { command: "x" } } } },
+    ],
+  });
+
+  const withIter = (stepName, body) => {
+    const template = mod.decodeJobTemplate(TEMPLATE);
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    const job = mod.createJob(template, {}, opts);
+    try {
+      body(() => new mod.StepParameterSpaceIterator(job, stepName));
+    } finally {
+      job.free();
+      opts.free();
+      template.free();
+    }
+  };
+
+  it("reads a step's tasks by index", () => {
+    withIter("Frames", (make) => {
+      const iter = make();
+      expect(iter.count).toBe(3n);
+      expect(iter.names).toEqual(["F"]);
+      expect(iter.get(2n).get("F")).toBe("3");
+      expect(() => iter.get(3n)).toThrow(new Error("Index 3 out of range"));
+      iter.free();
+    });
+  });
+
+  it("gives a step without a parameter space one task", () => {
+    withIter("Bare", (make) => {
+      const iter = make();
+      expect(iter.count).toBe(1n);
+      expect(iter.get(0n).size).toBe(0);
+      iter.free();
+    });
+  });
+
+  it("rejects an unknown step name", () => {
+    withIter("Nope", (make) => {
+      expect(make).toThrow(new Error("Job has no step named 'Nope'"));
+    });
+  });
+});
+
+// ── Counts above 2^32 (wasm32) ─────────────────────────────────────
+//
+// WebAssembly is a 32-bit target, so `usize` is 32 bits here. Task, chunk,
+// and value counts are 64-bit end to end; these ranges have more values
+// than a 32-bit count can hold. Each is built from text, so no test lists
+// its values.
+
+describe("task counts above 2^32 (wasm32)", () => {
+  const chunkTemplate = (range, defaultTaskCount, rangeConstraint) =>
+    JSON.stringify({
+      specificationVersion: "jobtemplate-2023-09",
+      extensions: ["TASK_CHUNKING"],
+      name: "T",
+      steps: [
+        {
+          name: "S",
+          parameterSpace: {
+            taskParameterDefinitions: [
+              {
+                name: "F",
+                type: "CHUNK[INT]",
+                range,
+                chunks: { defaultTaskCount, rangeConstraint },
+              },
+            ],
+          },
+          script: { actions: { onRun: { command: "x" } } },
+        },
+      ],
+    });
+
+  // Creates the job, runs `body(job)`, and frees everything.
+  const withJob = (templateText, limits, body) => {
+    const template = mod.decodeJobTemplate(templateText);
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    try {
+      const job = mod.createJob(template, {}, opts, limits);
+      try {
+        body(job);
+      } finally {
+        job.free();
+      }
+    } finally {
+      opts.free();
+      template.free();
+    }
+  };
+
+  // The chunk strings at `indices`, from the step's parameter space.
+  const chunksAt = (job, indices) => {
+    const iter = new mod.StepParameterSpaceIterator(job, "S");
+    try {
+      return { count: iter.count, chunks: indices.map((i) => iter.get(i).get("F")) };
+    } finally {
+      iter.free();
+    }
+  };
+
+  it("counts and splits CONTIGUOUS 1-5000000000", () => {
+    withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [0n, 1n, 4n])).toEqual({
+        count: 5n,
+        chunks: ["1-1000000000", "1000000001-2000000000", "4000000001-5000000000"],
+      });
+    });
+  });
+
+  it("counts and splits NONCONTIGUOUS 1-5000000000", () => {
+    withJob(chunkTemplate("1-5000000000", 1000000000, "NONCONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [0n, 4n])).toEqual({
+        count: 5n,
+        chunks: ["1-1000000000", "4000000001-5000000000"],
+      });
+    });
+  });
+
+  it("counts every value of 1-4294967296 as a task", () => {
+    withJob(chunkTemplate("1-4294967296", 1, "CONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [0n, 4294967295n])).toEqual({
+        count: 4294967296n,
+        chunks: ["1-1", "4294967296-4294967296"],
+      });
+    });
+  });
+
+  it("places CONTIGUOUS chunks at offsets of 2^32 and beyond", () => {
+    // An offset into an interval past 2^32 wraps a 32-bit usize: index
+    // 4294967296 of 1-5000000000 read "705032704-705032704" that way.
+    withJob(chunkTemplate("1-5000000000", 1, "CONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [4294967295n, 4294967296n, 4999999999n])).toEqual({
+        count: 5000000000n,
+        chunks: ["4294967296-4294967296", "4294967297-4294967297", "5000000000-5000000000"],
+      });
+    });
+    withJob(chunkTemplate("1-10000000000", 1000000000, "CONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [4n, 5n, 9n])).toEqual({
+        count: 10n,
+        chunks: ["4000000001-5000000000", "5000000001-6000000000", "9000000001-10000000000"],
+      });
+    });
+  });
+
+  it("splits 1-4294967296 into two chunks of 2^31", () => {
+    withJob(chunkTemplate("1-4294967296", 2147483648, "CONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [0n, 1n])).toEqual({
+        count: 2n,
+        chunks: ["1-2147483648", "2147483649-4294967296"],
+      });
+    });
+  });
+
+  it("keeps a defaultTaskCount above 2^32", () => {
+    withJob(chunkTemplate("1-5000000000", 4294967297, "CONTIGUOUS"), undefined, (job) => {
+      expect(chunksAt(job, [0n, 1n])).toEqual({
+        count: 2n,
+        chunks: ["1-2500000000", "2500000001-5000000000"],
+      });
+      const chunks = job.toJSON().steps[0].parameterSpace.taskParameterDefinitions.get("F")
+        .chunkInt.chunks;
+      expect(chunks.defaultTaskCount).toBe(4294967297);
+    });
+  });
+
+  it("rejects an index past the last task", () => {
+    withJob(chunkTemplate("1-4294967296", 1, "CONTIGUOUS"), undefined, (job) => {
+      const iter = new mod.StepParameterSpaceIterator(job, "S");
+      try {
+        expect(() => iter.get(4294967296n)).toThrow(new Error("Index 4294967296 out of range"));
+      } finally {
+        iter.free();
+      }
+    });
+  });
+
+  it("rejects indices outside u64 instead of wrapping them", () => {
+    // A wasm-bindgen u64 parameter would wrap 2^64 to 0 (task 0) and -1 to
+    // 2^64 - 1; the index is range-checked as a bigint instead.
+    withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), undefined, (job) => {
+      const iter = new mod.StepParameterSpaceIterator(job, "S");
+      try {
+        expect(() => iter.get(2n ** 64n)).toThrow(new Error("Index 18446744073709551616 out of range"));
+        expect(() => iter.get(2n ** 64n + 1n)).toThrow(new Error("Index 18446744073709551617 out of range"));
+        expect(() => iter.get(-1n)).toThrow(new Error("Index -1 out of range"));
+        expect(() => iter.get(1)).toThrow(new Error("Index must be a bigint"));
+      } finally {
+        iter.free();
+      }
+    });
+  });
+
+  it("counts a product of parameters beyond 2^32", () => {
+    // 100000 x 100000 tasks: a 32-bit usize product overflowed here.
+    const template = mod.decodeJobTemplate(
+      JSON.stringify({
+        specificationVersion: "jobtemplate-2023-09",
+        name: "T",
+        steps: [
+          {
+            name: "S",
+            parameterSpace: {
+              taskParameterDefinitions: [
+                { name: "A", type: "INT", range: "1-100000" },
+                { name: "B", type: "INT", range: "1-100000" },
+              ],
+            },
+            script: { actions: { onRun: { command: "x" } } },
+          },
+        ],
+      })
+    );
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    try {
+      const job = mod.createJob(template, {}, opts);
+      const iter = new mod.StepParameterSpaceIterator(job, "S");
+      expect(iter.count).toBe(10000000000n);
+      const last = iter.get(9999999999n);
+      expect([last.get("A"), last.get("B")]).toEqual(["100000", "100000"]);
+      const middle = iter.get(4294967296n);
+      expect([middle.get("A"), middle.get("B")]).toEqual(["42950", "67297"]);
+      iter.free();
+      job.free();
+      expect(() => mod.createJob(template, {}, opts, { maxTaskCount: 1000000n })).toThrow(
+        new Error(
+          "Model validation error: 1 validation error for Template\n" +
+            "Template: Total task count (10000000000) exceeds caller limit of 1000000."
+        )
+      );
+    } finally {
+      opts.free();
+      template.free();
+    }
+  });
+
+  it("enforces maxTaskCount on 1-5000000000", () => {
+    expect(() =>
+      withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), { maxTaskCount: 1000000n }, () => {})
+    ).toThrow(
+      new Error(
+        "Model validation error: 1 validation error for Template\n" +
+          "Template: Total task count (5000000000) exceeds caller limit of 1000000."
+      )
+    );
+  });
+
+  it("enforces maxTaskCount on 1-4294967296", () => {
+    expect(() =>
+      withJob(chunkTemplate("1-4294967296", 1, "CONTIGUOUS"), { maxTaskCount: 1000000n }, () => {})
+    ).toThrow(
+      new Error(
+        "Model validation error: 1 validation error for Template\n" +
+          "Template: Total task count (4294967296) exceeds caller limit of 1000000."
+      )
+    );
+  });
+
+  it("accepts a maxTaskCount equal to the exact task count", () => {
+    withJob(chunkTemplate("1-5000000000", 1000000000, "CONTIGUOUS"), { maxTaskCount: 5000000000n }, (job) => {
+      expect(job.name).toBe("T");
+    });
+  });
+
+  // Evaluates `expr` and returns the error message it throws.
+  const evalError = (expr) => {
+    const st = new mod.SymbolTable();
+    try {
+      mod.evaluateExpression(expr, st);
+      return null;
+    } catch (e) {
+      return e.message;
+    } finally {
+      st.free();
+    }
+  };
+
+  it("charges the operation budget for a list plus a range of 2^32 values", () => {
+    // The list's length plus the range's saturated 2^32 - 1 wraps a 32-bit
+    // usize to 0 without saturating addition.
+    expect(evalError("[1] + range_expr('1-4294967296')")).toBe(
+      "Expression operation count (at least 4294967295) exceeded limit (10000000)\n" +
+        "  [1] + range_expr('1-4294967296')\n" +
+        "  ~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+    );
+    expect(evalError("range_expr('1-4294967296') + [1]")).toBe(
+      "Expression operation count (at least 4294967295) exceeded limit (10000000)\n" +
+        "  range_expr('1-4294967296') + [1]\n" +
+        "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~"
+    );
+  });
+
+  it("reports a range's exact length in an index error", () => {
+    expect(evalError("range_expr('1-5000000000')[5000000000]")).toBe(
+      "Index 5000000000 out of bounds for range_expr of length 5000000000\n" +
+        "  range_expr('1-5000000000')[5000000000]\n" +
+        "  ~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~"
+    );
+  });
+
+  it("charges the operation budget for concatenating two ranges of 2^31 values", () => {
+    // The two lengths sum to 2^32, which wraps a 32-bit usize to 0 and
+    // used to skip the budget (then trap building 2^32 values). The charge
+    // saturates at usize::MAX instead, so the count reads "at least".
+    const st = new mod.SymbolTable();
+    try {
+      expect(() =>
+        mod.evaluateExpression("range_expr('1-2147483648') + range_expr('1-2147483648')", st)
+      ).toThrow(
+        new Error(
+          "Expression operation count (at least 4294967295) exceeded limit (10000000)\n" +
+            "  range_expr('1-2147483648') + range_expr('1-2147483648')\n" +
+            "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+        )
+      );
+    } finally {
+      st.free();
+    }
+  });
+
+  it("rejects a saturated memory projection under the largest limits", () => {
+    // 2^27 values fit the operation limit but not the memory limit: the
+    // projected size saturates at usize::MAX, which is over every limit.
+    // Without that rule this trapped.
+    const st = new mod.SymbolTable();
+    try {
+      expect(() =>
+        mod.evaluateExpression("list(range_expr('1-134217728'))", st, undefined, {
+          operationLimit: 4294967295,
+          memoryLimit: 4294967295,
+        })
+      ).toThrow(
+        new Error(
+          "Expression memory usage (at least 4294967295 bytes) exceeded limit (4294967295 bytes)\n" +
+            "  list(range_expr('1-134217728'))\n" +
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+        )
+      );
+    } finally {
+      st.free();
+    }
+  });
+
+  it("rejects a saturated charge under the largest operation limit", () => {
+    // 4294967295 is usize::MAX here, the largest operationLimit a caller
+    // can pass. A saturated counter may stand for more, so it is over
+    // every limit; a 64-bit build rejects the same input and limit with
+    // the exact count. Without that rule this trapped.
+    const st = new mod.SymbolTable();
+    try {
+      for (const [expr, caret] of [
+        [
+          "range_expr('1-2147483648') + range_expr('1-2147483648')",
+          "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+        ["list(range_expr('1-5000000000'))", "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"],
+      ]) {
+        expect(() =>
+          mod.evaluateExpression(expr, st, undefined, { operationLimit: 4294967295 })
+        ).toThrow(
+          new Error(
+            "Expression operation count (at least 4294967295) exceeded limit (4294967295)\n" +
+              `  ${expr}\n` +
+              caret
+          )
+        );
+      }
+    } finally {
+      st.free();
+    }
   });
 });

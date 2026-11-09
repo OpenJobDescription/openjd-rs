@@ -542,10 +542,10 @@ pub struct openjd_expr::range_expr::IntRange
 impl openjd_expr::range_expr::IntRange
 pub fn openjd_expr::range_expr::IntRange::contains(&self, i64) -> bool
 pub fn openjd_expr::range_expr::IntRange::end(&self) -> i64
-pub fn openjd_expr::range_expr::IntRange::get(&self, usize) -> core::option::Option<i64>
+pub fn openjd_expr::range_expr::IntRange::get(&self, u64) -> core::option::Option<i64>
 pub fn openjd_expr::range_expr::IntRange::is_empty(&self) -> bool
 pub fn openjd_expr::range_expr::IntRange::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = i64> + '_
-pub fn openjd_expr::range_expr::IntRange::len(&self) -> usize
+pub fn openjd_expr::range_expr::IntRange::len(&self) -> u64
 pub fn openjd_expr::range_expr::IntRange::new(i64, i64, i64) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::range_expr::IntRange::start(&self) -> i64
 pub fn openjd_expr::range_expr::IntRange::step(&self) -> i64
@@ -575,7 +575,7 @@ pub fn openjd_expr::range_expr::RangeExpr::get(&self, i64) -> core::option::Opti
 pub fn openjd_expr::range_expr::RangeExpr::heap_size(&self) -> usize
 pub fn openjd_expr::range_expr::RangeExpr::is_empty(&self) -> bool
 pub fn openjd_expr::range_expr::RangeExpr::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = i64> + '_
-pub fn openjd_expr::range_expr::RangeExpr::len(&self) -> usize
+pub fn openjd_expr::range_expr::RangeExpr::len(&self) -> u64
 pub fn openjd_expr::range_expr::RangeExpr::ranges(&self) -> &[openjd_expr::range_expr::IntRange]
 pub fn openjd_expr::range_expr::RangeExpr::slice(&self, i64, i64, i64) -> core::result::Result<openjd_expr::range_expr::RangeExpr, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::range_expr::RangeExpr::to_vec(&self) -> alloc::vec::Vec<i64>
@@ -1391,7 +1391,7 @@ pub fn openjd_expr::range_expr::RangeExpr::get(&self, i64) -> core::option::Opti
 pub fn openjd_expr::range_expr::RangeExpr::heap_size(&self) -> usize
 pub fn openjd_expr::range_expr::RangeExpr::is_empty(&self) -> bool
 pub fn openjd_expr::range_expr::RangeExpr::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = i64> + '_
-pub fn openjd_expr::range_expr::RangeExpr::len(&self) -> usize
+pub fn openjd_expr::range_expr::RangeExpr::len(&self) -> u64
 pub fn openjd_expr::range_expr::RangeExpr::ranges(&self) -> &[openjd_expr::range_expr::IntRange]
 pub fn openjd_expr::range_expr::RangeExpr::slice(&self, i64, i64, i64) -> core::result::Result<openjd_expr::range_expr::RangeExpr, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::range_expr::RangeExpr::to_vec(&self) -> alloc::vec::Vec<i64>

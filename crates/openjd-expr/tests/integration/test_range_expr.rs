@@ -533,7 +533,7 @@ fn largest_count_parses_and_indexes() {
     within_deadline(Duration::from_secs(10), || {
         let max = i64::MAX;
         let range: RangeExpr = format!("1-{max}").parse().unwrap();
-        assert_eq!(range.len() as u64, openjd_expr::MAX_RANGE_EXPR_LEN);
+        assert_eq!(range.len(), openjd_expr::MAX_RANGE_EXPR_LEN);
         assert_eq!(range.get(-1), Some(max));
         assert_eq!(range.to_string(), format!("1-{max}"));
         // One more is too many.

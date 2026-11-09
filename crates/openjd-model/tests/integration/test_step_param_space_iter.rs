@@ -900,17 +900,17 @@ fn test_product_getitem() {
         let got = iter.get(i).unwrap();
         assert_eq!(
             iter_val_str(&got, "Param1"),
-            task_val_str(&collected, i, "Param1"),
+            task_val_str(&collected, i as usize, "Param1"),
             "Mismatch at index {i} for Param1"
         );
         assert_eq!(
             iter_val_str(&got, "Param2"),
-            task_val_str(&collected, i, "Param2"),
+            task_val_str(&collected, i as usize, "Param2"),
             "Mismatch at index {i} for Param2"
         );
         assert_eq!(
             iter_val_str(&got, "Param3"),
-            task_val_str(&collected, i, "Param3"),
+            task_val_str(&collected, i as usize, "Param3"),
             "Mismatch at index {i} for Param3"
         );
     }
@@ -948,7 +948,7 @@ fn test_associate_getitem() {
         ("3", "c", "-3"),
         ("4", "d", "-4"),
     ];
-    for (i, (p1, p2, p3)) in expected.iter().enumerate() {
+    for (i, (p1, p2, p3)) in (0u64..).zip(expected.iter()) {
         let set = iter.get(i).unwrap();
         assert_eq!(iter_val_str(&set, "Param1"), *p1, "index {i} Param1");
         assert_eq!(iter_val_str(&set, "Param2"), *p2, "index {i} Param2");
@@ -1010,7 +1010,7 @@ fn test_nested_expr_getitem() {
         for name in &["Param1", "Param2", "Param3", "Param4"] {
             assert_eq!(
                 iter_val_str(&got, name),
-                task_val_str(&tasks, i, name),
+                task_val_str(&tasks, i as usize, name),
                 "get({i}) mismatch for {name}"
             );
         }
