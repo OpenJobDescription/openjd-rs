@@ -90,9 +90,10 @@ fn validate_symlink_targets_relative(files: &[FileEntry]) -> Result<()> {
 
 /// Sum the `size` fields of encoded v2023 path entries.
 ///
-/// Checked rather than saturating: sizes are caller data, and v2023 has no way
-/// to represent a total above `u64::MAX`, so writing a clamped `totalSize`
-/// would produce a manifest that disagrees with its own entries.
+/// Checked rather than saturating: sizes are caller data, and a clamped
+/// `totalSize` would disagree with the entries. Python writes the exact
+/// (arbitrary-precision) sum instead; Rust's `u64` sizes cannot, so this is
+/// an intentional divergence (see `specs/snapshots/public-api.md`).
 fn v2023_total_size(paths: &[Value]) -> Result<u64> {
     paths
         .iter()

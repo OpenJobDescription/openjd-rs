@@ -302,7 +302,17 @@ pub fn encode_snapshot_diff_v2025(m: &SnapshotDiff) -> Result<String>;
 Both v2023 encoders write `totalSize` as the sum of the encoded entries'
 sizes and return `SnapshotError::Validation` if that sum exceeds `u64::MAX`;
 they never write a clamped total. The v2025 encoders write the manifest's
-`total_size` field as is.
+`total_size` field as is, which `recompute_total_size` may have clamped to
+`u64::MAX`.
+
+This is an intentional divergence from Python. Python's v2023 encoder uses
+arbitrary-precision integers, so it writes the exact sum (for example
+`18446744073709551616` for two `2^63`-byte files), and Python reads that
+back. Rust stores sizes as `u64`, so it cannot represent such a manifest: the
+v2023 encoders reject it rather than write a `totalSize` that disagrees with
+the entries, and `decode_v2023` rejects a `totalSize` above `u64::MAX` as
+`missing or invalid totalSize`. No real file set reaches this size; the limit
+matters only for crafted manifests.
 
 The generic `encode_v2025` is also public via the `codec` module path:
 

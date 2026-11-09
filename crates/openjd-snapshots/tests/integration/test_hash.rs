@@ -1124,33 +1124,41 @@ fn progress_with_cache_hits_counts_skipped() {
     assert!((result.statistics.progress - 100.0).abs() < 0.01);
 }
 
-/// Declared sizes come from the caller's manifest. Two files whose sizes
-/// sum past `u64::MAX` must not overflow the statistics: the byte counters
-/// and the hashed-plus-skipped sum behind `rate` and `progress` saturate.
+/// Declared sizes come from the caller's manifest. Two cached and two hashed
+/// files, each declared at 2^63 bytes, must not overflow the statistics: every
+/// byte counter and the hashed-plus-skipped sum behind `rate` and `progress`
+/// saturate.
+///
+/// The files are 1 byte. Today `file_size as i64` wraps negative for a 2^63
+/// declared size, which skips the declared-size check; if that check is
+/// fixed, hashing these files fails with a size mismatch and this test needs
+/// another way to reach a huge hashed-bytes count.
 #[test]
 fn statistics_saturate_on_huge_declared_sizes() {
     let tmp = TempDir::new().unwrap();
     let (_cache_dir, cache) = new_cache();
-    let (cached_path, _, cached_mtime) = make_file(tmp.path(), "cached.txt", b"a");
-    let (hashed_path, _, hashed_mtime) = make_file(tmp.path(), "hashed.txt", b"b");
-    cache
-        .put(
-            Path::new(&cached_path),
-            "xxh128",
-            0,
-            openjd_snapshots::hash_cache::WHOLE_FILE_RANGE_END,
-            &"a".repeat(32),
-            cached_mtime,
-        )
-        .unwrap();
-
     let huge = 1u64 << 63;
-    let m = snapshot(vec![
-        FileEntry::file(&cached_path, huge, cached_mtime),
-        FileEntry::file(&hashed_path, huge, hashed_mtime),
-    ]);
+    let mut files = Vec::new();
+    for name in ["cached1.txt", "cached2.txt"] {
+        let (path, _, mtime) = make_file(tmp.path(), name, b"a");
+        cache
+            .put(
+                Path::new(&path),
+                "xxh128",
+                0,
+                openjd_snapshots::hash_cache::WHOLE_FILE_RANGE_END,
+                &"a".repeat(32),
+                mtime,
+            )
+            .unwrap();
+        files.push(FileEntry::file(&path, huge, mtime));
+    }
+    for name in ["hashed1.txt", "hashed2.txt"] {
+        let (path, _, mtime) = make_file(tmp.path(), name, b"b");
+        files.push(FileEntry::file(&path, huge, mtime));
+    }
     let result = hash_abs_manifest(
-        &m,
+        &snapshot(files),
         HashOptions {
             hash_cache: Some(cache),
             max_workers: Some(1),
@@ -1161,7 +1169,7 @@ fn statistics_saturate_on_huge_declared_sizes() {
 
     let s = &result.statistics;
     assert_eq!(s.total_bytes, u64::MAX);
-    assert_eq!(s.hashed_bytes, huge);
-    assert_eq!(s.skipped_bytes, huge);
+    assert_eq!(s.hashed_bytes, u64::MAX);
+    assert_eq!(s.skipped_bytes, u64::MAX);
     assert_eq!(s.progress, 100.0);
 }

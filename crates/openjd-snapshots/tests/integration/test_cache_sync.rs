@@ -567,15 +567,18 @@ async fn cache_sync_same_cache_is_noop() {
     assert_eq!(result.statistics.copied_objects, 0);
 }
 
-/// Declared sizes come from the caller's manifests. Skipping two objects
-/// whose sizes sum past `u64::MAX`, then copying a third, must not overflow
-/// the copied-plus-skipped sum behind `rate` and `progress`.
+/// Declared sizes come from the caller's manifests. Objects the destination
+/// already has, declared at 2^63 bytes, around a 1-byte copy, must not
+/// overflow the statistics: every byte counter and the copied-plus-skipped
+/// sum behind `rate` and `progress` saturate on both the skip and the copy
+/// paths.
 #[tokio::test]
 async fn statistics_saturate_on_huge_declared_sizes() {
     let (_src_dir, src) = make_fs_cache();
     let (_dst_dir, dst) = make_fs_cache();
-    put(&dst, "h1", "xxh128", b"1").await;
-    put(&dst, "h2", "xxh128", b"2").await;
+    for h in ["h1", "h2", "h4"] {
+        put(&dst, h, "xxh128", h.as_bytes()).await;
+    }
     put(&src, "h3", "xxh128", b"3").await;
     let huge = 1u64 << 63;
     let entry = |name: &str, hash: &str, size: u64| {
@@ -584,17 +587,23 @@ async fn statistics_saturate_on_huge_declared_sizes() {
         e.size = Some(size);
         e
     };
+    // Skips, then the copy (its rate/progress sum sees skipped = MAX), then
+    // another skip (copied + skipped past MAX on the skip path).
     let manifest = test_manifest(vec![
         entry("a.txt", "h1", huge),
         entry("b.txt", "h2", huge),
         entry("c.txt", "h3", 1),
+        entry("d.txt", "h4", huge),
     ]);
 
     let result = cache_sync_manifest(
         &[&manifest as &dyn ManifestRef],
         src,
         dst.clone(),
-        CacheSyncOptions::default(),
+        CacheSyncOptions {
+            max_workers: Some(1),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();
@@ -602,4 +611,83 @@ async fn statistics_saturate_on_huge_declared_sizes() {
     let s = &result.statistics;
     assert_eq!(s.total_bytes, u64::MAX);
     assert_eq!(s.skipped_bytes, u64::MAX);
+    assert_eq!(s.copied_bytes, 1);
+    assert_eq!(s.progress, 100.0);
+}
+
+/// `progress` is the copied-plus-skipped share of `total_bytes`, as a
+/// percentage, in every progress callback and in the final statistics.
+#[tokio::test]
+async fn progress_reports_done_share_of_total_bytes() {
+    let (_src_dir, src) = make_fs_cache();
+    let (_dst_dir, dst) = make_fs_cache();
+    put(&dst, "h1", "xxh128", b"12345").await;
+    put(&src, "h2", "xxh128", b"123456789012345").await;
+    let entry = |name: &str, hash: &str, size: u64| {
+        let mut e = FileEntry::new(name);
+        e.hash = Some(hash.into());
+        e.size = Some(size);
+        e
+    };
+    let manifest = test_manifest(vec![entry("a.txt", "h1", 5), entry("b.txt", "h2", 15)]);
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen_cb = seen.clone();
+
+    let result = cache_sync_manifest(
+        &[&manifest as &dyn ManifestRef],
+        src,
+        dst.clone(),
+        CacheSyncOptions {
+            max_workers: Some(1),
+            on_progress: Some(Box::new(move |s| {
+                seen_cb.lock().unwrap().push(s.progress);
+                true
+            })),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let seen = seen.lock().unwrap().clone();
+    // One callback per object, then a final one.
+    assert_eq!(seen.len(), 3, "{seen:?}");
+    // Either object may finish first: the skip alone is 25%, the copy 75%.
+    assert!(seen[0] == 25.0 || seen[0] == 75.0, "{seen:?}");
+    assert_eq!(&seen[1..], &[100.0, 100.0], "{seen:?}");
+    assert_eq!(result.statistics.progress, 100.0);
+}
+
+/// With nothing to transfer (`total_bytes == 0`) progress stays 0 rather
+/// than dividing by zero.
+#[tokio::test]
+async fn progress_is_zero_when_total_bytes_is_zero() {
+    let (_src_dir, src) = make_fs_cache();
+    let (_dst_dir, dst) = make_fs_cache();
+    put(&dst, "h1", "xxh128", b"").await;
+    let mut e = FileEntry::new("a.txt");
+    e.hash = Some("h1".into());
+    e.size = Some(0);
+    let manifest = test_manifest(vec![e]);
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen_cb = seen.clone();
+
+    let result = cache_sync_manifest(
+        &[&manifest as &dyn ManifestRef],
+        src,
+        dst.clone(),
+        CacheSyncOptions {
+            on_progress: Some(Box::new(move |s| {
+                seen_cb.lock().unwrap().push(s.progress);
+                true
+            })),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.statistics.total_bytes, 0);
+    assert_eq!(result.statistics.progress, 0.0);
+    assert!(seen.lock().unwrap().iter().all(|p| *p == 0.0), "{seen:?}");
 }

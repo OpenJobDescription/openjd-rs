@@ -978,7 +978,8 @@ pub enum ModelError {
         end: Option<usize>,
         /// The `ExpressionError` behind a `create_job` resolution failure
         /// (job name, host-requirement names, amount `min`/`max`, attribute
-        /// `anyOf`/`allOf` values), or carried by a converted
+        /// `anyOf`/`allOf` values; an amount bound whose text is not a
+        /// finite number is `Expression` instead), or carried by a converted
         /// `FormatStringValidationError`; otherwise `None`. Also returned
         /// by `Error::source()`.
         source: Option<openjd_expr::ExpressionError>,
