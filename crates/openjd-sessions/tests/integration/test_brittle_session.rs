@@ -18,6 +18,7 @@ use openjd_model::job::{
 use openjd_sessions::action::ActionState;
 use openjd_sessions::error::SessionError;
 use openjd_sessions::session::{Session, SessionState};
+use std::collections::{BTreeMap, HashMap};
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -511,18 +512,53 @@ async fn assert_accepts_new_actions(s: &mut Session) {
     assert_eq!(s.environments_entered(), entered.as_slice());
 }
 
+/// An environment with no actions that defines `CLEAR_TEST_VAR=value`.
+fn env_with_var(name: &str, value: &str) -> Environment {
+    Environment {
+        name: name.into(),
+        description: None,
+        script: None,
+        variables: Some(HashMap::from([("CLEAR_TEST_VAR".into(), fs(value))])),
+        resolved_symtab: None,
+    }
+}
+
+/// Assert that a task sees `CLEAR_TEST_VAR=value`, so the variables of the
+/// environments still entered reach new actions.
+async fn assert_task_sees_var(s: &mut Session, value: &str) {
+    let r = s
+        .run_task(
+            "t-var",
+            &step(&format!("test \"$CLEAR_TEST_VAR\" = {value}")),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        r.state,
+        ActionState::Success,
+        "CLEAR_TEST_VAR must be {value}"
+    );
+    assert_eq!(s.state(), SessionState::Ready);
+}
+
 /// Call `clear_ending_only()` on a `ReadyEnding` session and check that it
-/// moves to `Ready` without touching the entered environments or the last
-/// action's status.
+/// moves to `Ready` without touching the entered environments, the last
+/// action's status or the environment variables.
 fn clear_and_check(s: &mut Session) {
     assert_eq!(s.state(), SessionState::ReadyEnding);
     let entered = s.environments_entered().to_vec();
+    let env_vars: BTreeMap<_, _> = s.evaluate_env_vars(None).into_iter().collect();
     // ActionStatus has no PartialEq; its Debug form covers every field.
     let status = format!("{:?}", s.action_status());
     s.clear_ending_only().unwrap();
     assert_eq!(s.state(), SessionState::Ready);
     assert_eq!(s.environments_entered(), entered.as_slice());
     assert_eq!(format!("{:?}", s.action_status()), status);
+    let env_vars_after: BTreeMap<_, _> = s.evaluate_env_vars(None).into_iter().collect();
+    assert_eq!(env_vars_after, env_vars);
 }
 
 /// Enter two environments and run a task that ends in `ending`. If
@@ -533,17 +569,14 @@ fn clear_and_check(s: &mut Session) {
 async fn check_clear_after_task_ending(ending: Ending, exit_inner_first: bool) {
     let tmp = TempDir::new().unwrap();
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    let mut outer_env = env("Outer", None, Some(action("echo outer-exited")));
+    outer_env.variables = env_with_var("Outer", "outer").variables;
     let outer = s
-        .enter_environment(
-            &env("Outer", None, Some(action("echo outer-exited"))),
-            None,
-            None,
-            None,
-        )
+        .enter_environment(&outer_env, None, None, None)
         .await
         .unwrap();
     let inner = s
-        .enter_environment(&env("Inner", None, None), None, None, None)
+        .enter_environment(&env_with_var("Inner", "inner"), None, None, None)
         .await
         .unwrap();
     run_ending_task(&mut s, ending).await;
@@ -564,6 +597,9 @@ async fn check_clear_after_task_ending(ending: Ending, exit_inner_first: bool) {
         vec![outer.clone(), inner.clone()]
     };
     assert_eq!(s.environments_entered(), expected.as_slice());
+    // The variables of exactly the environments still entered reach new
+    // actions: the exited inner one's override is gone, a kept one stays.
+    assert_task_sees_var(&mut s, if exit_inner_first { "outer" } else { "inner" }).await;
     assert_accepts_new_actions(&mut s).await;
 
     // An exited environment stays exited, and the rest exit in LIFO order.
@@ -608,11 +644,13 @@ async fn clear_ending_only_after_default_exit() {
         let tmp = TempDir::new().unwrap();
         let mut s = Session::new_for_test(tmp.path().to_path_buf());
         let outer = s
-            .enter_environment(&env("Outer", None, None), None, None, None)
+            .enter_environment(&env_with_var("Outer", "outer"), None, None, None)
             .await
             .unwrap();
+        let mut inner_env = env("Inner", None, on_exit.clone());
+        inner_env.variables = env_with_var("Inner", "inner").variables;
         let inner = s
-            .enter_environment(&env("Inner", None, on_exit.clone()), None, None, None)
+            .enter_environment(&inner_env, None, None, None)
             .await
             .unwrap();
         s.exit_environment(&inner, None, false, None).await.unwrap();
@@ -621,6 +659,7 @@ async fn clear_ending_only_after_default_exit() {
 
         clear_and_check(&mut s);
         assert_eq!(s.environments_entered(), std::slice::from_ref(&outer));
+        assert_task_sees_var(&mut s, "outer").await;
         assert_accepts_new_actions(&mut s).await;
     }
 }
@@ -738,4 +777,33 @@ async fn clear_ending_only_refused_in_ended() {
         assert_eq!(s.state(), SessionState::Ended);
         assert_clear_refused(&mut s);
     }
+}
+
+/// `clear_ending_only()` keeps the variables the session was constructed
+/// with (`SessionConfig::os_env_vars`), and new actions still see them.
+#[tokio::test]
+async fn clear_ending_only_keeps_session_env_vars() {
+    let tmp = TempDir::new().unwrap();
+    let config = openjd_sessions::session::SessionConfig {
+        limits: Default::default(),
+        session_id: "clear-ending-only".into(),
+        job_parameter_values: HashMap::new(),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: None,
+        os_env_vars: Some(HashMap::from([("CLEAR_TEST_VAR".into(), "ctor".into())])),
+        session_root_directory: Some(tmp.path().to_path_buf()),
+        user: None,
+        profile: None,
+        cancel_token: None,
+        debug_collect_stdout: false,
+        echo_openjd_directives: false,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
+    };
+    let mut s = Session::with_config(config).unwrap();
+    run_ending_task(&mut s, Ending::Failed).await;
+
+    clear_and_check(&mut s);
+    assert_task_sees_var(&mut s, "ctor").await;
+    s.cleanup();
 }

@@ -459,7 +459,8 @@ async fn test_cross_user_session_cancel_handle_mark_failed_helper_subprocess() {
 /// A subprocess that fails through the cross-user helper makes the session
 /// ending-only (specs/sessions/session.md § Brittle Sessions), so exiting an
 /// environment with `keep_session_running = true` must not bring it back to
-/// Ready. A succeeding helper subprocess leaves the session Ready.
+/// Ready. A succeeding helper subprocess leaves the session Ready, and
+/// `clear_ending_only()` makes helper subprocesses run again.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_failed_helper_subprocess_makes_session_ending_only() {
@@ -506,6 +507,21 @@ async fn test_cross_user_failed_helper_subprocess_makes_session_ending_only() {
             .await,
         Err(openjd_sessions::SessionError::InvalidState { .. })
     ));
+
+    session.clear_ending_only().unwrap();
+    assert_eq!(session.state(), SessionState::Ready);
+    let ok = session
+        .run_subprocess("true", None, None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(ok.state, ActionState::Success);
+    assert_eq!(session.state(), SessionState::Ready);
+    let failed = session
+        .run_subprocess("sh", Some(&args), None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(failed.state, ActionState::Failed);
+    assert_eq!(session.state(), SessionState::ReadyEnding);
     session.cleanup();
 }
 

@@ -160,7 +160,8 @@ impl Session {
     /// so it is ReadyEnding after this exit completes, blocking
     /// further work. `true` only means "don't make the session
     /// ending-only on this exit", so a session that was Ready stays
-    /// Ready for later `run_task` / `enter_environment` calls. It
+    /// Ready for later `run_task` / `enter_environment` calls unless
+    /// the `onExit` action fails, like any failed action. It
     /// never brings an ending-only session back to Ready, for example
     /// after an earlier action ended Failed, Canceled or Timeout;
     /// only `clear_ending_only` does that.

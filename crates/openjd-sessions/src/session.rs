@@ -1146,7 +1146,8 @@ impl Session {
     /// state `final_state` (spec § Brittle Sessions).
     ///
     /// A `Failed`, `Canceled` or `Timeout` action makes the session
-    /// ending-only for the rest of its life. The between-action state is
+    /// ending-only until the caller calls
+    /// [`clear_ending_only`](Self::clear_ending_only). The between-action state is
     /// then derived from `ending_only` alone, so `Ready` is reachable only
     /// while the session is not ending-only. Every path that ends an action
     /// goes through here, which is what lets the `state == Ready` checks in
@@ -1609,9 +1610,10 @@ impl Session {
     ///
     /// Environments must be exited in LIFO order (last entered, first exited).
     /// If `keep_session_running` is `false`, the session becomes ending-only and
-    /// is `ReadyEnding` after the exit. If it is `true`, this exit doesn't make
-    /// the session ending-only, and that is all it does: it never brings an
-    /// ending-only session back to `Ready`. A session that is already
+    /// is `ReadyEnding` after the exit. If it is `true`, the exit itself
+    /// doesn't make the session ending-only, though a failing `onExit` still
+    /// does, like any failed action. It never brings an ending-only session
+    /// back to `Ready`. A session that is already
     /// ending-only, for example because an action ended `Failed`, `Canceled` or
     /// `Timeout`, stays `ReadyEnding` until the caller calls
     /// [`clear_ending_only`](Self::clear_ending_only).
