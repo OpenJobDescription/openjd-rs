@@ -2002,3 +2002,59 @@ async fn streaming_file_skipped_when_exists_in_data_cache() {
     assert_eq!(r2.statistics.hashed_files, 0);
     assert_eq!(r2.statistics.uploaded_files, 0);
 }
+
+/// Declared sizes come from the caller's manifest. Two files declared at 2^63
+/// bytes, uploaded, re-hashed against a data cache that has them, and then
+/// skipped through the hash cache, must not overflow the statistics: every
+/// byte counter and the hashed-plus-skipped sum behind `rate` and `progress`
+/// saturate.
+#[tokio::test]
+async fn statistics_saturate_on_huge_declared_sizes() {
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let hc_dir = TempDir::new().unwrap();
+    let dc: Arc<dyn AsyncDataCache> =
+        Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
+    let hc = Arc::new(HashCache::new(hc_dir.path()).unwrap());
+    let huge = 1u64 << 63;
+    let files = ["a.txt", "b.txt"]
+        .iter()
+        .map(|n| {
+            let (path, _, mtime) = make_test_file(tmp.path(), n, n.as_bytes());
+            FileEntry::file(&path, huge, mtime)
+        })
+        .collect();
+    let m = AbsManifest::Snapshot(make_snapshot(files));
+    let run = |hash_cache: Option<Arc<HashCache>>| {
+        let (m, dc) = (&m, dc.clone());
+        async move {
+            hash_upload_abs_manifest(
+                m,
+                dc,
+                HashUploadOptions {
+                    hash_cache,
+                    max_workers: Some(1),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .statistics
+        }
+    };
+
+    // Hashed and uploaded; fills the hash cache.
+    let s = run(Some(hc.clone())).await;
+    assert_eq!(s.total_bytes, u64::MAX);
+    assert_eq!(s.hashed_bytes, u64::MAX);
+    assert_eq!(s.uploaded_bytes, u64::MAX);
+    assert_eq!(s.progress, 100.0);
+    // Hashed again without the hash cache; the data cache already has them.
+    let s = run(None).await;
+    assert_eq!(s.hashed_bytes, u64::MAX);
+    assert_eq!(s.skipped_bytes, u64::MAX);
+    // Hash-cache hits.
+    let s = run(Some(hc)).await;
+    assert_eq!(s.skipped_bytes, u64::MAX);
+    assert_eq!(s.progress, 100.0);
+}

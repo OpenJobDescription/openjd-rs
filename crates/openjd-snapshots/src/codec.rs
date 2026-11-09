@@ -88,7 +88,28 @@ fn validate_symlink_targets_relative(files: &[FileEntry]) -> Result<()> {
     Ok(())
 }
 
-/// Encode a Snapshot to v2023 JSON.
+/// Sum the `size` fields of encoded v2023 path entries.
+///
+/// Checked rather than saturating: sizes are caller data, and a clamped
+/// `totalSize` would disagree with the entries. Python writes the exact
+/// (arbitrary-precision) sum instead; Rust's `u64` sizes cannot, so this is
+/// an intentional divergence (see `specs/snapshots/public-api.md`).
+fn v2023_total_size(paths: &[Value]) -> Result<u64> {
+    paths
+        .iter()
+        .try_fold(0u64, |acc, p| {
+            acc.checked_add(p["size"].as_u64().unwrap_or(0))
+        })
+        .ok_or_else(|| {
+            SnapshotError::Validation(
+                "v2023 totalSize: the file sizes sum past u64::MAX".to_string(),
+            )
+        })
+}
+
+/// Encode a Snapshot to v2023 JSON. Fails with `SnapshotError::Validation`
+/// if a file is missing a hash, a symlink target is absolute, the chunk size
+/// is not whole-file, or the file sizes sum past `u64::MAX`.
 pub fn encode_snapshot_v2023(manifest: &Snapshot) -> Result<String> {
     validate_symlink_targets_relative(&manifest.files)?;
     if manifest.file_chunk_size_bytes != WHOLE_FILE_CHUNK_SIZE {
@@ -149,14 +170,16 @@ pub fn encode_snapshot_v2023(manifest: &Snapshot) -> Result<String> {
         "hashAlg": hash_alg_str(collapsed.hash_alg),
         "manifestVersion": V2023_MANIFEST_VERSION,
         "paths": paths,
-        "totalSize": collapsed.total_size,
+        "totalSize": v2023_total_size(&paths)?,
     });
 
     // sort_keys + no whitespace = canonical JSON
     Ok(canonical_json(&obj))
 }
 
-/// Encode a SnapshotDiff to v2023 JSON (drops deletions).
+/// Encode a SnapshotDiff to v2023 JSON (drops deletions). Fails with
+/// `SnapshotError::Validation` under the same conditions as
+/// [`encode_snapshot_v2023`], including file sizes that sum past `u64::MAX`.
 pub fn encode_snapshot_diff_v2023(manifest: &SnapshotDiff) -> Result<String> {
     validate_symlink_targets_relative(&manifest.files)?;
     if manifest.file_chunk_size_bytes != WHOLE_FILE_CHUNK_SIZE {
@@ -228,7 +251,7 @@ pub fn encode_snapshot_diff_v2023(manifest: &SnapshotDiff) -> Result<String> {
     });
 
     // Recompute total_size from non-deleted files only
-    let total_size: u64 = paths.iter().map(|p| p["size"].as_u64().unwrap_or(0)).sum();
+    let total_size = v2023_total_size(&paths)?;
 
     let obj = serde_json::json!({
         "hashAlg": hash_alg_str(collapsed.hash_alg),

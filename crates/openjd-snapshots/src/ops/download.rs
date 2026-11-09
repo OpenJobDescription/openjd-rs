@@ -200,7 +200,7 @@ fn collect_work_item(
 ) {
     let file_size = file.size.unwrap_or(0);
     stats.total_files += 1;
-    stats.total_bytes += file_size;
+    stats.total_bytes = stats.total_bytes.saturating_add(file_size);
 
     let path = Path::new(&file.path);
 
@@ -214,7 +214,7 @@ fn collect_work_item(
                     {
                         if cached_hash == *file_hash {
                             stats.skipped_files += 1;
-                            stats.skipped_bytes += file_size;
+                            stats.skipped_bytes = stats.skipped_bytes.saturating_add(file_size);
                             work_items.push((index, true, actual_mtime));
                             return;
                         }
@@ -246,7 +246,7 @@ fn collect_work_item(
                         }
                         if all_cached {
                             stats.skipped_files += 1;
-                            stats.skipped_bytes += file_size;
+                            stats.skipped_bytes = stats.skipped_bytes.saturating_add(file_size);
                             work_items.push((index, true, actual_mtime));
                             return;
                         }
@@ -260,7 +260,7 @@ fn collect_work_item(
     if path.exists() && conflict_res == FileConflictResolution::Skip {
         debug!(path = %file.path, "file exists, skipping per conflict resolution policy");
         stats.skipped_files += 1;
-        stats.skipped_bytes += file_size;
+        stats.skipped_bytes = stats.skipped_bytes.saturating_add(file_size);
         let mtime = get_mtime(path).ok();
         work_items.push((index, true, mtime.unwrap_or(0)));
         return;
@@ -715,15 +715,15 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
                 {
                     let mut s = progress_stats.lock().unwrap();
                     s.downloaded_files += 1;
-                    s.downloaded_bytes += file_size;
+                    s.downloaded_bytes = s.downloaded_bytes.saturating_add(file_size);
                     let elapsed = start.elapsed().as_secs_f64();
                     s.total_time = elapsed;
                     {
                         let mut rc = rate_calc.lock().unwrap();
-                        s.rate = rc.update(elapsed, s.downloaded_bytes + s.skipped_bytes);
+                        s.rate = rc.update(elapsed, s.downloaded_bytes.saturating_add(s.skipped_bytes));
                     }
                     if s.total_bytes > 0 {
-                        s.progress = ((s.downloaded_bytes + s.skipped_bytes) as f64
+                        s.progress = ((s.downloaded_bytes.saturating_add(s.skipped_bytes)) as f64
                             / s.total_bytes as f64)
                             * 100.0;
                     }
@@ -813,11 +813,11 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
         let mut rc = rate_calc.lock().unwrap();
         stats.rate = rc.update(
             stats.total_time,
-            stats.downloaded_bytes + stats.skipped_bytes,
+            stats.downloaded_bytes.saturating_add(stats.skipped_bytes),
         );
     }
     if stats.total_bytes > 0 {
-        stats.progress = ((stats.downloaded_bytes + stats.skipped_bytes) as f64
+        stats.progress = ((stats.downloaded_bytes.saturating_add(stats.skipped_bytes)) as f64
             / stats.total_bytes as f64)
             * 100.0;
     }

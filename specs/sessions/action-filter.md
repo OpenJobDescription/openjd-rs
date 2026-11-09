@@ -62,6 +62,22 @@ The `cancel` flag indicates that the action should be canceled and marked as fai
 (e.g., due to a malformed directive). The caller in `subprocess.rs` maps these to
 `ActionMessage` variants and sends them through the mpsc channel.
 
+A malformed directive produces one callback with `cancel: true` and the error
+text as its `String` value:
+
+- An `openjd_env` or `openjd_unset_env` line whose payload does not parse has
+  the directive's kind (`Env` or `UnsetEnv`). A malformed
+  `openjd_redacted_env` line does the same with kind `Env` when redaction is
+  not enabled; when it is, the filter only logs a warning.
+  `process_line` does not apply it: an `Env` or `UnsetEnv` callback carrying a
+  `String` sends no `SetEnv` or `UnsetEnv` message.
+- A line that is not a directive but looks like an env directive (wrong case,
+  or no space after the colon, such as `OPENJD_ENV: X=1` or `openjd_env:X=1`)
+  has kind `Fail`, and `process_line` sends `Fail` with the error text.
+
+For every `cancel: true` callback, `process_line` then sends
+`CancelMarkFailed { fail_message: "Action canceled due to malformed command" }`.
+
 ### Why `session_id` is a parameter
 
 The filter stores a `session_id` at construction and compares it against the
@@ -96,9 +112,9 @@ including `openjd_redacted_env`. Earlier revisions of this code special-cased
 
 ### Why Vec instead of Option for callbacks
 
-A single line can produce multiple callbacks in edge cases (e.g., a malformed directive
-that produces both a `Fail` callback and a cancel callback). Using `Vec`
-avoids special-casing these.
+A single line produces zero or one callback today (a malformed directive is one
+callback with `cancel: true`, not two). `Vec` keeps the signature open for
+directives that need more without changing callers.
 
 ### Dynamic log level via openjd_session_runtime_loglevel
 
@@ -160,7 +176,9 @@ filter checks specifically for env-related directives:
 
 1. Performs a case-insensitive check for `openjd_env`, `openjd_redacted_env`, or
    `openjd_unset_env` followed by a colon, space, or end-of-string
-2. If it matches, emits `ActionMessage::CancelMarkFailed` with an error message
+2. If it matches, returns a `Fail` callback with `cancel: true` whose value is the
+   error text; `process_line` sends `ActionMessage::Fail` with that text, then
+   `ActionMessage::CancelMarkFailed` with the fixed message described above
 3. The session cancels the action with `Failed` state
 
 Only env-related directives are checked for malformation because they have side effects

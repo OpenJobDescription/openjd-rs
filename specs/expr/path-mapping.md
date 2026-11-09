@@ -344,11 +344,28 @@ Path-related operations in the expression language:
 | `with_name(name)` | `(path, string) -> path` | Replace last component |
 | `with_stem(stem)` | `(path, string) -> path` | Replace stem, keep extension |
 | `with_suffix(suffix)` | `(path, string) -> path` | Replace extension |
-| `with_number(n)` | `(path, int) -> path` / `(string, int) -> path` | Append frame number |
+| `with_number(n)` | `(path, int) -> path` / `(string, int) -> string` | Put frame number `n` into the stem (see below) |
 | `as_posix()` | `(path) -> string` | Convert to POSIX string |
 | `is_absolute()` | `(path) -> bool` | Check if path is absolute |
 | `is_relative_to(other)` | `(path, path) -> bool` | Check prefix relationship |
 | `relative_to(other)` | `(path, path) -> path` | Compute relative path |
+
+`with_number(n)` rewrites the stem (the extension is kept) by the first
+rule that matches:
+
+1. The stem ends in `%d`: replace it with `n`.
+2. The stem ends in `%0Nd`: replace it with `n` padded to width `N`.
+3. The stem contains `#`: keep the stem up to the last run of `#` and
+   replace that run with `n` padded to the run's length. Any text after the
+   run is dropped (`f_####_v2` becomes `f_0007`); this is a known bug.
+4. The stem ends in ASCII digits: replace them with `n` padded to their
+   count.
+5. Otherwise append `_` and `n` padded to width 4.
+
+Padding adds leading zeros; a negative `n` keeps the width with its `-`
+counted (`-7` at width 4 is `-007`), and an `n` wider than the width is
+written in full. A `%0Nd` or `#` width above 32 raises `ExpressionError`;
+a trailing digit run of any length is replaced at its own width.
 
 > **URI paths in path methods.** The path properties and the
 > `with_*` methods all detect URI inputs (`uri_path::is_uri`) and

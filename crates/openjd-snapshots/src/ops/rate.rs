@@ -33,7 +33,7 @@ impl SlidingWindowRate {
         let (oldest_time, oldest_bytes) = self.history[0];
         let time_delta = timestamp - oldest_time;
         if time_delta > 0.0 {
-            (cumulative_bytes - oldest_bytes) as f64 / time_delta
+            cumulative_bytes.saturating_sub(oldest_bytes) as f64 / time_delta
         } else {
             0.0
         }

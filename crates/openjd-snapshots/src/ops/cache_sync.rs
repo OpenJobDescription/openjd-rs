@@ -195,7 +195,10 @@ pub async fn cache_sync_manifest(
 
     let mut stats = CacheSyncStatistics {
         total_objects: work_items.len(),
-        total_bytes: work_items.iter().map(|(_, _, s)| *s).sum(),
+        total_bytes: work_items
+            .iter()
+            .map(|(_, _, s)| *s)
+            .fold(0u64, u64::saturating_add),
         ..Default::default()
     };
 
@@ -249,16 +252,17 @@ pub async fn cache_sync_manifest(
             if dst.object_exists(&hash, &alg).await.unwrap_or(false) {
                 let mut s = progress_stats.lock().unwrap();
                 s.skipped_objects += 1;
-                s.skipped_bytes += size_est;
+                s.skipped_bytes = s.skipped_bytes.saturating_add(size_est);
                 let elapsed = start.elapsed().as_secs_f64();
                 s.total_time = elapsed;
                 {
                     let mut rc = rate_calc.lock().unwrap();
-                    s.rate = rc.update(elapsed, s.copied_bytes + s.skipped_bytes);
+                    s.rate = rc.update(elapsed, s.copied_bytes.saturating_add(s.skipped_bytes));
                 }
                 if s.total_bytes > 0 {
-                    s.progress =
-                        ((s.copied_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+                    s.progress = ((s.copied_bytes.saturating_add(s.skipped_bytes)) as f64
+                        / s.total_bytes as f64)
+                        * 100.0;
                 }
                 if let Some(ref cb) = on_progress {
                     if !cb(&s) {
@@ -274,15 +278,15 @@ pub async fn cache_sync_manifest(
                 Ok(CopyResult::ServerSideCopy) => {
                     let mut s = progress_stats.lock().unwrap();
                     s.copied_objects += 1;
-                    s.copied_bytes += size_est;
+                    s.copied_bytes = s.copied_bytes.saturating_add(size_est);
                     let elapsed = start.elapsed().as_secs_f64();
                     s.total_time = elapsed;
                     {
                         let mut rc = rate_calc.lock().unwrap();
-                        s.rate = rc.update(elapsed, s.copied_bytes + s.skipped_bytes);
+                        s.rate = rc.update(elapsed, s.copied_bytes.saturating_add(s.skipped_bytes));
                     }
                     if s.total_bytes > 0 {
-                        s.progress = ((s.copied_bytes + s.skipped_bytes) as f64
+                        s.progress = ((s.copied_bytes.saturating_add(s.skipped_bytes)) as f64
                             / s.total_bytes as f64)
                             * 100.0;
                     }
@@ -305,16 +309,17 @@ pub async fn cache_sync_manifest(
             {
                 let mut s = progress_stats.lock().unwrap();
                 s.copied_objects += 1;
-                s.copied_bytes += actual_size;
+                s.copied_bytes = s.copied_bytes.saturating_add(actual_size);
                 let elapsed = start.elapsed().as_secs_f64();
                 s.total_time = elapsed;
                 {
                     let mut rc = rate_calc.lock().unwrap();
-                    s.rate = rc.update(elapsed, s.copied_bytes + s.skipped_bytes);
+                    s.rate = rc.update(elapsed, s.copied_bytes.saturating_add(s.skipped_bytes));
                 }
                 if s.total_bytes > 0 {
-                    s.progress =
-                        ((s.copied_bytes + s.skipped_bytes) as f64 / s.total_bytes as f64) * 100.0;
+                    s.progress = ((s.copied_bytes.saturating_add(s.skipped_bytes)) as f64
+                        / s.total_bytes as f64)
+                        * 100.0;
                 }
                 if let Some(ref cb) = on_progress {
                     if !cb(&s) {
@@ -345,11 +350,15 @@ pub async fn cache_sync_manifest(
     stats.total_time = start_time.elapsed().as_secs_f64();
     {
         let mut rc = rate_calc.lock().unwrap();
-        stats.rate = rc.update(stats.total_time, stats.copied_bytes + stats.skipped_bytes);
+        stats.rate = rc.update(
+            stats.total_time,
+            stats.copied_bytes.saturating_add(stats.skipped_bytes),
+        );
     }
     if stats.total_bytes > 0 {
-        stats.progress =
-            ((stats.copied_bytes + stats.skipped_bytes) as f64 / stats.total_bytes as f64) * 100.0;
+        stats.progress = ((stats.copied_bytes.saturating_add(stats.skipped_bytes)) as f64
+            / stats.total_bytes as f64)
+            * 100.0;
     }
 
     let mut parts = vec![

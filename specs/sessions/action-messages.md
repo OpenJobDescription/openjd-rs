@@ -36,9 +36,12 @@ locks needed.
 
 When the `ActionFilter` detects a malformed `openjd_*` directive (e.g., wrong case or
 missing space after colon), it emits `CancelMarkFailed` to cancel the action and mark
-it as failed. The `fail_message` field provides context about what was malformed, which
-the session stores as `action_fail_message` and reports via the callback. Without this
-field, the consumer would only know the action was canceled but not why.
+it as failed. The session stores `fail_message` as the action's fail message (replacing
+any earlier `Fail` text) and reports it via the callback. `process_line` currently sends
+the fixed text "Action canceled due to malformed command"; the specific parse error
+reaches the session only through the `Fail` message sent before it, for near-miss
+directives. Without this field, the consumer would only know the action was canceled but
+not why.
 
 ## Channel Architecture
 

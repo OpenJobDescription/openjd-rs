@@ -521,7 +521,7 @@ Handles each `ActionMessage` variant:
 | `SetEnv { name, value }` | Adds to current environment's change set |
 | `UnsetEnv { name }` | Adds unset to current environment's change set |
 | `RedactedEnv { name, value }` | Same as SetEnv + adds value to redaction set |
-| `CancelMarkFailed` | Sets `action_fail_message`, triggers cancelation with `mark_action_failed = true` |
+| `CancelMarkFailed` | Sets `action_status.fail_message` (replacing any earlier `Fail` text), triggers cancelation with `mark_action_failed = true` |
 
 After each message, the user callback is invoked with the updated `ActionStatus`.
 

@@ -823,8 +823,9 @@ impl<'a> Evaluator<'a> {
             }
         }
         // Fall back: evaluate the value, then access the attribute via library.
-        // If the base evaluation fails (e.g., "Param" is a subtable not a value),
-        // and we had a dotted path, report the dotted path as undefined with suggestions.
+        // If the base is undefined (e.g., "Param" is a subtable, not a value)
+        // and we had a dotted path, report the dotted path as undefined with
+        // suggestions; any other base error is kept.
         //
         // Both fallback arms below replace the original error with a
         // friendlier one. A budget error is never replaced: the rewritten
@@ -1208,10 +1209,12 @@ impl<'a> Evaluator<'a> {
         let mut left = self.eval_node(first, None)?;
         // An unresolved operand still goes through dispatch: the library
         // matches the operand types against the operator's signatures and
-        // returns `unresolved[bool]` on success, so a comparison whose types
-        // can never match (`Param.Name in [1, 2]` with a STRING parameter,
-        // or `Param.Path < 1`) is refused at validation time rather than on
-        // the worker. Only the value is deferred, not the type check.
+        // returns `unresolved[bool]` on success, so a membership test whose
+        // types can never match (`Param.Name in [1, 2]` with a STRING
+        // parameter) is refused at validation time rather than on the
+        // worker. The ordering operators are `(T1, T2)`, so their cross-type
+        // refusal (`Param.Path < 1`) is still a run-time one (see
+        // specs/expr/function-library.md).
         let mut seen_unresolved = false;
         let last_index = c.ops.len().saturating_sub(1);
         for (index, (op, right_node)) in c.ops.iter().zip(comparators.iter()).enumerate() {

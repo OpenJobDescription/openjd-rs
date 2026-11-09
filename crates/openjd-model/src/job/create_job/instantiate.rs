@@ -681,6 +681,7 @@ fn resolve_capability_name(
             input: Some(name.raw().to_string()),
             start: None,
             end: None,
+            source: Some(e),
         })?;
     let path = vec![
         PathElement::Field("steps".to_string()),

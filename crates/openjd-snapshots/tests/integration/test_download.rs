@@ -1858,3 +1858,84 @@ async fn download_restores_mtime_chunked() {
     );
     assert_eq!(result.manifest.files()[0].mtime.unwrap(), on_disk_mtime);
 }
+
+/// Declared sizes come from the caller's manifest. Two files declared at 2^63
+/// bytes on each download path (whole-file hash-cache skip, chunk hash-cache
+/// skip, conflict skip, and download) must not overflow the statistics: every
+/// byte counter and the downloaded-plus-skipped sum behind `rate` and
+/// `progress` saturate.
+#[tokio::test]
+async fn statistics_saturate_on_huge_declared_sizes() {
+    let tmp = TempDir::new().unwrap();
+    let cache_dir = TempDir::new().unwrap();
+    let hc_dir = TempDir::new().unwrap();
+    let dc = new_data_cache(&cache_dir);
+    let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
+    let huge = 1u64 << 63;
+    let cs = DEFAULT_FILE_CHUNK_SIZE as u64;
+    let mtime_of = |p: &std::path::Path| {
+        std::fs::metadata(p)
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64
+    };
+    let mut files = Vec::new();
+    for i in 0..8 {
+        let dest = tmp.path().join(format!("f{i}.txt"));
+        let mut e = hashed_entry(&dest.to_string_lossy(), b"x", &*dc).await;
+        e.size = Some(huge);
+        let hash = e.hash.clone().unwrap();
+        match i {
+            // Whole-file hash-cache hit.
+            0 | 1 => {
+                std::fs::write(&dest, b"x").unwrap();
+                hc.put(
+                    &dest,
+                    "xxh128",
+                    0,
+                    openjd_snapshots::hash_cache::WHOLE_FILE_RANGE_END,
+                    &hash,
+                    mtime_of(&dest),
+                )
+                .unwrap();
+            }
+            // Chunk hash-cache hit: one chunk, cached for its range.
+            2 | 3 => {
+                std::fs::write(&dest, b"x").unwrap();
+                hc.put(&dest, "xxh128", 0, cs as i64, &hash, mtime_of(&dest))
+                    .unwrap();
+                e.hash = None;
+                e.chunk_hashes = Some(vec![hash]);
+            }
+            // Exists, not cached: skipped by the conflict policy.
+            4 | 5 => std::fs::write(&dest, b"x").unwrap(),
+            // Missing: downloaded.
+            _ => {}
+        }
+        files.push(e);
+    }
+
+    let result = download_abs_manifest(
+        &AbsManifest::Snapshot(make_snapshot(files)),
+        dc.clone(),
+        DownloadOptions {
+            hash_cache: Some(hc),
+            file_conflict_resolution: FileConflictResolution::Skip,
+            max_workers: Some(1),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    let s = &result.statistics;
+    assert_eq!(s.skipped_files, 6);
+    assert_eq!(s.downloaded_files, 2);
+    assert_eq!(s.total_bytes, u64::MAX);
+    assert_eq!(s.skipped_bytes, u64::MAX);
+    assert_eq!(s.downloaded_bytes, u64::MAX);
+    assert_eq!(s.progress, 100.0);
+}
