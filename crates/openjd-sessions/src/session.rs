@@ -1614,8 +1614,9 @@ impl Session {
     /// Environments must be exited in LIFO order (last entered, first exited).
     /// If `keep_session_running` is `false`, the session becomes ending-only and
     /// is `ReadyEnding` after the exit. If it is `true`, the exit itself
-    /// doesn't make the session ending-only, though a failing `onExit` still
-    /// does, like any failed action. It never brings an ending-only session
+    /// doesn't make the session ending-only, though an `onExit` that ends
+    /// `Failed`, `Canceled` or `Timeout` still does, like any other action.
+    /// It never brings an ending-only session
     /// back to `Ready`. A session that is already
     /// ending-only, for example because an action ended `Failed`, `Canceled` or
     /// `Timeout`, stays `ReadyEnding` until the caller calls

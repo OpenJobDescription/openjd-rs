@@ -53,7 +53,8 @@ The `ending_only` flag is set when:
 - `exit_environment()` is called without `keep_session_running` (the default)
 
 `keep_session_running = true` means only "don't make the session ending-only on this
-exit". A failing `onExit` still makes it ending-only, like any failed action, and
+exit". An `onExit` that ends `Failed`, `Canceled` or `Timeout` still makes it ending-only,
+like any other action, and
 `keep_session_running` never clears `ending_only`. When an action ends, the session goes to
 `ReadyEnding` if `ending_only` is set and to `Ready` otherwise, so `keep_session_running`
 can't bring an ending-only session back to `Ready`. All of these paths settle the state
