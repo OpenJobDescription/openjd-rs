@@ -74,7 +74,8 @@ The only way back to `Ready` is an explicit call to the public method
   default `exit_environment`) and sets the state to `Ready`.
 - It runs no action and changes nothing else: the entered environments, the last action's
   status and the session's environment variables stay as they were. A later failure
-  makes the session ending-only again.
+  makes the session ending-only again, and so does every action after a
+  `SessionConfig::cancel_token` cancellation, which is permanent.
 
 It's for callers that deliberately want to keep running work after a failure or an
 ending exit, and they take responsibility for the session's state. A failed or canceled

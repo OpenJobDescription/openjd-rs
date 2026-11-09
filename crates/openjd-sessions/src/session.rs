@@ -1125,6 +1125,9 @@ impl Session {
     /// it. The method clears ending-only mode whatever set it. It runs no
     /// action and changes nothing else: the entered environments, the last
     /// action's status and the environment variables stay as they were.
+    /// It doesn't undo a canceled [`SessionConfig::cancel_token`]: that
+    /// cancellation is permanent, so every later action still ends
+    /// `Canceled` and makes the session ending-only again.
     ///
     /// # Errors
     ///

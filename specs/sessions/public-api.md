@@ -228,8 +228,9 @@ impl Session {
     /// The only way back to Ready after a Failed, Canceled or Timeout
     /// action or an ending `exit_environment`, whatever set it. Fails
     /// with `SessionError::InvalidState` in any other state. Runs no
-    /// action and leaves the entered environments and the last action
-    /// status as they were.
+    /// action and leaves the entered environments, the last action
+    /// status and the environment variables as they were. A canceled
+    /// `SessionConfig.cancel_token` stays canceled.
     ///
     /// Use with care: by default a session only allows shutdown after
     /// a failure. This is for callers that deliberately keep running

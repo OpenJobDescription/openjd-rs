@@ -779,19 +779,16 @@ async fn clear_ending_only_refused_in_ended() {
     }
 }
 
-/// `clear_ending_only()` keeps the variables the session was constructed
-/// with (`SessionConfig::os_env_vars`), and new actions still see them.
-#[tokio::test]
-async fn clear_ending_only_keeps_session_env_vars() {
-    let tmp = TempDir::new().unwrap();
-    let config = openjd_sessions::session::SessionConfig {
+/// A `SessionConfig` for the tests that need `Session::with_config`.
+fn config_for_test(tmp: &TempDir) -> openjd_sessions::session::SessionConfig {
+    openjd_sessions::session::SessionConfig {
         limits: Default::default(),
         session_id: "clear-ending-only".into(),
         job_parameter_values: HashMap::new(),
         path_mapping_rules: None,
         retain_working_dir: false,
         callback: None,
-        os_env_vars: Some(HashMap::from([("CLEAR_TEST_VAR".into(), "ctor".into())])),
+        os_env_vars: None,
         session_root_directory: Some(tmp.path().to_path_buf()),
         user: None,
         profile: None,
@@ -799,11 +796,106 @@ async fn clear_ending_only_keeps_session_env_vars() {
         debug_collect_stdout: false,
         echo_openjd_directives: false,
         sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
+    }
+}
+
+/// `clear_ending_only()` keeps the variables the session was constructed
+/// with (`SessionConfig::os_env_vars`), and new actions still see them.
+#[tokio::test]
+async fn clear_ending_only_keeps_session_env_vars() {
+    let tmp = TempDir::new().unwrap();
+    let config = openjd_sessions::session::SessionConfig {
+        os_env_vars: Some(HashMap::from([("CLEAR_TEST_VAR".into(), "ctor".into())])),
+        ..config_for_test(&tmp)
     };
     let mut s = Session::with_config(config).unwrap();
     run_ending_task(&mut s, Ending::Failed).await;
 
     clear_and_check(&mut s);
     assert_task_sees_var(&mut s, "ctor").await;
+    s.cleanup();
+}
+
+/// `clear_ending_only()` keeps every field of the failed action's status,
+/// the values the session redacts, and the working directory that
+/// `cleanup()` later removes. The failing task reports progress, a status
+/// message, a fail message and a redacted value first, so none of the
+/// before/after comparisons is between two `None`s.
+#[tokio::test]
+async fn clear_ending_only_keeps_action_status_and_redactions() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    let id = s
+        .enter_environment(
+            &env(
+                "Env",
+                Some(action(
+                    "echo 'openjd_redacted_env: CLEAR_TEST_SECRET=hunter2-clear'",
+                )),
+                None,
+            ),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let r = s
+        .run_task(
+            "t",
+            &step(
+                "echo 'openjd_progress: 50.0'; echo 'openjd_status: halfway'; \
+                 echo 'openjd_fail: clear-test failure'; exit 1",
+            ),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Failed);
+    let status = s.action_status().unwrap();
+    assert_eq!(status.progress, Some(50.0));
+    assert_eq!(status.status_message.as_deref(), Some("halfway"));
+    assert!(status.fail_message.is_some(), "{status:?}");
+    assert!(status.exit_code.is_some(), "{status:?}");
+    assert!(status.ended_at.is_some(), "{status:?}");
+    assert_eq!(s.redact("x hunter2-clear y"), "x ******** y");
+
+    clear_and_check(&mut s);
+    assert_eq!(s.redact("x hunter2-clear y"), "x ******** y");
+
+    s.exit_environment(&id, None, false, None).await.unwrap();
+    let working_dir = s.working_directory().to_path_buf();
+    assert!(working_dir.exists());
+    s.cleanup();
+    assert!(
+        !working_dir.exists(),
+        "cleanup() after a clear must remove {working_dir:?}"
+    );
+}
+
+/// `clear_ending_only()` doesn't undo a canceled
+/// `SessionConfig::cancel_token`: the next action still ends `Canceled` and
+/// makes the session ending-only again.
+#[tokio::test]
+async fn clear_ending_only_does_not_undo_session_cancel_token() {
+    let tmp = TempDir::new().unwrap();
+    let token = tokio_util::sync::CancellationToken::new();
+    let config = openjd_sessions::session::SessionConfig {
+        cancel_token: Some(token.clone()),
+        ..config_for_test(&tmp)
+    };
+    let mut s = Session::with_config(config).unwrap();
+    token.cancel();
+    for _ in 0..2 {
+        let r = s
+            .run_task("t", &step("sleep 30"), None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(r.state, ActionState::Canceled);
+        assert_eq!(s.state(), SessionState::ReadyEnding);
+        clear_and_check(&mut s);
+    }
     s.cleanup();
 }
