@@ -345,6 +345,7 @@ pub fn openjd_sessions::session::Session::build_symbol_table(&self, core::option
 pub fn openjd_sessions::session::Session::cancel_action(&mut self, core::option::Option<core::time::Duration>, bool) -> core::result::Result<(), openjd_sessions::error::SessionError>
 pub fn openjd_sessions::session::Session::cancel_handle(&self) -> openjd_sessions::session::SessionCancelHandle
 pub fn openjd_sessions::session::Session::cleanup(&mut self)
+pub fn openjd_sessions::session::Session::clear_ending_only(&mut self) -> core::result::Result<(), openjd_sessions::error::SessionError>
 pub fn openjd_sessions::session::Session::clone_cancel_writer(&self) -> core::option::Option<std::fs::File>
 pub async fn openjd_sessions::session::Session::enter_environment(&mut self, &openjd_model::job::Environment, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, core::option::Option<&str>, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<alloc::string::String, openjd_sessions::error::SessionError>
 pub async fn openjd_sessions::session::Session::enter_environment_with_output(&mut self, &openjd_model::job::Environment, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, core::option::Option<&str>, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<(alloc::string::String, alloc::string::String), openjd_sessions::error::SessionError>
@@ -751,6 +752,7 @@ pub fn openjd_sessions::session::Session::build_symbol_table(&self, core::option
 pub fn openjd_sessions::session::Session::cancel_action(&mut self, core::option::Option<core::time::Duration>, bool) -> core::result::Result<(), openjd_sessions::error::SessionError>
 pub fn openjd_sessions::session::Session::cancel_handle(&self) -> openjd_sessions::session::SessionCancelHandle
 pub fn openjd_sessions::session::Session::cleanup(&mut self)
+pub fn openjd_sessions::session::Session::clear_ending_only(&mut self) -> core::result::Result<(), openjd_sessions::error::SessionError>
 pub fn openjd_sessions::session::Session::clone_cancel_writer(&self) -> core::option::Option<std::fs::File>
 pub async fn openjd_sessions::session::Session::enter_environment(&mut self, &openjd_model::job::Environment, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, core::option::Option<&str>, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<alloc::string::String, openjd_sessions::error::SessionError>
 pub async fn openjd_sessions::session::Session::enter_environment_with_output(&mut self, &openjd_model::job::Environment, core::option::Option<&openjd_expr::symbol_table::SerializedSymbolTable>, core::option::Option<&str>, core::option::Option<&std::collections::hash::map::HashMap<alloc::string::String, alloc::string::String>>) -> core::result::Result<(alloc::string::String, alloc::string::String), openjd_sessions::error::SessionError>

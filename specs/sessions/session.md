@@ -14,7 +14,7 @@ pub enum SessionState {
     Ready,        // Can start any action
     Running,      // An action is in progress
     Canceling,    // Cancel requested, waiting for subprocess to exit
-    ReadyEnding,  // Failed/canceled — only exit_environment allowed
+    ReadyEnding,  // Ending-only — only exit_environment, cleanup and clear_ending_only allowed
     Ended,        // cleanup() called, session is done
 }
 ```
@@ -29,6 +29,7 @@ Running ────────► Canceling       (cancel_action called)
 Canceling ──────► Ready           (action finished Success before the cancel reached it, session not in ending-only mode)
 Canceling ──────► ReadyEnding     (action ended Canceled/Failed/Timeout, OR session is in ending-only mode)
 ReadyEnding ───► Running          (exit_environment started)
+ReadyEnding ───► Ready            (clear_ending_only)
 Ready ──────────► Ended           (cleanup)
 ReadyEnding ───► Ended            (cleanup)
 ```
@@ -36,9 +37,10 @@ ReadyEnding ───► Ended            (cleanup)
 ### Brittle Sessions
 
 After any action failure or cancelation, the session transitions to `ReadyEnding`. In
-this state, only `exit_environment()` and `cleanup()` are allowed. This prevents running
-new tasks or entering new environments after a failure. The Python library follows the
-same rule, except in the case described in
+this state, only `exit_environment()`, `cleanup()` and `clear_ending_only()` are allowed.
+This prevents running new tasks or entering new environments after a failure unless the
+caller explicitly asks for it. The Python library follows the same rule, except in the
+case described in
 [architecture.md § Python-vs-Rust Design Comparison](architecture.md#python-vs-rust-design-comparison).
 
 The `ending_only` flag is set when:
@@ -50,7 +52,8 @@ The `ending_only` flag is set when:
   cross-user helper
 - `exit_environment()` is called without `keep_session_running` (the default)
 
-Once set, `ending_only` is never cleared. When an action ends, the session goes to
+`keep_session_running = true` means only "don't make the session ending-only on this
+exit". It never clears `ending_only`. When an action ends, the session goes to
 `ReadyEnding` if `ending_only` is set and to `Ready` otherwise, so `keep_session_running`
 can't bring an ending-only session back to `Ready`. All of these paths settle the state
 through one private helper, `settle_after_action`, so `state == Ready` implies the session
@@ -58,7 +61,23 @@ isn't ending-only, and the `Ready` checks in `run_task`, `enter_environment` and
 `run_subprocess` enforce the contract without checking `ending_only` themselves.
 
 This design reflects the worker agent's pattern: after a task fails, the agent exits all
-environments in reverse order and cleans up. There's no recovery path.
+environments in reverse order and cleans up.
+
+The only way back to `Ready` is an explicit call to the public method
+`clear_ending_only()`:
+
+- It's allowed only in `ReadyEnding`. In any other state (`Ready`, `Running`, `Canceling`,
+  `Ended`) it returns `SessionError::InvalidState` with `expected: [ReadyEnding]` and
+  changes nothing.
+- It clears `ending_only` whatever set it (a failed, canceled or timed-out action, or a
+  default `exit_environment`) and sets the state to `Ready`.
+- It runs no action and changes nothing else: the entered environments, the last action's
+  status and the session's environment variables stay as they were. A later failure
+  makes the session ending-only again.
+
+It's for callers that deliberately want to keep running work after a failure or an
+ending exit, and they take responsibility for the session's state. A failed or canceled
+action can leave its work half done, and the session neither checks nor undoes it.
 
 ## SessionConfig
 
@@ -225,7 +244,8 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 6. Removes the environment's variable changes from the cumulative set
 7. On completion: state → `Ready` or `ReadyEnding` as for any other action. With
    `keep_session_running` true, the state is `Ready` only if the session wasn't already
-   ending-only (see [Brittle Sessions](#brittle-sessions))
+   ending-only; `keep_session_running` never clears ending-only mode, and only
+   `clear_ending_only()` does (see [Brittle Sessions](#brittle-sessions))
 
 ### Why LIFO enforcement
 

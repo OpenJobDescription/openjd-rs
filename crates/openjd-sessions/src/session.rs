@@ -625,7 +625,9 @@ impl Session {
     /// will proceed without needing a full action run.
     ///
     /// It bypasses the brittle-session rule: setting `Ready` on an ending-only
-    /// session lets it accept new actions, which no public API path allows.
+    /// session lets it accept new actions without clearing ending-only mode,
+    /// which no other path allows. The public way back to `Ready` is
+    /// [`clear_ending_only`](Self::clear_ending_only).
     #[cfg(any(test, feature = "test-utils"))]
     pub fn set_state_for_test(&mut self, state: SessionState) {
         self.state = state;
@@ -1104,6 +1106,42 @@ impl Session {
         }
     }
 
+    /// Take the session out of ending-only mode, moving it from
+    /// `ReadyEnding` back to `Ready` so that it accepts `run_task`,
+    /// `enter_environment` and `run_subprocess` again (spec § Brittle
+    /// Sessions).
+    ///
+    /// **Use with care.** By default a session is brittle: once an action
+    /// ends `Failed`, `Canceled` or `Timeout`, or `exit_environment` is
+    /// called with `keep_session_running = false`, the session only allows
+    /// exiting the environments it entered and `cleanup()`. This method is
+    /// for callers that deliberately want to keep running work after that.
+    /// The caller takes responsibility for the session's state: a failed or
+    /// canceled action can leave its work half done, and the session
+    /// neither checks nor undoes any of it.
+    ///
+    /// This is the only way from `ReadyEnding` back to `Ready`.
+    /// `exit_environment(.., keep_session_running = true, ..)` never does
+    /// it. The method clears ending-only mode whatever set it. It runs no
+    /// action and changes nothing else: the entered environments, the last
+    /// action's status and the environment variables stay as they were.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::InvalidState`] if the session isn't
+    /// `ReadyEnding`.
+    pub fn clear_ending_only(&mut self) -> Result<(), SessionError> {
+        if self.state != SessionState::ReadyEnding {
+            return Err(SessionError::InvalidState {
+                expected: vec![SessionState::ReadyEnding],
+                current: self.state,
+            });
+        }
+        self.ending_only = false;
+        self.state = SessionState::Ready;
+        Ok(())
+    }
+
     /// Leave `Running`/`Canceling` once an action has reached the terminal
     /// state `final_state` (spec § Brittle Sessions).
     ///
@@ -1571,9 +1609,12 @@ impl Session {
     ///
     /// Environments must be exited in LIFO order (last entered, first exited).
     /// If `keep_session_running` is `false`, the session becomes ending-only and
-    /// is `ReadyEnding` after the exit. If it is `true`, the session returns to
-    /// `Ready` only if it was not already ending-only: once any action has ended
-    /// `Failed`, `Canceled` or `Timeout`, the session stays `ReadyEnding`.
+    /// is `ReadyEnding` after the exit. If it is `true`, this exit doesn't make
+    /// the session ending-only, and that is all it does: it never brings an
+    /// ending-only session back to `Ready`. A session that is already
+    /// ending-only, for example because an action ended `Failed`, `Canceled` or
+    /// `Timeout`, stays `ReadyEnding` until the caller calls
+    /// [`clear_ending_only`](Self::clear_ending_only).
     pub async fn exit_environment(
         &mut self,
         identifier: &EnvironmentIdentifier,

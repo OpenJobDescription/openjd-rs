@@ -156,12 +156,14 @@ impl Session {
     /// last-entered environment first. Fails with
     /// `SessionError::LifoViolation` if called out of order.
     ///
-    /// `keep_session_running: true` keeps the session in the Ready
-    /// state for subsequent `run_task` / `enter_environment` calls,
-    /// unless the session is already ending-only because an earlier
-    /// action ended Failed, Canceled or Timeout.
-    /// `false` transitions the session to ReadyEnding after this
-    /// exit completes, blocking further work.
+    /// `keep_session_running: false` makes the session ending-only,
+    /// so it is ReadyEnding after this exit completes, blocking
+    /// further work. `true` only means "don't make the session
+    /// ending-only on this exit", so a session that was Ready stays
+    /// Ready for later `run_task` / `enter_environment` calls. It
+    /// never brings an ending-only session back to Ready, for example
+    /// after an earlier action ended Failed, Canceled or Timeout;
+    /// only `clear_ending_only` does that.
     pub async fn exit_environment(
         &mut self,
         identifier: &EnvironmentIdentifier,
@@ -220,6 +222,19 @@ impl Session {
     /// `Session` value is owned by the thread driving it. Reusable for
     /// the life of the session; see session.md § SessionCancelHandle.
     pub fn cancel_handle(&self) -> SessionCancelHandle;
+
+    /// Take the session out of ending-only mode: ReadyEnding → Ready.
+    /// The only way back to Ready after a Failed, Canceled or Timeout
+    /// action or an ending `exit_environment`, whatever set it. Fails
+    /// with `SessionError::InvalidState` in any other state. Runs no
+    /// action and leaves the entered environments and the last action
+    /// status as they were.
+    ///
+    /// Use with care: by default a session only allows shutdown after
+    /// a failure. This is for callers that deliberately keep running
+    /// work after that, and they take responsibility for the
+    /// session's state (session.md § Brittle Sessions).
+    pub fn clear_ending_only(&mut self) -> Result<(), SessionError>;
 
     /// Remove the working directory and associated temp files.
     /// Called automatically on drop as a safety net, but callers
@@ -467,7 +482,8 @@ pub enum SessionState {
     Running,
     /// Cancellation has been requested; the subprocess is being torn down.
     Canceling,
-    /// Environments can still be exited but no new actions can start.
+    /// Ending-only: environments can still be exited but no new actions
+    /// can start until `Session::clear_ending_only` is called.
     ReadyEnding,
     /// All environments exited; `cleanup()` may be called.
     Ended,

@@ -5,10 +5,11 @@
 //! Brittle sessions (specs/sessions/session.md § Brittle Sessions).
 //!
 //! Once an action ends `Failed`, `Canceled` or `Timeout`, the session is
-//! ending-only: it accepts only `exit_environment` and `cleanup`, and it
-//! never returns to `Ready`. That must hold whatever the caller later passes
-//! as `keep_session_running`, and whether or not the exited environment has
-//! an `onExit` action.
+//! ending-only: it accepts only `exit_environment`, `cleanup` and
+//! `clear_ending_only`, and only `clear_ending_only` brings it back to
+//! `Ready`. That must hold whatever the caller later passes as
+//! `keep_session_running`, and whether or not the exited environment has an
+//! `onExit` action.
 
 use openjd_expr::format_string::FormatString;
 use openjd_model::job::{
@@ -470,5 +471,271 @@ async fn successful_actions_keep_running_controls_reopening() {
         } else {
             assert_refuses_new_actions(&mut s).await;
         }
+    }
+}
+
+// ── clear_ending_only ───────────────────────────────────────────────────
+//
+// `clear_ending_only()` is the only way from `ReadyEnding` back to `Ready`.
+// It is allowed only in `ReadyEnding`, clears ending-only mode whatever set
+// it, and changes nothing else.
+
+/// Assert that the session accepts new work after `clear_ending_only()`:
+/// a task runs, and a new environment can be entered and exited. Leaves the
+/// session `Ready` with the same environments entered as before.
+async fn assert_accepts_new_actions(s: &mut Session) {
+    let entered = s.environments_entered().to_vec();
+    let r = s
+        .run_task("t2", &step("echo again"), None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Success);
+    assert_eq!(s.state(), SessionState::Ready);
+
+    let new_id = s
+        .enter_environment(
+            &env("New", Some(action("echo new")), None),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(s.state(), SessionState::Ready);
+    let mut expected = entered.clone();
+    expected.push(new_id.clone());
+    assert_eq!(s.environments_entered(), expected.as_slice());
+
+    s.exit_environment(&new_id, None, true, None).await.unwrap();
+    assert_eq!(s.state(), SessionState::Ready);
+    assert_eq!(s.environments_entered(), entered.as_slice());
+}
+
+/// Call `clear_ending_only()` on a `ReadyEnding` session and check that it
+/// moves to `Ready` without touching the entered environments or the last
+/// action's status.
+fn clear_and_check(s: &mut Session) {
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    let entered = s.environments_entered().to_vec();
+    // ActionStatus has no PartialEq; its Debug form covers every field.
+    let status = format!("{:?}", s.action_status());
+    s.clear_ending_only().unwrap();
+    assert_eq!(s.state(), SessionState::Ready);
+    assert_eq!(s.environments_entered(), entered.as_slice());
+    assert_eq!(format!("{:?}", s.action_status()), status);
+}
+
+/// Enter two environments and run a task that ends in `ending`. If
+/// `exit_inner_first`, exit the inner environment with
+/// `keep_session_running = true` before clearing, which on its own must
+/// leave the session `ReadyEnding`. Then `clear_ending_only()` must bring
+/// the session back to `Ready` so it accepts new work.
+async fn check_clear_after_task_ending(ending: Ending, exit_inner_first: bool) {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    let outer = s
+        .enter_environment(
+            &env("Outer", None, Some(action("echo outer-exited"))),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let inner = s
+        .enter_environment(&env("Inner", None, None), None, None, None)
+        .await
+        .unwrap();
+    run_ending_task(&mut s, ending).await;
+    if exit_inner_first {
+        s.exit_environment(&inner, None, true, None).await.unwrap();
+        assert_eq!(
+            s.state(),
+            SessionState::ReadyEnding,
+            "keep_session_running = true alone must not leave ending-only"
+        );
+        assert_refuses_new_actions(&mut s).await;
+    }
+
+    clear_and_check(&mut s);
+    let expected = if exit_inner_first {
+        vec![outer.clone()]
+    } else {
+        vec![outer.clone(), inner.clone()]
+    };
+    assert_eq!(s.environments_entered(), expected.as_slice());
+    assert_accepts_new_actions(&mut s).await;
+
+    // An exited environment stays exited, and the rest exit in LIFO order.
+    if exit_inner_first {
+        match s.exit_environment(&inner, None, true, None).await {
+            Err(SessionError::UnknownEnvironment { identifier }) => assert_eq!(identifier, inner),
+            other => panic!("the exited environment must stay exited, got {other:?}"),
+        }
+    } else {
+        s.exit_environment(&inner, None, true, None).await.unwrap();
+    }
+    let out = s.exit_environment(&outer, None, false, None).await.unwrap();
+    assert!(out.contains("outer-exited"), "{out:?}");
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    assert!(s.environments_entered().is_empty());
+}
+
+macro_rules! clear_after_task_ending_tests {
+    ($($name:ident: $ending:expr, $exit_inner_first:expr;)*) => {$(
+        #[tokio::test(flavor = "multi_thread")]
+        async fn $name() {
+            check_clear_after_task_ending($ending, $exit_inner_first).await;
+        }
+    )*};
+}
+
+clear_after_task_ending_tests! {
+    clear_ending_only_after_failed_task: Ending::Failed, false;
+    clear_ending_only_after_failed_task_and_keep_running_exit: Ending::Failed, true;
+    clear_ending_only_after_canceled_task: Ending::Canceled, false;
+    clear_ending_only_after_canceled_task_and_keep_running_exit: Ending::Canceled, true;
+    clear_ending_only_after_timeout_task: Ending::Timeout, false;
+    clear_ending_only_after_timeout_task_and_keep_running_exit: Ending::Timeout, true;
+}
+
+/// `clear_ending_only()` also clears ending-only mode set by a default
+/// `exit_environment` (`keep_session_running = false`) after successful
+/// actions, with or without an `onExit`.
+#[tokio::test]
+async fn clear_ending_only_after_default_exit() {
+    for on_exit in [None, Some(action("echo bye"))] {
+        let tmp = TempDir::new().unwrap();
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        let outer = s
+            .enter_environment(&env("Outer", None, None), None, None, None)
+            .await
+            .unwrap();
+        let inner = s
+            .enter_environment(&env("Inner", None, on_exit.clone()), None, None, None)
+            .await
+            .unwrap();
+        s.exit_environment(&inner, None, false, None).await.unwrap();
+        assert_eq!(s.state(), SessionState::ReadyEnding);
+        assert_refuses_new_actions(&mut s).await;
+
+        clear_and_check(&mut s);
+        assert_eq!(s.environments_entered(), std::slice::from_ref(&outer));
+        assert_accepts_new_actions(&mut s).await;
+    }
+}
+
+/// After `clear_ending_only()`, a later failure makes the session
+/// ending-only again, and it can be cleared again.
+#[tokio::test]
+async fn clear_ending_only_then_fail_again() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    let id = s
+        .enter_environment(&env("Env", None, None), None, None, None)
+        .await
+        .unwrap();
+    run_ending_task(&mut s, Ending::Failed).await;
+    clear_and_check(&mut s);
+
+    run_ending_task(&mut s, Ending::Failed).await;
+    assert_refuses_new_actions(&mut s).await;
+    s.exit_environment(&id, None, true, None).await.unwrap();
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+
+    clear_and_check(&mut s);
+    assert_accepts_new_actions(&mut s).await;
+}
+
+/// Assert that `clear_ending_only()` fails with `InvalidState` in the
+/// session's current state and leaves that state unchanged.
+fn assert_clear_refused(s: &mut Session) {
+    let current = s.state();
+    let entered = s.environments_entered().to_vec();
+    let err = s.clear_ending_only().unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!("Session must be in READY_ENDING state, current: {current}")
+    );
+    match err {
+        SessionError::InvalidState {
+            expected,
+            current: reported,
+        } => {
+            assert_eq!(expected, vec![SessionState::ReadyEnding]);
+            assert_eq!(reported, current);
+        }
+        other => panic!("expected InvalidState, got {other:?}"),
+    }
+    assert_eq!(s.state(), current);
+    assert_eq!(s.environments_entered(), entered.as_slice());
+}
+
+/// `clear_ending_only()` is refused in `Ready`, both on a new session and
+/// after work has run.
+#[tokio::test]
+async fn clear_ending_only_refused_in_ready() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    assert_clear_refused(&mut s);
+
+    let _id = s
+        .enter_environment(&env("Env", None, None), None, None, None)
+        .await
+        .unwrap();
+    let r = s
+        .run_task("t", &step("echo ok"), None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Success);
+    assert_clear_refused(&mut s);
+    assert_accepts_new_actions(&mut s).await;
+}
+
+/// `clear_ending_only()` is refused in `Running` and `Canceling`, and the
+/// refusal leaves ending-only mode set: once the state is forced back, a
+/// successful action still settles to `ReadyEnding`.
+///
+/// `run_task` holds `&mut Session` for the whole action, so these states
+/// can't be observed from outside a real action. They are forced with
+/// `set_state_for_test`.
+#[tokio::test]
+async fn clear_ending_only_refused_in_running_and_canceling() {
+    for forced in [SessionState::Running, SessionState::Canceling] {
+        let tmp = TempDir::new().unwrap();
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        run_ending_task(&mut s, Ending::Failed).await;
+
+        s.set_state_for_test(forced);
+        assert_clear_refused(&mut s);
+
+        // Still ending-only: a successful action settles to ReadyEnding.
+        s.set_state_for_test(SessionState::Ready);
+        let r = s
+            .run_task("t2", &step("echo ok"), None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(r.state, ActionState::Success);
+        assert_eq!(
+            s.state(),
+            SessionState::ReadyEnding,
+            "a refused clear_ending_only() in {forced:?} must not clear ending-only mode"
+        );
+    }
+}
+
+/// `clear_ending_only()` is refused in `Ended`, whether or not the session
+/// was ending-only before `cleanup()`.
+#[tokio::test]
+async fn clear_ending_only_refused_in_ended() {
+    for make_ending_only in [false, true] {
+        let tmp = TempDir::new().unwrap();
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        if make_ending_only {
+            run_ending_task(&mut s, Ending::Failed).await;
+        }
+        s.cleanup();
+        assert_eq!(s.state(), SessionState::Ended);
+        assert_clear_refused(&mut s);
     }
 }
