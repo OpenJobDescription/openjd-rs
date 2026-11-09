@@ -52,6 +52,9 @@ pub enum SessionError {
 
     #[error("Must exit the most recently entered environment first. Expected {expected}, got {got}")]
     LifoViolation { expected: String, got: String },
+
+    #[error("The session was canceled through its session-wide cancel token and cannot be continued.")]
+    SessionCanceled,
 }
 ```
 
@@ -140,6 +143,16 @@ Covers protocol errors, unexpected helper exit, and stdin/stdout pipe failures.
 
 Returned when `exit_environment` is called out of LIFO order. The `expected` field is
 the identifier that should be exited next; `got` is the identifier that was requested.
+
+### SessionCanceled
+
+Returned by `clear_ending_only()` when the session-wide
+`SessionConfig::cancel_token` has been canceled. A tokio `CancellationToken` can't be
+reset once canceled, so every later action would end `Canceled` and make the session
+ending-only again. Rather than return the session to `Ready` under a cancellation it
+can't undo, `clear_ending_only()` refuses and leaves the session `ReadyEnding`; only
+`exit_environment()` and `cleanup()` remain. Per-action cancels (`cancel_action()` and
+`SessionCancelHandle`) don't raise this — they install a fresh token per action.
 
 ## Error Propagation Patterns
 

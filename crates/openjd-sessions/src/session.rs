@@ -1125,20 +1125,33 @@ impl Session {
     /// it. The method clears ending-only mode whatever set it. It runs no
     /// action and changes nothing else: the entered environments, the last
     /// action's status and the environment variables stay as they were.
-    /// It doesn't undo a canceled [`SessionConfig::cancel_token`]: that
-    /// cancellation is permanent, so every later action still ends
-    /// `Canceled` and makes the session ending-only again.
+    ///
+    /// It refuses, and leaves the session unchanged, when the session-wide
+    /// [`SessionConfig::cancel_token`] exists and has been canceled. That
+    /// cancellation is permanent — a tokio token can't be reset — so every
+    /// later action would end `Canceled` and make the session ending-only
+    /// again; the method won't return the session to `Ready` under a
+    /// cancellation it can't undo. Per-action cancels
+    /// ([`cancel_action`](Self::cancel_action) and
+    /// [`SessionCancelHandle`]) don't block it: only the session-wide token
+    /// does.
     ///
     /// # Errors
     ///
     /// Returns [`SessionError::InvalidState`] if the session isn't
-    /// `ReadyEnding`.
+    /// `ReadyEnding`, or [`SessionError::SessionCanceled`] if the
+    /// session-wide [`SessionConfig::cancel_token`] has been canceled.
     pub fn clear_ending_only(&mut self) -> Result<(), SessionError> {
         if self.state != SessionState::ReadyEnding {
             return Err(SessionError::InvalidState {
                 expected: vec![SessionState::ReadyEnding],
                 current: self.state,
             });
+        }
+        if let Some(token) = &self.cancel.parent_token {
+            if token.is_cancelled() {
+                return Err(SessionError::SessionCanceled);
+            }
         }
         self.ending_only = false;
         self.state = SessionState::Ready;

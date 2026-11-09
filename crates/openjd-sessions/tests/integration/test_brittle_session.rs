@@ -875,11 +875,12 @@ async fn clear_ending_only_keeps_action_status_and_redactions() {
     );
 }
 
-/// `clear_ending_only()` doesn't undo a canceled
-/// `SessionConfig::cancel_token`: the next action still ends `Canceled` and
-/// makes the session ending-only again.
+/// After the session-wide `SessionConfig::cancel_token` is canceled,
+/// `clear_ending_only()` refuses with `SessionError::SessionCanceled` and
+/// leaves the session `ReadyEnding`. `exit_environment` and `cleanup` still
+/// work after that refusal.
 #[tokio::test]
-async fn clear_ending_only_does_not_undo_session_cancel_token() {
+async fn clear_ending_only_refused_after_session_cancel_token() {
     let tmp = TempDir::new().unwrap();
     let token = tokio_util::sync::CancellationToken::new();
     let config = openjd_sessions::session::SessionConfig {
@@ -887,15 +888,101 @@ async fn clear_ending_only_does_not_undo_session_cancel_token() {
         ..config_for_test(&tmp)
     };
     let mut s = Session::with_config(config).unwrap();
+    let id = s
+        .enter_environment(&env("Env", None, None), None, None, None)
+        .await
+        .unwrap();
     token.cancel();
-    for _ in 0..2 {
-        let r = s
-            .run_task("t", &step("sleep 30"), None, None, None)
-            .await
-            .unwrap();
-        assert_eq!(r.state, ActionState::Canceled);
-        assert_eq!(s.state(), SessionState::ReadyEnding);
-        clear_and_check(&mut s);
-    }
+
+    // The canceled session-wide token makes the next action end Canceled,
+    // which leaves the session ending-only.
+    let r = s
+        .run_task("t", &step("sleep 30"), None, None, None)
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Canceled);
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+
+    // clear_ending_only() refuses and changes nothing.
+    let err = s.clear_ending_only().unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "The session was canceled through its session-wide cancel token and cannot be continued."
+    );
+    assert!(matches!(err, SessionError::SessionCanceled));
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    assert_refuses_new_actions(&mut s).await;
+
+    // A second refusal is identical — the state is untouched.
+    assert!(matches!(
+        s.clear_ending_only().unwrap_err(),
+        SessionError::SessionCanceled
+    ));
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+
+    // exit_environment and cleanup still work after the refusal.
+    let out = s.exit_environment(&id, None, false, None).await.unwrap();
+    assert!(out.is_empty(), "no onExit action to run: {out:?}");
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    let working_dir = s.working_directory().to_path_buf();
+    assert!(working_dir.exists());
+    s.cleanup();
+    assert_eq!(s.state(), SessionState::Ended);
+    assert!(
+        !working_dir.exists(),
+        "cleanup() after the refusal must remove {working_dir:?}"
+    );
+}
+
+/// A session-wide `SessionConfig::cancel_token` that exists but was never
+/// canceled doesn't block `clear_ending_only()`: a failure makes the
+/// session ending-only, and clearing still returns it to `Ready`.
+#[tokio::test]
+async fn clear_ending_only_with_uncanceled_session_token() {
+    let tmp = TempDir::new().unwrap();
+    let token = tokio_util::sync::CancellationToken::new();
+    let config = openjd_sessions::session::SessionConfig {
+        cancel_token: Some(token.clone()),
+        ..config_for_test(&tmp)
+    };
+    let mut s = Session::with_config(config).unwrap();
+    let _id = s
+        .enter_environment(&env("Env", None, None), None, None, None)
+        .await
+        .unwrap();
+    run_ending_task(&mut s, Ending::Failed).await;
+
+    // The token is still live, so clearing works.
+    assert!(!token.is_cancelled());
+    clear_and_check(&mut s);
+    assert_accepts_new_actions(&mut s).await;
+    s.cleanup();
+}
+
+/// A per-action cancel (`cancel_action` / `SessionCancelHandle`), unlike a
+/// session-wide one, doesn't block `clear_ending_only()`. The canceled task
+/// makes the session ending-only, and clearing returns it to `Ready` so it
+/// accepts new work — even with a live (uncanceled) session-wide token in
+/// place.
+#[tokio::test(flavor = "multi_thread")]
+async fn clear_ending_only_after_per_action_cancel_with_session_token() {
+    let tmp = TempDir::new().unwrap();
+    let token = tokio_util::sync::CancellationToken::new();
+    let config = openjd_sessions::session::SessionConfig {
+        cancel_token: Some(token.clone()),
+        ..config_for_test(&tmp)
+    };
+    let mut s = Session::with_config(config).unwrap();
+    let _id = s
+        .enter_environment(&env("Env", None, None), None, None, None)
+        .await
+        .unwrap();
+    // run_ending_task cancels through a per-action SessionCancelHandle.
+    run_ending_task(&mut s, Ending::Canceled).await;
+
+    // The session-wide token was never canceled, so clearing works.
+    assert!(!token.is_cancelled());
+    clear_and_check(&mut s);
+    assert_accepts_new_actions(&mut s).await;
     s.cleanup();
 }

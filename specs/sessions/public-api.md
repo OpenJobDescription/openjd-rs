@@ -230,8 +230,11 @@ impl Session {
     /// action or an ending `exit_environment`, whatever set it. Fails
     /// with `SessionError::InvalidState` in any other state. Runs no
     /// action and leaves the entered environments, the last action
-    /// status and the environment variables as they were. A canceled
-    /// `SessionConfig.cancel_token` stays canceled.
+    /// status and the environment variables as they were. Fails with
+    /// `SessionError::SessionCanceled`, changing nothing, when the
+    /// session-wide `SessionConfig.cancel_token` has been canceled — that
+    /// cancellation is permanent, so the session can't return to Ready.
+    /// A per-action cancel doesn't block it.
     ///
     /// Use with care: by default a session only allows shutdown after
     /// a failure. This is for callers that deliberately keep running
@@ -1053,6 +1056,12 @@ pub enum SessionError {
     /// `extend_path_mapping_rules`. Display:
     /// "Invalid path mapping rules: path mapping rule <i>: <reason>".
     InvalidPathMappingRule(openjd_expr::InvalidPathMappingRule),
+
+    /// `clear_ending_only()` called after the session-wide
+    /// `SessionConfig.cancel_token` was canceled. That cancellation is
+    /// permanent (a tokio token can't be reset), so the session can't be
+    /// returned to Ready; only `exit_environment` and `cleanup` remain.
+    SessionCanceled,
 }
 ```
 

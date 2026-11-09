@@ -122,6 +122,7 @@ pub openjd_sessions::error::SessionError::PathPermissions
 pub openjd_sessions::error::SessionError::PathPermissions::path: alloc::string::String
 pub openjd_sessions::error::SessionError::PathPermissions::reason: alloc::string::String
 pub openjd_sessions::error::SessionError::Runtime(alloc::string::String)
+pub openjd_sessions::error::SessionError::SessionCanceled
 pub openjd_sessions::error::SessionError::SubprocessStart
 pub openjd_sessions::error::SessionError::SubprocessStart::command: alloc::string::String
 pub openjd_sessions::error::SessionError::SubprocessStart::source: core::io::error::Error
@@ -543,6 +544,7 @@ pub openjd_sessions::SessionError::PathPermissions
 pub openjd_sessions::SessionError::PathPermissions::path: alloc::string::String
 pub openjd_sessions::SessionError::PathPermissions::reason: alloc::string::String
 pub openjd_sessions::SessionError::Runtime(alloc::string::String)
+pub openjd_sessions::SessionError::SessionCanceled
 pub openjd_sessions::SessionError::SubprocessStart
 pub openjd_sessions::SessionError::SubprocessStart::command: alloc::string::String
 pub openjd_sessions::SessionError::SubprocessStart::source: core::io::error::Error

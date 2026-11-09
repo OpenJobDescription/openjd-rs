@@ -94,7 +94,10 @@ pub use session_user::{WindowsSessionUser, BadCredentialsError};
 When provided, all action cancel tokens are created as children of this token via
 `parent.child_token()`. Canceling the parent cascades to all current and future actions
 in the session. This enables the worker agent to cancel an entire session from outside
-the session's async context.
+the session's async context. A tokio token can't be reset once canceled, so this
+cancellation is permanent; `Session::clear_ending_only()` refuses with
+`SessionError::SessionCanceled` once it has fired (see
+[session.md § Brittle Sessions](session.md#brittle-sessions)).
 
 ## Data Flow
 

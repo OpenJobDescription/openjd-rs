@@ -75,8 +75,15 @@ The only way back to `Ready` is an explicit call to the public method
   default `exit_environment`) and sets the state to `Ready`.
 - It runs no action and changes nothing else: the entered environments, the last action's
   status and the session's environment variables stay as they were. A later failure
-  makes the session ending-only again, and so does every action after a
-  `SessionConfig::cancel_token` cancellation, which is permanent.
+  makes the session ending-only again.
+- It refuses, and changes nothing, when the session-wide
+  `SessionConfig::cancel_token` exists and has been canceled: it returns
+  `SessionError::SessionCanceled` and leaves the session `ReadyEnding`. That cancellation
+  is permanent — a tokio token can't be reset — so every later action would end `Canceled`
+  and make the session ending-only again; `clear_ending_only()` won't return the session to
+  `Ready` under a cancellation it can't undo, so what the method does matches what it says.
+  Only `exit_environment()` and `cleanup()` remain. A per-action cancel (`cancel_action()`
+  or a `SessionCancelHandle`) does not block it — only the session-wide token does.
 
 It's for callers that deliberately want to keep running work after a failure or an
 ending exit, and they take responsibility for the session's state. A failed or canceled
@@ -183,6 +190,13 @@ Canceling the parent cascades to all current and future actions in the session.
 This enables the worker agent to cancel an entire session from outside the session's
 async context (e.g., when the Deadline service sends a cancel request). Without this,
 the agent would need to track and cancel each action individually.
+
+A tokio `CancellationToken` can't be reset once canceled, so this cancellation is
+permanent: every action after it ends `Canceled`. Because of that, once the session-wide
+token is canceled, `clear_ending_only()` refuses with `SessionError::SessionCanceled`
+rather than return the session to `Ready` (see [Brittle Sessions](#brittle-sessions)).
+A per-action cancel (`cancel_action()` or a `SessionCancelHandle`) installs a fresh token
+per action and does not have this effect.
 
 ## Session Construction
 
