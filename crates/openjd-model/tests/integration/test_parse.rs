@@ -101,6 +101,42 @@ fn yaml_non_finite_floats_remain_available_for_model_validation() {
     assert_eq!(result["positive_inf"].as_str(), Some(".inf"));
     assert_eq!(result["negative_inf"].as_str(), Some("-.inf"));
 }
+
+/// YAML 1.2 Core schema resolves only the lowercase, capitalized and
+/// uppercase spellings of `true`, `false`, `null` and the non-finite floats.
+/// Any other casing is a plain string, which is also how the Python
+/// implementation reads them.
+#[test]
+fn yaml_core_schema_scalar_spellings() {
+    let result = document_string_to_object(
+        "t1: true\nt2: True\nt3: TRUE\nf1: false\nf2: False\nf3: FALSE\n\
+         n1: null\nn2: Null\nn3: NULL\nn4: ~\n\
+         s1: tRUE\ns2: FAlse\ns3: NUlL\ns4: .NAn\ns5: yes\n",
+        DocumentType::Yaml,
+        &CallerLimits::default(),
+    )
+    .unwrap();
+
+    for key in ["t1", "t2", "t3"] {
+        assert_eq!(result[key], serde_json::Value::Bool(true), "{key}");
+    }
+    for key in ["f1", "f2", "f3"] {
+        assert_eq!(result[key], serde_json::Value::Bool(false), "{key}");
+    }
+    for key in ["n1", "n2", "n3", "n4"] {
+        assert_eq!(result[key], serde_json::Value::Null, "{key}");
+    }
+    for (key, text) in [
+        ("s1", "tRUE"),
+        ("s2", "FAlse"),
+        ("s3", "NUlL"),
+        ("s4", ".NAn"),
+        ("s5", "yes"),
+    ] {
+        assert_eq!(result[key].as_str(), Some(text), "{key}");
+    }
+}
+
 // ══════════════════════════════════════════════════════════════
 // document_string_to_object — not a dict
 // ══════════════════════════════════════════════════════════════
@@ -143,6 +179,38 @@ fn bad_parse_yaml() {
         DocumentType::Yaml,
         &["not a valid Yaml document consisting of key-value pairs"],
     );
+}
+
+/// An explicit `!!bool` or `!!float` tag only accepts that type's YAML 1.2
+/// Core spellings, so a wrong-case value under one is a parse error rather
+/// than a string. The Python implementation accepts these.
+#[test]
+fn yaml_core_tag_with_wrong_case_value_is_a_parse_error() {
+    for (doc, expected) in [
+        ("a: !!bool True\n", Ok(serde_json::json!({"a": true}))),
+        (
+            "a: !!bool tRUE\n",
+            Err(
+                "Validation error: The document is not a valid YAML document consisting of \
+                 key-value pairs. error: line 1 column 11: invalid boolean (strict mode expects \
+                 true/false)\n --> <input>:1:11\n  |\n1 | a: !!bool tRUE\n  |           ^ \
+                 invalid boolean (strict mode expects true/false)",
+            ),
+        ),
+        (
+            "a: !!float .NAn\n",
+            Err(
+                "Validation error: The document is not a valid YAML document consisting of \
+                 key-value pairs. error: line 1 column 12: invalid floating point\n --> \
+                 <input>:1:12\n  |\n1 | a: !!float .NAn\n  |            ^ invalid floating \
+                 point",
+            ),
+        ),
+    ] {
+        let result = document_string_to_object(doc, DocumentType::Yaml, &CallerLimits::default())
+            .map_err(|e| e.to_string());
+        assert_eq!(result, expected.map_err(str::to_string), "{doc:?}");
+    }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -193,6 +261,60 @@ fn job_decode_success() {
     }"#,
     );
     decode_job_template(v, None, &CallerLimits::default()).unwrap();
+}
+
+// ══════════════════════════════════════════════════════════════
+// decode_job_template — YAML Core schema scalar spellings
+// ══════════════════════════════════════════════════════════════
+
+/// A wrong-case boolean spelling is a string, so a BOOL-typed field rejects it.
+#[test]
+fn yaml_wrong_case_boolean_is_rejected_for_bool_field() {
+    let doc = "specificationVersion: jobtemplate-2023-09\n\
+               name: J\n\
+               steps:\n\
+               - name: S\n  \
+                 script:\n    \
+                   embeddedFiles:\n    \
+                   - name: f\n      \
+                     type: TEXT\n      \
+                     runnable: tRUE\n      \
+                     data: x\n    \
+                   actions:\n      \
+                     onRun:\n        \
+                       command: echo\n";
+    let v = document_string_to_object(doc, DocumentType::Yaml, &CallerLimits::default()).unwrap();
+    let err = decode_job_template(v, None, &CallerLimits::default()).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: 'jobtemplate-2023-09' failed checks: \
+         invalid type: string \"tRUE\", expected a boolean"
+    );
+}
+
+/// A wrong-case boolean spelling is a string, so a STRING parameter accepts it.
+#[test]
+fn yaml_wrong_case_boolean_is_accepted_as_string_default() {
+    let doc = "specificationVersion: jobtemplate-2023-09\n\
+               name: J\n\
+               parameterDefinitions:\n\
+               - name: P\n  \
+                 type: STRING\n  \
+                 default: FAlse\n\
+               steps:\n\
+               - name: S\n  \
+                 script:\n    \
+                   actions:\n      \
+                     onRun:\n        \
+                       command: echo\n";
+    let v = document_string_to_object(doc, DocumentType::Yaml, &CallerLimits::default()).unwrap();
+    let template = decode_job_template(v, None, &CallerLimits::default()).unwrap();
+    match &template.parameter_definitions.as_deref().unwrap()[0] {
+        openjd_model::template::JobParameterDefinition::STRING(p) => {
+            assert_eq!(p.default.as_deref(), Some("FAlse"));
+        }
+        other => panic!("expected a STRING parameter, got {other:?}"),
+    }
 }
 
 // ══════════════════════════════════════════════════════════════
