@@ -4,9 +4,11 @@
   "description": "[Experimental] ECMAScript/WebAssembly bindings for OpenJD — template validation, job creation, expression evaluation",
   "license": "Apache-2.0",
   "type": "module",
-  "main": "./pkg/openjd_for_js.js",
-  "types": "./pkg/openjd_for_js.d.ts",
+  "main": "./index.js",
+  "types": "./index.d.ts",
   "files": [
+    "./index.js",
+    "./index.d.ts",
     "./pkg/openjd_for_js.js",
     "./pkg/openjd_for_js.d.ts",
     "./pkg/openjd_for_js_bg.wasm",

@@ -205,6 +205,16 @@ impl JsPathMappingRule {
             },
         }
     }
+
+    /// A copy of this rule. Hidden from JS and TypeScript: `index.js`
+    /// passes copies to `FunctionLibrary.withPathMappingRules`, which
+    /// takes its rules by value, so the caller's rules are not used up.
+    #[wasm_bindgen(js_name = "__clone", skip_typescript)]
+    pub fn __clone(&self) -> JsPathMappingRule {
+        JsPathMappingRule {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 // ── SymbolTable ────────────────────────────────────────────────────
@@ -386,6 +396,11 @@ impl JsFunctionLibrary {
     /// Throws when a rule's source path is not absolute for its format, a
     /// path is longer than 32 KiB, or the rules' trie would pass its 30 MiB
     /// limit; the message names the rule's position in `rules`.
+    ///
+    /// wasm-bindgen takes `rules` by value. `index.js` wraps this static
+    /// method: it checks in JS that `rules` is an iterable of live
+    /// `PathMappingRule` objects, then passes copies, so the caller's rules
+    /// stay usable.
     #[wasm_bindgen(js_name = "withPathMappingRules")]
     pub fn with_path_mapping_rules(
         rules: Vec<JsPathMappingRule>,
@@ -424,22 +439,54 @@ impl JsParsedExpression {
         self.inner.accessed_symbols().iter().cloned().collect()
     }
 
-    /// Evaluate the expression against symbol tables.
+    /// Evaluate the expression without a function library.
+    ///
+    /// Hidden from JS and TypeScript: `index.js` defines the public
+    /// `ParsedExpression.prototype.evaluate(symbols, lib?, options?)`,
+    /// which calls this or
+    /// `__evaluateWithLibrary`.
+    /// wasm-bindgen can only take an optional exported struct by value,
+    /// which would use up the caller's `FunctionLibrary`; borrowing
+    /// needs a required `&` argument, so the dispatch happens in JS.
     ///
     /// `options` (optional, plain-object shape) lets the host cap
     /// `memoryLimit` and/or `operationLimit` for this specific call.
     /// Omitted / `undefined` / `{}` keeps the built-in defaults.
-    pub fn evaluate(
+    #[wasm_bindgen(js_name = "__evaluate", skip_typescript)]
+    pub fn __evaluate(
         &self,
         symbols: &JsSymbolTable,
-        library: Option<JsFunctionLibrary>,
+        options: JsValue,
+    ) -> Result<JsExprValue, JsError> {
+        self.evaluate_impl(symbols, None, options)
+    }
+
+    /// Evaluate the expression with `library`, which is borrowed: the
+    /// caller keeps it and can pass it to later calls. Hidden; see
+    /// `__evaluate`.
+    #[wasm_bindgen(js_name = "__evaluateWithLibrary", skip_typescript)]
+    pub fn __evaluate_with_library(
+        &self,
+        symbols: &JsSymbolTable,
+        library: &JsFunctionLibrary,
+        options: JsValue,
+    ) -> Result<JsExprValue, JsError> {
+        self.evaluate_impl(symbols, Some(library), options)
+    }
+}
+
+impl JsParsedExpression {
+    fn evaluate_impl(
+        &self,
+        symbols: &JsSymbolTable,
+        library: Option<&JsFunctionLibrary>,
         options: JsValue,
     ) -> Result<JsExprValue, JsError> {
         let parsed_opts = JsEvalOptions::from_js_value(options)?;
         let inner_result = evaluate_inner(
             &self.inner,
             &symbols.inner,
-            library.as_ref().map(|lib| &lib.inner),
+            library.map(|lib| &lib.inner),
             parsed_opts.as_ref(),
         );
         inner_result
@@ -469,8 +516,8 @@ pub fn evaluate_expression_str(
 }
 
 /// Rust-native helper for evaluating a pre-parsed expression. Mirrors
-/// the public [`JsParsedExpression::evaluate`] surface without the
-/// `JsValue` boundary.
+/// the JS `ParsedExpression.evaluate` surface (see
+/// [`JsParsedExpression::__evaluate`]) without the `JsValue` boundary.
 pub fn parsed_expression_evaluate(
     expr: &str,
     symbols: &JsSymbolTable,
@@ -541,22 +588,67 @@ pub fn parse_expression(expr: &str) -> Result<JsParsedExpression, JsError> {
     Ok(JsParsedExpression { inner: parsed })
 }
 
-/// Evaluate an expression string directly.
+/// Evaluate an expression string without a function library. Hidden
+/// from JS and TypeScript: `index.js` defines the public
+/// `evaluateExpression(expr, symbols, lib?, options?)`, which calls this
+/// or `__evaluateExpressionWithLibrary`. See
+/// `ParsedExpression.__evaluate` for why the dispatch is in JS.
 ///
 /// `options` (optional, plain-object shape) lets the host cap
 /// `memoryLimit` and/or `operationLimit` for this specific call.
 /// Omitted / `undefined` / `{}` keeps the built-in defaults.
-#[wasm_bindgen(js_name = "evaluateExpression")]
-pub fn evaluate_expression(
+#[wasm_bindgen(js_name = "__evaluateExpression", skip_typescript)]
+pub fn __evaluate_expression(
     expr: &str,
     symbols: &JsSymbolTable,
-    library: Option<JsFunctionLibrary>,
     options: JsValue,
 ) -> Result<JsExprValue, JsError> {
     let parsed_opts = JsEvalOptions::from_js_value(options)?;
-    evaluate_expression_str(expr, symbols, library.as_ref(), parsed_opts.as_ref())
+    evaluate_expression_str(expr, symbols, None, parsed_opts.as_ref()).map_err(|e| JsError::new(&e))
+}
+
+/// Evaluate an expression string with `library`, which is borrowed: the
+/// caller keeps it and can pass it to later calls. Hidden; see
+/// `__evaluateExpression`.
+#[wasm_bindgen(js_name = "__evaluateExpressionWithLibrary", skip_typescript)]
+pub fn __evaluate_expression_with_library(
+    expr: &str,
+    symbols: &JsSymbolTable,
+    library: &JsFunctionLibrary,
+    options: JsValue,
+) -> Result<JsExprValue, JsError> {
+    let parsed_opts = JsEvalOptions::from_js_value(options)?;
+    evaluate_expression_str(expr, symbols, Some(library), parsed_opts.as_ref())
         .map_err(|e| JsError::new(&e))
 }
+
+#[wasm_bindgen(typescript_custom_section)]
+const EVALUATE_TS: &'static str = r#"
+/**
+ * Plain-object caps for one evaluation. Omitted fields keep the built-in
+ * defaults (`getDefaultMemoryLimit()`, `getDefaultOperationLimit()`).
+ */
+export interface EvalOptions {
+    memoryLimit?: number;
+    operationLimit?: number;
+}
+
+export interface ParsedExpression {
+    /**
+     * Evaluate the expression against `symbols`. `lib` is borrowed: the
+     * caller still owns it, can pass it to later calls, and frees it.
+     * `options` caps memory and operation use for this call.
+     */
+    evaluate(symbols: SymbolTable, lib?: FunctionLibrary | null, options?: EvalOptions | null): ExprValue;
+}
+
+/**
+ * Evaluate an expression string directly. `lib` is borrowed: the caller
+ * still owns it, can pass it to later calls, and frees it. `options` caps
+ * memory and operation use for this call.
+ */
+export function evaluateExpression(expr: string, symbols: SymbolTable, lib?: FunctionLibrary | null, options?: EvalOptions | null): ExprValue;
+"#;
 
 /// Get the default function library.
 #[wasm_bindgen(js_name = "getDefaultLibrary")]
