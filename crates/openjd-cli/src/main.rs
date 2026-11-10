@@ -12,6 +12,7 @@ mod summary;
 
 use clap::{Parser, Subcommand};
 use log::{LevelFilter, Log, Metadata, Record};
+use openjd_sessions::logging::LogContent;
 use std::sync::OnceLock;
 use std::time::Instant;
 
@@ -43,8 +44,23 @@ fn format_log_timestamp() -> String {
     }
 }
 
-/// Logger that prints subprocess COMMAND_OUTPUT lines to stdout with timestamps.
+/// Logger that prints, with timestamps, subprocess command output and the
+/// warnings and errors openjd reports about the session itself. See
+/// [`shows_record`].
 struct SessionLogger;
+
+/// Whether [`SessionLogger`] prints a record: command output
+/// (`COMMAND_OUTPUT`), or a problem openjd reports about the session, such as
+/// a working directory it could not delete (`EXCEPTION_INFO` at `Warn` or
+/// more severe). Records with no `openjd_log_content` are internal and hidden.
+fn shows_record(content_bits: Option<u64>, level: log::Level) -> bool {
+    let Some(bits) = content_bits else {
+        return false;
+    };
+    let has = |flag: LogContent| bits & u64::from(flag.bits()) != 0;
+    has(LogContent::COMMAND_OUTPUT)
+        || (has(LogContent::EXCEPTION_INFO) && level <= log::Level::Warn)
+}
 
 impl Log for SessionLogger {
     fn enabled(&self, _metadata: &Metadata) -> bool {
@@ -69,15 +85,9 @@ impl Log for SessionLogger {
         }
         let mut v = Visitor { bits: None };
         let _ = record.key_values().visit(&mut v);
-        if let Some(bits) = v.bits {
-            // Command output, plus warnings and errors openjd reports about the
-            // session itself, such as a working directory it could not delete.
-            let is_output = bits & 8 != 0;
-            let is_problem = bits & 16 != 0 && record.level() <= log::Level::Warn;
-            if is_output || is_problem {
-                let ts = format_log_timestamp();
-                println!("{ts}\t{}", record.args());
-            }
+        if shows_record(v.bits, record.level()) {
+            let ts = format_log_timestamp();
+            println!("{ts}\t{}", record.args());
         }
     }
 
@@ -133,5 +143,48 @@ async fn main() {
     if let Err(e) = result {
         eprintln!("ERROR: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use log::Level;
+
+    // The bit values are written as literals so a changed flag fails here:
+    // COMMAND_OUTPUT = 8, EXCEPTION_INFO = 16, FILE_PATH = 2, PROCESS_CONTROL = 32.
+
+    #[test]
+    fn command_output_is_shown_at_any_level() {
+        for level in [
+            Level::Error,
+            Level::Warn,
+            Level::Info,
+            Level::Debug,
+            Level::Trace,
+        ] {
+            assert!(shows_record(Some(8), level), "{level}");
+            assert!(shows_record(Some(8 | 2), level), "{level}");
+        }
+    }
+
+    #[test]
+    fn exception_info_is_shown_only_at_warn_or_more_severe() {
+        assert!(shows_record(Some(16), Level::Error));
+        assert!(shows_record(Some(16), Level::Warn));
+        assert!(
+            shows_record(Some(50), Level::Warn),
+            "the cleanup warning's flags"
+        );
+        assert!(!shows_record(Some(16), Level::Info));
+        assert!(!shows_record(Some(16), Level::Debug));
+    }
+
+    #[test]
+    fn other_records_are_hidden() {
+        assert!(!shows_record(None, Level::Error));
+        assert!(!shows_record(Some(0), Level::Error));
+        assert!(!shows_record(Some(2 | 32), Level::Error));
+        assert!(!shows_record(Some(1), Level::Warn));
     }
 }

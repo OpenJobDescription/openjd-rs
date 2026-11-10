@@ -70,7 +70,7 @@ fn list_holders(handle: u32, names: &[PCWSTR]) -> Result<Vec<FileHolder>, String
         let rc = unsafe { RmGetList(handle, &mut needed, &mut count, buf, &mut reasons) };
         if rc == ERROR_SUCCESS {
             infos.truncate(count as usize);
-            return Ok(infos.iter().map(holder_from).collect());
+            return Ok(infos.iter().map(|i| holder_from(i, image_name)).collect());
         }
         if rc != ERROR_MORE_DATA {
             return Err(format!("RmGetList failed ({})", rc.0));
@@ -80,7 +80,9 @@ fn list_holders(handle: u32, names: &[PCWSTR]) -> Result<Vec<FileHolder>, String
     Err("RmGetList kept reporting more processes".into())
 }
 
-fn holder_from(info: &RM_PROCESS_INFO) -> FileHolder {
+/// The holder named by `info`: the executable's file name from `image_name`,
+/// or the Restart Manager's application name when that lookup fails.
+fn holder_from(info: &RM_PROCESS_INFO, image_name: impl Fn(u32) -> Option<String>) -> FileHolder {
     let pid = info.Process.dwProcessId;
     let name = image_name(pid).unwrap_or_else(|| {
         let end = info
@@ -135,9 +137,71 @@ mod tests {
             .unwrap();
         let holders = processes_holding(&[path]).unwrap();
         assert!(
-            holders.iter().any(|h| h.pid == std::process::id()),
-            "expected this process in {holders:?}"
+            holders.contains(&FileHolder {
+                pid: std::process::id(),
+                name: this_exe_name(),
+            }),
+            "expected this process, by pid and executable name, in {holders:?}"
         );
+    }
+
+    fn this_exe_name() -> String {
+        std::env::current_exe()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[test]
+    fn image_name_is_the_executable_file_name() {
+        assert_eq!(image_name(std::process::id()), Some(this_exe_name()));
+        // pid 0 is the System Idle Process, which cannot be opened.
+        assert_eq!(image_name(0), None);
+    }
+
+    fn info_named(pid: u32, app_name: &str) -> RM_PROCESS_INFO {
+        let mut info = RM_PROCESS_INFO::default();
+        info.Process.dwProcessId = pid;
+        for (slot, c) in info.strAppName.iter_mut().zip(app_name.encode_utf16()) {
+            *slot = c;
+        }
+        info
+    }
+
+    #[test]
+    fn holder_prefers_the_image_name() {
+        let h = holder_from(&info_named(7, "Perforce"), |pid| {
+            assert_eq!(pid, 7);
+            Some("p4.exe".into())
+        });
+        assert_eq!(
+            h,
+            FileHolder {
+                pid: 7,
+                name: "p4.exe".into()
+            }
+        );
+    }
+
+    #[test]
+    fn holder_falls_back_to_the_restart_manager_app_name() {
+        let h = holder_from(&info_named(7, "Perforce Helix"), |_| None);
+        assert_eq!(
+            h,
+            FileHolder {
+                pid: 7,
+                name: "Perforce Helix".into()
+            }
+        );
+    }
+
+    #[test]
+    fn holder_app_name_uses_the_whole_buffer_when_unterminated() {
+        let full = "x".repeat(256);
+        let h = holder_from(&info_named(7, &full), |_| None);
+        assert_eq!(h.name, full);
     }
 
     #[test]

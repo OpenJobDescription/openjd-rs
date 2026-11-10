@@ -190,18 +190,24 @@ fn format_exit_code(code: Option<i32>) -> String {
 /// Log a temporary directory that `Session::cleanup` could not delete. Cleanup
 /// continues, so without this the directory is left on disk with no trace.
 fn log_cleanup_failure(session_id: &str, path: &Path, err: &SessionError) {
+    crate::tempdir::emit_cleanup_log(Some(session_id), &cleanup_failure_log(path, err));
+}
+
+/// The error line for a directory `Session::cleanup` gave up on.
+fn cleanup_failure_log(path: &Path, err: &SessionError) -> crate::tempdir::CleanupLog {
     let reason = match err {
-        SessionError::TempDir { source, .. } => source.to_string(),
+        SessionError::TempDir { source, .. } => crate::tempdir::os_error_text(source),
         other => other.to_string(),
     };
-    session_log!(
-        error,
-        session_id,
-        LogContent::EXCEPTION_INFO | LogContent::FILE_PATH,
-        "Files within temporary directory {} could not be deleted: {}",
-        path.display(),
-        reason
-    );
+    crate::tempdir::CleanupLog {
+        level: log::Level::Error,
+        content: LogContent::EXCEPTION_INFO | LogContent::FILE_PATH,
+        message: format!(
+            "Files within temporary directory {} could not be deleted: {}",
+            path.display(),
+            reason
+        ),
+    }
 }
 
 /// Normalize an environment variable name for the current platform.
@@ -3521,7 +3527,23 @@ mod cleanup_failure_log_tests {
     use super::*;
 
     #[test]
-    fn cleanup_failure_is_logged_as_an_error_with_path_and_reason() {
+    fn cleanup_failure_is_an_error_naming_the_path_and_reason() {
+        let err = SessionError::TempDir {
+            path: PathBuf::from("session-dir"),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "file in use."),
+        };
+        let line = cleanup_failure_log(Path::new("session-dir"), &err);
+        assert_eq!(line.level, log::Level::Error);
+        // Literal so a changed flag fails here: FILE_PATH (2) | EXCEPTION_INFO (16).
+        assert_eq!(line.content.bits(), 18);
+        assert_eq!(
+            line.message,
+            "Files within temporary directory session-dir could not be deleted: file in use"
+        );
+    }
+
+    #[test]
+    fn cleanup_failure_is_logged_through_the_session_logger() {
         testing_logger::setup();
         let err = SessionError::TempDir {
             path: PathBuf::from("session-dir"),
@@ -3531,9 +3553,11 @@ mod cleanup_failure_log_tests {
         testing_logger::validate(|logs| {
             assert_eq!(logs.len(), 1);
             assert_eq!(logs[0].level, log::Level::Error);
-            assert!(logs[0]
-                .body
-                .contains("session-dir could not be deleted: file in use"));
+            assert_eq!(logs[0].target, "openjd.sessions");
+            assert_eq!(
+                logs[0].body,
+                "Files within temporary directory session-dir could not be deleted: file in use"
+            );
         });
     }
 }

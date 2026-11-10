@@ -910,6 +910,16 @@ impl TempDir {
 
     pub fn path(&self) -> &Path;
 
+    /// Removes the directory and everything in it. Idempotent: a second call
+    /// returns `Ok(())` without touching the disk.
+    ///
+    /// On Windows this blocks for up to about 31 s when something in the
+    /// directory is held open: each pass deletes what it can, and a pass that
+    /// leaves anything behind is retried after 1, 2, 4, 8 and 16 s. Each failed
+    /// pass logs a warning naming the files that could not be deleted and the
+    /// processes holding them open. On other platforms a failure returns at
+    /// once. Errors with `SessionError::TempDir`, carrying the first error of
+    /// the last pass. See tempdir.md "Cleanup retries on Windows".
     pub fn cleanup(&mut self) -> Result<(), SessionError>;
 }
 
