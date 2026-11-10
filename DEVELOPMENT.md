@@ -52,8 +52,9 @@ confirms, and repeat until it comes back clean. The workflows below describe
    in AGENTS.md.
 3. Implement the fix. Update the spec if behavior changed.
 4. Run `cargo clippy --all-features --all-targets --workspace -- -D warnings` and
-   `cargo test --workspace`. These are part of the skill's gate step, which lists
-   the full set.
+   `cargo test --workspace`. These are part of the gate step (step 4) in
+   [`skills/implement-change/SKILL.md`](skills/implement-change/SKILL.md), which
+   lists the full set.
 5. Commit, then let the `implement-change` audit loop run to a clean round. The
    skill commits each implement and fix stage separately, and the branch is
    ready to push once a round comes back clean.

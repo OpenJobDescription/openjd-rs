@@ -9,6 +9,13 @@ Fixes: *<insert link to GitHub issue here>*
 ### How was this change tested?
 
 - Have you run the unit tests?
+- [ ] This change was made with the implement-change skill (`skills/implement-change/SKILL.md`)
+
+### Audit findings and fixes
+
+List what each `implement-change` audit round found and how you resolved each finding: fixed (how), deferred (why), withdrawn (the evidence), or left out of scope. Then name the round that came back clean, or list the outstanding findings that were accepted when the loop stopped at its round limit. If no audit applies, say which of the skill's exemptions covers this PR. An empty section means the audit loop did not run.
+
+Keep the branch's per-stage commits (the implement commit, then a fix commit for each audit round that changed files) so reviewers can follow the loop. Don't squash them before opening the PR; GitHub squashes the PR into one commit when it merges.
 
 ### Was this change documented?
 
