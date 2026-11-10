@@ -346,8 +346,8 @@ impl CrossUserTestHelper {
     /// Waits up to 5 s for the helper to exit, then reports its exit code
     /// and every response read before the failure. Exit code 1 is what the
     /// helper's own `kill_process` passes to `TerminateProcess`, and an
-    /// `0xC000xxxx` NTSTATUS is a crash. If the wait times out, the helper is
-    /// still running and only its stdout ended.
+    /// `0xC000xxxx` NTSTATUS is usually a crash. If the wait times out, the
+    /// helper is still running and only its stdout ended.
     fn helper_state(&self) -> String {
         use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
         use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
