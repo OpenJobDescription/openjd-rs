@@ -42,16 +42,20 @@ fn main() {
     );
     println!(
         "cargo:rerun-if-changed={}",
-        helper_dir.join("Cargo.toml").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        helper_dir.join("Cargo.lock").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
         helper_dir.join("src").display()
     );
+    // `Cargo.toml` and `Cargo.lock` are untracked and usually absent (see
+    // below). Cargo treats a watched path that does not exist as always
+    // changed, which would rerun this script and rebuild this crate and its
+    // dependents on every build. So watch them only when they exist. Creating
+    // one does not by itself rerun the script; the next change to a watched
+    // path does, or `cargo clean -p openjd-sessions`.
+    for optional in ["Cargo.toml", "Cargo.lock"] {
+        let path = helper_dir.join(optional);
+        if path.exists() {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
 
     let is_unix = target.contains("linux") || target.contains("unix") || cfg!(unix);
     let is_windows = target.contains("windows") || cfg!(windows);
