@@ -10,12 +10,18 @@
 //! This walk deletes everything it can, as Python's `shutil.rmtree` does with an
 //! error handler.
 //!
+//! The walk is iterative, with an explicit stack, so a deep tree cannot
+//! overflow the thread's call stack and abort the process.
+//!
 //! The session directory is writable by the job user, so a job process still
 //! running during cleanup could swap a directory for a junction mid-walk. Two
-//! rules stop the walk from following one out of the tree:
+//! rules stop the walk from following one out of the tree, matching the
+//! time-of-check/time-of-use safety of `std::fs::remove_dir_all`:
 //!
-//! - every open uses `FILE_FLAG_OPEN_REPARSE_POINT`, and a link is removed as a
-//!   link, never traversed;
+//! - a reparse point is removed as a link, never traversed: a child is tested
+//!   with [`std::fs::DirEntry::file_type`], which does not follow it, and any
+//!   directory the walk opens uses `FILE_FLAG_OPEN_REPARSE_POINT` and is
+//!   refused if it turns out to be a reparse point;
 //! - each directory on the path being walked is held open without
 //!   `FILE_SHARE_DELETE` while its entries are removed, so it cannot be renamed
 //!   or replaced until the walk has left it.
@@ -45,86 +51,90 @@ pub(crate) struct RemoveFailure {
 }
 
 /// Removes `root` and everything under it, as far as possible. Returns every
-/// entry that could not be removed, in the order the walk reached it. An empty
-/// result means `root` is gone.
+/// entry that could not be removed, in the order the walk reached it: a
+/// directory comes after its contents (post-order). An empty result means
+/// `root` is gone.
 pub(crate) fn remove_tree(root: &Path) -> Vec<RemoveFailure> {
     let mut failures = Vec::new();
-    remove_dir_tree(root, true, &mut failures);
-    failures
-}
 
-fn remove_dir_tree(dir: &Path, is_root: bool, failures: &mut Vec<RemoveFailure>) {
-    let pin = match pin_dir(dir) {
-        Ok(pin) => pin,
-        Err(e) if !is_root && e.kind() == io::ErrorKind::NotFound => return,
-        Err(error) => {
-            failures.push(RemoveFailure {
-                path: dir.to_path_buf(),
-                is_dir: true,
-                error,
-            });
-            return;
-        }
-    };
-    match std::fs::read_dir(dir) {
-        Ok(entries) => {
-            for entry in entries {
-                match entry {
-                    Ok(entry) => remove_entry(&entry, failures),
-                    Err(error) => failures.push(RemoveFailure {
-                        path: dir.to_path_buf(),
-                        is_dir: true,
-                        error,
-                    }),
-                }
+    // A directory whose contents are being removed. Its pin is held until the
+    // frame is popped, so the directory cannot be swapped while the walk is
+    // inside it. `entries` is read once, up front, so no directory handle is
+    // open for enumeration while children are deleted.
+    struct Frame {
+        path: PathBuf,
+        _pin: File,
+        entries: std::vec::IntoIter<std::fs::DirEntry>,
+    }
+
+    let push =
+        |path: &Path, is_root: bool, stack: &mut Vec<Frame>, failures: &mut Vec<RemoveFailure>| {
+            match open_dir_frame(path) {
+                Ok((pin, entries)) => stack.push(Frame {
+                    path: path.to_path_buf(),
+                    _pin: pin,
+                    entries,
+                }),
+                // Gone before we reached it; nothing to remove. The root not
+                // existing is still a failure, as `remove_dir_all` reports.
+                Err(e) if !is_root && e.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => failures.push(RemoveFailure {
+                    path: path.to_path_buf(),
+                    is_dir: true,
+                    error,
+                }),
             }
-        }
-        Err(error) => {
-            failures.push(RemoveFailure {
-                path: dir.to_path_buf(),
-                is_dir: true,
-                error,
-            });
-            return;
-        }
-    }
-    // Release the pin: removing the directory needs a handle with DELETE access.
-    drop(pin);
-    record(failures, dir, true, remove_clearing_readonly(dir, true));
-}
-
-fn remove_entry(entry: &std::fs::DirEntry, failures: &mut Vec<RemoveFailure>) {
-    let path = entry.path();
-    let kind = match entry.file_type() {
-        Ok(kind) => kind,
-        Err(error) => {
-            failures.push(RemoveFailure {
-                path,
-                is_dir: false,
-                error,
-            });
-            return;
-        }
-    };
-    if kind.is_symlink() {
-        // A symlink or junction: remove the link itself, never its target.
-        let is_dir = kind.is_symlink_dir();
-        let result = if is_dir {
-            std::fs::remove_dir(&path)
-        } else {
-            std::fs::remove_file(&path)
         };
-        record(failures, &path, is_dir, result);
-    } else if kind.is_dir() {
-        remove_dir_tree(&path, false, failures);
-    } else {
-        record(
-            failures,
-            &path,
-            false,
-            remove_clearing_readonly(&path, false),
-        );
+
+    let mut stack: Vec<Frame> = Vec::new();
+    push(root, true, &mut stack, &mut failures);
+
+    while let Some(frame) = stack.last_mut() {
+        if let Some(entry) = frame.entries.next() {
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(kind) if kind.is_symlink() => {
+                    // A symlink or junction: remove the link, never its target.
+                    let is_dir = kind.is_symlink_dir();
+                    let result = if is_dir {
+                        std::fs::remove_dir(&path)
+                    } else {
+                        std::fs::remove_file(&path)
+                    };
+                    record(&mut failures, &path, is_dir, result);
+                }
+                Ok(kind) if kind.is_dir() => {
+                    push(&path, false, &mut stack, &mut failures);
+                }
+                Ok(_) => record(
+                    &mut failures,
+                    &path,
+                    false,
+                    remove_clearing_readonly(&path, false),
+                ),
+                Err(error) => failures.push(RemoveFailure {
+                    path,
+                    is_dir: false,
+                    error,
+                }),
+            }
+        } else {
+            // Children done. Release the pin (removing the directory needs a
+            // handle with DELETE access, which the pin does not allow), then
+            // remove the directory itself.
+            let frame = stack.pop().expect("last_mut returned a frame");
+            let Frame { path, _pin, .. } = frame;
+            drop(_pin);
+            record(
+                &mut failures,
+                &path,
+                true,
+                remove_clearing_readonly(&path, true),
+            );
+        }
     }
+
+    failures
 }
 
 fn record(failures: &mut Vec<RemoveFailure>, path: &Path, is_dir: bool, result: io::Result<()>) {
@@ -138,6 +148,14 @@ fn record(failures: &mut Vec<RemoveFailure>, path: &Path, is_dir: bool, result: 
             error,
         }),
     }
+}
+
+/// Pins `dir` and reads its entries. The pin is returned so the caller can hold
+/// it while the entries are removed; see the module docs.
+fn open_dir_frame(dir: &Path) -> io::Result<(File, std::vec::IntoIter<std::fs::DirEntry>)> {
+    let pin = pin_dir(dir)?;
+    let entries: Vec<std::fs::DirEntry> = std::fs::read_dir(dir)?.collect::<io::Result<_>>()?;
+    Ok((pin, entries.into_iter()))
 }
 
 /// Opens `dir` so that it cannot be renamed, deleted or replaced while the
@@ -279,6 +297,32 @@ mod tests {
         assert!(!root.exists());
     }
 
+    /// A tree deep enough to overflow a recursive walk's call stack is removed
+    /// without aborting the process. The walk runs on a small-stack thread, so
+    /// a recursive implementation would overflow at this depth; the iterative
+    /// one returns normally.
+    #[test]
+    fn a_deep_tree_does_not_overflow_the_stack() {
+        let td = crate::tempdir::TempDir::new(None, None, None).unwrap();
+        // Build with a verbatim \\?\ path so MAX_PATH does not cap the depth.
+        let mut deep = format!(r"\\?\{}", td.path().display());
+        for i in 0..1500 {
+            deep.push_str(&format!(r"\d{i:04}"));
+        }
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(format!(r"{deep}\leaf.txt"), b"x").unwrap();
+        let root = td.path().to_path_buf();
+
+        let handle = std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || remove_tree(&root))
+            .unwrap();
+        let failures = handle.join().expect("the walk must not overflow the stack");
+
+        assert!(failures.is_empty(), "{failures:?}");
+        assert!(!td.path().exists());
+    }
+
     #[test]
     fn removes_read_only_files_and_directories() {
         let td = crate::tempdir::TempDir::new(None, None, None).unwrap();
@@ -323,6 +367,23 @@ mod tests {
         );
     }
 
+    /// A file symlink inside the tree is removed as a link; its target survives.
+    #[test]
+    fn a_file_symlink_is_removed_without_touching_its_target() {
+        let target = crate::tempdir::TempDir::new(None, None, None).unwrap();
+        let target_file = target.path().join("keep.txt");
+        std::fs::write(&target_file, b"keep").unwrap();
+        let td = crate::tempdir::TempDir::new(None, None, None).unwrap();
+        let root = td.path().to_path_buf();
+        std::os::windows::fs::symlink_file(&target_file, root.join("flink")).unwrap();
+
+        let failures = remove_tree(&root);
+
+        assert!(failures.is_empty(), "{failures:?}");
+        assert!(!root.exists());
+        assert_eq!(std::fs::read(&target_file).unwrap(), b"keep");
+    }
+
     /// A root that is itself a junction is refused, and its target is untouched.
     #[test]
     fn a_root_that_is_a_junction_is_not_followed() {
@@ -343,6 +404,55 @@ mod tests {
             std::fs::read(target.path().join("keep.txt")).unwrap(),
             b"keep"
         );
+    }
+
+    /// `pin_dir` refuses a reparse point. That is how a directory swapped for a
+    /// junction *after* it was classified as a real directory is kept out of
+    /// the walk: the walk opens it with `pin_dir`, which refuses it. (A junction
+    /// that is already there when the walk reaches it is classified as a link by
+    /// `DirEntry::file_type` and removed as one, so it never reaches `pin_dir`.)
+    #[test]
+    fn pin_dir_refuses_a_reparse_point() {
+        let target = crate::tempdir::TempDir::new(None, None, None).unwrap();
+        std::fs::write(target.path().join("keep.txt"), b"keep").unwrap();
+        let td = crate::tempdir::TempDir::new(None, None, None).unwrap();
+        let link = td.path().join("swapped");
+        make_junction(&link, target.path());
+
+        let err = pin_dir(&link).expect_err("a reparse point must be refused");
+        assert_eq!(
+            err.to_string(),
+            "it is a link or reparse point, so it was not followed"
+        );
+        assert_eq!(
+            std::fs::read(target.path().join("keep.txt")).unwrap(),
+            b"keep"
+        );
+        let _ = std::fs::remove_dir(&link);
+    }
+
+    /// `clear_readonly` opens with `FILE_FLAG_OPEN_REPARSE_POINT`, so clearing
+    /// the attribute on a path that is a link does not touch the link's target.
+    #[test]
+    fn clear_readonly_does_not_follow_a_link() {
+        let target = crate::tempdir::TempDir::new(None, None, None).unwrap();
+        let target_file = target.path().join("keep.txt");
+        std::fs::write(&target_file, b"keep").unwrap();
+        let mut ro = std::fs::metadata(&target_file).unwrap().permissions();
+        ro.set_readonly(true);
+        std::fs::set_permissions(&target_file, ro).unwrap();
+        let td = crate::tempdir::TempDir::new(None, None, None).unwrap();
+        let link = td.path().join("flink");
+        std::os::windows::fs::symlink_file(&target_file, &link).unwrap();
+
+        // The link itself is not a reparse-free file, so clear_readonly reports
+        // "not cleared" and leaves the target's attribute set.
+        assert!(!clear_readonly(&link, false).unwrap());
+        assert!(std::fs::metadata(&target_file)
+            .unwrap()
+            .permissions()
+            .readonly());
+        let _ = std::fs::remove_file(&link);
     }
 
     /// While a directory is pinned, nobody can rename it.

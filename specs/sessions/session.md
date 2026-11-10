@@ -478,7 +478,8 @@ collects the cleanup and teardown guarantees in one place.
 ### Drop safety net
 
 If `cleanup()` is never called, `Session`'s `Drop` impl:
-1. Logs a warning ("Session::cleanup() was not called")
+1. Logs a warning ("Session '<id>' was dropped without calling cleanup(). Working
+   directory may not have been cleaned up.")
 2. Performs a best-effort `remove_dir_all` on the working directory
 3. Does **not** perform cross-user cleanup (no async, no sudo)
 4. Does **not** shut down the cross-user helper

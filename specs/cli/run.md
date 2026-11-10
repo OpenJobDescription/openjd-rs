@@ -132,8 +132,9 @@ execute(args).await
   └── 7. RESULTS
       ├── Treat any observed interruption as a failed run
       ├── Capture run duration (before filesystem cleanup)
+      ├── Cleanup session (unless --preserve) — on Windows this can block and
+      │   print per-pass warnings while it waits for open files
       ├── Print session summary (format depends on --output)
-      ├── Cleanup session (unless --preserve)
       └── Exit with code 1 if any action failed
 ```
 

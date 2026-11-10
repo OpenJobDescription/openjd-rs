@@ -323,8 +323,9 @@ impl TempDir {
 
 /// Delays before each retry of a failed [`TempDir::cleanup`]: about 31 s in total.
 ///
-/// Windows refuses to delete a file or directory while any process holds a
-/// handle to it. Other platforms do not retry: a failure there is a permission
+/// Windows refuses to delete a file or directory while a process holds a handle
+/// to it that was not opened with `FILE_SHARE_DELETE`. Other platforms do not
+/// retry: a failure there is a permission
 /// problem that waiting will not fix.
 #[cfg(windows)]
 pub(crate) const CLEANUP_RETRY_DELAYS: &[Duration] = &[
@@ -834,10 +835,31 @@ mod tests {
         let f = PassFailure::from_failures(entries).expect("there were failures");
         assert_eq!(f.error.to_string(), "first");
         assert_eq!(f.file_count, 301);
-        assert_eq!(f.files.len(), MAX_FILES_TO_INSPECT);
+        assert_eq!(f.files.len(), 256, "the inspect cap, as a literal");
         assert_eq!(f.files[0], PathBuf::from("root/a/locked.bin"));
         assert_eq!(f.files[1], PathBuf::from("root/f0"));
         assert!(PassFailure::from_failures(Vec::new()).is_none());
+    }
+
+    #[test]
+    fn cleanup_is_idempotent_after_success() {
+        let mut td = TempDir::new(None, None, None).unwrap();
+        td.cleanup().unwrap();
+        assert!(!td.path().exists());
+        // A second call touches nothing and still reports success.
+        td.cleanup().unwrap();
+    }
+
+    #[test]
+    fn cleanup_after_a_failure_is_a_no_op_ok() {
+        // The first cleanup fails: the directory is already gone, a NotFound
+        // that is an error on the first pass. The second call returns Ok
+        // without a disk touch, so the path is still absent when it succeeds.
+        let mut td = TempDir::new(None, None, None).unwrap();
+        std::fs::remove_dir(td.path()).unwrap();
+        assert!(td.cleanup().is_err());
+        assert!(!td.path().exists());
+        td.cleanup().expect("second call is a no-op Ok");
     }
 
     #[test]

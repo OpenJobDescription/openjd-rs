@@ -171,7 +171,9 @@ Both are stored in the `Session` struct and cleaned up by `Session::cleanup()`.
 
 ### Cleanup retries on Windows
 
-On Windows, `TempDir::cleanup()` can block for about 31 s. A process that has exited
+On Windows, `TempDir::cleanup()` blocks for at least about 31 s once something is held
+open — the five retry waits — plus the time each pass spends walking the tree, which
+grows with the number of files. A process that has exited
 or been terminated can still hold handles in the directory for a while, and Windows
 will not delete a file while a handle to it is open without `FILE_SHARE_DELETE`. So
 cleanup runs a removal pass, and retries a pass that leaves anything behind after 1,
@@ -186,20 +188,26 @@ error.
 Each pass (`win32_remove::remove_tree`) deletes everything it can and records each
 entry it could not, as Python's `shutil.rmtree` does with an error handler. One
 locked file therefore leaves only that file and the directories above it.
-`std::fs::remove_dir_all` is not used here because it stops at the first error,
-which leaves the whole tree on disk and does not say which file failed.
+`std::fs::remove_dir_all` is not used here because it stops at the first error — it
+deletes what it reached before then, but abandons the rest of the tree and does not
+say which entry failed.
 
 The session directory is writable by the job user, and the processes cleanup waits
 for belong to the job, so the walk must not be tricked into following a junction or
 symlink planted mid-walk:
 
-- Every open and delete uses `FILE_FLAG_OPEN_REPARSE_POINT`. A symlink or junction
-  is removed as a link, and its target is never traversed.
+- A child is classified with `DirEntry::file_type`, which does not follow a link,
+  so a symlink or junction is removed as a link and its target is never traversed.
+  Any directory the walk opens uses `FILE_FLAG_OPEN_REPARSE_POINT` and is refused
+  if it turns out to be a reparse point: "it is a link or reparse point, so it was
+  not followed", recorded as a failure.
 - Each directory on the path being walked is held open without
   `FILE_SHARE_DELETE` while its entries are removed, so it cannot be renamed or
-  replaced. A directory that turns out to be a reparse point when opened is not
-  walked and is recorded as a failure: "it is a link or reparse point, so it was
-  not followed".
+  replaced. This matches the time-of-check/time-of-use safety of
+  `std::fs::remove_dir_all` (CVE-2022-21658). One case it does not cover: a
+  directory another process holds open with `DELETE` access and full sharing
+  cannot be pinned, so the walk records it as a failure and does not descend into
+  it (see the parity table). The walk is iterative, so depth does not bound it.
 
 A read-only file or directory has the attribute cleared, through a handle, before it
 is deleted, as `std::fs::remove_dir_all` does.
@@ -225,8 +233,9 @@ the line names only the directory and the error. A failed holder lookup replaces
 the process list with "The processes holding them open could not be determined:
 <reason>.", and an empty one with "No running process was found holding them open."
 
-The holder lookup registers only files, not directories, because the Restart Manager
-does not report processes holding a directory open.
+The holder lookup registers only files, not directories: registering a directory
+makes the whole `RmGetList` call fail, so a directory would cost the lookup for the
+files beside it.
 
 #### Python parity
 
@@ -236,7 +245,10 @@ without Rust's "(os error N)" suffix. The differences are intentional:
 
 | | Rust | Python |
 |---|---|---|
-| Read-only files on Windows | Attribute cleared, then deleted | `rmtree` fails on them, so they are reported as not deleted |
+| Read-only files and directories on Windows | Attribute cleared, then deleted | `rmtree` fails on them, so they are reported as not deleted |
+| Count of undeletable files in the warning | The true count, even above 256 | Capped at the 256 it inspects for holders |
+| A failed holder lookup | `… could not be determined: <reason>.` | Prefixes the exception type: `… could not be determined: OSError: <reason>.` |
+| A directory another process holds with `DELETE` access | Not descended into (cannot be pinned); recorded as a failure | `rmtree` deletes its unlocked contents |
 | A directory swapped for a junction mid-walk | Not followed (see above) | `rmtree` on Windows does not defend against this (`shutil.rmtree.avoids_symlink_attacks` is `False`) |
 | After the last pass | `SessionError::TempDir` with the first error, logged by `Session::cleanup()` as "Files within temporary directory <path> could not be deleted: <reason>" | `RuntimeError` listing every path that failed, with its error |
 
