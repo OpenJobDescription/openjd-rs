@@ -251,6 +251,8 @@ struct CrossUserTestHelper {
     process_handle: windows::Win32::Foundation::HANDLE,
     stdin: std::io::BufWriter<std::fs::File>,
     reader: BufReader<std::fs::File>,
+    /// Every response read so far, reported if reading from the helper fails.
+    responses: Vec<serde_json::Value>,
 }
 
 impl CrossUserTestHelper {
@@ -280,6 +282,7 @@ impl CrossUserTestHelper {
             process_handle: spawned.process_handle,
             stdin: std::io::BufWriter::new(stdin_file),
             reader: BufReader::new(stdout_file),
+            responses: Vec::new(),
         }
     }
 
@@ -315,12 +318,62 @@ impl CrossUserTestHelper {
         ));
     }
 
+    /// Read one JSON response from the helper.
+    ///
+    /// Panics with a description of the helper's state if its stdout ends or
+    /// can't be read, and with the raw line if the line isn't JSON, rather
+    /// than handing an empty string to the JSON parser.
     fn read_line(&mut self) -> serde_json::Value {
         let mut line = String::new();
-        self.reader
-            .read_line(&mut line)
-            .expect("read from helper stdout");
-        serde_json::from_str(line.trim()).expect("parse helper response JSON")
+        match self.reader.read_line(&mut line) {
+            // EOF: every write handle to the helper's stdout pipe is closed.
+            // (std reports ERROR_BROKEN_PIPE on a pipe read as Ok(0).)
+            Ok(0) => panic!(
+                "helper stdout reached EOF before the expected response; {}",
+                self.helper_state()
+            ),
+            Ok(_) => {}
+            Err(e) => panic!("read from helper stdout: {e}; {}", self.helper_state()),
+        }
+        let v: serde_json::Value = serde_json::from_str(line.trim())
+            .unwrap_or_else(|e| panic!("parse helper response JSON: {e}; line: {line:?}"));
+        self.responses.push(v.clone());
+        v
+    }
+
+    /// Describe how the helper process ended, for a failed read.
+    ///
+    /// Waits up to 5 s for the helper to exit, then reports its exit code
+    /// and every response read before the failure. Exit code 1 is what the
+    /// helper's own `kill_process` passes to `TerminateProcess`, and an
+    /// `0xC000xxxx` NTSTATUS is a crash. If the wait times out, the helper is
+    /// still running and only its stdout ended.
+    fn helper_state(&self) -> String {
+        use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+        use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
+        let mut code = 0u32;
+        // SAFETY: `process_handle` is the `hProcess` that
+        // `CreateProcessWithLogonW` returned through
+        // `spawn_as_user_with_stdin`; `subprocess.rs` waits on and reads the
+        // exit code of the same kind of handle. Only `shutdown` closes it,
+        // and `shutdown` takes `self` by value, so it is still open while
+        // `&self` exists. `code` is a live local the call writes through.
+        // The wait is bounded, so this can't hang.
+        let (wait, got_code) = unsafe {
+            let wait = WaitForSingleObject(self.process_handle, 5000);
+            (wait, GetExitCodeProcess(self.process_handle, &mut code))
+        };
+        let exit = if wait == WAIT_OBJECT_0 {
+            match got_code {
+                Ok(()) => format!("helper exited with code {code:#010x}"),
+                Err(e) => format!("helper exited, exit code unavailable ({e})"),
+            }
+        } else if wait == WAIT_TIMEOUT {
+            "helper still running after 5 s".to_string()
+        } else {
+            format!("waiting for the helper failed ({wait:?})")
+        };
+        format!("{exit}; responses before this: {:?}", self.responses)
     }
 
     fn read_until_done(&mut self) -> Vec<serde_json::Value> {
