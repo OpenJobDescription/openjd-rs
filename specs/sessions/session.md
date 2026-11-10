@@ -45,7 +45,9 @@ ReadyEnding ───► Ended            (cleanup)
 
 These are the states `state()` reports. Going to `ReadyEnding` stores `Ready` with
 `ending_only` set, and `ReadyEnding ───► Ready` clears the flag and leaves the stored
-state alone.
+state alone. The per-operation steps in the rest of this document use the same
+convention: "state" means what `state()` reports, so "state → `ReadyEnding`" means the
+stored state becomes `Ready` with `ending_only` set.
 
 ### Brittle Sessions
 
