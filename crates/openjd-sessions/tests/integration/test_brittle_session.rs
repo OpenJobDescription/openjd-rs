@@ -475,6 +475,69 @@ async fn successful_actions_keep_running_controls_reopening() {
     }
 }
 
+/// Assert that `r` is the `InvalidState` error an ending-only session gives
+/// for an operation that needs `expected`, naming `READY_ENDING` as the
+/// current state both in the error value and in its message.
+fn assert_refused_in_ready_ending<T: std::fmt::Debug>(
+    r: Result<T, SessionError>,
+    expected: SessionState,
+    what: &str,
+) {
+    let err = r.unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        format!("Session must be in {expected} state, current: READY_ENDING"),
+        "{what}"
+    );
+    match err {
+        SessionError::InvalidState {
+            expected: e,
+            current,
+        } => {
+            assert_eq!(e, vec![expected], "{what}");
+            assert_eq!(current, SessionState::ReadyEnding, "{what}");
+        }
+        other => panic!("{what}: expected InvalidState, got {other:?}"),
+    }
+}
+
+/// An ending-only session refuses `run_task`, `enter_environment`,
+/// `run_subprocess` and `cancel_action` with an error that reports
+/// `READY_ENDING` as the current state, and the refusals leave it
+/// `ReadyEnding`.
+#[tokio::test]
+async fn refusals_in_ending_only_report_ready_ending() {
+    let tmp = TempDir::new().unwrap();
+    let mut s = Session::new_for_test(tmp.path().to_path_buf());
+    run_ending_task(&mut s, Ending::Failed).await;
+
+    assert_refused_in_ready_ending(
+        s.run_task("t2", &step("echo again"), None, None, None)
+            .await,
+        SessionState::Ready,
+        "run_task",
+    );
+    assert_refused_in_ready_ending(
+        s.enter_environment(&env("New", None, None), None, None, None)
+            .await,
+        SessionState::Ready,
+        "enter_environment",
+    );
+    assert_refused_in_ready_ending(
+        s.run_subprocess("echo", Some(&["again".into()]), None, None, true, None)
+            .await,
+        SessionState::Ready,
+        "run_subprocess",
+    );
+    assert_refused_in_ready_ending(
+        s.cancel_action(None, false),
+        SessionState::Running,
+        "cancel_action",
+    );
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    assert!(s.environments_entered().is_empty());
+}
+
 // ── clear_ending_only ───────────────────────────────────────────────────
 //
 // `clear_ending_only()` is the only way from `ReadyEnding` back to `Ready`.
@@ -732,12 +795,12 @@ async fn clear_ending_only_refused_in_ready() {
 }
 
 /// `clear_ending_only()` is refused in `Running` and `Canceling`, and the
-/// refusal leaves ending-only mode set: once the state is forced back, a
-/// successful action still settles to `ReadyEnding`.
+/// refusal leaves ending-only mode set: once the state is forced back to
+/// `Ready`, the session still reports `ReadyEnding`.
 ///
 /// `run_task` holds `&mut Session` for the whole action, so these states
 /// can't be observed from outside a real action. They are forced with
-/// `set_state_for_test`.
+/// `set_state_for_test`, which never clears ending-only mode.
 #[tokio::test]
 async fn clear_ending_only_refused_in_running_and_canceling() {
     for forced in [SessionState::Running, SessionState::Canceling] {
@@ -748,13 +811,8 @@ async fn clear_ending_only_refused_in_running_and_canceling() {
         s.set_state_for_test(forced);
         assert_clear_refused(&mut s);
 
-        // Still ending-only: a successful action settles to ReadyEnding.
+        // Still ending-only: forced back to Ready, it reports ReadyEnding.
         s.set_state_for_test(SessionState::Ready);
-        let r = s
-            .run_task("t2", &step("echo ok"), None, None, None)
-            .await
-            .unwrap();
-        assert_eq!(r.state, ActionState::Success);
         assert_eq!(
             s.state(),
             SessionState::ReadyEnding,

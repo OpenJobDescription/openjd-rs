@@ -102,6 +102,9 @@ impl Session {
     // ── Accessors ──
 
     pub fn session_id(&self) -> &str;
+    /// The lifecycle state. `ReadyEnding` is derived, not stored: it is
+    /// `Ready` while the session is ending-only (session.md § Brittle
+    /// Sessions).
     pub fn state(&self) -> SessionState;
     /// The session working directory: a new directory directly under the
     /// session root, named with 8 random characters from `[a-z0-9_]`.
@@ -312,6 +315,9 @@ pipeline). Production callers should use `with_config`.
 ```rust
 impl Session {
     pub fn new_for_test(working_directory: PathBuf) -> Self;
+    /// Never clears ending-only mode: `ReadyEnding` turns it on, and any
+    /// other state leaves it as it was, so `Ready` on an ending-only
+    /// session reports `ReadyEnding`.
     pub fn set_state_for_test(&mut self, state: SessionState);
     pub fn set_job_parameter_values_for_test(&mut self, values: JobParameterValues);
     pub fn set_cancel_writer_for_test(&mut self, writer: std::fs::File);

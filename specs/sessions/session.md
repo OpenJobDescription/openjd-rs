@@ -19,6 +19,15 @@ pub enum SessionState {
 }
 ```
 
+`Session` never stores `ReadyEnding`. Its private `state` field is a `StoredState`, which
+has only `Ready`, `Running`, `Canceling` and `Ended`, and ending-only mode lives only in
+the private `ending_only` flag. `Session::state()` derives `ReadyEnding`: it reports a
+stored `Ready` as `ReadyEnding` while `ending_only` is set, and reports every other state
+as stored. The flag is the one source of truth for ending-only mode, so the state and
+the flag can't disagree. The flag has to exist anyway, because it is what remembers
+ending-only mode through `Running` and `Canceling`. Every state check in `Session`, and
+the `current` state in every `SessionError::InvalidState`, uses `state()`.
+
 ### Transitions
 
 ```
@@ -33,6 +42,10 @@ ReadyEnding ───► Ready            (clear_ending_only)
 Ready ──────────► Ended           (cleanup)
 ReadyEnding ───► Ended            (cleanup)
 ```
+
+These are the states `state()` reports. Going to `ReadyEnding` stores `Ready` with
+`ending_only` set, and `ReadyEnding ───► Ready` clears the flag and leaves the stored
+state alone.
 
 ### Brittle Sessions
 
@@ -55,12 +68,15 @@ The `ending_only` flag is set when:
 `keep_session_running = true` means only "don't make the session ending-only on this
 exit". An `onExit` that ends `Failed`, `Canceled` or `Timeout` still makes it ending-only,
 like any other action, and
-`keep_session_running` never clears `ending_only`. When an action ends, the session goes to
-`ReadyEnding` if `ending_only` is set and to `Ready` otherwise, so `keep_session_running`
-can't bring an ending-only session back to `Ready`. All of these paths settle the state
-through one private helper, `settle_after_action`, so `state == Ready` implies the session
-isn't ending-only, and the `Ready` checks in `run_task`, `enter_environment` and
-`run_subprocess` enforce the contract without checking `ending_only` themselves.
+`keep_session_running` never clears `ending_only`. When an action ends, the stored state
+goes back to `Ready`, and `state()` reports `ReadyEnding` if `ending_only` is set and
+`Ready` otherwise, so `keep_session_running` can't bring an ending-only session back to
+`Ready`. All of these paths settle the state through one private helper,
+`settle_after_action`, which sets the flag for a `Failed`, `Canceled` or `Timeout` action
+and then stores `Ready`. Because `ReadyEnding` is derived from the flag rather than
+stored beside it, `state() == Ready` means the session isn't ending-only, and the `Ready`
+checks in `run_task`, `enter_environment` and `run_subprocess` enforce the contract
+without checking `ending_only` themselves.
 
 This design reflects the worker agent's pattern: after a task fails, the agent exits all
 environments in reverse order and cleans up.
@@ -72,7 +88,8 @@ The only way back to `Ready` is an explicit call to the public method
   `Ended`) it returns `SessionError::InvalidState` with `expected: [ReadyEnding]` and
   changes nothing.
 - It clears `ending_only` whatever set it (a failed, canceled or timed-out action, or a
-  default `exit_environment`) and sets the state to `Ready`.
+  default `exit_environment`). That is all it changes: the stored state is already
+  `Ready`, so `state()` then reports `Ready`.
 - It runs no action and changes nothing else: the entered environments, the last action's
   status and the session's environment variables stay as they were. A later failure
   makes the session ending-only again.
