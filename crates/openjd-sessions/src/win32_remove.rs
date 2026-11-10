@@ -55,6 +55,13 @@ pub(crate) struct RemoveFailure {
 /// directory comes after its contents (post-order). An empty result means
 /// `root` is gone.
 pub(crate) fn remove_tree(root: &Path) -> Vec<RemoveFailure> {
+    remove_tree_observed(root, |_| {})
+}
+
+/// [`remove_tree`], calling `on_dir_pinned` once for each directory just after
+/// it is pinned and before its entries are processed, while the pin is held.
+/// Tests use it to observe the walk mid-flight; `remove_tree` passes a no-op.
+fn remove_tree_observed(root: &Path, mut on_dir_pinned: impl FnMut(&Path)) -> Vec<RemoveFailure> {
     let mut failures = Vec::new();
 
     // A directory whose contents are being removed. Its pin is held until the
@@ -65,6 +72,7 @@ pub(crate) fn remove_tree(root: &Path) -> Vec<RemoveFailure> {
         path: PathBuf,
         _pin: File,
         entries: std::vec::IntoIter<std::fs::DirEntry>,
+        announced: bool,
     }
 
     let push =
@@ -74,6 +82,7 @@ pub(crate) fn remove_tree(root: &Path) -> Vec<RemoveFailure> {
                     path: path.to_path_buf(),
                     _pin: pin,
                     entries,
+                    announced: false,
                 }),
                 // Gone before we reached it; nothing to remove. The root not
                 // existing is still a failure, as `remove_dir_all` reports.
@@ -90,6 +99,10 @@ pub(crate) fn remove_tree(root: &Path) -> Vec<RemoveFailure> {
     push(root, true, &mut stack, &mut failures);
 
     while let Some(frame) = stack.last_mut() {
+        if !frame.announced {
+            frame.announced = true;
+            on_dir_pinned(&frame.path);
+        }
         if let Some(entry) = frame.entries.next() {
             let path = entry.path();
             match entry.file_type() {
@@ -466,6 +479,83 @@ mod tests {
         assert_eq!(err.raw_os_error(), Some(32), "{err}");
         drop(pin);
         std::fs::rename(&dir, td.path().join("moved")).unwrap();
+    }
+
+    /// A directory another process holds open with DELETE access and full
+    /// sharing cannot be pinned, so the walk records it as a failure and does
+    /// not delete its contents. This is the documented pin limitation; the test
+    /// locks it in so it cannot change silently.
+    #[test]
+    fn a_directory_held_with_delete_access_is_recorded_not_descended() {
+        const DELETE: u32 = 0x0001_0000;
+        let td = crate::tempdir::TempDir::new(None, None, None).unwrap();
+        let root = td.path().to_path_buf();
+        let held_dir = root.join("held");
+        std::fs::create_dir(&held_dir).unwrap();
+        std::fs::write(held_dir.join("inside.txt"), b"x").unwrap();
+        // Another handle on the directory, with DELETE + full sharing, as a tool
+        // about to rename or delete it would hold.
+        let _handle = OpenOptions::new()
+            .access_mode(DELETE | FILE_READ_ATTRIBUTES)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(&held_dir)
+            .unwrap();
+
+        let failures = remove_tree(&root);
+
+        // "held" is recorded (cannot be pinned) and the root after it, and its
+        // contents are left alone — not deleted through an unpinned walk.
+        assert_eq!(names(&failures, &root), ["held", ""], "{failures:?}");
+        assert_eq!(failures[0].error.raw_os_error(), Some(32));
+        assert!(held_dir.join("inside.txt").exists());
+    }
+
+    /// Each directory stays pinned while its entries are removed: an attempt to
+    /// rename it mid-walk fails. This is the CVE-2022-21658 protection.
+    #[test]
+    fn a_directory_is_pinned_while_its_entries_are_removed() {
+        let td = crate::tempdir::TempDir::new(None, None, None).unwrap();
+        let root = td.path().to_path_buf();
+        let mid = root.join("mid");
+        std::fs::create_dir(&mid).unwrap();
+        std::fs::write(mid.join("leaf.txt"), b"x").unwrap();
+        let moved = root.join("moved");
+
+        let mut checked = false;
+        let failures = remove_tree_observed(&root, |pinned| {
+            if pinned.ends_with("mid") {
+                let err = std::fs::rename(&mid, &moved)
+                    .expect_err("a pinned directory must not be renamable");
+                assert_eq!(err.raw_os_error(), Some(32), "{err}");
+                checked = true;
+            }
+        });
+
+        assert!(checked, "the walk never pinned mid");
+        assert!(failures.is_empty(), "{failures:?}");
+        assert!(!root.exists());
+    }
+
+    /// A child that disappears after it is enumerated but before the walk pins
+    /// it is not a failure: the walk skips the NotFound and finishes cleanly.
+    #[test]
+    fn a_child_that_vanishes_before_it_is_pinned_is_not_a_failure() {
+        let td = crate::tempdir::TempDir::new(None, None, None).unwrap();
+        let root = td.path().to_path_buf();
+        let gone = root.join("gone");
+        std::fs::create_dir(&gone).unwrap();
+        std::fs::write(root.join("keep.txt"), b"x").unwrap();
+
+        // When the root is pinned, delete `gone` before the walk reaches it.
+        let failures = remove_tree_observed(&root, |pinned| {
+            if pinned == root {
+                std::fs::remove_dir(&gone).unwrap();
+            }
+        });
+
+        assert!(failures.is_empty(), "{failures:?}");
+        assert!(!root.exists());
     }
 
     fn make_junction(link: &Path, target: &Path) {
