@@ -704,6 +704,7 @@ mod tests {
             "{{ '\\t90\\n' }}",
             " {{ 90 }} ",
             "{{ '\u{a0}90' }}",
+            "\u{a0}{{ 90 }}\u{3000}",
         ] {
             assert_eq!(
                 resolve_action_timeout(

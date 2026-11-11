@@ -3908,9 +3908,10 @@ mod typed_param_seeding_tests {
 
     #[test]
     fn padded_numeric_values_ignore_white_space() {
-        // An INT or FLOAT value given as a string is a numeric string
-        // (Template Schemas §7.5): white space around the number is ignored,
-        // for job and task parameters, and a FLOAT keeps its text without it.
+        // Seeding coerces an INT or FLOAT value given as a string, and that
+        // coercion ignores white space around the number (Expression Language
+        // §1.2.3, as for Template Schemas §7.5 numeric strings), for job and
+        // task parameters; a FLOAT keeps its text without the white space.
         let symtab = build_symtab_with_task_params(
             vec![
                 ("N", JobParameterType::Int, ExprValue::String(" 5 ".into())),

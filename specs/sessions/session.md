@@ -354,8 +354,9 @@ parameter type when seeded, for `Param.*`, `RawParam.*`, `Task.Param.*`, and
 `Task.RawParam.*` alike: values cross the language boundary as strings (an INT parameter
 arrives as `"5"`), and typed expression evaluation requires typed symbols, so the value
 is converted via `ExprValue::coerce` (`"5"` → `Int(5)`, including element-wise coercion
-for list types). An INT or FLOAT value given as a string is a numeric string, so white
-space around the number is ignored (Template Schemas §7.5): `" 5 "` → `Int(5)`, and
+for list types). The string-to-`int` and string-to-`float` coercion ignores white space
+around the number (Expression Language §1.2.3, as for the numeric strings of Template
+Schemas §7.5): `" 5 "` → `Int(5)`, and
 `" 2.50 "` → a float that renders `2.50`. **Divergence from openjd-sessions-for-python:**
 Python does not parse parameter values, so it renders `" 5 "` as given.
 `CHUNK_INT` task parameters are exempt and remain strings — chunk range
