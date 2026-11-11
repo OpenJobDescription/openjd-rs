@@ -668,8 +668,16 @@ fn transport_numbers_are_exact() {
             "Cannot convert ' 42 ' to int: invalid digit found in string",
         ),
         (
+            serde_json::json!({"type": "int", "value": "42\n"}),
+            "Cannot convert '42\n' to int: invalid digit found in string",
+        ),
+        (
             serde_json::json!({"type": "float", "value": "\t3.5"}),
             "Cannot convert '\t3.5' to float: invalid float literal",
+        ),
+        (
+            serde_json::json!({"type": "float", "value": "3.5 "}),
+            "Cannot convert '3.5 ' to float: invalid float literal",
         ),
         (
             serde_json::json!({"type": "list[int]", "value": ["1", " 2"]}),
@@ -679,15 +687,16 @@ fn transport_numbers_are_exact() {
         let err = ExprValue::from_json_transport(&json, PathFormat::Posix).unwrap_err();
         assert_eq!(err.to_string(), expected, "{json}");
     }
-    let err = serde_json::from_value::<openjd_expr::SymbolTable>(serde_json::json!([
-        {"name": "Param.N", "type": "int", "value": " 9 "}
-    ]))
-    .unwrap_err();
-    assert!(
-        err.to_string()
-            .contains("Cannot convert ' 9 ' to int: invalid digit found in string"),
-        "{err}"
-    );
+    for value in [" 9 ", "9 "] {
+        let err = serde_json::from_value::<openjd_expr::SymbolTable>(serde_json::json!([
+            {"name": "Param.N", "type": "int", "value": value}
+        ]))
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("Cannot convert '{value}' to int: invalid digit found in string")
+        );
+    }
 }
 
 #[test]

@@ -3040,6 +3040,62 @@ steps:
     }
 
     #[test]
+    fn test_job_param_numeric_values_ignore_white_space() {
+        // A string value for an INT or FLOAT job parameter is a numeric
+        // string (Template Schemas §7.5). `-p K=V` trims the whole argument
+        // before it splits it, so its error quotes the value without the
+        // trailing white space; inline JSON keeps the value as given.
+        let mut tmpl = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            tmpl,
+            r#"specificationVersion: jobtemplate-2023-09
+name: Padded
+parameterDefinitions:
+- name: N
+  type: INT
+- name: F
+  type: FLOAT
+steps:
+- name: S
+  script:
+    actions:
+      onRun:
+        command: python
+        args: ["-c", "print('VALUES=[{{{{Param.N}}}}][{{{{Param.F}}}}]')"]
+"#
+        )
+        .unwrap();
+        let path = tmpl.path().to_str().unwrap();
+        let (code, stdout, stderr) = run_cli(&[
+            "run",
+            path,
+            "-p",
+            "N=\u{3000}7",
+            "-p",
+            r#"{"F": " 2.50\t"}"#,
+            "--extensions",
+            "",
+        ]);
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("VALUES=[7][2.50]"), "stdout: {stdout}");
+        for (n, expected) in [
+            (
+                " N= 7x ",
+                "Parameter 'N': Value ' 7x' is not a valid integer or integer string.",
+            ),
+            (
+                r#"{"N": " 7x "}"#,
+                "Parameter 'N': Value ' 7x ' is not a valid integer or integer string.",
+            ),
+        ] {
+            let (code, _stdout, stderr) =
+                run_cli(&["run", path, "-p", n, "-p", "F=2.5", "--extensions", ""]);
+            assert_ne!(code, 0, "{n} should fail");
+            assert!(stderr.contains(expected), "{n}: stderr: {stderr}");
+        }
+    }
+
+    #[test]
     fn test_tasks_from_json_file() {
         let mut f = NamedTempFile::with_suffix(".json").unwrap();
         write!(f, r#"[{{"TaskNumber": "1", "TaskMessage": "Hi!"}}]"#).unwrap();
