@@ -545,7 +545,8 @@ async fn test_run_task_fail_run() {
 async fn test_no_task_run_after_fail() {
     let tmp = TempDir::new().unwrap();
     let mut s = Session::new_for_test(tmp.path().to_path_buf());
-    // First run fails — session becomes "brittle" (ReadyEnding), only exit_environment allowed
+    // First run fails — session becomes "brittle" (ReadyEnding): only exit_environment,
+    // cleanup and clear_ending_only are allowed
     s.run_task(
         "test_step",
         &step("sh", vec!["-c", "exit 1"]),

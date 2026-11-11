@@ -98,6 +98,21 @@ impl std::fmt::Display for SessionState {
     }
 }
 
+/// The lifecycle state a [`Session`] stores. It is [`SessionState`] without
+/// `ReadyEnding`.
+///
+/// Ending-only mode is stored only in `Session::ending_only`, the one source
+/// of truth for it (spec § Brittle Sessions). `ReadyEnding` is derived from
+/// `Ready` plus the flag in [`Session::state`]. Leaving the variant out of
+/// the stored type means no write can store it, so the two can't disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StoredState {
+    Ready,
+    Running,
+    Canceling,
+    Ended,
+}
+
 /// Identifier for an environment within a session.
 pub type EnvironmentIdentifier = String;
 
@@ -529,7 +544,12 @@ fn derive_library(
 )]
 pub struct Session {
     session_id: String,
-    state: SessionState,
+    /// The stored lifecycle state. Read it through [`Session::state`], which
+    /// derives `ReadyEnding` from `ending_only`.
+    state: StoredState,
+    /// Whether the session is ending-only. The only record of ending-only
+    /// mode: it persists through `Running` and `Canceling`, and
+    /// [`Session::state`] reports `Ready` with it set as `ReadyEnding`.
     ending_only: bool,
     working_directory: PathBuf,
     files_directory: PathBuf,
@@ -587,7 +607,7 @@ impl Session {
         let files_directory = working_directory.join("embedded_files");
         Self {
             session_id: String::new(),
-            state: SessionState::Ready,
+            state: StoredState::Ready,
             ending_only: false,
             working_directory,
             files_directory,
@@ -646,9 +666,26 @@ impl Session {
 
     /// Test-only: force the session state (typically to `Running`) so `cancel_action`
     /// will proceed without needing a full action run.
+    ///
+    /// It never clears ending-only mode. `ReadyEnding` stores `Ready` and
+    /// turns ending-only mode on. `Ready`, `Running`, `Canceling` and `Ended`
+    /// store that state and leave ending-only mode as it was, so on an
+    /// ending-only session `set_state_for_test(Ready)` makes
+    /// [`state`](Self::state) report `ReadyEnding`. As for every caller, the
+    /// only way back to `Ready` is
+    /// [`clear_ending_only`](Self::clear_ending_only).
     #[cfg(any(test, feature = "test-utils"))]
     pub fn set_state_for_test(&mut self, state: SessionState) {
-        self.state = state;
+        self.state = match state {
+            SessionState::ReadyEnding => {
+                self.ending_only = true;
+                StoredState::Ready
+            }
+            SessionState::Ready => StoredState::Ready,
+            SessionState::Running => StoredState::Running,
+            SessionState::Canceling => StoredState::Canceling,
+            SessionState::Ended => StoredState::Ended,
+        };
     }
 
     /// Test-only: inject job parameter values for unit-testing `build_symbol_table`.
@@ -819,7 +856,7 @@ impl Session {
 
         Ok(Self {
             session_id: config.session_id,
-            state: SessionState::Ready,
+            state: StoredState::Ready,
             ending_only: false,
             working_directory,
             files_directory,
@@ -969,12 +1006,20 @@ impl Session {
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
-    #[allow(
-        missing_docs,
-        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-    )]
+    /// The session's lifecycle state.
+    ///
+    /// `ReadyEnding` is derived: it is the stored `Ready` state while the
+    /// session is ending-only (spec § Brittle Sessions). Every state check
+    /// in this type goes through here, so ending-only mode has one source of
+    /// truth.
     pub fn state(&self) -> SessionState {
-        self.state
+        match self.state {
+            StoredState::Ready if self.ending_only => SessionState::ReadyEnding,
+            StoredState::Ready => SessionState::Ready,
+            StoredState::Running => SessionState::Running,
+            StoredState::Canceling => SessionState::Canceling,
+            StoredState::Ended => SessionState::Ended,
+        }
     }
     /// The session working directory.
     ///
@@ -1057,13 +1102,13 @@ impl Session {
         time_limit: Option<Duration>,
         mark_action_failed: bool,
     ) -> Result<(), SessionError> {
-        if self.state != SessionState::Running {
+        if self.state() != SessionState::Running {
             return Err(SessionError::InvalidState {
                 expected: vec![SessionState::Running],
-                current: self.state,
+                current: self.state(),
             });
         }
-        self.state = SessionState::Canceling;
+        self.state = StoredState::Canceling;
         if mark_action_failed {
             self.cancel.lock().mark_failed = true;
         }
@@ -1124,6 +1169,79 @@ impl Session {
         }
     }
 
+    /// Take the session out of ending-only mode, moving it from
+    /// `ReadyEnding` back to `Ready` so that it accepts `run_task`,
+    /// `enter_environment` and `run_subprocess` again (spec § Brittle
+    /// Sessions).
+    ///
+    /// **Use with care.** By default a session is brittle: once an action
+    /// ends `Failed`, `Canceled` or `Timeout`, or `exit_environment` is
+    /// called with `keep_session_running = false`, the session only allows
+    /// exiting the environments it entered and `cleanup()`. This method is
+    /// for callers that deliberately want to keep running work after that.
+    /// The caller takes responsibility for the session's state: a failed or
+    /// canceled action can leave its work half done, and the session
+    /// neither checks nor undoes any of it.
+    ///
+    /// This is the only way from `ReadyEnding` back to `Ready`.
+    /// `exit_environment(.., keep_session_running = true, ..)` never does
+    /// it. The method clears ending-only mode whatever set it. It runs no
+    /// action and changes nothing else: the entered environments, the last
+    /// action's status and the environment variables stay as they were.
+    ///
+    /// It refuses, and leaves the session unchanged, when the session-wide
+    /// [`SessionConfig::cancel_token`] exists and has been canceled. That
+    /// cancellation is permanent — a tokio token can't be reset — so every
+    /// later action would end `Canceled` and make the session ending-only
+    /// again; the method won't return the session to `Ready` under a
+    /// cancellation it can't undo. Per-action cancels
+    /// ([`cancel_action`](Self::cancel_action) and
+    /// [`SessionCancelHandle`]) don't block it: only the session-wide token
+    /// does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SessionError::InvalidState`] if the session isn't
+    /// `ReadyEnding`, or [`SessionError::SessionCanceled`] if the
+    /// session-wide [`SessionConfig::cancel_token`] has been canceled.
+    pub fn clear_ending_only(&mut self) -> Result<(), SessionError> {
+        if self.state() != SessionState::ReadyEnding {
+            return Err(SessionError::InvalidState {
+                expected: vec![SessionState::ReadyEnding],
+                current: self.state(),
+            });
+        }
+        if let Some(token) = &self.cancel.parent_token {
+            if token.is_cancelled() {
+                return Err(SessionError::SessionCanceled);
+            }
+        }
+        // The stored state is already `Ready`: clearing the flag is all
+        // that takes the session from `ReadyEnding` to `Ready`.
+        self.ending_only = false;
+        Ok(())
+    }
+
+    /// Leave `Running`/`Canceling` once an action has reached the terminal
+    /// state `final_state` (spec § Brittle Sessions).
+    ///
+    /// A `Failed`, `Canceled` or `Timeout` action makes the session
+    /// ending-only until the caller calls
+    /// [`clear_ending_only`](Self::clear_ending_only). The stored state goes
+    /// back to `Ready` either way. `ending_only` is the only record of
+    /// ending-only mode, and [`state`](Self::state) derives `ReadyEnding`
+    /// from it, so `Ready` is reported only while the session isn't
+    /// ending-only. Every path that ends an action goes through here, which
+    /// is what lets the `state() == Ready` checks in `run_task`,
+    /// `enter_environment` and `run_subprocess` enforce the contract on
+    /// their own.
+    fn settle_after_action(&mut self, final_state: ActionState) {
+        if final_state != ActionState::Success {
+            self.ending_only = true;
+        }
+        self.state = StoredState::Ready;
+    }
+
     /// Record a failure that occurred while setting up an action that has
     /// already been reported as Running (e.g. wrap-symbol seeding or path
     /// mapping materialization failing before the subprocess dispatch).
@@ -1148,7 +1266,7 @@ impl Session {
         self.action.ended_at = Some(std::time::SystemTime::now());
         self.action.exit_code = None;
         self.cancel.reset();
-        self.state = SessionState::ReadyEnding;
+        self.settle_after_action(ActionState::Failed);
         self.notify_callback();
         e
     }
@@ -1230,7 +1348,7 @@ impl Session {
                 let _ = std::fs::remove_dir_all(&self.working_directory);
             }
         }
-        self.state = SessionState::Ended;
+        self.state = StoredState::Ended;
     }
 
     /// Enter an environment asynchronously (non-blocking).
@@ -1262,10 +1380,10 @@ impl Session {
         identifier: Option<&str>,
         os_env_vars: Option<&HashMap<String, String>>,
     ) -> Result<(String, String), SessionError> {
-        if self.state != SessionState::Ready {
+        if self.state() != SessionState::Ready {
             return Err(SessionError::InvalidState {
                 expected: vec![SessionState::Ready],
-                current: self.state,
+                current: self.state(),
             });
         }
 
@@ -1380,7 +1498,7 @@ impl Session {
             .is_some()
         {
             self.action.reset();
-            self.state = SessionState::Running;
+            self.state = StoredState::Running;
             self.notify_callback();
 
             log_section_banner(
@@ -1576,17 +1694,21 @@ impl Session {
             String::new()
         };
 
-        if self.state == SessionState::Running {
-            self.state = SessionState::Ready;
-        }
         Ok((identifier, output))
     }
 
     /// Exit an environment asynchronously, identified by its environment identifier.
     ///
     /// Environments must be exited in LIFO order (last entered, first exited).
-    /// The `keep_session_running` parameter controls whether the session transitions
-    /// to `ReadyEnding` after exit — if `false`, the session becomes ending-only.
+    /// If `keep_session_running` is `false`, the session becomes ending-only and
+    /// is `ReadyEnding` after the exit. If it is `true`, the exit itself
+    /// doesn't make the session ending-only, though an `onExit` that ends
+    /// `Failed`, `Canceled` or `Timeout` still does, like any other action.
+    /// It never brings an ending-only session
+    /// back to `Ready`. A session that is already
+    /// ending-only, for example because an action ended `Failed`, `Canceled` or
+    /// `Timeout`, stays `ReadyEnding` until the caller calls
+    /// [`clear_ending_only`](Self::clear_ending_only).
     pub async fn exit_environment(
         &mut self,
         identifier: &EnvironmentIdentifier,
@@ -1594,10 +1716,13 @@ impl Session {
         keep_session_running: bool,
         os_env_vars: Option<&HashMap<String, String>>,
     ) -> Result<String, SessionError> {
-        if self.state != SessionState::Ready && self.state != SessionState::ReadyEnding {
+        if !matches!(
+            self.state(),
+            SessionState::Ready | SessionState::ReadyEnding
+        ) {
             return Err(SessionError::InvalidState {
                 expected: vec![SessionState::Ready, SessionState::ReadyEnding],
-                current: self.state,
+                current: self.state(),
             });
         }
 
@@ -1657,7 +1782,7 @@ impl Session {
             .is_some()
         {
             self.action.reset();
-            self.state = SessionState::Running;
+            self.state = StoredState::Running;
             self.notify_callback();
 
             log_section_banner(
@@ -1819,7 +1944,6 @@ impl Session {
             let result = result?;
 
             if result.state != ActionState::Success {
-                self.state = SessionState::ReadyEnding;
                 return Err(SessionError::EnvironmentScriptFailed {
                     name: env.name.clone(),
                     action: "onExit".into(),
@@ -1828,7 +1952,7 @@ impl Session {
             }
             result.stdout.clone()
         } else {
-            // No exit script — set state based on ending_only (drive_action not called)
+            // No exit script, so drive_action is not called: settle here.
             let now = std::time::SystemTime::now();
             self.action.state = Some(ActionState::Success);
             self.action.started_at = Some(now);
@@ -1836,11 +1960,7 @@ impl Session {
             self.action.status_message = None;
             self.action.fail_message = None;
             self.action.exit_code = None;
-            self.state = if self.ending_only {
-                SessionState::ReadyEnding
-            } else {
-                SessionState::Ready
-            };
+            self.settle_after_action(ActionState::Success);
 
             log_section_banner(
                 &self.session_id,
@@ -1874,17 +1994,17 @@ impl Session {
         resolved_symtab: Option<&openjd_expr::SerializedSymbolTable>,
         os_env_vars: Option<&HashMap<String, String>>,
     ) -> Result<ActionResult, SessionError> {
-        if self.state != SessionState::Ready {
+        if self.state() != SessionState::Ready {
             return Err(SessionError::InvalidState {
                 expected: vec![SessionState::Ready],
-                current: self.state,
+                current: self.state(),
             });
         }
 
         let symtab = self.build_symbol_table(task_parameter_values, resolved_symtab)?;
 
         self.action.reset();
-        self.state = SessionState::Running;
+        self.state = StoredState::Running;
         self.notify_callback();
 
         log_section_banner(&self.session_id, "Running Task");
@@ -2103,10 +2223,10 @@ impl Session {
         use_session_env_vars: bool,
         log_banner_message: Option<&str>,
     ) -> Result<crate::subprocess::SubprocessResult, SessionError> {
-        if self.state != SessionState::Ready {
+        if self.state() != SessionState::Ready {
             return Err(SessionError::InvalidState {
                 expected: vec![SessionState::Ready],
-                current: self.state,
+                current: self.state(),
             });
         }
         if command.is_empty() || command.trim().is_empty() {
@@ -2125,7 +2245,7 @@ impl Session {
         }
 
         self.action.reset();
-        self.state = SessionState::Running;
+        self.state = StoredState::Running;
         self.notify_callback();
 
         let env_vars = if use_session_env_vars {
@@ -2281,11 +2401,7 @@ impl Session {
         self.action.ended_at = Some(std::time::SystemTime::now());
         self.action.exit_code = r.exit_code;
         self.cancel.reset();
-        self.state = if final_state == ActionState::Success {
-            SessionState::Ready
-        } else {
-            SessionState::ReadyEnding
-        };
+        self.settle_after_action(final_state);
         self.notify_callback();
         Ok(crate::subprocess::SubprocessResult {
             state: final_state,
@@ -2349,7 +2465,7 @@ impl Session {
                 self.action.ended_at = Some(std::time::SystemTime::now());
                 self.action.exit_code = None;
                 self.cancel.reset();
-                self.state = SessionState::ReadyEnding;
+                self.settle_after_action(ActionState::Failed);
 
                 if let Some(cb) = &self.callback {
                     if let Some(status) = self.action_status() {
@@ -2373,12 +2489,7 @@ impl Session {
         self.action.ended_at = Some(std::time::SystemTime::now());
         self.action.exit_code = r.exit_code;
         self.cancel.reset();
-
-        self.state = if self.ending_only || final_state != ActionState::Success {
-            SessionState::ReadyEnding
-        } else {
-            SessionState::Ready
-        };
+        self.settle_after_action(final_state);
 
         if let Some(cb) = &self.callback {
             if let Some(status) = self.action_status() {
@@ -4111,5 +4222,68 @@ mod typed_param_seeding_tests {
             "Failed to coerce parameter 'RawParam.Tiles': \
              Cannot convert 'abc' to int: invalid digit found in string"
         );
+    }
+}
+
+#[cfg(test)]
+mod stored_state_tests {
+    //! Ending-only mode is stored only in `Session::ending_only`, and
+    //! `ReadyEnding` is derived from it (spec § Brittle Sessions). These
+    //! tests pin `state()`'s mapping and `set_state_for_test`'s translation
+    //! against the private fields. Behavior is covered end to end in
+    //! `tests/integration/test_brittle_session.rs`.
+    use super::*;
+
+    fn session(tmp: &tempfile::TempDir) -> Session {
+        Session::new_for_test(tmp.path().to_path_buf())
+    }
+
+    /// `state()` for every stored state, with and without ending-only mode.
+    #[test]
+    fn state_derives_ready_ending_from_the_flag() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut s = session(&tmp);
+        for (stored, ending_only, expected) in [
+            (StoredState::Ready, false, SessionState::Ready),
+            (StoredState::Ready, true, SessionState::ReadyEnding),
+            (StoredState::Running, false, SessionState::Running),
+            (StoredState::Running, true, SessionState::Running),
+            (StoredState::Canceling, false, SessionState::Canceling),
+            (StoredState::Canceling, true, SessionState::Canceling),
+            (StoredState::Ended, false, SessionState::Ended),
+            (StoredState::Ended, true, SessionState::Ended),
+        ] {
+            s.state = stored;
+            s.ending_only = ending_only;
+            assert_eq!(
+                s.state(),
+                expected,
+                "{stored:?}, ending_only = {ending_only}"
+            );
+        }
+    }
+
+    /// `set_state_for_test` never clears ending-only mode: `ReadyEnding`
+    /// stores `Ready` and sets the flag, and every other state is stored as
+    /// given with the flag left as it was.
+    #[test]
+    fn set_state_for_test_never_clears_ending_only() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        for ending_only in [false, true] {
+            for (requested, stored, flag_after) in [
+                (SessionState::ReadyEnding, StoredState::Ready, true),
+                (SessionState::Ready, StoredState::Ready, ending_only),
+                (SessionState::Running, StoredState::Running, ending_only),
+                (SessionState::Canceling, StoredState::Canceling, ending_only),
+                (SessionState::Ended, StoredState::Ended, ending_only),
+            ] {
+                let mut s = session(&tmp);
+                s.ending_only = ending_only;
+                s.set_state_for_test(requested);
+                let what = format!("{requested:?} with ending_only = {ending_only}");
+                assert_eq!(s.state, stored, "{what}");
+                assert_eq!(s.ending_only, flag_after, "{what}");
+            }
+        }
     }
 }

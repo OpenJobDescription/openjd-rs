@@ -14,38 +14,99 @@ pub enum SessionState {
     Ready,        // Can start any action
     Running,      // An action is in progress
     Canceling,    // Cancel requested, waiting for subprocess to exit
-    ReadyEnding,  // Failed/canceled — only exit_environment allowed
+    ReadyEnding,  // Ending-only — only exit_environment, cleanup and clear_ending_only allowed
     Ended,        // cleanup() called, session is done
 }
 ```
+
+`Session` never stores `ReadyEnding`. Its private `state` field is a `StoredState`, which
+has only `Ready`, `Running`, `Canceling` and `Ended`, and ending-only mode lives only in
+the private `ending_only` flag. `Session::state()` derives `ReadyEnding`: it reports a
+stored `Ready` as `ReadyEnding` while `ending_only` is set, and reports every other state
+as stored. The flag is the one source of truth for ending-only mode, so the state and
+the flag can't disagree. The flag has to exist anyway, because it is what remembers
+ending-only mode through `Running` and `Canceling`. Every state check in `Session`, and
+the `current` state in every `SessionError::InvalidState`, uses `state()`.
 
 ### Transitions
 
 ```
 Ready ──────────► Running         (enter_environment / exit_environment / run_task / run_subprocess)
 Running ────────► Ready           (action succeeded, session not in ending-only mode)
-Running ────────► ReadyEnding     (action failed/canceled, OR session is in ending-only mode)
+Running ────────► ReadyEnding     (action failed/canceled/timed out, OR session is in ending-only mode)
 Running ────────► Canceling       (cancel_action called)
-Canceling ──────► Ready           (canceled action completes, session not ending)
-Canceling ──────► ReadyEnding     (canceled action completes, session is ending)
+Canceling ──────► Ready           (action finished Success before the cancel reached it, session not in ending-only mode)
+Canceling ──────► ReadyEnding     (action ended Canceled/Failed/Timeout, OR session is in ending-only mode)
 ReadyEnding ───► Running          (exit_environment started)
+ReadyEnding ───► Ready            (clear_ending_only)
 Ready ──────────► Ended           (cleanup)
 ReadyEnding ───► Ended            (cleanup)
 ```
 
+These are the states `state()` reports. Going to `ReadyEnding` stores `Ready` with
+`ending_only` set, and `ReadyEnding ───► Ready` clears the flag and leaves the stored
+state alone. The per-operation steps in the rest of this document use the same
+convention: "state" means what `state()` reports, so "state → `ReadyEnding`" means the
+stored state becomes `Ready` with `ending_only` set.
+
 ### Brittle Sessions
 
 After any action failure or cancelation, the session transitions to `ReadyEnding`. In
-this state, only `exit_environment()` and `cleanup()` are allowed. This prevents running
-new tasks or entering new environments after a failure, matching the Python library's
-behavior.
+this state, only `exit_environment()`, `cleanup()` and `clear_ending_only()` are allowed.
+This prevents running new tasks or entering new environments after a failure unless the
+caller explicitly asks for it. The Python library follows the same rule, except in the
+case described in
+[architecture.md § Python-vs-Rust Design Comparison](architecture.md#python-vs-rust-design-comparison).
 
 The `ending_only` flag is set when:
-- An action completes with `ActionState::Failed`, `Canceled`, or `Timeout`
+- An action completes with `ActionState::Failed`, `Canceled`, or `Timeout`. This covers
+  every way an action can end that way: a non-zero exit or `openjd_fail`, a cancel
+  (including one with `mark_action_failed`, which reports `Failed`), a timeout, a runner
+  error such as a command that can't be started, a failure while setting up the action
+  before its subprocess starts, and the same outcomes for `run_subprocess` through the
+  cross-user helper
 - `exit_environment()` is called without `keep_session_running` (the default)
 
+`keep_session_running = true` means only "don't make the session ending-only on this
+exit". An `onExit` that ends `Failed`, `Canceled` or `Timeout` still makes it ending-only,
+like any other action, and
+`keep_session_running` never clears `ending_only`. When an action ends, the stored state
+goes back to `Ready`, and `state()` reports `ReadyEnding` if `ending_only` is set and
+`Ready` otherwise, so `keep_session_running` can't bring an ending-only session back to
+`Ready`. All of these paths settle the state through one private helper,
+`settle_after_action`, which sets the flag for a `Failed`, `Canceled` or `Timeout` action
+and then stores `Ready`. Because `ReadyEnding` is derived from the flag rather than
+stored beside it, `state() == Ready` means the session isn't ending-only, and the `Ready`
+checks in `run_task`, `enter_environment` and `run_subprocess` enforce the contract
+without checking `ending_only` themselves.
+
 This design reflects the worker agent's pattern: after a task fails, the agent exits all
-environments in reverse order and cleans up. There's no recovery path.
+environments in reverse order and cleans up.
+
+The only way back to `Ready` is an explicit call to the public method
+`clear_ending_only()`:
+
+- It's allowed only in `ReadyEnding`. In any other state (`Ready`, `Running`, `Canceling`,
+  `Ended`) it returns `SessionError::InvalidState` with `expected: [ReadyEnding]` and
+  changes nothing.
+- It clears `ending_only` whatever set it (a failed, canceled or timed-out action, or a
+  default `exit_environment`). That is all it changes: the stored state is already
+  `Ready`, so `state()` then reports `Ready`.
+- It runs no action and changes nothing else: the entered environments, the last action's
+  status and the session's environment variables stay as they were. A later failure
+  makes the session ending-only again.
+- It refuses, and changes nothing, when the session-wide
+  `SessionConfig::cancel_token` exists and has been canceled: it returns
+  `SessionError::SessionCanceled` and leaves the session `ReadyEnding`. That cancellation
+  is permanent — a tokio token can't be reset — so every later action would end `Canceled`
+  and make the session ending-only again; `clear_ending_only()` won't return the session to
+  `Ready` under a cancellation it can't undo, so what the method does matches what it says.
+  Only `exit_environment()` and `cleanup()` remain. A per-action cancel (`cancel_action()`
+  or a `SessionCancelHandle`) does not block it — only the session-wide token does.
+
+It's for callers that deliberately want to keep running work after a failure or an
+ending exit, and they take responsibility for the session's state. A failed or canceled
+action can leave its work half done, and the session neither checks nor undoes it.
 
 ## SessionConfig
 
@@ -149,6 +210,13 @@ This enables the worker agent to cancel an entire session from outside the sessi
 async context (e.g., when the Deadline service sends a cancel request). Without this,
 the agent would need to track and cancel each action individually.
 
+A tokio `CancellationToken` can't be reset once canceled, so this cancellation is
+permanent: every action after it ends `Canceled`. Because of that, once the session-wide
+token is canceled, `clear_ending_only()` refuses with `SessionError::SessionCanceled`
+rather than return the session to `Ready` (see [Brittle Sessions](#brittle-sessions)).
+A per-action cancel (`cancel_action()` or a `SessionCancelHandle`) installs a fresh token
+per action and does not have this effect.
+
 ## Session Construction
 
 `Session::with_config(config: SessionConfig) -> Result<Self, SessionError>`:
@@ -198,7 +266,7 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 7. Processes `ActionMessage` values via `drive_action()` — env var changes from
    `openjd_env`/`openjd_unset_env` are applied to the environment's change set
 8. On success: state → `Ready` (or `ReadyEnding` if `ending_only`)
-9. On failure: state → `ReadyEnding`
+9. On failure: `ending_only` is set and state → `ReadyEnding`
 
 ### Exit
 
@@ -210,6 +278,10 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 4. Runs `onExit` action via `EnvironmentScriptRunner::exit()`
 5. Pops the environment from `environments_entered`
 6. Removes the environment's variable changes from the cumulative set
+7. On completion: state → `Ready` or `ReadyEnding` as for any other action. With
+   `keep_session_running` true, the state is `Ready` only if the session wasn't already
+   ending-only; `keep_session_running` never clears ending-only mode, and only
+   `clear_ending_only()` does (see [Brittle Sessions](#brittle-sessions))
 
 ### Why LIFO enforcement
 

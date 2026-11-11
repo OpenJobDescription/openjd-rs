@@ -132,6 +132,19 @@ pub enum SessionError {
     /// ([`SessionLimits::max_path_mapping_trie_bytes`](crate::SessionLimits::max_path_mapping_trie_bytes)).
     #[error("Invalid path mapping rules: {0}")]
     InvalidPathMappingRule(#[from] openjd_expr::InvalidPathMappingRule),
+
+    /// The session's session-wide
+    /// [`cancel_token`](crate::SessionConfig::cancel_token) has been
+    /// canceled, so the session can no longer be continued. A tokio
+    /// [`CancellationToken`](tokio_util::sync::CancellationToken) can't be
+    /// reset once canceled, so every later action would end `Canceled`;
+    /// [`clear_ending_only`](crate::Session::clear_ending_only) refuses
+    /// rather than return the session to `Ready` under a cancellation it
+    /// can't undo. Only `exit_environment` and `cleanup` remain.
+    #[error(
+        "The session was canceled through its session-wide cancel token and cannot be continued."
+    )]
+    SessionCanceled,
 }
 
 fn format_expected(states: &[SessionState]) -> String {

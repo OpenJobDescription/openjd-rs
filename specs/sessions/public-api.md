@@ -103,6 +103,9 @@ impl Session {
     // ── Accessors ──
 
     pub fn session_id(&self) -> &str;
+    /// The lifecycle state. `ReadyEnding` is derived, not stored: it is
+    /// `Ready` while the session is ending-only (session.md § Brittle
+    /// Sessions).
     pub fn state(&self) -> SessionState;
     /// The session working directory: a new directory directly under the
     /// session root, named with 8 random characters from `[a-z0-9_]`.
@@ -157,10 +160,16 @@ impl Session {
     /// last-entered environment first. Fails with
     /// `SessionError::LifoViolation` if called out of order.
     ///
-    /// `keep_session_running: true` keeps the session in the Ready
-    /// state for subsequent `run_task` / `enter_environment` calls.
-    /// `false` transitions the session to ReadyEnding after this
-    /// exit completes, blocking further work.
+    /// `keep_session_running: false` makes the session ending-only,
+    /// so it is ReadyEnding after this exit completes, blocking
+    /// further work. `true` only means "don't make the session
+    /// ending-only on this exit", so a session that was Ready stays
+    /// Ready for later `run_task` / `enter_environment` calls unless
+    /// the `onExit` action ends Failed, Canceled or Timeout, like any
+    /// other action. It
+    /// never brings an ending-only session back to Ready, for example
+    /// after an earlier action ended Failed, Canceled or Timeout;
+    /// only `clear_ending_only` does that.
     pub async fn exit_environment(
         &mut self,
         identifier: &EnvironmentIdentifier,
@@ -219,6 +228,23 @@ impl Session {
     /// `Session` value is owned by the thread driving it. Reusable for
     /// the life of the session; see session.md § SessionCancelHandle.
     pub fn cancel_handle(&self) -> SessionCancelHandle;
+
+    /// Take the session out of ending-only mode: ReadyEnding → Ready.
+    /// The only way back to Ready after a Failed, Canceled or Timeout
+    /// action or an ending `exit_environment`, whatever set it. Fails
+    /// with `SessionError::InvalidState` in any other state. Runs no
+    /// action and leaves the entered environments, the last action
+    /// status and the environment variables as they were. Fails with
+    /// `SessionError::SessionCanceled`, changing nothing, when the
+    /// session-wide `SessionConfig.cancel_token` has been canceled — that
+    /// cancellation is permanent, so the session can't return to Ready.
+    /// A per-action cancel doesn't block it.
+    ///
+    /// Use with care: by default a session only allows shutdown after
+    /// a failure. This is for callers that deliberately keep running
+    /// work after that, and they take responsibility for the
+    /// session's state (session.md § Brittle Sessions).
+    pub fn clear_ending_only(&mut self) -> Result<(), SessionError>;
 
     /// Remove the working directory and associated temp files.
     /// Called automatically on drop as a safety net, but callers
@@ -293,6 +319,9 @@ pipeline). Production callers should use `with_config`.
 ```rust
 impl Session {
     pub fn new_for_test(working_directory: PathBuf) -> Self;
+    /// Never clears ending-only mode: `ReadyEnding` turns it on, and any
+    /// other state leaves it as it was, so `Ready` on an ending-only
+    /// session reports `ReadyEnding`.
     pub fn set_state_for_test(&mut self, state: SessionState);
     pub fn set_job_parameter_values_for_test(&mut self, values: JobParameterValues);
     pub fn set_cancel_writer_for_test(&mut self, writer: std::fs::File);
@@ -469,7 +498,8 @@ pub enum SessionState {
     Running,
     /// Cancellation has been requested; the subprocess is being torn down.
     Canceling,
-    /// Environments can still be exited but no new actions can start.
+    /// Ending-only: environments can still be exited but no new actions
+    /// can start until `Session::clear_ending_only` is called.
     ReadyEnding,
     /// All environments exited; `cleanup()` may be called.
     Ended,
@@ -1051,6 +1081,12 @@ pub enum SessionError {
     /// `extend_path_mapping_rules`. Display:
     /// "Invalid path mapping rules: path mapping rule <i>: <reason>".
     InvalidPathMappingRule(openjd_expr::InvalidPathMappingRule),
+
+    /// `clear_ending_only()` called after the session-wide
+    /// `SessionConfig.cancel_token` was canceled. That cancellation is
+    /// permanent (a tokio token can't be reset), so the session can't be
+    /// returned to Ready; only `exit_environment` and `cleanup` remain.
+    SessionCanceled,
 }
 ```
 

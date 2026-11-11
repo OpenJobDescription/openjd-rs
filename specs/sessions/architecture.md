@@ -94,7 +94,10 @@ pub use session_user::{WindowsSessionUser, BadCredentialsError};
 When provided, all action cancel tokens are created as children of this token via
 `parent.child_token()`. Canceling the parent cascades to all current and future actions
 in the session. This enables the worker agent to cancel an entire session from outside
-the session's async context.
+the session's async context. A tokio token can't be reset once canceled, so this
+cancellation is permanent; `Session::clear_ending_only()` refuses with
+`SessionError::SessionCanceled` once it has fired (see
+[session.md § Brittle Sessions](session.md#brittle-sessions)).
 
 ## Data Flow
 
@@ -210,3 +213,4 @@ reference this section rather than repeating the comparison.
 | Error types | Exceptions (`RuntimeError`, `OSError`) | `SessionError` enum with `thiserror` (`#[non_exhaustive]`) |
 | Callback | `Callable[[str, ActionStatus], None]` | `Box<dyn Fn(&str, &ActionStatus) + Send + Sync>` |
 | Temp directory cleanup | Explicit `cleanup()`, no `__del__` | Explicit `cleanup()` + `Drop` safety net |
+| Brittle sessions | openjd-sessions 0.14.0: a Failed, Canceled or Timeout action moves the session to `READY_ENDING` but doesn't set `_ending_only`, so a later `exit_environment(keep_session_running=True)` returns it to `READY`. That is its only way back to `READY`: it has no `clear_ending_only()`, and once `_ending_only` is set nothing clears it | The action sets `ending_only`, so the session stays `ReadyEnding` whatever `keep_session_running` says. Only an explicit `clear_ending_only()` returns it to `Ready` (see [session.md § Brittle Sessions](session.md#brittle-sessions), issue #287) |
