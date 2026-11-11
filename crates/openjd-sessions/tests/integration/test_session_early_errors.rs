@@ -389,13 +389,24 @@ async fn enter_with_overlong_variable_fails_the_action() {
 async fn enter_with_several_bad_variables_reports_the_sorted_first() {
     let root = TempDir::new().unwrap();
     let (mut s, _seen) = session(&root, JobParameterValues::new());
+    // Several invalid variables; AAA_BAD sorts first. On correct (sorted)
+    // code AAA_BAD is always reported; a mutant that drops the sort reports
+    // whichever the HashMap visits first, so more invalid keys raise the
+    // chance it is caught.
     let e = env_with_variables(
         "Env",
         Some(action("echo exited")),
         &[
             ("MMM_GOOD", "set"),
-            ("ZZZ_BAD", "{{Param.Missing}}"),
             ("AAA_BAD", "{{Param.Missing}}"),
+            ("BBB_BAD", "{{Param.Missing}}"),
+            ("CCC_BAD", "{{Param.Missing}}"),
+            ("DDD_BAD", "{{Param.Missing}}"),
+            ("EEE_BAD", "{{Param.Missing}}"),
+            ("FFF_BAD", "{{Param.Missing}}"),
+            ("GGG_BAD", "{{Param.Missing}}"),
+            ("HHH_BAD", "{{Param.Missing}}"),
+            ("ZZZ_BAD", "{{Param.Missing}}"),
         ],
     );
     let err = s
@@ -851,7 +862,8 @@ async fn enter_pre_start_failure_logs_the_banner() {
 // those sites, or moves the Running notification after them, changes it.
 
 /// Make the session working directory unwritable so the path mapping rules
-/// file (written unconditionally) can't be created.
+/// file (written whenever the action runs, with or without rules) can't be
+/// created.
 #[cfg(unix)]
 fn make_working_dir_readonly(s: &Session) {
     use std::os::unix::fs::PermissionsExt;

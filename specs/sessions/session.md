@@ -133,8 +133,8 @@ status becomes `Failed`, with the error's message as its `fail_message` and no e
 the callback reports it; and the session settles through `settle_after_action(Failed)`,
 so it is ending-only (`ReadyEnding`). Two of these run before the action is reported
 `Running`, so they occur even for an environment with no `onEnter`/`onExit`: building the
-symbol table (an undeserializable `resolved_symtab`, a job or task parameter value that
-can't be coerced to its declared type, a `PATH` parameter over the path mapping limit)
+symbol table (an undeserializable `resolved_symtab`, a job parameter value that can't be
+coerced to its declared type, a `PATH` or `LIST[PATH]` value over the path mapping limit)
 and resolving an environment's `variables`. The rest run after `Running`: writing the path mapping rules file and resolving or
 writing an RFC 0008 wrap hook's symbols and embedded files (in the `onEnter`/`onExit`
 action branch), and, in `run_task` only, building the symbol table and coercing task
