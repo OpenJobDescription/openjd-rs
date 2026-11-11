@@ -562,6 +562,28 @@ async fn enter_rejections_change_nothing() {
     assert_unchanged(&s, &seen, &before);
 }
 
+/// The duplicate-identifier check runs before the wrap-layer check, as in
+/// Python: re-entering a wrap environment under its own identifier reports
+/// the duplicate, not the wrap-layer conflict. Both are rejections that
+/// change nothing, so only the variant is pinned here.
+#[tokio::test]
+async fn enter_duplicate_identifier_is_checked_before_wrap_layer() {
+    let root = TempDir::new().unwrap();
+    let (mut s, seen) = session(&root, JobParameterValues::new());
+    s.enter_environment(&wrap_env("Wrap"), None, Some("env-1"), None)
+        .await
+        .unwrap();
+    let before = snapshot(&s, &seen);
+    match s
+        .enter_environment(&wrap_env("Wrap"), None, Some("env-1"), None)
+        .await
+    {
+        Err(SessionError::DuplicateEnvironment { id }) => assert_eq!(id, "env-1"),
+        other => panic!("expected DuplicateEnvironment, got {other:?}"),
+    }
+    assert_unchanged(&s, &seen, &before);
+}
+
 #[tokio::test]
 async fn exit_rejections_change_nothing() {
     let root = TempDir::new().unwrap();
@@ -660,4 +682,35 @@ async fn run_subprocess_argument_rejections_change_nothing() {
         assert_unchanged(&s, &seen, &before);
     }
     assert_eq!(s.state(), SessionState::Ready);
+}
+
+/// A pre-start failure logs the call's section banner first, so the failure
+/// appears under it in the session log (as `fail_action_before_start`
+/// documents). Uses the public constructor's own session id via with_config.
+#[tokio::test]
+async fn enter_pre_start_failure_logs_the_banner() {
+    testing_logger::setup();
+    let root = TempDir::new().unwrap();
+    let (mut s, _seen) = session(&root, JobParameterValues::new());
+    s.enter_environment(
+        &env("MyEnv", None, Some(action("echo exited"))),
+        Some(&bad_symtab()),
+        Some("env-1"),
+        None,
+    )
+    .await
+    .unwrap_err();
+    testing_logger::validate(|logs| {
+        let bodies: Vec<&str> = logs.iter().map(|l| l.body.as_str()).collect();
+        assert!(
+            bodies
+                .iter()
+                .any(|b| b.contains("Entering Environment: MyEnv")),
+            "banner must be logged: {bodies:?}"
+        );
+        assert!(
+            bodies.iter().any(|b| b.contains("Action failed to run")),
+            "failure must be logged: {bodies:?}"
+        );
+    });
 }

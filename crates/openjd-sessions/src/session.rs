@@ -2072,12 +2072,13 @@ impl Session {
     /// # Errors
     ///
     /// [`SessionError::InvalidState`] if the session isn't `Ready`, which
-    /// changes nothing. Any other error is a failed action set up before
-    /// the subprocess started, such as an undeserializable `resolved_symtab`
-    /// or a task parameter value that can't be coerced to its type: the
-    /// action status is `Failed` with the error's message and the session
-    /// is ending-only. An action that runs and fails returns `Ok` with its
-    /// state.
+    /// changes nothing. Any other error is a failed action: the action
+    /// status is `Failed` with the error's message and the session is
+    /// ending-only. That covers both a failure before the subprocess starts
+    /// (an undeserializable `resolved_symtab`, a task parameter value that
+    /// can't be coerced to its type) and one from dispatching it (a command
+    /// that can't be started). An action that runs to a non-`Success` state
+    /// returns `Ok` with that state.
     pub async fn run_task(
         &mut self,
         step_name: &str,

@@ -280,7 +280,9 @@ enter failure); final cleanup then exits every remaining recorded environment
 in LIFO order. This is the OpenJD cleanup guarantee (extended to wrapped
 exits by RFC 0008 "Lifecycle and cleanup guarantees"): every environment
 entered or attempted has its `onExit` (or substituted `onWrapEnvExit`) run
-before the session ends. An environment rejected before entry is not recorded
+before the session ends, unless the exit itself fails before its action starts
+(for example an `onExit` whose symbol table can't be built), which the session
+counts as the exit. An environment rejected before entry is not recorded
 and not exited.
 
 ## Script Runtime Delegation

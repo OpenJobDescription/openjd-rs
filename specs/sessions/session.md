@@ -37,6 +37,7 @@ Running ────────► ReadyEnding     (action failed/canceled/time
 Running ────────► Canceling       (cancel_action called)
 Canceling ──────► Ready           (action finished Success before the cancel reached it, session not in ending-only mode)
 Canceling ──────► ReadyEnding     (action ended Canceled/Failed/Timeout, OR session is in ending-only mode)
+Ready ──────────► ReadyEnding     (enter_environment / exit_environment failed before its action started)
 ReadyEnding ───► Running          (exit_environment started)
 ReadyEnding ───► Ready            (clear_ending_only)
 Ready ──────────► Ended           (cleanup)
@@ -153,6 +154,13 @@ Python, and the caller must still exit it. When the caller didn't pass an `ident
 the environment is `environments_entered().last()`. A failed `exit_environment` has
 already removed the environment, so it still counts as an exit.
 
+`enter_environment` and `exit_environment` report only a `Failed` callback for a
+pre-start failure — they haven't reported `Running` yet, since neither sets `Running`
+until its action's subprocess is about to start. `run_task` reports `Running` and then
+`Failed`, because it reports `Running` before it builds the symbol table, as it already
+does for its other setup failures. The `fail_message` is the error's own text, which is
+Rust's wording and not identical to the Python runtime's for the same input.
+
 ## SessionConfig
 
 ```rust
@@ -237,7 +245,9 @@ must be `Send + Sync` because it's invoked from the async task processing `Actio
 values.
 
 The callback fires on:
-- Action start (state = Running)
+- Action start (state = Running) — except a failure before an `enter_environment` or
+  `exit_environment` action starts, which reports only the `Failed` state (see
+  [Failures before an action starts](#failures-before-an-action-starts))
 - Every `openjd_*` directive (progress, status, fail)
 - Action completion (state = Success/Failed/Canceled/Timeout)
 
