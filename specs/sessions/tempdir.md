@@ -168,3 +168,106 @@ This matches openjd-sessions-for-python PR #348, with two differences:
    characters after `embedded_files`; that difference is not yet resolved.
 
 Both are stored in the `Session` struct and cleaned up by `Session::cleanup()`.
+
+### Cleanup retries on Windows
+
+On Windows, `TempDir::cleanup()` blocks for at least about 31 s once something is held
+open — the five retry waits — plus the time each pass spends walking the tree, which
+grows with the number of files. A process that has exited
+or been terminated can still hold handles in the directory for a while, and Windows
+will not delete a file while a handle to it is open without `FILE_SHARE_DELETE`. So
+cleanup runs a removal pass, and retries a pass that leaves anything behind after 1,
+2, 4, 8 and 16 s. `NotFound` on a retry counts as success, because the pass that
+failed may still have removed the directory. `NotFound` on the first pass is still
+an error. Other platforms do not retry: a failure there is a permission problem that
+waiting will not fix. They use `std::fs::remove_dir_all`, which stops at the first
+error.
+
+#### The Windows removal pass
+
+Each pass (`win32_remove::remove_tree`) deletes everything it can and records each
+entry it could not, as Python's `shutil.rmtree` does with an error handler. One
+locked file therefore leaves only that file and the directories above it.
+`std::fs::remove_dir_all` is not used here because it stops at the first error — it
+deletes what it reached before then, but abandons the rest of the tree and does not
+say which entry failed.
+
+The session directory is writable by the job user, and the processes cleanup waits
+for belong to the job, so the walk must not be tricked into following a junction or
+symlink planted mid-walk:
+
+- A child is classified with `DirEntry::file_type`, which does not follow a link,
+  so a symlink or junction is removed as a link and its target is never traversed.
+  Any directory the walk opens uses `FILE_FLAG_OPEN_REPARSE_POINT` and is refused
+  if it turns out to be a reparse point: "it is a link or reparse point, so it was
+  not followed", recorded as a failure.
+- Each directory on the path being walked is held open without
+  `FILE_SHARE_DELETE` while its entries are removed, so it cannot be renamed or
+  replaced. This matches the time-of-check/time-of-use safety of
+  `std::fs::remove_dir_all` (CVE-2022-21658). One case it does not cover: a
+  directory another process holds open with `DELETE` access and full sharing
+  cannot be pinned, so the walk records it as a failure and does not descend into
+  it (see the parity table). The walk is iterative, so depth does not bound it.
+
+A read-only file or directory has the attribute cleared, through a handle, before it
+is deleted, as `std::fs::remove_dir_all` does.
+
+#### The warning
+
+Each failed Windows pass is logged as a warning with content
+`FILE_PATH | PROCESS_CONTROL | EXCEPTION_INFO`. It names the directory and the first
+error of the pass, then how many files could not be deleted and up to three of
+them, then the processes holding any of the first 256 of those open, found with the
+Restart Manager (`RmGetList`). It ends with the next delay, or "Giving up." after
+the last pass:
+
+```
+Could not delete temporary directory C:\ProgramData\Amazon\OpenJD\c46tnxjh: The process
+cannot access the file because it is being used by another process. 1 file(s) could
+not be deleted, including a_sub\locked.bin. Files are still locked open by:
+powershell.exe (pid 3604). Retrying in 4 s.
+```
+
+When no file failed (for example, a directory is some process's current directory),
+the line names only the directory and the error. A failed holder lookup replaces
+the process list with "The processes holding them open could not be determined:
+<reason>.", and an empty one with "No running process was found holding them open."
+
+The holder lookup costs time on every failed pass, on top of the delays: the Restart
+Manager takes about 12 to 18 ms per held file on the Windows Server 2022 worker this
+was measured on (256 held files: about 3.4 s per pass), and was measured at about 75 ms
+per file, about 20 s for 256, on another machine. Only files that failed to delete are
+looked up. The pass deletes read-only files, so the read-only attribute alone never adds
+a file to it; a read-only file that is also held open is looked up. Python's lookup
+also includes the read-only files it failed to delete.
+
+Paths of 260 characters or more are left out of the lookup: the Restart Manager rejects
+the whole request when any path in it is that long, even with a `\\?\` prefix, which
+would hide the holders of every other file. The warning still names such a file; it
+just cannot name its holder.
+
+The holder lookup registers only files, not directories: registering a directory
+makes the whole `RmGetList` call fail, so a directory would cost the lookup for the
+files beside it.
+
+#### Python parity
+
+The retry schedule, the files reported, and the warning text match Python's
+`TempDir.cleanup` (openjd-sessions-for-python #376), including the error text
+without Rust's "(os error N)" suffix. The differences are intentional:
+
+| | Rust | Python |
+|---|---|---|
+| Read-only files and directories on Windows | Attribute cleared, then deleted | `rmtree` fails on them, so they are reported as not deleted |
+| Count of undeletable files in the warning | The true count, even above 256 | Capped at the 256 it inspects for holders |
+| Order of the files named | Listing order: a directory's own files where they are listed, each subdirectory where it is listed | 3.12.3 and earlier: the same. 3.12.4 and later (`_rmtree_unsafe`, the Windows path): a subdirectory's files before the directory's own, so `b_sub\held.bin` before `a_root.bin` |
+| A failed holder lookup | `… could not be determined: <reason>.` | Prefixes the exception type: `… could not be determined: OSError: <reason>.` |
+| A directory another process holds with `DELETE` access | Not descended into (cannot be pinned); recorded as a failure | `rmtree` deletes it and its contents |
+| A very deep tree (1500 levels) | Removed: the walk is iterative | 3.12.3 and earlier: `rmtree` raises `RecursionError` on the first pass (no warning, no retry, nothing deleted). 3.12.4 and later walk iteratively and remove it |
+| A held file whose path is 260 characters or longer | Named; its holder is not, and the other files' holders still are | The whole holder lookup fails (`RmRegisterResources failed (29)`), so no holder is named |
+| A directory swapped for a junction mid-walk | Not followed (see above) | `rmtree` on Windows does not defend against this (`shutil.rmtree.avoids_symlink_attacks` is `False`) |
+| After the last pass | `SessionError::TempDir` with the first error, logged by `Session::cleanup()` as "Files within temporary directory <path> could not be deleted: <reason>" | `RuntimeError` listing every path that failed, with its error |
+
+`Session::cleanup()` removes only the working directory, which contains the embedded
+files directory, so a lock inside the latter is waited out once. It logs each directory
+it could not remove at error level, with the path and the reason, and continues.

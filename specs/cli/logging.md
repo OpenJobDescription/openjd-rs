@@ -4,7 +4,8 @@
 
 The CLI implements a custom `log::Log` to display real-time subprocess output during
 `run` command execution. The logger filters log records by structured metadata to show
-only subprocess command output (not internal debug/info messages), and formats each line
+subprocess command output and `EXCEPTION_INFO` warnings and errors (not internal debug/info
+messages), and formats each line
 with a timestamp.
 
 ## Architecture
@@ -18,8 +19,9 @@ openjd-sessions subprocess loop
       │
       └── SessionLogger::log(&record)
           ├── Extract openjd_log_content from record's key-value pairs
-          ├── Check if COMMAND_OUTPUT bit (0x08) is set
-          └── If set: println!("{timestamp}\t{message}")
+          ├── Check if COMMAND_OUTPUT bit (0x08) is set, or EXCEPTION_INFO
+          │   (0x10) is set and the level is Warn or more severe
+          └── If so: println!("{timestamp}\t{message}")
 ```
 
 ## LogContent Filtering
@@ -28,9 +30,15 @@ The sessions crate uses `log`'s key-value feature to attach structured metadata 
 records. The `openjd_log_content` key carries a `LogContent` bitflag value that classifies
 the log line's content type.
 
-The CLI's `SessionLogger` only displays lines with the `COMMAND_OUTPUT` bit set (bit 3,
-value 8). This filters out internal session lifecycle messages, action status updates, and
-other metadata that would clutter the user's terminal output.
+The CLI's `SessionLogger` displays two kinds of line:
+
+1. Lines with the `COMMAND_OUTPUT` bit set (bit 3, value 8): subprocess output.
+2. Lines with the `EXCEPTION_INFO` bit set (bit 4, value 16) at `Warn` or more severe:
+   problems openjd reports about the session itself, such as "Action failed to run" or a
+   working directory that could not be deleted and the processes still holding its files.
+
+Everything else is filtered out: internal session lifecycle messages, action status
+updates, and other metadata that would clutter the user's terminal output.
 
 ### Visitor Pattern
 

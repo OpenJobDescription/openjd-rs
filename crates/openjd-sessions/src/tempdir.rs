@@ -5,6 +5,7 @@
 //! Secure temporary directory creation — mirrors Python `_tempdir.py`.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::error::SessionError;
 use crate::session_user::SessionUser;
@@ -269,15 +270,305 @@ impl TempDir {
     }
 
     /// Remove the directory and all contents.
+    ///
+    /// On Windows this can block for at least about 31 s. A removal that leaves anything
+    /// behind is retried after 1, 2, 4, 8 and 16 s, because a process that has
+    /// just exited, or been terminated, can hold its file handles for a while
+    /// afterwards. Each pass deletes everything it can, and each failed pass is
+    /// logged as a warning naming the files that could not be deleted and the
+    /// processes holding them open. On other platforms a failure is returned at
+    /// once.
     pub fn cleanup(&mut self) -> Result<(), SessionError> {
+        self.cleanup_with_delays(None, CLEANUP_RETRY_DELAYS)
+    }
+
+    /// [`Self::cleanup`], logging each failed attempt against `session_id` and
+    /// retrying after each of `delays`.
+    pub(crate) fn cleanup_with_delays(
+        &mut self,
+        session_id: Option<&str>,
+        delays: &[Duration],
+    ) -> Result<(), SessionError> {
         if self.cleaned_up {
             return Ok(());
         }
         self.cleaned_up = true;
-        std::fs::remove_dir_all(&self.path).map_err(|e| SessionError::TempDir {
+        let dir = self.path.clone();
+        remove_with_retry(
+            &self.path,
+            delays,
+            remove_pass,
+            std::thread::sleep,
+            |failure, retry_in| {
+                if cfg!(windows) {
+                    log_failed_attempt(session_id, &dir, failure, retry_in);
+                }
+            },
+        )
+        .map_err(|e| SessionError::TempDir {
             path: self.path.clone(),
             source: e,
         })
+    }
+
+    /// Record the directory as removed without touching the disk. For a
+    /// directory nested in one whose own cleanup removes it.
+    pub(crate) fn mark_cleaned_up(&mut self) {
+        self.cleaned_up = true;
+    }
+}
+
+/// Delays before each retry of a failed [`TempDir::cleanup`]: about 31 s in total.
+///
+/// Windows refuses to delete a file or directory while a process holds a handle
+/// to it that was not opened with `FILE_SHARE_DELETE`. Other platforms do not
+/// retry: a failure there is a permission
+/// problem that waiting will not fix.
+#[cfg(windows)]
+pub(crate) const CLEANUP_RETRY_DELAYS: &[Duration] = &[
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+    Duration::from_secs(4),
+    Duration::from_secs(8),
+    Duration::from_secs(16),
+];
+/// Delays before each retry of a failed [`TempDir::cleanup`]. None off Windows.
+#[cfg(not(windows))]
+pub(crate) const CLEANUP_RETRY_DELAYS: &[Duration] = &[];
+
+/// Most undeletable files a failed-attempt log line looks up holders for.
+#[cfg(any(windows, test))]
+const MAX_FILES_TO_INSPECT: usize = 256;
+/// Most undeletable file names a failed-attempt log line lists.
+const MAX_FILES_TO_NAME: usize = 3;
+
+/// Content flags of the cleanup warning and error log lines.
+pub(crate) const CLEANUP_LOG_CONTENT: crate::logging::LogContent =
+    crate::logging::LogContent::FILE_PATH
+        .union(crate::logging::LogContent::PROCESS_CONTROL)
+        .union(crate::logging::LogContent::EXCEPTION_INFO);
+
+/// A process holding a file open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FileHolder {
+    pub(crate) pid: u32,
+    pub(crate) name: String,
+}
+
+/// What one removal pass left behind.
+#[derive(Debug)]
+pub(crate) struct PassFailure {
+    /// The first error the pass hit.
+    pub(crate) error: std::io::Error,
+    /// The files that could not be deleted, in the order the pass reached
+    /// them, at most [`MAX_FILES_TO_INSPECT`]. Directories are not listed.
+    pub(crate) files: Vec<PathBuf>,
+    /// How many files could not be deleted, including any beyond `files`.
+    pub(crate) file_count: usize,
+}
+
+impl PassFailure {
+    /// Summarize a pass's `(path, is_dir, error)` failures. `None` when there were none.
+    #[cfg(any(windows, test))]
+    pub(crate) fn from_failures(
+        failures: impl IntoIterator<Item = (PathBuf, bool, std::io::Error)>,
+    ) -> Option<Self> {
+        let mut first = None;
+        let mut files = Vec::new();
+        let mut file_count = 0;
+        for (path, is_dir, error) in failures {
+            if !is_dir {
+                file_count += 1;
+                if files.len() < MAX_FILES_TO_INSPECT {
+                    files.push(path);
+                }
+            }
+            first.get_or_insert(error);
+        }
+        first.map(|error| Self {
+            error,
+            files,
+            file_count,
+        })
+    }
+}
+
+impl From<std::io::Error> for PassFailure {
+    fn from(error: std::io::Error) -> Self {
+        Self {
+            error,
+            files: Vec::new(),
+            file_count: 0,
+        }
+    }
+}
+
+/// One removal pass over `path`.
+///
+/// Windows deletes everything it can and reports each file it could not, as
+/// Python's `shutil.rmtree` does with an error handler. Elsewhere this is
+/// `std::fs::remove_dir_all`, which stops at the first error: cleanup does not
+/// retry there, so the extra detail would go unused.
+fn remove_pass(path: &Path) -> Result<(), PassFailure> {
+    #[cfg(windows)]
+    {
+        let failures = crate::win32_remove::remove_tree(path)
+            .into_iter()
+            .map(|f| (f.path, f.is_dir, f.error));
+        PassFailure::from_failures(failures).map_or(Ok(()), Err)
+    }
+    #[cfg(not(windows))]
+    {
+        std::fs::remove_dir_all(path).map_err(PassFailure::from)
+    }
+}
+
+/// Calls `remove` on `path`, and again after each of `delays` until it succeeds.
+///
+/// `on_failure` is called after every failed attempt with the delay before
+/// the next one, or `None` after the last. `NotFound` on the first attempt is
+/// returned as is, with no `on_failure` call. On a retry it counts as success:
+/// an earlier attempt that reported a failure partway through can still have
+/// removed the directory.
+fn remove_with_retry(
+    path: &Path,
+    delays: &[Duration],
+    mut remove: impl FnMut(&Path) -> Result<(), PassFailure>,
+    mut sleep: impl FnMut(Duration),
+    mut on_failure: impl FnMut(&PassFailure, Option<Duration>),
+) -> std::io::Result<()> {
+    let mut result = remove(path);
+    for &delay in delays {
+        let Err(failure) = &result else { break };
+        if failure.error.kind() == std::io::ErrorKind::NotFound {
+            break;
+        }
+        on_failure(failure, Some(delay));
+        sleep(delay);
+        result = match remove(path) {
+            Err(f) if f.error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        };
+    }
+    if let Err(failure) = &result {
+        if failure.error.kind() != std::io::ErrorKind::NotFound {
+            on_failure(failure, None);
+        }
+    }
+    result.map_err(|f| f.error)
+}
+
+/// A cleanup log line: its level, content flags and text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CleanupLog {
+    pub(crate) level: log::Level,
+    pub(crate) content: crate::logging::LogContent,
+    pub(crate) message: String,
+}
+
+/// Send `line` to the `openjd.sessions` logger, tagged with `session_id` when given.
+pub(crate) fn emit_cleanup_log(session_id: Option<&str>, line: &CleanupLog) {
+    let bits = line.content.bits();
+    let ts = crate::logging::timestamp_usec();
+    match session_id {
+        Some(id) => log::log!(
+            target: "openjd.sessions",
+            line.level,
+            session_id = id,
+            openjd_log_content = bits,
+            openjd_timestamp_usec = ts;
+            "{}", line.message
+        ),
+        None => log::log!(
+            target: "openjd.sessions",
+            line.level,
+            openjd_log_content = bits,
+            openjd_timestamp_usec = ts;
+            "{}", line.message
+        ),
+    }
+}
+
+/// Log one failed removal of `dir`: what is left, and who is holding it open.
+fn log_failed_attempt(
+    session_id: Option<&str>,
+    dir: &Path,
+    failure: &PassFailure,
+    retry_in: Option<Duration>,
+) {
+    #[cfg(windows)]
+    let holders = (!failure.files.is_empty())
+        .then(|| crate::win32_file_locks::processes_holding(&failure.files));
+    #[cfg(not(windows))]
+    let holders: Option<Result<Vec<FileHolder>, String>> = None;
+    let line = failed_attempt_log(dir, failure, holders.as_ref(), retry_in);
+    emit_cleanup_log(session_id, &line);
+}
+
+/// The log line for one failed removal of `dir`. `holders` is `None` when no
+/// lookup was made. The text matches Python's `TempDir.cleanup`.
+pub(crate) fn failed_attempt_log(
+    dir: &Path,
+    failure: &PassFailure,
+    holders: Option<&Result<Vec<FileHolder>, String>>,
+    retry_in: Option<Duration>,
+) -> CleanupLog {
+    let mut msg = format!(
+        "Could not delete temporary directory {}: {}.",
+        dir.display(),
+        os_error_text(&failure.error)
+    );
+    if failure.file_count > 0 {
+        let names: Vec<String> = failure
+            .files
+            .iter()
+            .take(MAX_FILES_TO_NAME)
+            .map(|p| p.strip_prefix(dir).unwrap_or(p).display().to_string())
+            .collect();
+        msg.push_str(&format!(
+            " {} file(s) could not be deleted, including {}.",
+            failure.file_count,
+            names.join(", ")
+        ));
+        msg.push_str(&describe_holders(holders));
+    }
+    match retry_in {
+        Some(d) => msg.push_str(&format!(" Retrying in {} s.", d.as_secs_f64())),
+        None => msg.push_str(" Giving up."),
+    }
+    CleanupLog {
+        level: log::Level::Warn,
+        content: CLEANUP_LOG_CONTENT,
+        message: msg,
+    }
+}
+
+/// An error's text without Rust's " (os error N)" suffix or a trailing period,
+/// matching Python's `OSError.strerror`.
+pub(crate) fn os_error_text(err: &std::io::Error) -> String {
+    let text = err.to_string();
+    let text = match text.rsplit_once(" (os error ") {
+        Some((head, tail)) if tail.ends_with(')') => head.to_string(),
+        _ => text,
+    };
+    text.trim_end().trim_end_matches('.').to_string()
+}
+
+/// The sentence naming who holds the remaining files. Empty when no lookup was made.
+fn describe_holders(holders: Option<&Result<Vec<FileHolder>, String>>) -> String {
+    match holders {
+        Some(Ok(h)) if !h.is_empty() => {
+            let mut seen = std::collections::HashSet::new();
+            let list: Vec<String> = h
+                .iter()
+                .filter(|x| seen.insert(x.pid))
+                .map(|x| format!("{} (pid {})", x.name, x.pid))
+                .collect();
+            format!(" Files are still locked open by: {}.", list.join(", "))
+        }
+        Some(Ok(_)) => " No running process was found holding them open.".to_string(),
+        Some(Err(e)) => format!(" The processes holding them open could not be determined: {e}."),
+        None => String::new(),
     }
 }
 
@@ -398,6 +689,649 @@ mod tests {
         let td = TempDir::new(None, None, None).unwrap();
         let p: &std::path::Path = td.as_ref();
         assert_eq!(p, td.path());
+    }
+
+    fn sharing_violation() -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::PermissionDenied, "file in use")
+    }
+
+    fn failure(error: std::io::Error) -> PassFailure {
+        PassFailure::from(error)
+    }
+
+    #[test]
+    fn remove_retry_stops_at_the_first_success() {
+        let mut calls = 0;
+        let mut slept = Vec::new();
+        let delays = [
+            Duration::from_millis(1),
+            Duration::from_millis(2),
+            Duration::from_millis(3),
+        ];
+        let result = remove_with_retry(
+            Path::new("unused"),
+            &delays,
+            |_| {
+                calls += 1;
+                if calls < 3 {
+                    Err(failure(sharing_violation()))
+                } else {
+                    Ok(())
+                }
+            },
+            |d| slept.push(d),
+            |_, _| {},
+        );
+        assert!(result.is_ok());
+        assert_eq!(calls, 3);
+        assert_eq!(slept, delays[..2]);
+    }
+
+    #[test]
+    fn remove_retry_reports_each_failure_with_the_next_delay() {
+        let mut reported = Vec::new();
+        let delays = [Duration::from_millis(1), Duration::from_millis(2)];
+        let _ = remove_with_retry(
+            Path::new("unused"),
+            &delays,
+            |_| Err(failure(sharing_violation())),
+            |_| {},
+            |f, next| reported.push((f.error.kind(), next)),
+        );
+        let kind = std::io::ErrorKind::PermissionDenied;
+        assert_eq!(
+            reported,
+            [
+                (kind, Some(delays[0])),
+                (kind, Some(delays[1])),
+                (kind, None)
+            ]
+        );
+    }
+
+    #[test]
+    fn remove_retry_reports_nothing_when_the_first_attempt_succeeds() {
+        let mut reported = 0;
+        let result = remove_with_retry(
+            Path::new("unused"),
+            &[Duration::ZERO],
+            |_| Ok(()),
+            |_| {},
+            |_, _| reported += 1,
+        );
+        assert!(result.is_ok());
+        assert_eq!(reported, 0);
+    }
+
+    #[test]
+    fn remove_retry_returns_the_last_error_when_exhausted() {
+        let mut calls = 0;
+        let delays = [Duration::ZERO, Duration::ZERO];
+        let result = remove_with_retry(
+            Path::new("unused"),
+            &delays,
+            |_| {
+                calls += 1;
+                Err(failure(sharing_violation()))
+            },
+            |_| {},
+            |_, _| {},
+        );
+        let err = result.expect_err("every attempt failed");
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(calls, 3, "one attempt plus one per delay");
+    }
+
+    #[test]
+    fn remove_retry_treats_not_found_on_a_retry_as_success() {
+        let mut calls = 0;
+        let result = remove_with_retry(
+            Path::new("unused"),
+            &[Duration::ZERO],
+            |_| {
+                calls += 1;
+                if calls == 1 {
+                    Err(failure(sharing_violation()))
+                } else {
+                    Err(failure(std::io::ErrorKind::NotFound.into()))
+                }
+            },
+            |_| {},
+            |_, _| {},
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn remove_retry_keeps_not_found_on_the_first_attempt_as_an_error() {
+        let mut reported = 0;
+        let result = remove_with_retry(
+            Path::new("unused"),
+            &[Duration::ZERO],
+            |_| Err(failure(std::io::ErrorKind::NotFound.into())),
+            |_| {},
+            |_, _| reported += 1,
+        );
+        assert_eq!(
+            result.expect_err("directory was never there").kind(),
+            std::io::ErrorKind::NotFound
+        );
+        assert_eq!(reported, 0, "a missing directory is not a lock to report");
+    }
+
+    #[test]
+    fn pass_failure_keeps_the_first_error_and_counts_only_files() {
+        let io = |s: &str| std::io::Error::other(s.to_string());
+        let mut entries = vec![
+            (PathBuf::from("root/a/locked.bin"), false, io("first")),
+            (PathBuf::from("root/a"), true, io("dir")),
+        ];
+        for i in 0..300 {
+            entries.push((PathBuf::from(format!("root/f{i}")), false, io("later")));
+        }
+        let f = PassFailure::from_failures(entries).expect("there were failures");
+        assert_eq!(f.error.to_string(), "first");
+        assert_eq!(f.file_count, 301);
+        assert_eq!(f.files.len(), 256, "the inspect cap, as a literal");
+        assert_eq!(f.files[0], PathBuf::from("root/a/locked.bin"));
+        assert_eq!(f.files[1], PathBuf::from("root/f0"));
+        assert!(PassFailure::from_failures(Vec::new()).is_none());
+    }
+
+    #[test]
+    fn cleanup_is_idempotent_after_success() {
+        let mut td = TempDir::new(None, None, None).unwrap();
+        td.cleanup().unwrap();
+        assert!(!td.path().exists());
+        // A second call touches nothing and still reports success.
+        td.cleanup().unwrap();
+    }
+
+    #[test]
+    fn cleanup_after_a_failure_is_a_no_op_ok() {
+        // The first cleanup fails: the directory is already gone, a NotFound
+        // that is an error on the first pass. The second call returns Ok
+        // without a disk touch, so the path is still absent when it succeeds.
+        let mut td = TempDir::new(None, None, None).unwrap();
+        std::fs::remove_dir(td.path()).unwrap();
+        assert!(td.cleanup().is_err());
+        assert!(!td.path().exists());
+        td.cleanup().expect("second call is a no-op Ok");
+    }
+
+    #[test]
+    fn os_error_text_drops_the_os_error_suffix_and_trailing_period() {
+        let os = std::io::Error::from_raw_os_error(2);
+        let text = os_error_text(&os);
+        assert!(!text.contains("(os error"), "{text}");
+        assert!(!text.ends_with('.'), "{text}");
+        assert_eq!(
+            text,
+            os.to_string()
+                .split(" (os error ")
+                .next()
+                .unwrap()
+                .trim_end_matches('.')
+        );
+        assert_eq!(os_error_text(&std::io::Error::other("plain.")), "plain");
+        assert_eq!(
+            os_error_text(&std::io::Error::other("a (os error x")),
+            "a (os error x"
+        );
+    }
+
+    #[test]
+    fn cleanup_log_content_is_file_path_process_control_and_exception_info() {
+        // Written as a literal so a changed flag fails here: FILE_PATH (2) |
+        // EXCEPTION_INFO (16) | PROCESS_CONTROL (32).
+        assert_eq!(CLEANUP_LOG_CONTENT.bits(), 50);
+    }
+
+    fn holder(pid: u32, name: &str) -> FileHolder {
+        FileHolder {
+            pid,
+            name: name.to_string(),
+        }
+    }
+
+    fn files_failure(dir: &Path, files: &[&str], count: usize) -> PassFailure {
+        PassFailure {
+            error: std::io::Error::other("The process cannot access the file."),
+            files: files.iter().map(|f| dir.join(f)).collect(),
+            file_count: count,
+        }
+    }
+
+    #[test]
+    fn failed_attempt_names_files_holders_and_next_delay() {
+        let dir = Path::new("root");
+        let f = files_failure(dir, &["a.bin", "b.bin", "c.bin", "d.bin"], 4);
+        let holders = Ok(vec![
+            holder(42, "UnrealShaderCompileWorker.exe"),
+            holder(42, "UnrealShaderCompileWorker.exe"),
+            holder(7, "p4.exe"),
+        ]);
+        let line = failed_attempt_log(dir, &f, Some(&holders), Some(Duration::from_secs(4)));
+        assert_eq!(
+            line,
+            CleanupLog {
+                level: log::Level::Warn,
+                content: CLEANUP_LOG_CONTENT,
+                message: format!(
+                    "Could not delete temporary directory root: The process cannot access the \
+                     file. 4 file(s) could not be deleted, including {}, {}, {}. Files are still \
+                     locked open by: UnrealShaderCompileWorker.exe (pid 42), p4.exe (pid 7). \
+                     Retrying in 4 s.",
+                    Path::new("a.bin").display(),
+                    Path::new("b.bin").display(),
+                    Path::new("c.bin").display(),
+                ),
+            }
+        );
+    }
+
+    #[test]
+    fn failed_attempt_says_when_no_holder_was_found_or_lookup_failed() {
+        let dir = Path::new("root");
+        let f = files_failure(dir, &["a"], 1);
+        let head = "Could not delete temporary directory root: The process cannot access the \
+                    file. 1 file(s) could not be deleted, including a.";
+        let none = Ok(Vec::new());
+        assert_eq!(
+            failed_attempt_log(dir, &f, Some(&none), None).message,
+            format!("{head} No running process was found holding them open. Giving up.")
+        );
+        let failed = Err("RmGetList failed (5)".to_string());
+        assert_eq!(
+            failed_attempt_log(dir, &f, Some(&failed), None).message,
+            format!(
+                "{head} The processes holding them open could not be determined: RmGetList \
+                 failed (5). Giving up."
+            )
+        );
+        assert_eq!(
+            failed_attempt_log(dir, &f, None, None).message,
+            format!("{head} Giving up.")
+        );
+    }
+
+    #[test]
+    fn failed_attempt_with_no_undeletable_files_names_only_the_directory() {
+        let dir = Path::new("root");
+        let f = failure(sharing_violation());
+        let none = Ok(Vec::new());
+        assert_eq!(
+            failed_attempt_log(dir, &f, Some(&none), Some(Duration::from_secs(1))).message,
+            "Could not delete temporary directory root: file in use. Retrying in 1 s."
+        );
+    }
+
+    /// Delete everything in a fresh temp dir via the Windows pass, with
+    /// `locked` held open throughout; return the warnings logged.
+    #[cfg(windows)]
+    fn warnings_for_locked_file_among_siblings(
+        locked: &str,
+        siblings: &[String],
+        hold_for: Duration,
+    ) -> (PathBuf, Vec<String>) {
+        use std::os::windows::fs::OpenOptionsExt;
+        testing_logger::setup();
+        let mut td = TempDir::new(None, None, None).unwrap();
+        let root = td.path().to_path_buf();
+        for s in siblings {
+            let p = root.join(s);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, b"x").unwrap();
+        }
+        let lp = root.join(locked);
+        std::fs::create_dir_all(lp.parent().unwrap()).unwrap();
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .open(&lp)
+            .unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(hold_for);
+            drop(held);
+        });
+        let result = td.cleanup_with_delays(Some("session-1"), &[Duration::from_millis(300)]);
+        release.join().unwrap();
+        let warnings = std::cell::RefCell::new(Vec::new());
+        testing_logger::validate(|logs| {
+            *warnings.borrow_mut() = logs
+                .iter()
+                .filter(|l| l.level == log::Level::Warn)
+                .map(|l| l.body.clone())
+                .collect();
+        });
+        assert!(result.is_ok(), "{result:?}");
+        (root, warnings.into_inner())
+    }
+
+    /// The warning names the locked file and its holder, even when hundreds of
+    /// deletable files sit beside it.
+    #[cfg(windows)]
+    #[test]
+    fn cleanup_names_the_locked_file_not_its_siblings() {
+        let siblings: Vec<String> = (0..300).map(|i| format!("b{i:03}.txt")).collect();
+        let (root, warnings) = warnings_for_locked_file_among_siblings(
+            r"a_sub\locked.bin",
+            &siblings,
+            Duration::from_millis(150),
+        );
+        assert_eq!(
+            warnings,
+            [format!(
+                "Could not delete temporary directory {}: The process cannot access the file \
+                 because it is being used by another process. 1 file(s) could not be deleted, \
+                 including a_sub\\locked.bin. Files are still locked open by: {} (pid {}). \
+                 Retrying in 0.3 s.",
+                root.display(),
+                this_exe_name(),
+                std::process::id()
+            )]
+        );
+    }
+
+    /// One failed pass already deletes every file that is not locked.
+    #[cfg(windows)]
+    #[test]
+    fn a_failed_pass_leaves_only_the_locked_file() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let td = TempDir::new(None, None, None).unwrap();
+        let root = td.path().to_path_buf();
+        std::fs::create_dir(root.join("a_sub")).unwrap();
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .open(root.join("a_sub").join("locked.bin"))
+            .unwrap();
+        for i in 0..50 {
+            std::fs::write(root.join(format!("b{i:03}.txt")), b"x").unwrap();
+            std::fs::write(root.join("a_sub").join(format!("c{i:03}.txt")), b"x").unwrap();
+        }
+        let f = remove_pass(&root).expect_err("locked file");
+        assert_eq!(f.file_count, 1);
+        assert_eq!(f.files, [root.join("a_sub").join("locked.bin")]);
+        assert_eq!(f.error.raw_os_error(), Some(32));
+        let left: Vec<PathBuf> = walk(&root);
+        assert_eq!(left, [root.join("a_sub").join("locked.bin")]);
+        drop(held);
+        assert!(remove_pass(&root).is_ok());
+        assert!(!root.exists());
+    }
+
+    #[cfg(windows)]
+    fn walk(dir: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        for e in std::fs::read_dir(dir).unwrap().flatten() {
+            if e.file_type().unwrap().is_dir() {
+                out.extend(walk(&e.path()));
+            } else {
+                out.push(e.path());
+            }
+        }
+        out
+    }
+
+    #[cfg(windows)]
+    fn this_exe_name() -> String {
+        std::env::current_exe()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn cleanup_does_not_retry_off_windows() {
+        assert!(CLEANUP_RETRY_DELAYS.is_empty());
+    }
+
+    /// Written as literals so a changed constant fails here.
+    #[cfg(windows)]
+    #[test]
+    fn cleanup_retry_delays_double_from_one_second() {
+        let secs: Vec<u64> = CLEANUP_RETRY_DELAYS.iter().map(|d| d.as_secs()).collect();
+        assert_eq!(secs, [1, 2, 4, 8, 16]);
+    }
+
+    /// A file held open without `FILE_SHARE_DELETE` for less time than the
+    /// retries cover: the first removal fails with a sharing violation, a
+    /// retry succeeds, and the failed attempt is logged naming the holder.
+    #[cfg(windows)]
+    #[test]
+    fn cleanup_waits_for_a_briefly_held_file() {
+        let (root, warnings) =
+            warnings_for_locked_file_among_siblings("locked.bin", &[], Duration::from_millis(150));
+        assert!(!root.exists());
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("including locked.bin."),
+            "{}",
+            warnings[0]
+        );
+        assert!(
+            warnings[0].ends_with("Retrying in 0.3 s."),
+            "{}",
+            warnings[0]
+        );
+    }
+
+    /// A file held open for the whole cleanup is reported by path, with the
+    /// sharing-violation error, after every attempt.
+    #[cfg(windows)]
+    #[test]
+    fn cleanup_reports_a_file_held_throughout() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let td = TempDir::new(None, None, None).unwrap();
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .open(td.path().join("locked.bin"))
+            .unwrap();
+        let mut reported = Vec::new();
+        let result = remove_with_retry(
+            td.path(),
+            &[Duration::from_millis(50)],
+            remove_pass,
+            std::thread::sleep,
+            |f, next| reported.push((f.files.clone(), f.file_count, next)),
+        );
+        let err = result.expect_err("held throughout");
+        assert_eq!(err.raw_os_error(), Some(32), "{err}");
+        let locked = vec![td.path().join("locked.bin")];
+        assert_eq!(
+            reported,
+            [
+                (locked.clone(), 1, Some(Duration::from_millis(50))),
+                (locked, 1, None)
+            ]
+        );
+        drop(held);
+        drop(td);
+    }
+
+    /// Runs its closure when dropped, so a failing Windows test still stops the
+    /// process it started, lifts an ACL it added, and removes its directory.
+    #[cfg(windows)]
+    struct OnDrop<F: FnMut()>(F);
+
+    #[cfg(windows)]
+    impl<F: FnMut()> Drop for OnDrop<F> {
+        fn drop(&mut self) {
+            (self.0)();
+        }
+    }
+
+    /// A copy of `ping.exe` at `dir\name`.
+    #[cfg(windows)]
+    fn copy_ping(dir: &Path, name: &str) -> PathBuf {
+        let exe = dir.join(name);
+        let system = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        std::fs::copy(Path::new(&system).join("System32").join("ping.exe"), &exe).unwrap();
+        exe
+    }
+
+    /// Runs `program args` with no console window and waits for success.
+    #[cfg(windows)]
+    fn run_hidden(program: &str, args: &[&std::ffi::OsStr]) {
+        use std::os::windows::process::CommandExt;
+        let status = std::process::Command::new(program)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .status()
+            .unwrap();
+        assert!(status.success(), "{program} {args:?}");
+    }
+
+    /// Starts `exe` (a copy of `ping.exe`) with no console window.
+    #[cfg(windows)]
+    fn run_ping(exe: &Path) -> std::process::Child {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new(exe)
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn()
+            .unwrap()
+    }
+
+    /// The holders listed in a warning that ends "Giving up.", given the text
+    /// before the list.
+    #[cfg(windows)]
+    fn holders_in<'a>(body: &'a str, start: &str) -> Vec<&'a str> {
+        body.strip_prefix(start)
+            .and_then(|rest| rest.strip_suffix(". Giving up."))
+            .unwrap_or_else(|| panic!("unexpected warning: {body}"))
+            .split(", ")
+            .collect()
+    }
+
+    /// The holder lookup covers every file reported, not only the first: a file
+    /// this process holds, and a running program held by its own process.
+    #[cfg(windows)]
+    #[test]
+    fn failed_attempt_names_the_holders_of_every_file() {
+        use std::os::windows::fs::OpenOptionsExt;
+        testing_logger::setup();
+        let mut td = TempDir::new(None, None, None).unwrap();
+        let dir = td.path().to_path_buf();
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .open(dir.join("a_locked.bin"))
+            .unwrap();
+        let exe = copy_ping(&dir, "b_ping.exe");
+        let mut child = run_ping(&exe);
+        let ping_pid = child.id();
+        let guard_dir = dir.clone();
+        let mut held = Some(held);
+        let _restore = OnDrop(move || {
+            let _ = child.kill();
+            let _ = child.wait();
+            held.take();
+            let _ = std::fs::remove_dir_all(&guard_dir);
+        });
+
+        let result = td.cleanup_with_delays(Some("session-1"), &[]);
+
+        assert!(result.is_err(), "held files were deleted");
+        let start = format!(
+            "Could not delete temporary directory {}: The process cannot access the file \
+             because it is being used by another process. 2 file(s) could not be deleted, \
+             including a_locked.bin, b_ping.exe. Files are still locked open by: ",
+            dir.display()
+        );
+        let this = format!("{} (pid {})", this_exe_name(), std::process::id());
+        let ping = format!("b_ping.exe (pid {ping_pid})");
+        testing_logger::validate(|logs| {
+            let warns: Vec<String> = logs
+                .iter()
+                .filter(|l| l.level == log::Level::Warn)
+                .map(|l| l.body.clone())
+                .collect();
+            assert_eq!(warns.len(), 1, "{warns:?}");
+            let holders = holders_in(&warns[0], &start);
+            // A scanner inspecting the new executable can appear too.
+            assert!(holders.contains(&this.as_str()), "{}", warns[0]);
+            assert!(holders.contains(&ping.as_str()), "{}", warns[0]);
+        });
+    }
+
+    /// A file whose ACLs refuse deletion (the file denies DELETE and its
+    /// directory denies deleting children) is reported, and no process holds it.
+    #[cfg(windows)]
+    #[test]
+    fn cleanup_reports_a_file_the_acls_protect() {
+        testing_logger::setup();
+        let mut td = TempDir::new(None, None, None).unwrap();
+        let dir = td.path().to_path_buf();
+        let sub = dir.join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        let file = sub.join("protected.bin");
+        std::fs::write(&file, b"x").unwrap();
+        let everyone = "*S-1-1-0";
+        run_hidden(
+            "icacls",
+            &[
+                file.as_os_str(),
+                "/deny".as_ref(),
+                format!("{everyone}:(DE)").as_ref(),
+            ],
+        );
+        run_hidden(
+            "icacls",
+            &[
+                sub.as_os_str(),
+                "/deny".as_ref(),
+                format!("{everyone}:(DC)").as_ref(),
+            ],
+        );
+        let (gf, gs, gd) = (file.clone(), sub.clone(), dir.clone());
+        let _restore = OnDrop(move || {
+            for p in [&gs, &gf] {
+                let _ = std::process::Command::new("icacls")
+                    .args([p.as_os_str(), "/remove:d".as_ref(), everyone.as_ref()])
+                    .stdout(std::process::Stdio::null())
+                    .status();
+            }
+            let _ = std::fs::remove_dir_all(&gd);
+        });
+
+        let result = td.cleanup_with_delays(Some("session-1"), &[]);
+
+        assert!(result.is_err(), "the protected file was deleted");
+        assert!(file.exists());
+        testing_logger::validate(|logs| {
+            let warns: Vec<String> = logs
+                .iter()
+                .filter(|l| l.level == log::Level::Warn)
+                .map(|l| l.body.clone())
+                .collect();
+            assert_eq!(warns.len(), 1, "{warns:?}");
+            assert_eq!(
+                warns[0],
+                format!(
+                    "Could not delete temporary directory {}: Access is denied. 1 file(s) could \
+                     not be deleted, including {}. No running process was found holding them \
+                     open. Giving up.",
+                    dir.display(),
+                    Path::new("sub").join("protected.bin").display()
+                )
+            );
+        });
     }
 
     /// The naming parameters match tempdir.md, written as literals so a

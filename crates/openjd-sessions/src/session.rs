@@ -187,6 +187,29 @@ fn format_exit_code(code: Option<i32>) -> String {
     }
 }
 
+/// Log a temporary directory that `Session::cleanup` could not delete. Cleanup
+/// continues, so without this the directory is left on disk with no trace.
+fn log_cleanup_failure(session_id: &str, path: &Path, err: &SessionError) {
+    crate::tempdir::emit_cleanup_log(Some(session_id), &cleanup_failure_log(path, err));
+}
+
+/// The error line for a directory `Session::cleanup` gave up on.
+fn cleanup_failure_log(path: &Path, err: &SessionError) -> crate::tempdir::CleanupLog {
+    let reason = match err {
+        SessionError::TempDir { source, .. } => crate::tempdir::os_error_text(source),
+        other => other.to_string(),
+    };
+    crate::tempdir::CleanupLog {
+        level: log::Level::Error,
+        content: LogContent::EXCEPTION_INFO | LogContent::FILE_PATH,
+        message: format!(
+            "Files within temporary directory {} could not be deleted: {}",
+            path.display(),
+            reason
+        ),
+    }
+}
+
 /// Normalize an environment variable name for the current platform.
 /// On Windows, env vars are case-insensitive, so we uppercase all keys
 /// to avoid undefined behavior from mixed-case duplicates in the Win32 API.
@@ -1132,6 +1155,12 @@ impl Session {
 
     /// Clean up the session. Deletes working directory if not retained.
     pub fn cleanup(&mut self) {
+        self.cleanup_with_delays(crate::tempdir::CLEANUP_RETRY_DELAYS);
+    }
+
+    /// [`Self::cleanup`], retrying a failed removal after each of `delays`, so
+    /// tests can shorten them.
+    fn cleanup_with_delays(&mut self, delays: &[Duration]) {
         if self.cleanup_called {
             return;
         }
@@ -1184,13 +1213,20 @@ impl Session {
                 }
             }
 
-            // If we own TempDirs, clean them up; otherwise fall back to remove_dir_all
-            if let Some(ref mut files_dir) = self._files_dir {
-                let _ = files_dir.cleanup();
-            }
+            // `_working_dir` and `_files_dir` are set together (both `Some` for
+            // a real session, both `None` only in unit tests), so the files
+            // directory is cleaned as part of the working directory it lives
+            // in. Removing it separately first would wait out the retries twice
+            // when it is the one holding a locked file.
             if let Some(ref mut working_dir) = self._working_dir {
-                let _ = working_dir.cleanup();
+                if let Some(ref mut files_dir) = self._files_dir {
+                    files_dir.mark_cleaned_up();
+                }
+                if let Err(e) = working_dir.cleanup_with_delays(Some(&self.session_id), delays) {
+                    log_cleanup_failure(&self.session_id, working_dir.path(), &e);
+                }
             } else {
+                // No owned TempDirs: the test constructor. Best-effort removal.
                 let _ = std::fs::remove_dir_all(&self.working_directory);
             }
         }
@@ -3486,6 +3522,122 @@ mod wrap_actions_tests {
             symtab.get_value("WrappedAction.Cancelation.NotifyPeriodInSeconds"),
             Some(&ExprValue::Null)
         );
+    }
+}
+
+#[cfg(test)]
+mod cleanup_failure_log_tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_failure_is_an_error_naming_the_path_and_reason() {
+        let err = SessionError::TempDir {
+            path: PathBuf::from("session-dir"),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "file in use."),
+        };
+        let line = cleanup_failure_log(Path::new("session-dir"), &err);
+        assert_eq!(line.level, log::Level::Error);
+        // Literal so a changed flag fails here: FILE_PATH (2) | EXCEPTION_INFO (16).
+        assert_eq!(line.content.bits(), 18);
+        assert_eq!(
+            line.message,
+            "Files within temporary directory session-dir could not be deleted: file in use"
+        );
+    }
+
+    #[test]
+    fn cleanup_failure_is_logged_through_the_session_logger() {
+        testing_logger::setup();
+        let err = SessionError::TempDir {
+            path: PathBuf::from("session-dir"),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "file in use"),
+        };
+        log_cleanup_failure("session-1", Path::new("session-dir"), &err);
+        testing_logger::validate(|logs| {
+            assert_eq!(logs.len(), 1);
+            assert_eq!(logs[0].level, log::Level::Error);
+            assert_eq!(logs[0].target, "openjd.sessions");
+            assert_eq!(
+                logs[0].body,
+                "Files within temporary directory session-dir could not be deleted: file in use"
+            );
+        });
+    }
+
+    /// A file held open in the embedded files directory for the whole cleanup:
+    /// only the working directory's removal is retried, each attempt is warned
+    /// about, the directory left behind is logged as an error, and the session
+    /// ends.
+    #[cfg(windows)]
+    #[test]
+    fn session_cleanup_logs_a_directory_it_cannot_remove() {
+        use std::os::windows::fs::OpenOptionsExt;
+        testing_logger::setup();
+        let root = tempfile::tempdir().unwrap();
+        let mut session = Session::with_config(SessionConfig {
+            limits: Default::default(),
+            session_id: "session-1".into(),
+            job_parameter_values: Default::default(),
+            session_root_directory: Some(root.path().to_path_buf()),
+            path_mapping_rules: None,
+            retain_working_dir: false,
+            callback: None,
+            os_env_vars: None,
+            user: None,
+            profile: None,
+            cancel_token: None,
+            debug_collect_stdout: false,
+            echo_openjd_directives: true,
+            sticky_bit_policy: crate::tempdir::StickyBitPolicy::Disabled,
+        })
+        .unwrap();
+        let wd = session.working_directory().to_path_buf();
+        let held_path = session.files_directory().join("locked.bin");
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .open(&held_path)
+            .unwrap();
+
+        session.cleanup_with_delays(&[Duration::from_millis(10)]);
+
+        assert_eq!(session.state(), SessionState::Ended);
+        let exe = std::env::current_exe().unwrap();
+        let reason = "The process cannot access the file because it is being used by \
+                      another process";
+        let warning = |end: &str| {
+            format!(
+                "Could not delete temporary directory {}: {reason}. 1 file(s) could not be \
+                 deleted, including {}. Files are still locked open by: {} (pid {}). {end}",
+                wd.display(),
+                held_path.strip_prefix(&wd).unwrap().display(),
+                exe.file_name().unwrap().to_string_lossy(),
+                std::process::id()
+            )
+        };
+        let expected = [
+            (log::Level::Warn, warning("Retrying in 0.01 s.")),
+            (log::Level::Warn, warning("Giving up.")),
+            (
+                log::Level::Error,
+                format!(
+                    "Files within temporary directory {} could not be deleted: {reason}",
+                    wd.display()
+                ),
+            ),
+        ];
+        testing_logger::validate(|logs| {
+            let problems: Vec<_> = logs
+                .iter()
+                .filter(|l| l.level <= log::Level::Warn)
+                .map(|l| (l.level, l.body.clone()))
+                .collect();
+            assert_eq!(problems, expected);
+        });
+        drop(held);
+        std::fs::remove_dir_all(&wd).unwrap();
     }
 }
 

@@ -465,15 +465,21 @@ collects the cleanup and teardown guarantees in one place.
 `cleanup()` is the primary teardown API. It:
 1. Shuts down the cross-user helper (if active) via the `"shutdown"` protocol message
 2. For cross-user sessions: runs `sudo rm -rf` as the session user to remove files
-   owned by that user, then `remove_dir_all` as the process user for any remainder
-3. For same-user sessions: `remove_dir_all` on the working directory
+   owned by that user, then `TempDir::cleanup()` as the process user for any
+   remainder, as in step 3
+3. For same-user sessions: `TempDir::cleanup()` on the working directory, which
+   also removes the embedded files directory inside it. On Windows this can block
+   for at least about 31 s while it waits for open files to be released, logging a
+   warning after each failed pass (see tempdir.md "Cleanup retries on Windows").
+   If it still fails, logs the path and reason at error level and continues
 4. Sets state to `Ended`
 5. Skips directory removal if `retain_working_dir` is `true`
 
 ### Drop safety net
 
 If `cleanup()` is never called, `Session`'s `Drop` impl:
-1. Logs a warning ("Session::cleanup() was not called")
+1. Logs a warning ("Session '<id>' was dropped without calling cleanup(). Working
+   directory may not have been cleaned up.")
 2. Performs a best-effort `remove_dir_all` on the working directory
 3. Does **not** perform cross-user cleanup (no async, no sudo)
 4. Does **not** shut down the cross-user helper
