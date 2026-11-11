@@ -22,15 +22,33 @@ use windows::Win32::System::Threading::{
 
 use crate::tempdir::FileHolder;
 
+/// Paths at least this many UTF-16 units long make the Restart Manager
+/// reject the whole request with error 29.
+const MAX_PATH: usize = 260;
+
 /// Returns the processes that hold any of `files` open.
+///
+/// The Restart Manager rejects a whole request if any path in it is
+/// [`MAX_PATH`] characters or longer, even with a `\\?\` prefix, so those
+/// paths are left out and the rest are still looked up.
 pub(crate) fn processes_holding(files: &[PathBuf]) -> Result<Vec<FileHolder>, String> {
     if files.is_empty() {
         return Ok(Vec::new());
     }
     let wide: Vec<Vec<u16>> = files
         .iter()
-        .map(|p| p.as_os_str().encode_wide().chain(Some(0)).collect())
+        .map(|p| p.as_os_str().encode_wide().collect::<Vec<u16>>())
+        .filter(|w| w.len() < MAX_PATH)
+        .map(|mut w| {
+            w.push(0);
+            w
+        })
         .collect();
+    if wide.is_empty() {
+        return Err(format!(
+            "every path is {MAX_PATH} characters or longer, which the Restart Manager does not accept"
+        ));
+    }
     let names: Vec<PCWSTR> = wide.iter().map(|w| PCWSTR(w.as_ptr())).collect();
 
     let mut handle = 0u32;
@@ -202,6 +220,43 @@ mod tests {
         let full = "x".repeat(256);
         let h = holder_from(&info_named(7, &full), |_| None);
         assert_eq!(h.name, full);
+    }
+
+    /// A path the Restart Manager would refuse does not stop the lookup for
+    /// the files beside it.
+    #[test]
+    fn a_long_path_does_not_hide_the_holders_of_other_files() {
+        let dir = crate::tempdir::TempDir::new(None, None, None).unwrap();
+        let short = dir.path().join("short.bin");
+        let mut long_dir = std::ffi::OsString::from(r"\\?\");
+        long_dir.push(dir.path());
+        for i in 0..8 {
+            long_dir.push(format!(r"\{}{i}", "x".repeat(40)));
+        }
+        let long_dir = PathBuf::from(long_dir);
+        std::fs::create_dir_all(&long_dir).unwrap();
+        let long = long_dir.join("held.bin");
+        assert!(long.as_os_str().len() >= MAX_PATH);
+        let hold = |p: &PathBuf| {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .share_mode(0)
+                .open(p)
+                .unwrap()
+        };
+        let (_a, _b) = (hold(&short), hold(&long));
+
+        let holders = processes_holding(&[short, long.clone()]).unwrap();
+        assert!(
+            holders.iter().any(|h| h.pid == std::process::id()),
+            "{holders:?}"
+        );
+        assert_eq!(
+            processes_holding(&[long]).unwrap_err(),
+            "every path is 260 characters or longer, which the Restart Manager does not accept"
+        );
     }
 
     #[test]

@@ -135,8 +135,9 @@ fn remove_tree_observed(root: &Path, mut on_dir_pinned: impl FnMut(&Path)) -> Ve
             // Children done. Release the pin (removing the directory needs a
             // handle with DELETE access, which the pin does not allow), then
             // remove the directory itself.
-            let frame = stack.pop().expect("last_mut returned a frame");
-            let Frame { path, _pin, .. } = frame;
+            let Some(Frame { path, _pin, .. }) = stack.pop() else {
+                break;
+            };
             drop(_pin);
             record(
                 &mut failures,

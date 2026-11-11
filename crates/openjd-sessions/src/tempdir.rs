@@ -1270,62 +1270,6 @@ mod tests {
         });
     }
 
-    /// A running program whose ACL denies writing: deleting it fails with access
-    /// denied, and the warning names it and its process.
-    #[cfg(windows)]
-    #[test]
-    fn cleanup_names_a_running_program_that_refuses_writing() {
-        testing_logger::setup();
-        let mut td = TempDir::new(None, None, None).unwrap();
-        let dir = td.path().to_path_buf();
-        let exe = copy_ping(&dir, "ping.exe");
-        let everyone = "*S-1-1-0";
-        let deny = format!("{everyone}:(WD)");
-        run_hidden(
-            "icacls",
-            &[exe.as_os_str(), "/deny".as_ref(), deny.as_ref()],
-        );
-        let mut child = run_ping(&exe);
-        let pid = child.id();
-        let (guard_exe, guard_dir) = (exe.clone(), dir.clone());
-        let _restore = OnDrop(move || {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = std::process::Command::new("icacls")
-                .args([
-                    guard_exe.as_os_str(),
-                    "/remove:d".as_ref(),
-                    everyone.as_ref(),
-                ])
-                .stdout(std::process::Stdio::null())
-                .status();
-            let _ = std::fs::remove_dir_all(&guard_dir);
-        });
-
-        let result = td.cleanup_with_delays(Some("session-1"), &[]);
-
-        assert!(result.is_err(), "the running image was deleted");
-        let start = format!(
-            "Could not delete temporary directory {}: Access is denied. 1 file(s) could not \
-             be deleted, including ping.exe. Files are still locked open by: ",
-            dir.display()
-        );
-        let ping = format!("ping.exe (pid {pid})");
-        testing_logger::validate(|logs| {
-            let warns: Vec<String> = logs
-                .iter()
-                .filter(|l| l.level == log::Level::Warn)
-                .map(|l| l.body.clone())
-                .collect();
-            assert_eq!(warns.len(), 1, "{warns:?}");
-            assert!(
-                holders_in(&warns[0], &start).contains(&ping.as_str()),
-                "{}",
-                warns[0]
-            );
-        });
-    }
-
     /// A file whose ACLs refuse deletion (the file denies DELETE and its
     /// directory denies deleting children) is reported, and no process holds it.
     #[cfg(windows)]

@@ -923,8 +923,9 @@ impl TempDir {
     /// leaves anything behind is retried after 1, 2, 4, 8 and 16 s. Each failed
     /// pass logs a warning naming the files that could not be deleted and the
     /// processes holding them open. On other platforms a failure returns at
-    /// once. Each failed pass also spends time finding the holders: up to
-    /// about 20 s when hundreds of files are held. Errors with
+    /// once. Each failed pass also spends time finding the holders: seconds
+    /// when hundreds of files are held, up to about 20 s on a slow machine.
+    /// Errors with
     /// `SessionError::TempDir`, carrying the first error of the last pass,
     /// including `NotFound` when the directory was gone before the first
     /// pass. See tempdir.md "Cleanup retries on Windows".

@@ -4,7 +4,7 @@
 
 The CLI implements a custom `log::Log` to display real-time subprocess output during
 `run` command execution. The logger filters log records by structured metadata to show
-subprocess command output and warnings or errors about the session (not internal debug/info
+subprocess command output and `EXCEPTION_INFO` warnings and errors (not internal debug/info
 messages), and formats each line
 with a timestamp.
 

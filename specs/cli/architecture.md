@@ -44,7 +44,7 @@ Each command module exports an `Args` struct (clap derive) and an `execute()` fu
 | `serde_json` | JSON output formatting, inline JSON parameter parsing, path mapping rule loading |
 | `serde-saphyr` | YAML output formatting and YAML parameter/task file loading |
 | `tokio` | Async runtime (`rt-multi-thread`, `macros`) for session execution |
-| `log` | Logging facade; custom `Log` impl that prints subprocess output and session warnings and errors |
+| `log` | Logging facade; custom `Log` impl that prints subprocess output and `EXCEPTION_INFO` warnings and errors |
 | `chrono` | Timestamp formatting (local, UTC) for session logs |
 
 ## Public API Surface
