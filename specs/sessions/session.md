@@ -108,6 +108,51 @@ It's for callers that deliberately want to keep running work after a failure or 
 ending exit, and they take responsibility for the session's state. A failed or canceled
 action can leave its work half done, and the session neither checks nor undoes it.
 
+### Failures before an action starts
+
+`enter_environment`, `exit_environment` and `run_task` first check that the call can be
+accepted. A call that fails one of these checks is **rejected**: it returns the error and
+changes nothing (state, entered environments, the last action's status), and no callback
+fires. The rejections are:
+
+| Call | Rejections |
+|------|------------|
+| `enter_environment` | `InvalidState` (not `Ready`), `DuplicateEnvironment` (an explicit `identifier` already entered), `MultipleWrapEnvironments` (RFC 0008 single wrap layer) |
+| `exit_environment` | `InvalidState` (not `Ready` or `ReadyEnding`), `UnknownEnvironment`, `LifoViolation` |
+| `run_task` | `InvalidState` (not `Ready`) |
+| `run_subprocess` | `InvalidState` (not `Ready`), and `Runtime` for an empty command or a zero timeout |
+
+These are the checks the Python library also makes before it touches the session, and
+they run before anything that could fail an action, so a rejected call is rejected even
+if its other input would also fail.
+
+Once a call is accepted, any failure before its action's subprocess starts **fails the
+action**, as in the Python library (`Session._fail_action_before_start`). The action
+status becomes `Failed`, with the error's message as its `fail_message` and no exit code;
+the callback reports it; and the session settles through `settle_after_action(Failed)`,
+so it is ending-only (`ReadyEnding`). This covers building the symbol table (an
+undeserializable `resolved_symtab`, a job or task parameter value that can't be coerced
+to its declared type, a `PATH` parameter over the path mapping limit), resolving an
+environment's `variables`, writing the path mapping rules file, and resolving or writing
+an RFC 0008 wrap hook's symbols and embedded files. It holds whether or not the
+environment has an `onEnter` or `onExit`. Failures after the subprocess is dispatched,
+such as an embedded file that can't be written or a command that can't be started, were
+already failed actions (see [drive_action](#drive_action)).
+
+The call still returns the error. That is how every failed action in
+`enter_environment` and `exit_environment` already reports itself
+(`EnvironmentScriptFailed` for a failed `onEnter`/`onExit`), and how `run_task` already
+reports a setup failure. The Python methods are non-blocking and report every outcome
+through `action_status`, so they return normally instead (`enter_environment` returns the
+identifier). A Rust caller that reads `action_status()` sees what a Python caller sees. To
+tell a rejection from a failed action, check `state()` or `action_status()`, or the
+variant: only the rejection variants above leave the session unchanged.
+
+A failed `enter_environment` leaves the environment on `environments_entered`, as in
+Python, and the caller must still exit it. When the caller didn't pass an `identifier`,
+the environment is `environments_entered().last()`. A failed `exit_environment` has
+already removed the environment, so it still counts as an exit.
+
 ## SessionConfig
 
 ```rust
@@ -246,38 +291,52 @@ set to `true`. Production code should always use `Session::with_config`.
 `enter_environment(env, resolved_symtab, identifier, os_env_vars) -> Result<String, SessionError>`,
 where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 
-1. Validates state is `Ready`
-2. Sets state to `Running`
-3. Resolves environment `variables` format strings against the current symbol table,
-   with target type `string` for whole-field expressions (Expression Language §1.3.2),
-   and rejects a resolved value that contains a NUL byte or exceeds 2048 characters
-   (Template Schemas §4.4.2 — the session is the enforcement stage for values that
-   are unknown at template validation; the limit is kept in sync with the model's
-   `EffectiveLimits::max_env_var_value_len`)
-4. Stores the environment, folding the `resolved_symtab` argument onto the stored copy's
+1. Validates state is `Ready`, that an explicit `identifier` isn't already entered, and
+   the RFC 0008 single wrap layer rule. A call that fails these is rejected and changes
+   nothing (see [Failures before an action starts](#failures-before-an-action-starts))
+2. Stores the environment, folding the `resolved_symtab` argument onto the stored copy's
    `Environment::resolved_symtab` field. A caller may supply an environment's resolved
    symbol table either way, and the two are equivalent: readers that run after this call
    returns — notably the RFC 0008 wrap hooks, which resolve a wrap environment's own
    scope off the stored `Environment` — see the same table whichever route was used.
    When a caller supplies both, the argument wins, being the more specific input for
    this entry.
-5. Pushes the environment onto `environments_entered` (LIFO stack)
-6. Creates an `EnvironmentScriptRunner` and calls `enter()` (runs `onEnter` action)
+3. Pushes the environment onto `environments_entered` (LIFO stack). From here on, a
+   failure fails the action and leaves the environment on the stack
+4. Builds the symbol table (see [Symbol Table Construction](#symbol-table-construction))
+5. Resolves environment `variables` format strings against that symbol table,
+   with target type `string` for whole-field expressions (Expression Language §1.3.2),
+   and rejects a resolved value that contains a NUL byte or exceeds 2048 characters
+   (Template Schemas §4.4.2 — the session is the enforcement stage for values that
+   are unknown at template validation; the limit is kept in sync with the model's
+   `EffectiveLimits::max_env_var_value_len`). Every variable resolves before any is set,
+   so a failure sets none of them
+6. Without an `onEnter`, records a `Success` action and returns. Otherwise sets state to
+   `Running`, creates an `EnvironmentScriptRunner` and calls `enter()` (runs the
+   `onEnter` action, or an outer environment's `onWrapEnvEnter` in its place)
 7. Processes `ActionMessage` values via `drive_action()` — env var changes from
    `openjd_env`/`openjd_unset_env` are applied to the environment's change set
 8. On success: state → `Ready` (or `ReadyEnding` if `ending_only`)
-9. On failure: `ending_only` is set and state → `ReadyEnding`
+9. On failure, whether of the `onEnter` or before it starts: the action is `Failed`,
+   `ending_only` is set, state → `ReadyEnding`, and the call returns the error
 
 ### Exit
 
 `exit_environment(identifier, resolved_symtab, keep_session_running, os_env_vars)`:
 
-1. Validates state is `Ready` or `ReadyEnding`
-2. Validates the identifier matches the most recently entered environment (LIFO order)
+1. Validates state is `Ready` or `ReadyEnding`, that the identifier is known, and that it
+   is the most recently entered environment (LIFO order). A call that fails these is
+   rejected and changes nothing
+2. Evaluates the action's environment variables, which still include the exiting
+   environment's own
 3. Sets `ending_only = true` unless `keep_session_running` is true
-4. Runs `onExit` action via `EnvironmentScriptRunner::exit()`
-5. Pops the environment from `environments_entered`
-6. Removes the environment's variable changes from the cumulative set
+4. Pops the environment from `environments_entered` and removes it, so its variable
+   changes no longer apply. This happens before anything that can fail, so a failed exit
+   still counts as an exit
+5. Builds the symbol table. A failure here, or anywhere before the `onExit` starts,
+   fails the action (see [Failures before an action starts](#failures-before-an-action-starts))
+6. Runs the `onExit` action (or an outer environment's `onWrapEnvExit` in its place) via
+   `EnvironmentScriptRunner::exit()`, if there is one
 7. On completion: state → `Ready` or `ReadyEnding` as for any other action. With
    `keep_session_running` true, the state is `Ready` only if the session wasn't already
    ending-only; `keep_session_running` never clears ending-only mode, and only
@@ -293,9 +352,11 @@ in an inconsistent state. The Python library enforces this, and the Rust crate m
 
 `run_task(script, task_parameter_values, resolved_symtab, os_env_vars)`:
 
-1. Validates state is `Ready`
+1. Validates state is `Ready`; otherwise the call is rejected and changes nothing
 2. Sets state to `Running`
-3. Adds `Task.Param.*` and `Task.RawParam.*` to the symbol table
+3. Builds the symbol table, including `Task.Param.*` and `Task.RawParam.*`. A failure
+   here, or anywhere before the subprocess starts, fails the action (see
+   [Failures before an action starts](#failures-before-an-action-starts))
 4. Creates a `StepScriptRunner` and calls `run()` (runs `onRun` action)
 5. Processes `ActionMessage` values via `drive_action()`
 6. On completion: state → `Ready` or `ReadyEnding` based on result
@@ -708,9 +769,10 @@ during environment entry and task execution.
 ## Duplicate Environment Identifier Rejection
 
 When `enter_environment` is called with an explicit `identifier` that has already been
-entered in the session, it returns `SessionError::Runtime` with the message
-`"Environment {id} has already been entered in this Session."`. This prevents
-accidentally entering the same environment twice, which would corrupt the LIFO stack.
+entered in the session, it returns `SessionError::DuplicateEnvironment`, whose message is
+`"Environment {id} has already been entered in this Session."`, and changes nothing. This
+prevents accidentally entering the same environment twice, which would corrupt the LIFO
+stack.
 
 ## Environment Variable Normalization
 

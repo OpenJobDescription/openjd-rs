@@ -123,6 +123,16 @@ impl Session {
     pub fn action_status(&self) -> Option<ActionStatus>;
 
     // ── Lifecycle actions (async) ──
+    //
+    // An error from these methods is either a rejection from the
+    // up-front checks (wrong state, an unknown or duplicate environment,
+    // LIFO order, the wrap-layer rule, run_subprocess's argument checks),
+    // which changes nothing, or a failed action: once the call is
+    // accepted, any failure, including one before the subprocess starts,
+    // records a Failed action status with the error's message and makes
+    // the session ending-only. A failed enter_environment leaves the
+    // environment entered. See session.md § Failures before an action
+    // starts.
 
     /// Enter an environment (runs its `onEnter` action, if any).
     /// Returns the identifier used to later `exit_environment`.

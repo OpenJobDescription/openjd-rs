@@ -168,11 +168,30 @@ state transitions:
 
 See [session.md § Brittle Sessions](session.md#brittle-sessions).
 
+### Rejections and failed actions
+
+An error from `enter_environment`, `exit_environment`, `run_task` or `run_subprocess` is
+one of two kinds:
+
+- **A rejection**, from the up-front checks: `InvalidState`, `DuplicateEnvironment`,
+  `MultipleWrapEnvironments`, `UnknownEnvironment`, `LifoViolation`, and `run_subprocess`'s
+  `Runtime` argument checks. It changes nothing: the state, the entered environments and
+  the last action's status are as they were, and no callback fires.
+- **A failed action**, for any error once the call is accepted, including one before the
+  subprocess starts (building the symbol table, resolving an environment's `variables`).
+  The action status is `Failed` with the error's message, and the session is ending-only.
+  This matches the Python library, which reports these through `action_status` without
+  raising.
+
+The table in
+[session.md § Failures before an action starts](session.md#failures-before-an-action-starts)
+lists the rejections per call.
+
 ### Format string errors
 
 Format string resolution can fail at multiple points:
 - `resolve_action_args()` — command/args resolution
-- `evaluate_env_vars()` — environment variable resolution
+- environment `variables` resolution in `enter_environment`
 - `write_file_contents()` — embedded file data resolution
 
 All are wrapped in `SessionError::FormatString` with context describing the operation.
