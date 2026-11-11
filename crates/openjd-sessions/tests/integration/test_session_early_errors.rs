@@ -154,6 +154,20 @@ fn assert_failed_action<T: std::fmt::Debug>(
     result: Result<T, SessionError>,
     expected: &str,
 ) {
+    assert_failed_action_seq(s, seen, result, expected, None);
+}
+
+/// As [`assert_failed_action`], and additionally pin the exact callback
+/// sequence when `callbacks` is `Some`. A failure before the action is
+/// reported `Running` fires only `[Failed]`; one after it (path mapping,
+/// wrap-hook setup, and everything in `run_task`) fires `[Running, Failed]`.
+fn assert_failed_action_seq<T: std::fmt::Debug>(
+    s: &Session,
+    seen: &Seen,
+    result: Result<T, SessionError>,
+    expected: &str,
+    callbacks: Option<&[ActionState]>,
+) {
     let err = result.expect_err("the call must return the error");
     assert_eq!(err.to_string(), expected);
     let status = s.action_status().expect("the failed action has a status");
@@ -162,11 +176,15 @@ fn assert_failed_action<T: std::fmt::Debug>(
     assert_eq!(status.exit_code, None);
     assert!(status.started_at.is_some());
     assert!(status.ended_at.is_some());
+    let seen = seen.lock().unwrap();
     assert_eq!(
-        seen.lock().unwrap().last(),
+        seen.last(),
         Some(&ActionState::Failed),
         "the callback must report the failed action"
     );
+    if let Some(expected_seq) = callbacks {
+        assert_eq!(seen.as_slice(), expected_seq, "callback sequence");
+    }
     assert_eq!(s.state(), SessionState::ReadyEnding);
 }
 
@@ -206,7 +224,9 @@ async fn check_enter_failure(
     expected: &str,
 ) {
     let result = s.enter_environment(e, symtab, Some("env-1"), None).await;
-    assert_failed_action(s, seen, result, expected);
+    // Building the symbol table or resolving variables fails before the
+    // action is reported Running, so the only callback is Failed.
+    assert_failed_action_seq(s, seen, result, expected, Some(&[ActionState::Failed]));
     assert_eq!(s.environments_entered(), ["env-1".to_string()]);
     assert_refused_until_cleared(s).await;
 
@@ -366,9 +386,12 @@ async fn enter_with_overlong_variable_fails_the_action() {
 async fn enter_with_one_bad_variable_sets_none_of_them() {
     let root = TempDir::new().unwrap();
     let (mut s, _seen) = session(&root, JobParameterValues::new());
+    // Variables resolve in sorted key order, so a bad variable that sorts
+    // last still leaves none set: this kills a mutant that sets each as it
+    // resolves regardless of HashMap iteration order.
     let vars: Vec<(String, String)> = (0..8)
         .map(|i| (format!("GOOD{i}"), "set".to_string()))
-        .chain([("BAD".to_string(), "{{Param.Missing}}".to_string())])
+        .chain([("ZZZ_BAD".to_string(), "{{Param.Missing}}".to_string())])
         .collect();
     let vars: Vec<(&str, &str)> = vars.iter().map(|(k, v)| (&**k, &**v)).collect();
     let e = env_with_variables(
@@ -415,10 +438,18 @@ async fn exit_with_undeserializable_resolved_symtab_fails_the_action() {
             )
             .await
             .unwrap();
+        let before = seen.lock().unwrap().len();
         let result = s
             .exit_environment(&id, Some(&bad_symtab()), keep_session_running, None)
             .await;
         assert_failed_action(&s, &seen, result, BAD_SYMTAB_MESSAGE);
+        // Exit builds the symbol table after removing the environment and
+        // before reporting Running, so the only callback it adds is Failed.
+        assert_eq!(
+            &seen.lock().unwrap()[before..],
+            &[ActionState::Failed],
+            "exit must report only Failed, no Running"
+        );
         assert!(s.environments_entered().is_empty());
         match s.exit_environment(&id, None, true, None).await {
             Err(SessionError::UnknownEnvironment { identifier }) => assert_eq!(identifier, id),
@@ -426,6 +457,63 @@ async fn exit_with_undeserializable_resolved_symtab_fails_the_action() {
         }
         assert_refused_until_cleared(&mut s).await;
     }
+}
+
+/// Exit's pre-start failure goes through `fail_action_before_start`, which
+/// starts a fresh action status and logs the "Exiting Environment" banner.
+/// A previous task's progress/status must not leak into the failed exit's
+/// status, and the banner must be logged. (Pairs with the enter banner test;
+/// pins the exit call site, which a mutant could otherwise route through
+/// `fail_action_setup` undetected.)
+#[tokio::test]
+async fn exit_pre_start_failure_resets_status_and_logs_banner() {
+    testing_logger::setup();
+    let root = TempDir::new().unwrap();
+    let (mut s, _seen) = session(&root, JobParameterValues::new());
+    let id = s
+        .enter_environment(
+            &env("MyEnv", None, Some(action("echo exited"))),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    // A task that reports progress and status, so a leak would be visible.
+    let r = s
+        .run_task(
+            "t",
+            &step("echo openjd_progress: 50.0; echo openjd_status: halfway; exit 0"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.state, ActionState::Success);
+    // The task succeeded, so the session is Ready and the exit is accepted.
+    let result = s
+        .exit_environment(&id, Some(&bad_symtab()), true, None)
+        .await;
+    let err = result.expect_err("the exit must fail");
+    assert_eq!(err.to_string(), BAD_SYMTAB_MESSAGE);
+    let status = s.action_status().unwrap();
+    assert_eq!(status.state, ActionState::Failed);
+    assert_eq!(
+        status.progress, None,
+        "previous task progress must not leak"
+    );
+    assert_eq!(status.status_message, None, "previous status must not leak");
+    assert_eq!(status.fail_message.as_deref(), Some(BAD_SYMTAB_MESSAGE));
+    testing_logger::validate(|logs| {
+        let bodies: Vec<&str> = logs.iter().map(|l| l.body.as_str()).collect();
+        assert!(
+            bodies
+                .iter()
+                .any(|b| b.contains("Exiting Environment: MyEnv")),
+            "exit banner must be logged: {bodies:?}"
+        );
+    });
 }
 
 /// A failed exit leaves the outer environment on the stack, and it can
@@ -466,7 +554,14 @@ async fn run_task_with_undeserializable_resolved_symtab_fails_the_action() {
     let result = s
         .run_task("t", &step("echo ran"), None, Some(&bad_symtab()), None)
         .await;
-    assert_failed_action(&s, &seen, result, BAD_SYMTAB_MESSAGE);
+    // run_task reports Running before it builds the symbol table.
+    assert_failed_action_seq(
+        &s,
+        &seen,
+        result,
+        BAD_SYMTAB_MESSAGE,
+        Some(&[ActionState::Running, ActionState::Failed]),
+    );
     assert_refused_until_cleared(&mut s).await;
 }
 

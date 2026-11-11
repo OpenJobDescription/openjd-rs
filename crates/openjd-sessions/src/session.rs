@@ -1380,14 +1380,18 @@ impl Session {
     /// entered, or [`SessionError::MultipleWrapEnvironments`] under the RFC
     /// 0008 single-layer rule. These change nothing.
     ///
-    /// Any other error is a failed action, as in the Python runtime: the
-    /// action status is `Failed` with the error's message, the session is
-    /// ending-only, and the environment stays entered, so the caller must
-    /// still exit it (it is the last entry of
-    /// [`environments_entered`](Self::environments_entered)). That includes
-    /// failures before `onEnter` starts, such as an undeserializable
-    /// `resolved_symtab` or a `variables` value that can't be resolved, and
-    /// it applies when the environment has no `onEnter`.
+    /// Any other error fails the action and makes the session ending-only;
+    /// the environment stays entered, so the caller must still exit it (it
+    /// is the last entry of
+    /// [`environments_entered`](Self::environments_entered)). For a failure
+    /// before the `onEnter` subprocess starts — an undeserializable
+    /// `resolved_symtab`, a `variables` value that can't be resolved, a path
+    /// mapping or wrap-hook setup error — the action status is `Failed` with
+    /// the error's message, as in the Python runtime; this is the only kind
+    /// of failure possible when the environment has no `onEnter`. If the
+    /// `onEnter` runs and ends non-`Success`, the error is
+    /// [`SessionError::EnvironmentScriptFailed`] and the action status is
+    /// that terminal state (`Failed`, `Canceled` or `Timeout`).
     pub async fn enter_environment(
         &mut self,
         env: &Environment,
@@ -1707,8 +1711,14 @@ impl Session {
         let Some(vars) = &env.variables else {
             return Ok(Vec::new());
         };
-        let mut resolved = Vec::with_capacity(vars.len());
-        for (key, fmt_str) in vars {
+        // Resolve in sorted key order so that, when more than one variable
+        // is invalid, the error reported is deterministic rather than
+        // dependent on `HashMap` iteration order. Nothing observable depends
+        // on the order the valid ones are returned in (they go into a map).
+        let mut entries: Vec<(&String, &openjd_model::FormatString)> = vars.iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+        let mut resolved = Vec::with_capacity(entries.len());
+        for (key, fmt_str) in entries {
             // Required string values (§4.4.2): a single whole-field
             // expression resolves with target type `string`
             // (Expression Language §1.3.2), so `null` and list values
@@ -1777,11 +1787,15 @@ impl Session {
     /// `ReadyEnding`, [`SessionError::UnknownEnvironment`], or
     /// [`SessionError::LifoViolation`]. These change nothing.
     ///
-    /// Any other error is a failed action: the action status is `Failed`
-    /// with the error's message and the session is ending-only. The
-    /// environment has already been removed, so the failed exit still
-    /// counts as an exit. That includes a failure before `onExit` starts,
-    /// such as an undeserializable `resolved_symtab`.
+    /// Any other error fails the action and makes the session ending-only.
+    /// The environment has already been removed, so the failed exit still
+    /// counts as an exit. For a failure before the `onExit` subprocess
+    /// starts — an undeserializable `resolved_symtab`, a path mapping or
+    /// wrap-hook setup error — the action status is `Failed` with the
+    /// error's message; this is the only kind possible when there is no
+    /// `onExit`. If the `onExit` runs and ends non-`Success`, the error is
+    /// [`SessionError::EnvironmentScriptFailed`] and the action status is
+    /// that terminal state (`Failed`, `Canceled` or `Timeout`).
     pub async fn exit_environment(
         &mut self,
         identifier: &EnvironmentIdentifier,

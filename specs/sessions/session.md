@@ -154,12 +154,23 @@ Python, and the caller must still exit it. When the caller didn't pass an `ident
 the environment is `environments_entered().last()`. A failed `exit_environment` has
 already removed the environment, so it still counts as an exit.
 
-`enter_environment` and `exit_environment` report only a `Failed` callback for a
-pre-start failure — they haven't reported `Running` yet, since neither sets `Running`
-until its action's subprocess is about to start. `run_task` reports `Running` and then
-`Failed`, because it reports `Running` before it builds the symbol table, as it already
-does for its other setup failures. The `fail_message` is the error's own text, which is
-Rust's wording and not identical to the Python runtime's for the same input.
+Which callbacks a pre-start failure fires depends on when it happens relative to the
+`Running` notification. `enter_environment` and `exit_environment` report only a `Failed`
+callback for a failure while building the symbol table, and `enter_environment` also for
+resolving an environment's `variables` — these run before the action is reported
+`Running`. Their later setup steps (writing the path mapping rules file, resolving or
+writing an RFC 0008 wrap hook's symbols and embedded files) run after `Running`, so they
+report `Running` and then `Failed`. `run_task` reports `Running` and then `Failed` for
+every pre-start failure, because it reports `Running` before it builds the symbol table.
+The terminal outcome is the same in every case, and the Python runtime reports only the
+`Failed` callback for all of them. The `fail_message` is the error's own text — Rust's
+wording, not identical to the Python runtime's for the same input.
+
+When the resolved action runs and ends non-`Success` (a failed, canceled or timed-out
+`onEnter`/`onExit`), `enter_environment` and `exit_environment` return
+`SessionError::EnvironmentScriptFailed`, and the action status is the script's own
+terminal state rather than `Failed` with an error message. The session is ending-only
+either way.
 
 ## SessionConfig
 
@@ -245,8 +256,9 @@ must be `Send + Sync` because it's invoked from the async task processing `Actio
 values.
 
 The callback fires on:
-- Action start (state = Running) — except a failure before an `enter_environment` or
-  `exit_environment` action starts, which reports only the `Failed` state (see
+- Action start (state = Running) — except a failure while building the symbol table or
+  resolving an environment's `variables`, which happens before `Running` and reports
+  only the `Failed` state (see
   [Failures before an action starts](#failures-before-an-action-starts))
 - Every `openjd_*` directive (progress, status, fail)
 - Action completion (state = Success/Failed/Canceled/Timeout)
@@ -319,8 +331,9 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
    and rejects a resolved value that contains a NUL byte or exceeds 2048 characters
    (Template Schemas §4.4.2 — the session is the enforcement stage for values that
    are unknown at template validation; the limit is kept in sync with the model's
-   `EffectiveLimits::max_env_var_value_len`). Every variable resolves before any is set,
-   so a failure sets none of them
+   `EffectiveLimits::max_env_var_value_len`). Variables resolve in sorted key order and
+   all resolve before any is set, so a failure sets none of them and reports a
+   deterministic error when more than one is invalid
 6. Without an `onEnter`, records a `Success` action and returns. Otherwise sets state to
    `Running`, creates an `EnvironmentScriptRunner` and calls `enter()` (runs the
    `onEnter` action, or an outer environment's `onWrapEnvEnter` in its place)
