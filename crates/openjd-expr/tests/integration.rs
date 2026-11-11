@@ -53,6 +53,8 @@ mod test_misc_getitem;
 mod test_operation_limit;
 #[path = "integration/test_parse_expression.rs"]
 mod test_parse_expression;
+#[path = "integration/test_parser_work_bound.rs"]
+mod test_parser_work_bound;
 #[path = "integration/test_path_format_mismatch.rs"]
 mod test_path_format_mismatch;
 #[path = "integration/test_path_mapping.rs"]

@@ -658,7 +658,10 @@ fn leading_whitespace_preserved() {
 
 #[test]
 fn syntax_error_has_message() {
-    assert_err("1 +", &["Syntax error: invalid syntax\n", "  1 +\n", "  ^"]);
+    assert_err(
+        "1 +",
+        &["Syntax error: Expected an expression\n", "  1 +\n", "  ^"],
+    );
 }
 
 // === TestSyntaxErrorCarets ===
@@ -667,7 +670,11 @@ fn syntax_error_has_message() {
 fn unclosed_paren() {
     assert_err(
         "(1 + 2",
-        &["Syntax error: '(' was never closed\n", "  (1 + 2\n", "  ^"],
+        &[
+            "Syntax error: unexpected EOF while parsing\n",
+            "  (1 + 2\n",
+            "  ^",
+        ],
     );
 }
 
@@ -675,7 +682,11 @@ fn unclosed_paren() {
 fn unclosed_bracket() {
     assert_err(
         "[1, 2",
-        &["Syntax error: '[' was never closed\n", "  [1, 2\n", "  ^"],
+        &[
+            "Syntax error: unexpected EOF while parsing\n",
+            "  [1, 2\n",
+            "  ^",
+        ],
     );
 }
 
@@ -684,7 +695,7 @@ fn unclosed_string() {
     assert_err(
         "'hello",
         &[
-            "Syntax error: unterminated string literal (detected at line 1)\n",
+            "Syntax error: missing closing quote in string literal\n",
             "  'hello\n",
             "  ^",
         ],
@@ -1173,7 +1184,7 @@ fn format_string_parse_error_carries_caret() {
     // the raw format-string source and a caret over the failing {{...}}.
     let err = FormatString::new("hello {{ 1 + }} world").unwrap_err();
     let expected = "\
-Failed to parse interpolation expression at [6, 15]. Reason: Syntax error: invalid syntax
+Failed to parse interpolation expression at [6, 15]. Reason: Syntax error: Expected an expression
   hello {{ 1 + }} world
         ^~~~~~~~~";
     assert_eq!(err.to_string(), expected);

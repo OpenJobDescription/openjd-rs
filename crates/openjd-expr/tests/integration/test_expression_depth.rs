@@ -11,7 +11,7 @@
 
 use openjd_expr::{
     ExpressionErrorKind, FormatString, FormatStringOptions, ParsedExpression, SymbolTable,
-    MAX_EXPRESSION_DEPTH,
+    MAX_EXPRESSION_DEPTH, MAX_PARSE_INPUT_LEN,
 };
 
 /// Helper that wraps an expression in a format string and tries both
@@ -71,12 +71,10 @@ fn parser_survives_deeply_nested_parens() {
 
 #[test]
 fn parser_survives_very_deeply_nested_parens() {
-    // 199 nested parens — the deepest the lexer accepts (it rejects at 200,
-    // matching CPython). Redundant parens never deepen the AST, so this
-    // parses and evaluates.
-    let expr = format!("{}1{}", "(".repeat(199), ")".repeat(199));
+    // 5000 nested parens — exercises the worker thread's enlarged stack.
+    let expr = format!("{}1{}", "(".repeat(5000), ")".repeat(5000));
     let parsed = ParsedExpression::new(&expr)
-        .expect("199 parens must parse (worker thread has ample stack)");
+        .expect("5000 parens must parse (worker thread has ample stack)");
     let v = parsed
         .evaluate(&SymbolTable::new())
         .expect("evaluation must succeed");
@@ -356,23 +354,41 @@ fn parser_survives_deeply_nested_list_literals() {
     // `[[[[...1...]]]]` — nested list literals also recurse in the parser.
     // The spec's own validator rejects lists deeper than 2 levels, but
     // the parser must survive long enough to hand the AST to the walker.
-    // 150 stays under ruff's 200-bracket lexer limit (see
-    // `lexer_rejects_brackets_nested_past_cpython_limit`) and over
-    // MAX_EXPRESSION_DEPTH, so the AST depth walker is what rejects it.
-    let depth = 150;
+    let depth = 2000;
     let expr = format!("{}1{}", "[".repeat(depth), "]".repeat(depth));
     expect_too_deep(&expr);
 }
 
 #[test]
-fn lexer_rejects_brackets_nested_past_cpython_limit() {
-    // Since rustpython-ruff_python_parser 0.16.10 the lexer caps bracket
-    // nesting at 200, matching CPython's "too many nested parentheses".
-    // Inputs that deep never reach the AST walker.
-    for (open, close) in [("(", ")"), ("[", "]")] {
-        let expr = format!("{}1{}", open.repeat(2000), close.repeat(2000));
-        let err = ParsedExpression::new(&expr).expect_err("2000 nested brackets must be rejected");
-        assert_eq!(err.message(), "Syntax error: too many nested parentheses");
+fn parser_survives_brackets_nested_to_length_cap() {
+    // The parser has no bracket-nesting limit (the rustpython-ruff 0.16.10
+    // republish rejected 201 levels in its lexer; Astral's ruff_python_parser
+    // does not), so nesting is bounded only by MAX_PARSE_INPUT_LEN. Its
+    // `stacker` feature grows the stack as it recurses, so nesting that deep
+    // must not overflow: redundant parens collapse to `1`, and every other
+    // bracket kind leaves an AST the depth walker rejects.
+    let parens = (MAX_PARSE_INPUT_LEN - 1) / 2;
+    let expr = format!("{}1{}", "(".repeat(parens), ")".repeat(parens));
+    let parsed = ParsedExpression::new(&expr).expect("redundant parens at the cap must parse");
+    let v = parsed
+        .evaluate(&SymbolTable::new())
+        .expect("evaluation must succeed");
+    assert_eq!(v.to_display_string(), "1");
+
+    for (open, close) in [("[", "]"), ("f(", ")"), ("x[", "]")] {
+        let n = (MAX_PARSE_INPUT_LEN - 1) / (open.len() + close.len());
+        expect_too_deep(&format!("{}1{}", open.repeat(n), close.repeat(n)));
+    }
+}
+
+#[test]
+fn parser_survives_unary_chain_at_length_cap() {
+    // Prefix operators recurse once per operator with no bracket to count.
+    // Without the parser's `stacker` feature, 64 KB of `-` overflows even
+    // the worker thread's 32 MB stack and aborts the process.
+    for unit in ["-", "+", "not "] {
+        let n = (MAX_PARSE_INPUT_LEN - 1) / unit.len();
+        expect_too_deep(&format!("{}1", unit.repeat(n)));
     }
 }
 

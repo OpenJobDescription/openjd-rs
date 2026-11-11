@@ -199,10 +199,9 @@ impl ParsedExpression {
         }
 
         // Hard cap on parser input length. A recursive-descent parser can
-        // recurse at most once per input character; the 32 MB worker-thread
-        // stack comfortably handles inputs up to
-        // [`MAX_PARSE_INPUT_LEN`], but beyond that we would risk overflow
-        // even in the dedicated thread. Inputs exceeding this size are
+        // recurse at most once per input character, so the cap bounds the
+        // stack the parser (growing its own with `stacker`) and the worker
+        // thread need, and the parser's work. Inputs exceeding this size are
         // rejected without invoking the parser at all.
         if expr_str.len() > MAX_PARSE_INPUT_LEN {
             return Err(ExpressionError::new(format!(
@@ -523,19 +522,21 @@ const FAST_PATH_INPUT_LEN: usize = 200;
 /// Maximum permitted source length (in bytes) for a single
 /// [`ParsedExpression`]. An absolute cap independent of any AST-shape
 /// analysis: the parser's recursive descent can recurse at most once per
-/// input byte, so bounding input length bounds worst-case stack use. Set
-/// to a value that leaves generous headroom in a debug-profile build on
-/// the parser worker thread (32 MB stack).
+/// input byte, and its parse time is roughly linear in input length, so
+/// bounding input length bounds both its worst-case stack use and its work
+/// (see `tests/integration/test_parser_work_bound.rs`).
 ///
 /// Realistic template expressions are well under 1 KB; 64 KB is two
 /// orders of magnitude above that.
 pub const MAX_PARSE_INPUT_LEN: usize = 64 * 1024;
 
 /// Stack size for the parser thread used when the source string is longer
-/// than [`FAST_PATH_INPUT_LEN`]. 32 MB is large enough to handle any input
-/// up to [`MAX_PARSE_INPUT_LEN`] even in debug builds, where each parser
-/// frame can be several KB. In release builds this leaves orders of
-/// magnitude of headroom; the allocation is a one-time reservation per
+/// than [`FAST_PATH_INPUT_LEN`]. On its own, 32 MB does not cover every
+/// input up to [`MAX_PARSE_INPUT_LEN`]: the parser recurses once per nested
+/// bracket or prefix operator, and 64 KB of `-` overflows it even in a
+/// release build. The parser's `stacker` feature (enabled in `Cargo.toml`)
+/// grows the stack on the heap past that point. The 32 MB also covers this
+/// crate's own AST walkers. The allocation is a one-time reservation per
 /// parse and is reclaimed when the thread ends.
 const PARSER_THREAD_STACK_SIZE: usize = 32 * 1024 * 1024;
 

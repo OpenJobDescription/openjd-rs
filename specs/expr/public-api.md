@@ -1618,6 +1618,12 @@ impl std::fmt::Display for ExpressionError;   // multi-line caret-annotated form
 impl std::error::Error for ExpressionError;   // source() returns &kind
 ```
 
+`with_node` takes a node from the `ruff_python_ast` crate that Astral
+publishes, pinned at `=0.0.21` (see [parser.md](parser.md)). A caller that
+passes a node must depend on that same crate and version. Before #489 the type
+came from `rustpython-ruff_python_ast` 0.16.10, which is a different crate, so
+nodes from it no longer type-check.
+
 ## Function Implementations (`functions::*`)
 
 Accessible via module paths like `openjd_expr::functions::arithmetic::add_int`.

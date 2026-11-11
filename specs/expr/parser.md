@@ -10,13 +10,10 @@ Defined in `eval/parse.rs`.
 
 ## Parser Selection: ruff_python_parser
 
-The `ruff_python_parser` from [astral-sh/ruff](https://github.com/astral-sh/ruff) is
-used via the `rustpython-ruff_python_parser` crate on crates.io.
-
-The `rustpython-ruff_python_parser` package on crates.io is a republished version of
-the same code as `ruff_python_parser` in the `astral-sh/ruff` monorepo. The RustPython
-project republishes it under this name. Users seeing `rustpython-ruff_python_parser` in
-`Cargo.toml` or `Cargo.lock` should know it is the same parser, not a fork.
+The `ruff_python_parser`, `ruff_python_ast` and `ruff_text_size` crates that
+Astral publishes to crates.io from the [astral-sh/ruff](https://github.com/astral-sh/ruff)
+monorepo are used directly. Astral describes them as internal components of
+Ruff, publishes them about weekly as `0.0.x`, and makes no stability promise.
 
 **Why ruff over rustpython-parser:**
 
@@ -24,20 +21,43 @@ project republishes it under this name. Users seeing `rustpython-ruff_python_par
 - ruff is actively maintained (daily commits, backed by Astral)
 - rustpython-parser has had no substantive code changes since early 2025
 
+**Why not the `rustpython-ruff_*` crates.** Until #489 the crate used
+`rustpython-ruff_python_parser`, which the RustPython project publishes from its
+own fork of ruff. Its 0.16.10 is not the same code as Astral's: the fork adds
+CPython-style syntax-error hints ("invalid syntax. Perhaps you forgot a
+comma?") that parse ahead speculatively, rewind, and parse the same tokens
+again. The hints nest inside brackets, so an invalid expression's parse time
+doubled with each unclosed bracket level (`"f(a " * 24 + "x"`, 97 bytes, took
+12 s), and a run of juxtaposed tokens inside one bracket was cubic in its
+length. Expressions are untrusted template input, so that was a denial of
+service. Astral's parser has no such hints and parses every one of those inputs
+in milliseconds. `tests/integration/test_parser_work_bound.rs` holds the
+reproducers with a time bound, so a parser bump that brings the behavior back
+fails CI.
+
 ```toml
-ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "=0.16.10" }
-ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "=0.16.10" }
-ruff_text_size = { package = "rustpython-ruff_text_size", version = "=0.16.10" }
+ruff_python_parser = { version = "=0.0.21", features = ["stacker"] }
+ruff_python_ast = "=0.0.21"
+ruff_text_size = "=0.0.21"
 ```
 
 **Exact version pin.** The ruff crates are pinned with `=` because they make
-breaking AST changes in 0.x patch releases. For example, 0.16.10 replaced
-`ExprCompare`'s `left` and `comparators` fields with a single `operands` list.
-With the earlier `^0.16.5` requirement, anything that resolved dependencies
-without our `Cargo.lock` failed to compile `openjd-expr`. That included
-downstream users and the cargo-semver-checks step in the release-plz workflow.
-Upgrade all three crates together and review the upstream AST changes as part
-of each bump.
+breaking AST changes without notice. For example, rustpython-ruff 0.16.10
+replaced `ExprCompare`'s `left` and `comparators` fields with a single
+`operands` list in a patch release. With the earlier `^0.16.5` requirement,
+anything that resolved dependencies without our `Cargo.lock` failed to compile
+`openjd-expr`. That included downstream users and the cargo-semver-checks step
+in the release-plz workflow. Upgrade all three crates together, review the
+upstream AST changes, and keep `test_parser_work_bound.rs` passing as part of
+each bump.
+
+**`stacker` feature.** With it, the parser grows its stack on the heap once its
+recursion gets deep (see Depth Limit below). Without it, 64 KB of `-` or of
+nested brackets overflows even the 32 MB worker thread and aborts the process.
+
+**Error messages.** Syntax errors carry Ruff's own wording, prefixed with
+`Syntax error: `, for example `Expected an expression` for `1 +` and
+`unexpected EOF while parsing` for `(1 + 2`. These are not CPython's messages.
 
 ## Parsing Pipeline
 
@@ -143,11 +163,14 @@ Three independent mechanisms work together:
    and the ruff parser's empirical overflow threshold on Rust's default
    2 MB thread stack is well above 200 frames (≥ 500 observed in release
    builds). Longer inputs run on a dedicated thread with a 32 MB stack via
-   `std::thread::Builder::stack_size`, which comfortably accommodates any
-   input up to `MAX_PARSE_INPUT_LEN` even in debug builds. The
-   worker-thread approach lets us parse *any* AST shape safely without
-   enumerating which token patterns drive parser recursion — whatever
-   shape the grammar produces, the parser has enough stack to complete.
+   `std::thread::Builder::stack_size`. That stack is not enough on its own:
+   the parser recurses once per nested bracket or prefix operator, and
+   64 KB of them overflows 32 MB. The parser's `stacker` feature covers the
+   rest, growing the stack on the heap once recursion passes about 20
+   levels, so the parser completes on *any* input up to
+   `MAX_PARSE_INPUT_LEN` without our enumerating which token patterns drive
+   its recursion. The parser has no bracket-nesting limit of its own, so
+   nesting is bounded only by `MAX_PARSE_INPUT_LEN`.
 
    The fast-path threshold is deliberately decoupled from
    `MAX_EXPRESSION_DEPTH`: the depth cap is a semantic abuse ceiling on
@@ -173,7 +196,8 @@ before they can exhaust the evaluator's stack.
 
 Rust threads default to 2 MB of stack, and Rust cannot recover from stack
 overflow via `std::panic::catch_unwind` — it aborts the process. The input
-cap + worker thread + depth walker + evaluator guard together ensure that
+cap + worker thread + the parser's `stacker` feature + depth walker +
+evaluator guard together ensure that
 no input to `ParsedExpression::new` or `Evaluator::evaluate` can cause a
 process abort.
 
