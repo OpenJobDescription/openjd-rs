@@ -724,6 +724,10 @@ pub(super) fn coerce_to_job_parameter_type(
 }
 
 /// Coerce a string value to the target type.
+///
+/// An INT or FLOAT value is an `<intstring>` or `<floatstring>`, so white
+/// space around the number is ignored (Template Schemas §7.5); a FLOAT keeps
+/// its text without it. Messages quote `s` as given.
 pub(super) fn coerce_from_str(
     s: &str,
     param_type: JobParameterType,
@@ -731,15 +735,17 @@ pub(super) fn coerce_from_str(
     use openjd_expr::ExprValue;
     Ok(match param_type {
         JobParameterType::Int => s
+            .trim()
             .parse::<i64>()
             .map(ExprValue::Int)
             .map_err(|_| format!("Value '{s}' is not a valid integer or integer string."))?,
         JobParameterType::Float => {
-            let f = s
+            let text = s.trim();
+            let f = text
                 .parse::<f64>()
                 .map_err(|_| format!("Value '{s}' is not a valid float."))?;
             ExprValue::Float(
-                openjd_expr::value::Float64::with_str(f, s.to_string())
+                openjd_expr::value::Float64::with_str(f, text.to_string())
                     .map_err(|_| format!("Value '{s}' is not a valid float."))?,
             )
         }

@@ -157,7 +157,15 @@ PATH parameters have special handling throughout the pipeline:
 two input modes:
 
 - **CLI input** (string values): Parsed via `coerce_from_str` — handles numeric parsing,
-  boolean aliases (`yes`/`no`/`on`/`off`/`1`/`0`), JSON list parsing for list types.
+  boolean aliases (`yes`/`no`/`on`/`off`/`1`/`0`), JSON list parsing for list types. An INT or
+  FLOAT value is an `<intstring>` or `<floatstring>`, so white space around the number is
+  ignored (Template Schemas §7.5): `" 7 "` is `7`, and a FLOAT keeps its text without the white
+  space. White space is the Unicode `White_Space` property (what `str::trim` removes). Errors
+  quote the value as given (`Value ' 7 x' is not a valid integer or integer string.`). A
+  template's own numeric strings (`default`, `minValue`, `maxValue`, `allowedValues`) are
+  trimmed the same way when they are decoded (`FlexInt`, `FlexFloat`), and so is the string
+  `JobIntParameterDefinition::check_constraints` and `JobFloatParameterDefinition::check_constraints`
+  parse.
 
 - **Library input** (typed ExprValue): Validated via `coerce_to_job_parameter_type` — checks type
   compatibility, performs numeric widening (int → float), validates list element types.

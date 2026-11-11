@@ -94,8 +94,9 @@ pub struct PathParameterOptions<'a> {
   only by environment templates; `create_job` re-checks the job template's own parameters.
 
 **Value coercion:**
-- `coerce_from_str` — Parses string input (CLI): numeric parsing, boolean aliases
-  (`yes`/`no`/`on`/`off`/`1`/`0`), JSON list parsing for list types
+- `coerce_from_str` — Parses string input (CLI): numeric parsing that ignores white space
+  around the number (Template Schemas §7.5; see [parameters.md](parameters.md#value-coercion)),
+  boolean aliases (`yes`/`no`/`on`/`off`/`1`/`0`), JSON list parsing for list types
 - `coerce_to_job_parameter_type` — Validates typed input (library): type compatibility, numeric
   widening (int → float), list element type validation
 
@@ -209,7 +210,8 @@ budgets template validation and the session runtime apply.
      (so `{{ 4.0 }}` coerces to 4) and `int?` for the optional
      `targetRuntimeSeconds` (a whole-field `null` means the field is omitted);
      multi-segment strings concatenate and parse with surrounding whitespace
-     tolerated.
+     tolerated. Both forms ignore the same white space, since string-to-`int`
+     coercion trims it too (see `specs/expr/values.md` § from_str_coerce).
    - Parameter space ranges (evaluate range expressions, resolve FormatString ranges).
      A format string element of a range list resolves through one helper
      (`resolve_list_item`) for every task parameter type, with the target from
@@ -245,8 +247,8 @@ budgets template validation and the session runtime apply.
      Without EXPR an INT, CHUNK[INT] or FLOAT element is the base 2023-09
      `<TaskParameterStringValue>` and resolves to a string. A base format string
      only interpolates value references, so it cannot produce `null` or a list, and
-     the string form keeps the surrounding-whitespace tolerance of `<intstring>` and
-     `<floatstring>`, which §1.2.3 coercion lacks. The same is true with EXPR of any
+     the string form ignores white space around the number, as an `<intstring>` or
+     `<floatstring>` does (Template Schemas §7.5). The same is true with EXPR of any
      format string that is not a single whole-field `{{...}}`: literal text around
      its expressions, two or more expressions (`{{ Param.A }}{{ Param.B }}`), or no
      expressions (a literal FLOAT string such as `"02.50"`). A string is interpreted
@@ -264,8 +266,10 @@ budgets template validation and the session runtime apply.
 
      For a whole-field list-item expression the target's coercion applies
      (Expression Language §1.2.3), as for the chunks fields above: `{{ 3.0 }}` is 3
-     in an INT range, a STRING job parameter `"7"` is 7, and a value that cannot
-     coerce, such as a STRING `"abc"` or `" 7 "`, or a `list[string]` with a
+     in an INT range, a STRING job parameter `"7"` or `" 7 "` is 7 (coercion ignores
+     white space around the number, so the element gives the value it gives without
+     EXPR), and a value that cannot coerce, such as a STRING `"abc"` or `"\u200b7"`
+     (U+200B is not white space), or a `list[string]` with a
      non-numeric member (`["a"]`; `["1", "2"]` coerces member by member to `[1, 2]`),
      fails with the coercion error, for example `Task parameter '<name>' range[<k>]: Cannot
      coerce string to int | list[int] | nulltype`, followed by the expression and

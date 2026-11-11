@@ -443,6 +443,10 @@ non-destructive conversions, matching RFC 0005 §"Implicit Type Coercion"
   exactly, e.g. `3.75`, `""`, `"3.1"`)
 - `int`/`string` → `float` (error if the string cannot be parsed, e.g.
   `""`, `"nothing"`)
+- a `string` converted to `int` or `float` may have white space around the
+  number, which is ignored (Expression Language §1.2.3, Template Schemas §7.5):
+  `" 7 "` becomes `7`. Both conversions go through
+  [from_str_coerce](#from_str_coerce), which defines the white space.
 - `string` → `bool`, accepting the same case-insensitive spellings as the
   explicit `bool()` conversion (RFC 0006): `"true"`/`"yes"`/`"on"`/`"1"`
   become `true` and `"false"`/`"no"`/`"off"`/`"0"` become `false` (error
@@ -588,14 +592,23 @@ typed value. Used when binding parameter values from their string representation
 
 | `target_type` | Rule | Example |
 |---|---|---|
-| `int` | `i64::from_str` | `"42"` → `Int(42)`; `"3.0"` → error |
-| `float` | `f64::from_str`, rejecting NaN/Inf | `"3.14"` → `Float(3.14)` with `"3.14"` preserved |
+| `int` | `str::trim`, then `i64::from_str` | `"42"` and `" 42\t"` → `Int(42)`; `"3.0"`, `"4 2"` → error |
+| `float` | `str::trim`, then `f64::from_str`, rejecting NaN/Inf | `"3.14"` → `Float(3.14)` with `"3.14"` preserved; `" 3.14 "` preserves `"3.14"` |
 | `bool` | case-insensitive `true`/`yes`/`on`/`1` vs `false`/`no`/`off`/`0` | `"Yes"` → `Bool(true)` |
 | `string` | identity | `"hi"` → `String("hi")` |
 | `path` | wrap with supplied `path_format` (no parsing) | `"/tmp"` → `Path { value: "/tmp", format }` |
 | `range_expr` | `RangeExpr::from_str` | `"1-10"` → `RangeExpr(1..=10)` |
 | `nulltype` | only `"null"` parses | `"null"` → `Null` |
 | any other | error | — |
+
+For `int` and `float`, white space around the number is ignored, as for the numeric
+strings of Template Schemas §7.5 and the string-to-number coercion of Expression
+Language §1.2.3. The white space is what `str::trim` removes: the characters with the
+Unicode `White_Space` property, which is the set the spec names. It is not CPython's
+`str.isspace` set, which adds U+001C..U+001F; CPython's own `int()` and `float()` reject
+those too (see function-library.md). White space inside the number, or a string of only
+white space, is still an error. Error messages quote the string as given:
+`Cannot convert ' 4 2 ' to int: invalid digit found in string`.
 
 `from_str_coerce` is not a subset of the target-type coercion table above, and the
 two are deliberately distinct: this is the entry point from outside the expression

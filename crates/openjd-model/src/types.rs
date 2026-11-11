@@ -355,10 +355,10 @@ impl TaskParameterType {
     /// it only with EXPR. Without EXPR they resolve to a string, the base
     /// `<TaskParameterStringValue>`, which parses as an `<intstring>` or a
     /// `<floatstring>`. A base format string cannot produce `null` or a
-    /// list, and the string parse tolerates surrounding whitespace, which
-    /// §1.2.3 coercion does not, so base templates keep the 2023-09
-    /// behavior. For STRING and PATH the two forms give the same result
-    /// without EXPR.
+    /// list, so base templates keep the 2023-09 behavior. Both forms ignore
+    /// white space around the number (Template Schemas §7.5, Expression
+    /// Language §1.2.3), so a padded number gives the same value either way.
+    /// For STRING and PATH the two forms give the same result without EXPR.
     ///
     /// A FLOAT element's target also accepts `int`, so an integer renders as
     /// written (`10`, not `10.0`), the way the `<floatstring>` it denotes

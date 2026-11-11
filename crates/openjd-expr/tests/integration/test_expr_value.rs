@@ -94,6 +94,119 @@ fn coerce_str_to_float_nan() {
     );
 }
 
+/// The characters with the Unicode `White_Space` property, the white space
+/// Template Schemas §7.5 allows around a number in a numeric string.
+const WHITE_SPACE: &[char] = &[
+    '\u{9}', '\u{a}', '\u{b}', '\u{c}', '\u{d}', '\u{20}', '\u{85}', '\u{a0}', '\u{1680}',
+    '\u{2000}', '\u{2001}', '\u{2002}', '\u{2003}', '\u{2004}', '\u{2005}', '\u{2006}', '\u{2007}',
+    '\u{2008}', '\u{2009}', '\u{200a}', '\u{2028}', '\u{2029}', '\u{202f}', '\u{205f}', '\u{3000}',
+];
+
+#[test]
+fn coerce_str_to_int_ignores_surrounding_white_space() {
+    for &ws in WHITE_SPACE {
+        for s in [
+            format!("{ws}42"),
+            format!("42{ws}"),
+            format!("{ws}{ws}-42{ws} "),
+        ] {
+            let v = ExprValue::from_str_coerce(&s, &ExprType::INT, PathFormat::Posix)
+                .unwrap_or_else(|e| panic!("{s:?}: {e}"));
+            let expected = if s.contains('-') { -42 } else { 42 };
+            assert!(
+                matches!(v, ExprValue::Int(n) if n == expected),
+                "{s:?}: {v:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn coerce_str_to_float_ignores_surrounding_white_space() {
+    for &ws in WHITE_SPACE {
+        let s = format!("{ws}2.50{ws}");
+        let v = ExprValue::from_str_coerce(&s, &ExprType::FLOAT, PathFormat::Posix)
+            .unwrap_or_else(|e| panic!("{s:?}: {e}"));
+        // The value keeps the spelling it was written with (Expression
+        // Language §1.3.4), without the white space around it.
+        assert_eq!(v.to_display_string(), "2.50", "{s:?}");
+    }
+}
+
+#[test]
+fn coerce_str_to_number_rejects_other_white_space_and_interior_space() {
+    // Only `White_Space` characters are white space (Template Schemas §7.5):
+    // not U+001C (Python's `str.isspace` counts it), U+200B or U+FEFF. And
+    // white space inside the number, or nothing but white space, is still
+    // not a number.
+    for (s, int_reason, float_reason) in [
+        (
+            "\u{1c}7",
+            "invalid digit found in string",
+            "invalid float literal",
+        ),
+        (
+            "\u{200b}7",
+            "invalid digit found in string",
+            "invalid float literal",
+        ),
+        (
+            "7\u{feff}",
+            "invalid digit found in string",
+            "invalid float literal",
+        ),
+        (
+            "1 000",
+            "invalid digit found in string",
+            "invalid float literal",
+        ),
+        (
+            " \t ",
+            "cannot parse integer from empty string",
+            "cannot parse float from empty string",
+        ),
+    ] {
+        let e = ExprValue::from_str_coerce(s, &ExprType::INT, PathFormat::Posix).unwrap_err();
+        assert_eq!(e, format!("Cannot convert '{s}' to int: {int_reason}"));
+        let e = ExprValue::from_str_coerce(s, &ExprType::FLOAT, PathFormat::Posix).unwrap_err();
+        assert_eq!(e, format!("Cannot convert '{s}' to float: {float_reason}"));
+    }
+    // A non-finite value is rejected with its white space too.
+    let e = ExprValue::from_str_coerce(" inf ", &ExprType::FLOAT, PathFormat::Posix).unwrap_err();
+    assert_eq!(e, "Cannot convert ' inf ' to float");
+}
+
+#[test]
+fn coerce_padded_string_to_number_targets() {
+    // The value-to-value path that template fields use: a whole-field
+    // `{{ Param.Text }}` with the STRING value " 7 " meets an `int` target,
+    // a range list element's `int? | list[int]`, and a FLOAT element's
+    // `float? | int | list[float]`.
+    let padded = || ExprValue::String(" 7 ".to_string());
+    let v = padded().coerce(&ExprType::INT, PathFormat::Posix).unwrap();
+    assert!(matches!(v, ExprValue::Int(7)), "{v:?}");
+    let int_item = ExprType::parse("int? | list[int]").unwrap();
+    let v = padded().coerce(&int_item, PathFormat::Posix).unwrap();
+    assert!(matches!(v, ExprValue::Int(7)), "{v:?}");
+    let float_item = ExprType::parse("float? | int | list[float]").unwrap();
+    let v = ExprValue::String("\t2.5\n".to_string())
+        .coerce(&float_item, PathFormat::Posix)
+        .unwrap();
+    assert!(matches!(v, ExprValue::Float(_)), "{v:?}");
+    assert_eq!(v.to_display_string(), "2.5");
+    // A list of padded strings coerces member by member.
+    let list = ExprValue::make_list(
+        vec![
+            ExprValue::String(" 1".to_string()),
+            ExprValue::String("2 ".to_string()),
+        ],
+        ExprType::STRING,
+    )
+    .unwrap();
+    let v = list.coerce(&int_item, PathFormat::Posix).unwrap();
+    assert_eq!(v.to_display_string(), "[1, 2]");
+}
+
 // ══════════════════════════════════════════════════════════════
 // coerce (value-to-value)
 // ══════════════════════════════════════════════════════════════

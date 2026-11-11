@@ -174,8 +174,11 @@ Supplying `--task-param` or `--tasks` for such a step is rejected during preflig
 When `--task-param` or `--tasks` is provided, the CLI runs exactly the specified tasks.
 Task parameter values are injected as `Task.Param.<name>` and `Task.RawParam.<name>` in
 the symbol table. Each value is coerced to the type the step's parameter space declares
-for it (`coerce_task_params` in `run/params.rs`): `INT` and `FLOAT` values are parsed, and a
-`CHUNK[INT]` value is parsed as a range expression. For a `CONTIGUOUS` `CHUNK[INT]` parameter
+for it (`coerce_task_params` in `run/params.rs`): `INT` and `FLOAT` values are parsed, ignoring
+white space around the number as for a template's numeric strings (Template Schemas §7.5), so
+`--tasks '[{"Frame": " 7 "}]'` is `7`, and a `CHUNK[INT]` value is parsed as a range expression.
+The error for a value that does not parse quotes it as given
+(`Task parameter 'Frame': expected INT, got '7 0'`). For a `CONTIGUOUS` `CHUNK[INT]` parameter
 the value carries the contiguous display flag, so it is written `<N>-<M>` even with one or
 two values (`-t Frame=5-6` is written `5-6`, not `5,6`), as Template Schemas §3.4.1.5
 requires and as the chunks the CLI computes itself are.

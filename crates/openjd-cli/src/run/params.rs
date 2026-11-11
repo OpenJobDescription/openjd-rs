@@ -189,14 +189,17 @@ pub fn coerce_task_params(
     for (name, value) in params {
         let tp = &space.task_parameter_definitions[name];
         let (param_type, expr_value) = match tp {
+            // INT and FLOAT values are numeric strings: white space around
+            // the number is ignored, as in a template (Template Schemas §7.5).
             TaskParameter::Int { .. } => {
                 let v: i64 = value
+                    .trim()
                     .parse()
                     .map_err(|_| format!("Task parameter '{name}': expected INT, got '{value}'"))?;
                 (TaskParameterType::Int, openjd_expr::ExprValue::Int(v))
             }
             TaskParameter::Float { .. } => {
-                let v: f64 = value.parse().map_err(|_| {
+                let v: f64 = value.trim().parse().map_err(|_| {
                     format!("Task parameter '{name}': expected FLOAT, got '{value}'")
                 })?;
                 if !v.is_finite() {

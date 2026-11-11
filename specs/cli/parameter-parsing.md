@@ -95,6 +95,9 @@ openjd run template.yaml -t Frame=42 -t Quality=high
 
 - Each argument must contain exactly one `=` with non-empty name and value
 - Duplicate parameter names are errors
+- The whole argument is trimmed before it is split, so `-t "Frame=7 "` gives the value `7`.
+  Coercing the value to its declared type is a separate step
+  ([run.md](run.md#explicit-task-parameters)).
 - All errors are collected and reported together (not fail-fast)
 
 ### Error Accumulation

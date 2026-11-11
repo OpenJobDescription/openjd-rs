@@ -751,7 +751,11 @@ impl ExprValue {
     // ── Coercion ──
 
     /// Coerce a string into the target type. Used by the job-parameter
-    /// pipeline to turn CLI string inputs into typed parameters.
+    /// pipeline to turn CLI string inputs into typed parameters. For an
+    /// `int` or `float` target, white space around the number (Unicode
+    /// `White_Space`, what `str::trim` removes) is ignored, and a `float`
+    /// keeps its text without it; errors quote `s` as given. See
+    /// values.md § from_str_coerce.
     pub fn from_str_coerce(
         s: &str, target: &ExprType, path_format: PathFormat,
     ) -> Result<Self, String>;

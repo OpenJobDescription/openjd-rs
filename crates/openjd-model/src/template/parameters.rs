@@ -1061,7 +1061,9 @@ impl JobIntParameterDefinition {
         reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
     )]
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
-        let parsed: i64 = value.parse().map_err(|_| {
+        // An `<intstring>`: white space around the number is ignored
+        // (Template Schemas §7.5).
+        let parsed: i64 = value.trim().parse().map_err(|_| {
             format!(
                 "Parameter '{}': value '{value}' is not a valid integer",
                 self.name
@@ -1215,7 +1217,9 @@ impl JobFloatParameterDefinition {
         reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
     )]
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
-        let parsed: f64 = value.parse().map_err(|_| {
+        // An `<floatstring>`: white space around the number is ignored
+        // (Template Schemas §7.5).
+        let parsed: f64 = value.trim().parse().map_err(|_| {
             format!(
                 "Parameter '{}': value '{value}' is not a valid float",
                 self.name

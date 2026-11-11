@@ -832,6 +832,12 @@ impl ExprValue {
     }
 
     /// Coerce a string value to the given type.
+    ///
+    /// For an `int` or `float` target, white space around the number is
+    /// ignored, as for the numeric strings of Template Schemas §7.5: `" 7 "`
+    /// is `7`. White space is the Unicode `White_Space` property, which is
+    /// what [`str::trim`] removes. A `float` keeps the text it was written
+    /// with, without that white space. Error messages quote `s` as given.
     pub fn from_str_coerce(
         s: &str,
         target: &ExprType,
@@ -839,18 +845,20 @@ impl ExprValue {
     ) -> Result<Self, String> {
         match target.code() {
             TypeCode::Int => s
+                .trim()
                 .parse::<i64>()
                 .map(ExprValue::Int)
                 .map_err(|e| format!("Cannot convert '{s}' to int: {e}")),
             TypeCode::Float => {
-                let v: f64 = s
+                let text = s.trim();
+                let v: f64 = text
                     .parse()
                     .map_err(|e| format!("Cannot convert '{s}' to float: {e}"))?;
                 if v.is_infinite() || v.is_nan() {
                     return Err(format!("Cannot convert '{s}' to float"));
                 }
                 Ok(ExprValue::Float(
-                    Float64::with_str(v, s.to_string()).map_err(|e| e.to_string())?,
+                    Float64::with_str(v, text.to_string()).map_err(|e| e.to_string())?,
                 ))
             }
             TypeCode::Bool => match s.to_lowercase().as_str() {

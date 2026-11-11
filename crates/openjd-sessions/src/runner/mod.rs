@@ -694,6 +694,39 @@ mod tests {
     }
 
     #[test]
+    fn timeout_and_notify_period_ignore_white_space_around_the_number() {
+        // A whole-field string coerces to the `int?` target ignoring the
+        // white space around the number (Template Schemas §7.5), and a
+        // multi-segment string is trimmed before it is parsed.
+        let symtab = SymbolTable::default();
+        for field in [
+            "{{ ' 90 ' }}",
+            "{{ '\\t90\\n' }}",
+            " {{ 90 }} ",
+            "{{ '\u{a0}90' }}",
+        ] {
+            assert_eq!(
+                resolve_action_timeout(
+                    &action_with_timeout(field),
+                    &symtab,
+                    None,
+                    &Default::default(),
+                    None
+                )
+                .unwrap(),
+                Some(Duration::from_secs(90)),
+                "{field}"
+            );
+            assert_eq!(
+                resolve_notify_period_seconds(Some(&fs(field)), &symtab, None, &Default::default())
+                    .unwrap(),
+                Some(90),
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
     fn notify_period_resolves_literal_and_bounds() {
         let symtab = SymbolTable::default();
         // In-range values resolve.

@@ -383,7 +383,9 @@ impl JobParameterDefinition {
     pub fn allowed_values_strings(&self) -> Option<Vec<String>>;
 
     /// Validate an already-coerced ExprValue against this definition's
-    /// constraints. Used by `preprocess_job_parameters`.
+    /// constraints. Used by `preprocess_job_parameters`. For INT and FLOAT a
+    /// `String` value is parsed as an `<intstring>` or `<floatstring>`,
+    /// ignoring white space around the number (Template Schemas §7.5).
     pub fn check_constraints(&self, value: &openjd_expr::ExprValue) -> Result<(), String>;
 }
 ```

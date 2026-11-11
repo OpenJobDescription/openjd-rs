@@ -8320,3 +8320,324 @@ fn list_path_default_interior_walk_up_rejected_after_valid_elements() {
         "Validation error: The default value of LIST[PATH] parameter Paths at item[2] references a path outside of the template directory. Walking up from the template directory is not permitted."
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// White space around numeric strings (Template Schemas §7.5)
+// ══════════════════════════════════════════════════════════════
+//
+// `<intstring>`, `<posintstring>`, `<floatstring>` and the amount float
+// strings may have white space around the number, which is ignored: in a
+// template, in what a format string resolves to, and in a string value given
+// for an INT or FLOAT job parameter. With EXPR, string-to-number coercion
+// ignores it too (Expression Language §1.2.3). White space is the Unicode
+// `White_Space` property.
+
+/// Numbers padded with each kind of white space these tests use: ASCII space,
+/// tab and newline, and the non-ASCII U+00A0 and U+3000.
+const PADDED_SEVENS: &[&str] = &[" 7 ", "\t7\n", "\u{a0}7\u{3000}"];
+
+/// `s` as a JSON string literal, for building a template.
+fn json_str(s: &str) -> String {
+    serde_json::to_string(s).unwrap()
+}
+
+fn preprocess_numeric(
+    template_json: &str,
+    values: &[(&str, &str)],
+) -> Result<openjd_model::JobParameterValues, openjd_model::ModelError> {
+    let td = TestDirs::new();
+    let v: serde_json::Value = serde_saphyr::from_str(template_json).unwrap();
+    let jt = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
+    let input: std::collections::HashMap<String, openjd_expr::ExprValue> = values
+        .iter()
+        .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
+        .collect();
+    preprocess_job_parameters(
+        &jt,
+        &input,
+        &[],
+        &openjd_model::PathParameterOptions {
+            job_template_dir: td.cwd(),
+            current_working_dir: td.cwd(),
+            allow_template_dir_walk_up: true,
+            path_format: PathFormat::host(),
+            allow_uri_path_values: true,
+        },
+    )
+}
+
+fn numeric_params_template(extensions: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        {extensions}
+        "name": "Test",
+        "parameterDefinitions": [
+            {{"name": "I", "type": "INT", "minValue": 1, "maxValue": 9}},
+            {{"name": "F", "type": "FLOAT", "minValue": 0.5, "maxValue": 9.5}}
+        ],
+        "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}}}]
+    }}"#
+    )
+}
+
+#[test]
+fn submitted_numeric_parameter_values_ignore_white_space() {
+    for extensions in ["", r#""extensions": ["EXPR"],"#] {
+        let template = numeric_params_template(extensions);
+        for &seven in PADDED_SEVENS {
+            let float = seven.replace('7', "2.50");
+            let values = preprocess_numeric(&template, &[("I", seven), ("F", &float)])
+                .unwrap_or_else(|e| panic!("{extensions} {seven:?}: {e}"));
+            assert!(
+                matches!(values["I"].value, openjd_expr::ExprValue::Int(7)),
+                "{extensions} {seven:?}: {:?}",
+                values["I"].value
+            );
+            // A FLOAT keeps the text it was given, without the white space.
+            assert_eq!(values["F"].value.to_display_string(), "2.50", "{seven:?}");
+            // The values reach a job.
+            let v: serde_json::Value = serde_saphyr::from_str(&template).unwrap();
+            let jt = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
+            create_job(&jt, &values, &jt.default_validation_context()).unwrap();
+        }
+    }
+}
+
+#[test]
+fn submitted_numeric_parameter_values_check_constraints_after_trimming() {
+    let template = numeric_params_template("");
+    let err = preprocess_numeric(&template, &[("I", " 10 "), ("F", " 2.5 ")]).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'I': value 10 exceeds maximum 9"
+    );
+    let err = preprocess_numeric(&template, &[("I", " 7 "), ("F", "\t0.25\n")]).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'F': value 0.25 is less than minimum 0.5"
+    );
+}
+
+#[test]
+fn submitted_numeric_parameter_values_reject_other_text() {
+    // Only white space around the number is ignored. White space inside it, a
+    // value of only white space, and U+200B (not `White_Space`) are errors, and
+    // the message quotes the value as given.
+    let template = numeric_params_template("");
+    for value in ["1 0", " ", "\u{200b}7"] {
+        let err = preprocess_numeric(&template, &[("I", value), ("F", "2.5")]).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Validation error: Parameter 'I': Value '{value}' is not a valid integer or integer string."
+            )
+        );
+        let err = preprocess_numeric(&template, &[("I", "7"), ("F", value)]).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("Validation error: Parameter 'F': Value '{value}' is not a valid float.")
+        );
+    }
+}
+
+#[test]
+fn template_int_and_float_parameter_strings_ignore_white_space() {
+    // A default, minValue, maxValue or allowedValues entry written as a
+    // string, in the template.
+    for &seven in PADDED_SEVENS {
+        let float = json_str(&seven.replace('7', "2.5"));
+        let seven = json_str(seven);
+        let template = format!(
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Test",
+            "parameterDefinitions": [
+                {{"name": "I", "type": "INT", "default": {seven}, "minValue": {seven}, "allowedValues": [{seven}, "8"]}},
+                {{"name": "F", "type": "FLOAT", "default": {float}, "maxValue": {float}, "allowedValues": [{float}]}}
+            ],
+            "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}}}]
+        }}"#
+        );
+        let values =
+            preprocess_numeric(&template, &[]).unwrap_or_else(|e| panic!("{seven:?}: {e}"));
+        assert!(matches!(values["I"].value, openjd_expr::ExprValue::Int(7)));
+        assert_eq!(values["F"].value.to_display_string(), "2.5");
+    }
+}
+
+#[test]
+fn whole_field_numeric_range_list_element_ignores_white_space() {
+    // With EXPR a whole-field element coerces to the element type (Expression
+    // Language §1.3.12), ignoring white space around the number, so it gives
+    // the value the element resolves to without EXPR.
+    for &seven in PADDED_SEVENS {
+        let with_padded = |template: String| {
+            template.replacen(
+                r#"{"name": "Text", "type": "STRING", "default": "abc"},"#,
+                &format!(
+                    r#"{{"name": "Text", "type": "STRING", "default": "abc"}},
+                    {{"name": "Padded", "type": "STRING", "default": {}}},
+                    {{"name": "PaddedFloat", "type": "STRING", "default": {}}},"#,
+                    json_str(seven),
+                    json_str(&seven.replace('7', "2.50"))
+                ),
+                1,
+            )
+        };
+        for param_type in ["INT", "CHUNK[INT]"] {
+            for template in [
+                expr_range_list_template(param_type, r#"[1, "{{ Param.Padded }}"]"#),
+                int_range_list_template(param_type, r#"[1, "{{Param.Padded}}"]"#),
+            ] {
+                let job = parse_and_create(&with_padded(template), &[]);
+                assert_eq!(frame_int_list(&job), vec![1, 7], "{param_type} {seven:?}");
+            }
+        }
+        for template in [
+            expr_range_list_template(
+                "FLOAT",
+                r#"[0.5, "{{ Param.Padded }}", "{{ Param.PaddedFloat }}"]"#,
+            ),
+            int_range_list_template(
+                "FLOAT",
+                r#"[0.5, "{{Param.Padded}}", "{{Param.PaddedFloat}}"]"#,
+            ),
+        ] {
+            let job = parse_and_create(&with_padded(template), &[]);
+            assert_eq!(
+                frame_float_renderings(&job),
+                ["0.5", "7", "2.50"],
+                "{seven:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn whole_field_range_list_element_rejects_non_white_space() {
+    // U+200B is not `White_Space`, so the element does not coerce.
+    let template = expr_range_list_template("INT", r#"[1, "{{ Param.Text }}"]"#);
+    let err = parse_and_create_err(&template, &[("Text", "\u{200b}7")]);
+    assert_eq!(
+        err,
+        "Expression error: Task parameter 'Frame' range[1]: Cannot coerce string to int | list[int] | nulltype\n  Param.Text\n  ~~~~~~^~~~"
+    );
+}
+
+fn chunks_template(extensions: &str, default_task_count: &str, target_runtime: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": [{extensions}],
+        "name": "Test",
+        "parameterDefinitions": [
+            {{"name": "Count", "type": "STRING"}},
+            {{"name": "Runtime", "type": "STRING"}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "parameterSpace": {{"taskParameterDefinitions": [{{
+                "name": "F", "type": "CHUNK[INT]", "range": "1-4",
+                "chunks": {{"defaultTaskCount": "{default_task_count}", "targetRuntimeSeconds": "{target_runtime}", "rangeConstraint": "CONTIGUOUS"}}
+            }}]}},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#
+    )
+}
+
+fn resolved_chunks_of(job: &job::Job) -> job::ResolvedChunks {
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    match &ps.task_parameter_definitions["F"] {
+        job::TaskParameter::ChunkInt { chunks, .. } => chunks.clone(),
+        other => panic!("expected CHUNK[INT], got {other:?}"),
+    }
+}
+
+#[test]
+fn chunks_format_strings_ignore_white_space() {
+    // Whole-field (`int` and `int?` targets) and multi-segment forms, with
+    // and without EXPR.
+    for extensions in [r#""TASK_CHUNKING""#, r#""EXPR", "TASK_CHUNKING""#] {
+        for (count, runtime) in [
+            ("{{Param.Count}}", "{{Param.Runtime}}"),
+            ("{{Param.Count}} ", " {{Param.Runtime}}"),
+        ] {
+            for &seven in PADDED_SEVENS {
+                let template = chunks_template(extensions, count, runtime);
+                let sixty = seven.replace('7', "60");
+                let job = parse_and_create(
+                    &template,
+                    &[("Count", &seven.replace('7', "2")), ("Runtime", &sixty)],
+                );
+                let chunks = resolved_chunks_of(&job);
+                assert_eq!(
+                    chunks.default_task_count, 2,
+                    "{extensions} {count} {seven:?}"
+                );
+                assert_eq!(
+                    chunks.target_runtime_seconds,
+                    Some(60),
+                    "{extensions} {count} {seven:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn amount_format_strings_ignore_white_space() {
+    for extensions in [r#""FEATURE_BUNDLE_1""#, r#""EXPR", "FEATURE_BUNDLE_1""#] {
+        for &seven in PADDED_SEVENS {
+            let template = format!(
+                r#"{{
+                "specificationVersion": "jobtemplate-2023-09",
+                "extensions": [{extensions}],
+                "name": "Test",
+                "parameterDefinitions": [{{"name": "Min", "type": "STRING"}}, {{"name": "Max", "type": "STRING"}}],
+                "steps": [{{
+                    "name": "S",
+                    "hostRequirements": {{"amounts": [{{"name": "amount.worker.vcpu", "min": "{{{{Param.Min}}}}", "max": "{{{{Param.Max}}}}"}}]}},
+                    "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+                }}]
+            }}"#
+            );
+            let job = parse_and_create(
+                &template,
+                &[("Min", seven), ("Max", &seven.replace('7', "7.5"))],
+            );
+            let amounts = job.steps[0]
+                .host_requirements
+                .as_ref()
+                .unwrap()
+                .amounts
+                .as_ref()
+                .unwrap();
+            assert_eq!(amounts[0].min, Some(7.0), "{extensions} {seven:?}");
+            assert_eq!(amounts[0].max, Some(7.5), "{extensions} {seven:?}");
+        }
+    }
+}
+
+#[test]
+fn action_timeout_format_string_ignores_white_space() {
+    // Job creation checks a template-scope timeout with the parameters bound.
+    for extensions in [r#""FEATURE_BUNDLE_1""#, r#""EXPR", "FEATURE_BUNDLE_1""#] {
+        for &seven in PADDED_SEVENS {
+            let template = format!(
+                r#"{{
+                "specificationVersion": "jobtemplate-2023-09",
+                "extensions": [{extensions}],
+                "name": "Test",
+                "parameterDefinitions": [{{"name": "T", "type": "STRING"}}],
+                "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{
+                    "command": "echo", "timeout": "{{{{Param.T}}}}",
+                    "cancelation": {{"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "{{{{Param.T}}}}"}}
+                }}}}}}}}]
+            }}"#
+            );
+            parse_and_create(&template, &[("T", seven)]);
+        }
+    }
+}

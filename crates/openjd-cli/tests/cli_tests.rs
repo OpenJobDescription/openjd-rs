@@ -2915,6 +2915,75 @@ steps:
     }
 
     #[test]
+    fn test_task_param_numeric_values_ignore_white_space() {
+        // INT and FLOAT task parameter values are numeric strings: white
+        // space around the number is ignored (Template Schemas §7.5), from
+        // --task-param and from --tasks alike. White space inside the
+        // number is still an error.
+        let mut tmpl = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            tmpl,
+            r#"specificationVersion: jobtemplate-2023-09
+name: Padded
+steps:
+- name: S
+  parameterSpace:
+    taskParameterDefinitions:
+    - name: I
+      type: INT
+      range: [7]
+    - name: F
+      type: FLOAT
+      range: [2.5]
+  script:
+    actions:
+      onRun:
+        command: python
+        args: ["-c", "print('VALUES=[{{{{Task.Param.I}}}}][{{{{Task.Param.F}}}}]')"]
+"#
+        )
+        .unwrap();
+        let path = tmpl.path().to_str().unwrap();
+        let (code, stdout, stderr) = run_cli(&[
+            "run",
+            path,
+            "-t",
+            "I=\t7",
+            "-t",
+            "F=\u{a0}2.5",
+            "--extensions",
+            "",
+        ]);
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("VALUES=[7][2.5]"), "stdout: {stdout}");
+        let (code, stdout, stderr) = run_cli(&[
+            "run",
+            path,
+            "--tasks",
+            r#"[{"I": " 7\n", "F": "\t2.5 "}]"#,
+            "--extensions",
+            "",
+        ]);
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("VALUES=[7][2.5]"), "stdout: {stdout}");
+        let (code, _stdout, stderr) = run_cli(&[
+            "run",
+            path,
+            "-t",
+            "I=7 0",
+            "-t",
+            "F=2.5",
+            "--extensions",
+            "",
+        ]);
+        assert_ne!(code, 0, "white space inside the number should fail");
+        assert!(
+            stderr.contains("Task parameter 'I': expected INT, got '7 0'"),
+            "stderr: {stderr}"
+        );
+    }
+
+    #[test]
     fn test_tasks_from_json_file() {
         let mut f = NamedTempFile::with_suffix(".json").unwrap();
         write!(f, r#"[{{"TaskNumber": "1", "TaskMessage": "Hi!"}}]"#).unwrap();
