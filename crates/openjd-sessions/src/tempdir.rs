@@ -1257,15 +1257,16 @@ mod tests {
         let this = format!("{} (pid {})", this_exe_name(), std::process::id());
         let ping = format!("b_ping.exe (pid {ping_pid})");
         testing_logger::validate(|logs| {
-            let warns: Vec<_> = logs
+            let warns: Vec<String> = logs
                 .iter()
                 .filter(|l| l.level == log::Level::Warn)
+                .map(|l| l.body.clone())
                 .collect();
             assert_eq!(warns.len(), 1, "{warns:?}");
-            let holders = holders_in(&warns[0].body, &start);
+            let holders = holders_in(&warns[0], &start);
             // A scanner inspecting the new executable can appear too.
-            assert!(holders.contains(&this.as_str()), "{}", warns[0].body);
-            assert!(holders.contains(&ping.as_str()), "{}", warns[0].body);
+            assert!(holders.contains(&this.as_str()), "{}", warns[0]);
+            assert!(holders.contains(&ping.as_str()), "{}", warns[0]);
         });
     }
 
@@ -1311,15 +1312,16 @@ mod tests {
         );
         let ping = format!("ping.exe (pid {pid})");
         testing_logger::validate(|logs| {
-            let warns: Vec<_> = logs
+            let warns: Vec<String> = logs
                 .iter()
                 .filter(|l| l.level == log::Level::Warn)
+                .map(|l| l.body.clone())
                 .collect();
             assert_eq!(warns.len(), 1, "{warns:?}");
             assert!(
-                holders_in(&warns[0].body, &start).contains(&ping.as_str()),
+                holders_in(&warns[0], &start).contains(&ping.as_str()),
                 "{}",
-                warns[0].body
+                warns[0]
             );
         });
     }
@@ -1369,13 +1371,14 @@ mod tests {
         assert!(result.is_err(), "the protected file was deleted");
         assert!(file.exists());
         testing_logger::validate(|logs| {
-            let warns: Vec<_> = logs
+            let warns: Vec<String> = logs
                 .iter()
                 .filter(|l| l.level == log::Level::Warn)
+                .map(|l| l.body.clone())
                 .collect();
             assert_eq!(warns.len(), 1, "{warns:?}");
             assert_eq!(
-                warns[0].body,
+                warns[0],
                 format!(
                     "Could not delete temporary directory {}: Access is denied. 1 file(s) could \
                      not be deleted, including {}. No running process was found holding them \
