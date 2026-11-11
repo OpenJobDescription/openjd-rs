@@ -3906,6 +3906,60 @@ mod typed_param_seeding_tests {
         assert_eq!(result, "value=2.500");
     }
 
+    #[test]
+    fn padded_numeric_values_ignore_white_space() {
+        // An INT or FLOAT value given as a string is a numeric string
+        // (Template Schemas §7.5): white space around the number is ignored,
+        // for job and task parameters, and a FLOAT keeps its text without it.
+        let symtab = build_symtab_with_task_params(
+            vec![
+                ("N", JobParameterType::Int, ExprValue::String(" 5 ".into())),
+                (
+                    "V",
+                    JobParameterType::Float,
+                    ExprValue::String("\t2.50\u{3000}".into()),
+                ),
+            ],
+            vec![
+                ("I", TaskParameterType::Int, ExprValue::String("7\n".into())),
+                (
+                    "F",
+                    TaskParameterType::Float,
+                    ExprValue::String("\u{a0}1.250".into()),
+                ),
+            ],
+        )
+        .unwrap();
+        let result = eval_str(
+            &symtab,
+            "{{RawParam.N}} {{Param.V}} {{Task.RawParam.I}} {{Task.Param.F}}",
+        )
+        .unwrap();
+        assert_eq!(result, "5 2.50 7 1.250");
+        assert_eq!(
+            eval_expr(&symtab, "{{Param.N + Task.Param.I}}").unwrap(),
+            ExprValue::Int(12)
+        );
+        // Other characters, and white space inside the number, are errors.
+        for (value, reason) in [
+            ("\u{200b}5", "invalid digit found in string"),
+            ("5\u{1c}", "invalid digit found in string"),
+            ("5 0", "invalid digit found in string"),
+        ] {
+            let msg = build_symtab_from_scratch(vec![(
+                "N",
+                JobParameterType::Int,
+                ExprValue::String(value.into()),
+            )])
+            .expect_err("expected an error")
+            .to_string();
+            assert_eq!(
+                msg,
+                format!("Failed to coerce parameter 'RawParam.N': Cannot convert '{value}' to int: {reason}")
+            );
+        }
+    }
+
     // ── Bad values (must produce errors, not panics or silent passthrough) ──
 
     #[test]

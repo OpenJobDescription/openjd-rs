@@ -2990,7 +2990,9 @@ steps:
         ]);
         assert_ne!(code, 0, "white space inside the number should fail");
         assert!(
-            stderr.contains("Task parameter 'I': expected INT, got '7 0'"),
+            stderr
+                .lines()
+                .any(|l| l == "ERROR: Task parameter 'I': expected INT, got '7 0'"),
             "stderr: {stderr}"
         );
         // Inline JSON, so the value keeps white space at both ends.
@@ -3035,7 +3037,11 @@ steps:
             let (code, _stdout, stderr) =
                 run_cli(&["run", path, "--tasks", &tasks, "--extensions", ""]);
             assert_ne!(code, 0, "{tasks} should fail");
-            assert!(stderr.contains(expected), "{tasks}: stderr: {stderr}");
+            let expected = format!("ERROR: {expected}");
+            assert!(
+                stderr.lines().any(|l| l == expected),
+                "{tasks}: stderr: {stderr}"
+            );
         }
     }
 
@@ -3078,20 +3084,25 @@ steps:
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
         assert!(stdout.contains("VALUES=[7][2.50]"), "stdout: {stdout}");
-        for (n, expected) in [
-            (
-                " N= 7x ",
-                "Parameter 'N': Value ' 7x' is not a valid integer or integer string.",
-            ),
-            (
-                r#"{"N": " 7x "}"#,
-                "Parameter 'N': Value ' 7x ' is not a valid integer or integer string.",
-            ),
+        // A parameter file keeps the value as given, too.
+        let mut params = NamedTempFile::with_suffix(".json").unwrap();
+        write!(params, r#"{{"N": " 7x "}}"#).unwrap();
+        let params_arg = format!("file://{}", params.path().display());
+        for (n, quoted) in [
+            (" N= 7x ", "' 7x'"),
+            (r#"{"N": " 7x "}"#, "' 7x '"),
+            (params_arg.as_str(), "' 7x '"),
         ] {
             let (code, _stdout, stderr) =
                 run_cli(&["run", path, "-p", n, "-p", "F=2.5", "--extensions", ""]);
             assert_ne!(code, 0, "{n} should fail");
-            assert!(stderr.contains(expected), "{n}: stderr: {stderr}");
+            let expected = format!(
+                "ERROR: Validation error: Parameter 'N': Value {quoted} is not a valid integer or integer string."
+            );
+            assert!(
+                stderr.lines().any(|l| l == expected),
+                "{n}: stderr: {stderr}"
+            );
         }
     }
 

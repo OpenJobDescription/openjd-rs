@@ -8589,8 +8589,34 @@ fn chunks_format_strings_ignore_white_space() {
 
 #[test]
 fn amount_format_strings_ignore_white_space() {
+    // Whole-field (the `float?` coercion) and multi-segment (the string
+    // parse) forms, with the white space on one side or both.
     for extensions in [r#""FEATURE_BUNDLE_1""#, r#""EXPR", "FEATURE_BUNDLE_1""#] {
-        for &seven in PADDED_SEVENS {
+        let mut cases: Vec<(&str, &str, String, String)> = PADDED_SEVENS
+            .iter()
+            .map(|&seven| {
+                (
+                    "{{Param.Min}}",
+                    "{{Param.Max}}",
+                    seven.to_string(),
+                    seven.replace('7', "7.5"),
+                )
+            })
+            .collect();
+        cases.push(("{{Param.Min}}", "{{Param.Max}}", "7 ".into(), " 7.5".into()));
+        cases.push((
+            " {{Param.Min}}",
+            "{{Param.Max}}\t",
+            "7".into(),
+            "7.5".into(),
+        ));
+        cases.push((
+            "{{Param.Min}} ",
+            "\u{a0}{{Param.Max}}",
+            "7".into(),
+            "7.5".into(),
+        ));
+        for (min_field, max_field, min, max) in &cases {
             let template = format!(
                 r#"{{
                 "specificationVersion": "jobtemplate-2023-09",
@@ -8599,15 +8625,14 @@ fn amount_format_strings_ignore_white_space() {
                 "parameterDefinitions": [{{"name": "Min", "type": "STRING"}}, {{"name": "Max", "type": "STRING"}}],
                 "steps": [{{
                     "name": "S",
-                    "hostRequirements": {{"amounts": [{{"name": "amount.worker.vcpu", "min": "{{{{Param.Min}}}}", "max": "{{{{Param.Max}}}}"}}]}},
+                    "hostRequirements": {{"amounts": [{{"name": "amount.worker.vcpu", "min": {}, "max": {}}}]}},
                     "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
                 }}]
-            }}"#
+            }}"#,
+                json_str(min_field),
+                json_str(max_field)
             );
-            let job = parse_and_create(
-                &template,
-                &[("Min", seven), ("Max", &seven.replace('7', "7.5"))],
-            );
+            let job = parse_and_create(&template, &[("Min", min), ("Max", max)]);
             let amounts = job.steps[0]
                 .host_requirements
                 .as_ref()
@@ -8615,8 +8640,9 @@ fn amount_format_strings_ignore_white_space() {
                 .amounts
                 .as_ref()
                 .unwrap();
-            assert_eq!(amounts[0].min, Some(7.0), "{extensions} {seven:?}");
-            assert_eq!(amounts[0].max, Some(7.5), "{extensions} {seven:?}");
+            let case = format!("{extensions} {min_field:?}={min:?} {max_field:?}={max:?}");
+            assert_eq!(amounts[0].min, Some(7.0), "{case}");
+            assert_eq!(amounts[0].max, Some(7.5), "{case}");
         }
     }
 }

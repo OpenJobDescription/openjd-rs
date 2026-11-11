@@ -1712,3 +1712,33 @@ fn numeric_param_check_constraints_ignores_white_space_around_the_number() {
         );
     }
 }
+
+#[test]
+fn numeric_param_template_strings_keep_their_text_without_white_space() {
+    // A FLOAT `default` written as a string keeps the text it was written
+    // with, minus the white space around it (Template Schemas §7.5), as a
+    // submitted value does. An INT default keeps only its value.
+    let v = yaml_val(
+        "{\"specificationVersion\": \"jobtemplate-2023-09\", \"name\": \"Test\",
+         \"parameterDefinitions\": [
+             {\"name\": \"F\", \"type\": \"FLOAT\", \"default\": \"  2.50\\t\", \"minValue\": \"\\u3000 0.50\"},
+             {\"name\": \"I\", \"type\": \"INT\", \"default\": \" 007\\n\"}
+         ],
+         \"steps\": [{\"name\": \"S\", \"script\": {\"actions\": {\"onRun\": {\"command\": \"run\"}}}}]}",
+    );
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
+    let params = jt.parameter_definitions.as_ref().unwrap();
+    match (&params[0], &params[1]) {
+        (
+            openjd_model::template::JobParameterDefinition::FLOAT(f),
+            openjd_model::template::JobParameterDefinition::INT(i),
+        ) => {
+            let default = f.default.as_ref().unwrap();
+            assert_eq!((default.0, default.1.as_deref()), (2.5, Some("2.50")));
+            let min = f.min_value.as_ref().unwrap();
+            assert_eq!((min.0, min.1.as_deref()), (0.5, Some("0.50")));
+            assert_eq!(i.default.as_ref().unwrap().0, 7);
+        }
+        other => panic!("unexpected definitions {other:?}"),
+    }
+}
