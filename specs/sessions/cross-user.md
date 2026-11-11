@@ -181,7 +181,10 @@ reaps the whole workload tree. Workloads are spawned with
   after the notify period.
 - **Terminate**: `TerminateProcess` on the entire process tree via
   `CreateToolhelp32Snapshot` traversal (mirrors Python's
-  `_windows_process_killer.py`), with the Job Object as the backstop.
+  `_windows_process_killer.py`), with the Job Object as the backstop. The
+  walk validates parent/child edges by creation time against PID reuse, with
+  the same shared code as the in-process kill (see
+  [subprocess.md](subprocess.md#process-tree-killing)).
 
 Because signals are delivered by the helper — which runs as the target user —
 no cross-user signal permissions are needed, the same property the POSIX

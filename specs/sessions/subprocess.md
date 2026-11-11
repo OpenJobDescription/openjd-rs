@@ -347,6 +347,16 @@ Windows doesn't have process groups like POSIX. Termination uses
 PID, and kill them leaf-to-root via `TerminateProcess`. This mirrors Python's
 `_windows_process_killer.py`.
 
+The recorded parent PID (`th32ParentProcessID`) is never updated when a parent
+exits, and Windows reuses PIDs, so the walk validates every edge with process
+creation times, as psutil's `Process.children()` does: a child is accepted only
+if it was created no earlier than its parent and no later than the snapshot.
+Each kill re-reads the creation time on the same handle it terminates through,
+and skips the process if it changed. The validation is
+`collect_tree_validated` in `src/helper/src/process_tree.rs`, which is
+`#[path]`-included here and also compiled into the cross-user helper, so both
+Windows tree kills use the same rules.
+
 ## Windows Cross-User Execution
 
 On Windows, cross-user subprocess execution uses `CreateProcessAsUserW` (when a logon

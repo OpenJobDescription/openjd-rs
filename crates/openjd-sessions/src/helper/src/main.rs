@@ -6,6 +6,10 @@
 mod framer;
 #[cfg(windows)]
 mod job_object;
+// The PID-reuse-safe tree walk, shared with openjd-sessions' subprocess.rs.
+// Under `test` it also compiles on Unix for its unit tests.
+#[cfg(any(windows, test))]
+mod process_tree;
 mod protocol;
 #[cfg(unix)]
 mod runner;
