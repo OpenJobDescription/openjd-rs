@@ -2488,15 +2488,16 @@ fn build_dotted_name_from_attr(a: &ast::ExprAttribute) -> Option<String> {
 }
 
 /// Map each placeholder attribute in a dotted path back to the keyword it
-/// replaced (`Param.xf` back to `Param.if`).
+/// replaced (`Param.af` back to `Param.if`).
 ///
 /// Whole segments are matched, never substrings: one placeholder can be a
 /// prefix of another (`is` and `assert` become `bs` and `bssert`), and
 /// replacing `.bs` as a substring turned `Param.bssert` into
 /// `Param.isssert` whenever the hash map happened to visit `bs` first. The
-/// first segment is never a placeholder, because only names after a `.` are
-/// renamed, and a placeholder never occurs in the source, so no other
-/// segment can match one by accident.
+/// first segment is never mapped, because only names after a `.` are
+/// renamed. A segment the author wrote can still equal a placeholder when
+/// `make_replacement` falls back to an unchecked one (openjd-rs#333), and is
+/// then mapped too.
 fn resolve_keyword_renames(
     name: &str,
     renames: &std::collections::HashMap<String, String>,

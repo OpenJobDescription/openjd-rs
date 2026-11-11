@@ -259,6 +259,17 @@ fn keyword_rename_maps_back_placeholders_that_are_prefixes_of_others() {
 }
 
 #[test]
+fn keyword_rename_maps_back_every_segment() {
+    // Placeholders in the middle of a dotted path map back as well as the
+    // last segment does.
+    let mut st = SymbolTable::new();
+    st.set("X.if.y", 7i64).unwrap();
+    st.set("X.if.class", 8i64).unwrap();
+    assert_eq!(eval_with("X.if.y", &st).to_display_string(), "7");
+    assert_eq!(eval_with("X.if.class", &st).to_display_string(), "8");
+}
+
+#[test]
 fn keyword_rename_requires_attribute_position() {
     // Negative control for the "must follow a '.'" guard: a bare keyword is a
     // real syntax error and must not be renamed into a valid identifier.

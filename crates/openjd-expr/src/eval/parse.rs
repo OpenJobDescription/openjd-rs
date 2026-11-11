@@ -59,9 +59,10 @@ const PYTHON_KEYWORDS: &[&str] = &[
 
 /// Generate a same-length replacement identifier that doesn't appear in the source.
 fn make_replacement(keyword: &str, source: &str) -> String {
-    // Use a deterministic scheme: prefix with underscores to match length
-    // e.g., "if" → "xf", "def" → "xef", "else" → "xlse"
-    // If that collides, try incrementing the first char
+    // Deterministic: replace the first character, trying 'a' to 'z' until
+    // the result is unused and not a keyword, e.g. "if" → "af",
+    // "def" → "aef", "is" → "bs" ("as" is a keyword). The all-'x' fallback
+    // is not checked against the source (openjd-rs#333).
     let len = keyword.len();
     for prefix in b'a'..=b'z' {
         let mut replacement = String::with_capacity(len);
@@ -1159,14 +1160,9 @@ mod tests {
     }
 
     // These exercise `rename_contextual_keywords` directly rather than
-    // through evaluation. Going through evaluation cannot distinguish exact
-    // token delimiting from a keyword-prefix match, because
-    // `resolve_keyword_renames` rewrites `.placeholder` to `.original` as an
-    // unanchored substring and `make_replacement` only ever changes a
-    // keyword's first character — so a truncated "as" placeholder inside
-    // "assert" would happen to reconstruct correctly. The defect would still
-    // be real (the wrong keyword recorded as renamed), just invisible
-    // downstream, so it is pinned here.
+    // through evaluation, so they observe exactly which keyword each rename
+    // recorded (`assert`, not a truncated `as`), independently of how the
+    // evaluator maps placeholders back.
     #[test]
     fn rename_delimits_the_whole_token() {
         // "assert" must be renamed as "assert", not as the keyword "as"

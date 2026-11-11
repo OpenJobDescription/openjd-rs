@@ -102,11 +102,14 @@ The solution, before parsing:
 4. Record the renames in `keyword_renames: HashMap<String, String>` so the evaluator
    can map placeholder names back to the original attribute names
 
-Placeholders are chosen left to right against the text as renamed so far, so a
-placeholder never occurs in the source and no two keywords share one, and repeated
-accesses (`A.class + B.class`) share one entry. One placeholder can still be a prefix
-of another (`is` and `assert` become `bs` and `bssert`), so the evaluator maps them
-back by whole dotted-path segment, never by substring. Syntax errors are reported against the
+Placeholders (`make_replacement`) replace the keyword's first character, trying `a` to
+`z` against the text as renamed so far, so `if` becomes `af` and `is` becomes `bs`
+(`as` is a keyword). Two keywords never share a placeholder, and repeated accesses
+(`A.class + B.class`) share one entry. One placeholder can be a prefix of another
+(`is` and `assert` become `bs` and `bssert`), so the evaluator maps them back by whole
+dotted-path segment, never by substring. Known gap: if all 26 candidates are taken,
+the all-`x` fallback is not checked against the source and can equal an attribute the
+author wrote (openjd-rs#333). Syntax errors are reported against the
 original text, which the same-length renames leave aligned.
 
 This matches the Python implementation's `ast_parse_keyword_context()` approach, which
@@ -129,12 +132,14 @@ renames keywords before parsing and restores them after.
 ### Reverse mapping at evaluation
 
 The parse-time replacement only rewrites the source; the resulting AST contains the
-placeholder names (`xf` for `if`, `xlse` for `else`, etc.). The evaluator's
+placeholder names (`af` for `if`, `alse` for `else`, etc.). The evaluator's
 `eval_attribute` consults the `keyword_renames` map whenever it constructs a symbol
-lookup key from an AST `Attribute` node, so a parsed-as-`Param.xf` access becomes a
-real lookup of `Param.if` in the symbol table. Error messages also undo the
-placeholder: `ExpressionError::with_node` uses the original source text (which still
-contains `if`), so users never see the placeholder in diagnostics.
+lookup key from an AST `Attribute` node, so a parsed-as-`Param.af` access becomes a
+real lookup of `Param.if` in the symbol table. Error carets also show the original
+text: `ExpressionError::with_node` and syntax errors use the source as written (which
+still contains `if`). Known gap: messages that name an attribute from the AST still
+show the placeholder (`Undefined variable: 'Param.af'`, `Cannot access attribute 'af'
+on int`; openjd-rs#465).
 
 ## AST Validation
 
@@ -267,7 +272,15 @@ parser reports, in AST ranges and errors alike, is therefore a byte offset into 
 expression as written, and error messages show only the relevant line with its
 columns (see [error-formatting.md](error-formatting.md)).
 
-A multi-line expression may end in a `#` comment, as in parentheses in Python.
+A multi-line expression may end in a `#` comment, as in parentheses in Python. Because
+the parser no longer sees an enclosing `(`, a few multi-line forms that this crate
+used to reject with a specific message (`x := \n1` as "Walrus operator (:=) is not
+supported", `a\nfor a in b` as "Generator expressions are not supported") now get a
+plain syntax error, as the same expression on one line always did.
+
+A syntax error at a single point, such as end of input, underlines the line that
+point is on: the whole expression when it has one line, and otherwise that line (for
+end of input, the last line), since the caret display shows one line.
 
 Until #489 the expression was wrapped in `(...)` before parsing instead. That shifted
 every offset by one byte, which three consumers each undid separately and one didn't
@@ -283,5 +296,6 @@ The Rust implementation uses `ruff_python_parser::parse_expression()` which prod
 identical, so the evaluator logic translates directly.
 
 Syntax errors are worded differently: the Python implementation reports CPython's
-`SyntaxError` messages, and this crate reports Ruff's (see "Error messages" above). The
-error location and caret format are the same.
+`SyntaxError` messages, and this crate reports Ruff's (see "Error messages" above).
+The caret format is the same, but the caret's width and position can differ (for
+`(1 + 2`, Python marks one character and this crate the whole expression).

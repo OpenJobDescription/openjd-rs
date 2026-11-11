@@ -1144,6 +1144,21 @@ fn multiline_error_at_end_of_input_is_on_the_last_line() {
 }
 
 #[test]
+fn multiline_zero_width_error_mid_input_is_on_its_line() {
+    // A zero-width error before the end of input underlines the line it is
+    // on (here the middle line), not the first or the last.
+    assert_err(
+        "f'{\n1 :\nx",
+        &[
+            "Syntax error: f-string: newlines are not allowed in format specifiers when \
+             using single quotes\n",
+            "  1 :\n",
+            "  ^~~",
+        ],
+    );
+}
+
+#[test]
 fn syntax_error_shows_keyword_attributes_as_written() {
     // Contextual keywords are renamed to placeholders before parsing; the
     // error must still show the text the author wrote, not `Param.af`.
@@ -1160,7 +1175,7 @@ fn syntax_error_shows_keyword_attributes_as_written() {
         &[
             "Syntax error: Expected an expression\n",
             "  X.is + Y.as +\n",
-            "  ^",
+            "  ^~~~~~~~~~~~~",
         ],
     );
     assert_err(
@@ -1168,7 +1183,7 @@ fn syntax_error_shows_keyword_attributes_as_written() {
         &[
             "Syntax error: Expected an expression\n",
             "   + Param.class +\n",
-            "  ^",
+            "  ^~~~~~~~~~~~~~~~",
         ],
     );
 }
