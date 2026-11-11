@@ -46,7 +46,8 @@ pub(crate) fn processes_holding(files: &[PathBuf]) -> Result<Vec<FileHolder>, St
         .collect();
     if wide.is_empty() {
         return Err(format!(
-            "every path is {MAX_PATH} characters or longer, which the Restart Manager does not accept"
+            "every file looked up has a path of {MAX_PATH} characters or more, which the \
+             Restart Manager does not accept"
         ));
     }
     let names: Vec<PCWSTR> = wide.iter().map(|w| PCWSTR(w.as_ptr())).collect();
@@ -141,6 +142,7 @@ fn image_name(pid: u32) -> Option<String> {
 mod tests {
     use super::*;
     use std::os::windows::fs::OpenOptionsExt;
+    use std::path::Path;
 
     #[test]
     fn finds_this_process_holding_a_file() {
@@ -255,7 +257,49 @@ mod tests {
         );
         assert_eq!(
             processes_holding(&[long]).unwrap_err(),
-            "every path is 260 characters or longer, which the Restart Manager does not accept"
+            "every file looked up has a path of 260 characters or more, which the Restart \
+             Manager does not accept"
+        );
+    }
+
+    /// A path of `len` UTF-16 units under `dir`, padded with a long file name.
+    fn path_of_len(dir: &Path, len: usize) -> PathBuf {
+        let base = dir.as_os_str().encode_wide().count() + 1; // + the separator
+        assert!(len > base + 4, "dir too long for the test");
+        dir.join("y".repeat(len - base))
+    }
+
+    /// The boundary: a path of 259 units is looked up and its holder named; a
+    /// path of exactly 260 is left out rather than failing the whole request.
+    #[test]
+    fn the_long_path_limit_is_260_units() {
+        let dir = crate::tempdir::TempDir::new(None, None, None).unwrap();
+        let hold = |p: &PathBuf| {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(false)
+                .share_mode(0)
+                .open(p)
+                .unwrap()
+        };
+        let at_259 = path_of_len(dir.path(), 259);
+        let at_260 = path_of_len(dir.path(), 260);
+        assert_eq!(at_259.as_os_str().encode_wide().count(), 259);
+        assert_eq!(at_260.as_os_str().encode_wide().count(), 260);
+        let (_a, _b) = (hold(&at_259), hold(&at_260));
+
+        let found = processes_holding(std::slice::from_ref(&at_259)).unwrap();
+        assert!(
+            found.iter().any(|h| h.pid == std::process::id()),
+            "{found:?}"
+        );
+        assert!(processes_holding(std::slice::from_ref(&at_260)).is_err());
+        // Together, the 260-unit path does not hide the 259-unit file's holder.
+        let found = processes_holding(&[at_259, at_260]).unwrap();
+        assert!(
+            found.iter().any(|h| h.pid == std::process::id()),
+            "{found:?}"
         );
     }
 

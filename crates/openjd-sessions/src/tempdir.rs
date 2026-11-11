@@ -271,7 +271,7 @@ impl TempDir {
 
     /// Remove the directory and all contents.
     ///
-    /// On Windows this can block for about 31 s. A removal that leaves anything
+    /// On Windows this can block for at least about 31 s. A removal that leaves anything
     /// behind is retried after 1, 2, 4, 8 and 16 s, because a process that has
     /// just exited, or been terminated, can hold its file handles for a while
     /// afterwards. Each pass deletes everything it can, and each failed pass is

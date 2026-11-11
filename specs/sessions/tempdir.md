@@ -237,7 +237,8 @@ The holder lookup costs time on every failed pass, on top of the delays: the Res
 Manager takes about 12 to 18 ms per held file on the Windows Server 2022 worker this
 was measured on (256 held files: about 3.4 s per pass), and was measured at about 75 ms
 per file, about 20 s for 256, on another machine. Only files that failed to delete are
-looked up, so read-only files, which the pass deletes, never add to it. Python's lookup
+looked up. The pass deletes read-only files, so the read-only attribute alone never adds
+a file to it; a read-only file that is also held open is looked up. Python's lookup
 also includes the read-only files it failed to delete.
 
 Paths of 260 characters or more are left out of the lookup: the Restart Manager rejects
@@ -259,10 +260,10 @@ without Rust's "(os error N)" suffix. The differences are intentional:
 |---|---|---|
 | Read-only files and directories on Windows | Attribute cleared, then deleted | `rmtree` fails on them, so they are reported as not deleted |
 | Count of undeletable files in the warning | The true count, even above 256 | Capped at the 256 it inspects for holders |
-| Order of the files named | Listing order: a directory's own files where they are listed, each subdirectory where it is listed | 3.11: the same. 3.12 and later (`_rmtree_unsafe`, the Windows path): a subdirectory's files before the directory's own, so `b_sub\held.bin` before `a_root.bin` |
+| Order of the files named | Listing order: a directory's own files where they are listed, each subdirectory where it is listed | 3.12.3 and earlier: the same. 3.12.4 and later (`_rmtree_unsafe`, the Windows path): a subdirectory's files before the directory's own, so `b_sub\held.bin` before `a_root.bin` |
 | A failed holder lookup | `… could not be determined: <reason>.` | Prefixes the exception type: `… could not be determined: OSError: <reason>.` |
 | A directory another process holds with `DELETE` access | Not descended into (cannot be pinned); recorded as a failure | `rmtree` deletes it and its contents |
-| A very deep tree (1500 levels) | Removed: the walk is iterative | `rmtree` raises `RecursionError` on the first pass: no warning, no retry, nothing deleted |
+| A very deep tree (1500 levels) | Removed: the walk is iterative | 3.12.3 and earlier: `rmtree` raises `RecursionError` on the first pass (no warning, no retry, nothing deleted). 3.12.4 and later walk iteratively and remove it |
 | A held file whose path is 260 characters or longer | Named; its holder is not, and the other files' holders still are | The whole holder lookup fails (`RmRegisterResources failed (29)`), so no holder is named |
 | A directory swapped for a junction mid-walk | Not followed (see above) | `rmtree` on Windows does not defend against this (`shutil.rmtree.avoids_symlink_attacks` is `False`) |
 | After the last pass | `SessionError::TempDir` with the first error, logged by `Session::cleanup()` as "Files within temporary directory <path> could not be deleted: <reason>" | `RuntimeError` listing every path that failed, with its error |
