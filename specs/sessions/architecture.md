@@ -50,12 +50,16 @@ src/
 ```
 build.rs                    # Compiles embedded cross-user helper binary
 helper/                     # Standalone helper binary crate
-├── Cargo.toml              # Independent workspace ([workspace] = {})
+├── Cargo.bundled.toml      # Manifest (copied to Cargo.toml to build); independent workspace
 └── src/
     ├── main.rs             # Shared stdin reader, command dispatch loop
     ├── protocol.rs         # Command/Response JSON serde types
+    ├── framer.rs           # Bounded line framer for child output (both runners)
     ├── runner.rs           # poll(2) loop, child management, cancel handling
-    └── runner_win.rs       # Windows runner (placeholder)
+    ├── runner_win.rs       # Windows runner: spawn, output threads, cancel, tree kill
+    ├── process_tree.rs     # PID-reuse-safe tree walk, shared with subprocess.rs
+    ├── job_object.rs       # Windows kill-on-close Job Object guard
+    └── win32_which.rs      # Windows executable search, shared with win32_locate.rs
 ```
 
 ## Public API Surface

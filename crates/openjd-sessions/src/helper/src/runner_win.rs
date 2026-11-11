@@ -512,6 +512,24 @@ mod tests {
         assert!(out[0].len() <= MAX_LINE_BYTES);
     }
 
+    /// Guards that the root itself is killed. `ping` run directly is the
+    /// root with no children; it exits 0 if it runs to completion, so exit
+    /// code 1 shows `TerminateProcess` reached it. (In the cmd -> ping test
+    /// below, cmd would also exit 1 if only ping were killed.)
+    #[test]
+    fn kill_process_tree_kills_root() {
+        let mut child = Command::new("ping")
+            .args(["-n", "60", "127.0.0.1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn ping");
+        kill_process_tree(child.id());
+        let status = child.wait().expect("wait ping");
+        assert_eq!(status.code(), Some(1), "ping must be terminated");
+    }
+
     /// The PIDs of `parent`'s children in a fresh snapshot whose image name is
     /// `exe` (case-insensitive).
     fn children_named(parent: u32, exe: &str) -> Vec<u32> {
@@ -597,7 +615,7 @@ mod tests {
             let _ = CloseHandle(gc);
             (waited, code)
         };
-        assert_eq!(status.code(), Some(1), "cmd must be terminated");
+        assert_eq!(status.code(), Some(1), "cmd must end with exit code 1");
         assert_eq!(waited, WAIT_OBJECT_0, "ping must have exited");
         assert_eq!(gc_code, 1, "ping must be terminated");
     }

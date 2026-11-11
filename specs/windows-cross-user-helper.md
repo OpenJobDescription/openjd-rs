@@ -108,7 +108,10 @@ inside the helper.
   exit within the notify period, escalates to `kill_process_tree(child_pid)`.
   Works because the helper is in the same user/session as the child.
 - `{"cancel": "TERMINATE"}` → `kill_process_tree(child_pid)` using
-  `TerminateProcess` on each process in the tree.
+  `TerminateProcess` on each process in the tree. Parent/child edges are
+  validated by creation time against PID reuse, with the same code as the
+  in-process kill (see
+  [sessions/subprocess.md](sessions/subprocess.md#process-tree-killing)).
 
 **I/O multiplexing**: Two threads sharing a channel:
 - Thread 1 (main): reads stdin for cancel commands, signals child on cancel
