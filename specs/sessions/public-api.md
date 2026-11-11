@@ -57,7 +57,8 @@ openjd_sessions                 — crate root (most public items re-exported he
 ```
 
 SubprocessResult is re-exported at the crate root. The `subprocess`,
-`action_filter`, `cross_user_helper`, `helper_binary`, `win32_locate`,
+`action_filter`, `cross_user_helper`, `helper_binary`, `win32_file_locks`,
+`win32_locate`, `win32_remove`,
 and (outside `test-utils`) `win32_permissions` modules are
 crate-internal.
 
@@ -222,7 +223,10 @@ impl Session {
     /// Remove the working directory and associated temp files.
     /// Called automatically on drop as a safety net, but callers
     /// should call it explicitly at the end of a session to surface
-    /// cleanup errors.
+    /// cleanup errors. On Windows it can block for 31 s or more per
+    /// directory while it waits for other processes to release files
+    /// (see `TempDir::cleanup`). A directory it cannot remove is logged
+    /// at error level, not returned.
     pub fn cleanup(&mut self);
 
     // ── Builder-style configuration (post-construction) ──
@@ -910,8 +914,8 @@ impl TempDir {
 
     pub fn path(&self) -> &Path;
 
-    /// Removes the directory and everything in it. Idempotent: a second call
-    /// returns `Ok(())` without touching the disk.
+    /// Removes the directory and everything in it. A second call returns
+    /// `Ok(())` without touching the disk, even if the first call failed.
     ///
     /// On Windows this blocks for at least about 31 s when something in the
     /// directory is held open (longer with many files): each pass deletes what
@@ -919,8 +923,11 @@ impl TempDir {
     /// leaves anything behind is retried after 1, 2, 4, 8 and 16 s. Each failed
     /// pass logs a warning naming the files that could not be deleted and the
     /// processes holding them open. On other platforms a failure returns at
-    /// once. Errors with `SessionError::TempDir`, carrying the first error of
-    /// the last pass. See tempdir.md "Cleanup retries on Windows".
+    /// once. Each failed pass also spends time finding the holders: up to
+    /// about 20 s when hundreds of files are held. Errors with
+    /// `SessionError::TempDir`, carrying the first error of the last pass,
+    /// including `NotFound` when the directory was gone before the first
+    /// pass. See tempdir.md "Cleanup retries on Windows".
     pub fn cleanup(&mut self) -> Result<(), SessionError>;
 }
 

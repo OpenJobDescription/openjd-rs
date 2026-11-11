@@ -233,6 +233,11 @@ the line names only the directory and the error. A failed holder lookup replaces
 the process list with "The processes holding them open could not be determined:
 <reason>.", and an empty one with "No running process was found holding them open."
 
+The holder lookup costs time on every failed pass, on top of the delays: the Restart
+Manager takes about 75 ms per file a process holds open and about 45 ms per read-only
+file, so 256 held files take about 20 s per pass. Python's lookup asks about as many
+files, so it costs the same.
+
 The holder lookup registers only files, not directories: registering a directory
 makes the whole `RmGetList` call fail, so a directory would cost the lookup for the
 files beside it.
@@ -247,6 +252,7 @@ without Rust's "(os error N)" suffix. The differences are intentional:
 |---|---|---|
 | Read-only files and directories on Windows | Attribute cleared, then deleted | `rmtree` fails on them, so they are reported as not deleted |
 | Count of undeletable files in the warning | The true count, even above 256 | Capped at the 256 it inspects for holders |
+| Order of the files named | Listing order: a directory's own files where they are listed, each subdirectory where it is listed | 3.11: the same. 3.13 and later (`_rmtree_unsafe`, the Windows path): a subdirectory's files before the directory's own, so `b_sub\held.bin` before `a_root.bin` |
 | A failed holder lookup | `… could not be determined: <reason>.` | Prefixes the exception type: `… could not be determined: OSError: <reason>.` |
 | A directory another process holds with `DELETE` access | Not descended into (cannot be pinned); recorded as a failure | `rmtree` deletes its unlocked contents |
 | A directory swapped for a junction mid-walk | Not followed (see above) | `rmtree` on Windows does not defend against this (`shutil.rmtree.avoids_symlink_attacks` is `False`) |

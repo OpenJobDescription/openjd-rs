@@ -798,6 +798,45 @@ mod run_command {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    /// The session's own errors reach stdout, not only command output: here
+    /// the "Action failed to run" error for a command that cannot start.
+    #[test]
+    fn test_run_prints_session_errors() {
+        let command = "openjd-cli-test-no-such-command";
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
+name: NoStart
+steps:
+  - name: S
+    script:
+      actions:
+        onRun:
+          command: {command}
+"#
+        )
+        .unwrap();
+        let (code, stdout, stderr) = run_cli(&["run", f.path().to_str().unwrap()]);
+        assert_eq!(code, 1, "stdout: {stdout}\nstderr: {stderr}");
+        let prefix = format!("Action failed to run: Failed to start subprocess '{command}': ");
+        let line = stdout
+            .lines()
+            .filter_map(|l| l.split_once('\t').map(|(_, msg)| msg))
+            .find(|msg| msg.starts_with(&prefix));
+        let Some(line) = line else {
+            panic!("expected a line starting {prefix:?} in stdout: {stdout}");
+        };
+        // The reason after the prefix comes from the OS, except on Windows,
+        // where openjd looks the command up itself.
+        if cfg!(windows) {
+            assert_eq!(
+                line,
+                format!("{prefix}Could not find executable file: {command}")
+            );
+        }
+    }
+
     // --- test_do_run_success parametrized cases ---
 
     #[test]

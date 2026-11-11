@@ -184,7 +184,10 @@ both platforms:
   Job-Object/`CreateToolhelp32Snapshot` process-tree termination inside the helper
   (`helper/src/runner_win.rs`)
 - Win32 helpers: `win32.rs` (logon, user lookup, environment blocks),
-  `win32_permissions.rs` (ACL management), `win32_locate.rs` (executable resolution,
+  `win32_permissions.rs` (ACL management), `win32_remove.rs` (the cleanup removal
+  pass, which deletes what it can and reports what it cannot), `win32_file_locks.rs`
+  (which processes hold those files open, through the Restart Manager),
+  `win32_locate.rs` (executable resolution,
   called from both spawn paths)
 - Temp directory and embedded file permissions: Windows ACL paths implemented
 - Integration testing on Windows: dedicated CI job (`cross-user-windows`) runs the

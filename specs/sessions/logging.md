@@ -106,6 +106,7 @@ to provide visual structure in log output.
 | `subprocess.rs` | `PROCESS_CONTROL` | PID start, SIGTERM, SIGKILL, exit code, spawn failures |
 | `tempdir.rs` | `FILE_PATH \| PROCESS_CONTROL \| EXCEPTION_INFO` | Warning per failed Windows cleanup pass: files left and the processes holding them |
 | `session.rs` | `FILE_PATH \| EXCEPTION_INFO` | Error when a working directory could not be deleted after the retries |
+| `session.rs` | `EXCEPTION_INFO` | "Action failed to run" errors |
 | `subprocess.rs` | `COMMAND_OUTPUT` | Stdout/stderr lines from the subprocess |
 | `subprocess.rs` | `BANNER` | Output header banner |
 | `runner/env_script.rs` | `BANNER` | Subsection banner before action execution |

@@ -279,15 +279,12 @@ impl TempDir {
     /// processes holding them open. On other platforms a failure is returned at
     /// once.
     pub fn cleanup(&mut self) -> Result<(), SessionError> {
-        self.cleanup_logged(None)
+        self.cleanup_with_delays(None, CLEANUP_RETRY_DELAYS)
     }
 
-    /// [`Self::cleanup`], logging each failed attempt against `session_id`.
-    pub(crate) fn cleanup_logged(&mut self, session_id: Option<&str>) -> Result<(), SessionError> {
-        self.cleanup_with_delays(session_id, CLEANUP_RETRY_DELAYS)
-    }
-
-    fn cleanup_with_delays(
+    /// [`Self::cleanup`], logging each failed attempt against `session_id` and
+    /// retrying after each of `delays`.
+    pub(crate) fn cleanup_with_delays(
         &mut self,
         session_id: Option<&str>,
         delays: &[Duration],
@@ -1161,6 +1158,233 @@ mod tests {
         );
         drop(held);
         drop(td);
+    }
+
+    /// Runs its closure when dropped, so a failing Windows test still stops the
+    /// process it started, lifts an ACL it added, and removes its directory.
+    #[cfg(windows)]
+    struct OnDrop<F: FnMut()>(F);
+
+    #[cfg(windows)]
+    impl<F: FnMut()> Drop for OnDrop<F> {
+        fn drop(&mut self) {
+            (self.0)();
+        }
+    }
+
+    /// A copy of `ping.exe` at `dir\name`.
+    #[cfg(windows)]
+    fn copy_ping(dir: &Path, name: &str) -> PathBuf {
+        let exe = dir.join(name);
+        let system = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        std::fs::copy(Path::new(&system).join("System32").join("ping.exe"), &exe).unwrap();
+        exe
+    }
+
+    /// Runs `program args` with no console window and waits for success.
+    #[cfg(windows)]
+    fn run_hidden(program: &str, args: &[&std::ffi::OsStr]) {
+        use std::os::windows::process::CommandExt;
+        let status = std::process::Command::new(program)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .status()
+            .unwrap();
+        assert!(status.success(), "{program} {args:?}");
+    }
+
+    /// Starts `exe` (a copy of `ping.exe`) with no console window.
+    #[cfg(windows)]
+    fn run_ping(exe: &Path) -> std::process::Child {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new(exe)
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn()
+            .unwrap()
+    }
+
+    /// The holders listed in a warning that ends "Giving up.", given the text
+    /// before the list.
+    #[cfg(windows)]
+    fn holders_in<'a>(body: &'a str, start: &str) -> Vec<&'a str> {
+        body.strip_prefix(start)
+            .and_then(|rest| rest.strip_suffix(". Giving up."))
+            .unwrap_or_else(|| panic!("unexpected warning: {body}"))
+            .split(", ")
+            .collect()
+    }
+
+    /// The holder lookup covers every file reported, not only the first: a file
+    /// this process holds, and a running program held by its own process.
+    #[cfg(windows)]
+    #[test]
+    fn failed_attempt_names_the_holders_of_every_file() {
+        use std::os::windows::fs::OpenOptionsExt;
+        testing_logger::setup();
+        let mut td = TempDir::new(None, None, None).unwrap();
+        let dir = td.path().to_path_buf();
+        let held = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .open(dir.join("a_locked.bin"))
+            .unwrap();
+        let exe = copy_ping(&dir, "b_ping.exe");
+        let mut child = run_ping(&exe);
+        let ping_pid = child.id();
+        let guard_dir = dir.clone();
+        let mut held = Some(held);
+        let _restore = OnDrop(move || {
+            let _ = child.kill();
+            let _ = child.wait();
+            held.take();
+            let _ = std::fs::remove_dir_all(&guard_dir);
+        });
+
+        let result = td.cleanup_with_delays(Some("session-1"), &[]);
+
+        assert!(result.is_err(), "held files were deleted");
+        let start = format!(
+            "Could not delete temporary directory {}: The process cannot access the file \
+             because it is being used by another process. 2 file(s) could not be deleted, \
+             including a_locked.bin, b_ping.exe. Files are still locked open by: ",
+            dir.display()
+        );
+        let this = format!("{} (pid {})", this_exe_name(), std::process::id());
+        let ping = format!("b_ping.exe (pid {ping_pid})");
+        testing_logger::validate(|logs| {
+            let warns: Vec<_> = logs
+                .iter()
+                .filter(|l| l.level == log::Level::Warn)
+                .collect();
+            assert_eq!(warns.len(), 1, "{warns:?}");
+            let holders = holders_in(&warns[0].body, &start);
+            // A scanner inspecting the new executable can appear too.
+            assert!(holders.contains(&this.as_str()), "{}", warns[0].body);
+            assert!(holders.contains(&ping.as_str()), "{}", warns[0].body);
+        });
+    }
+
+    /// A running program whose ACL denies writing: deleting it fails with access
+    /// denied, and the warning names it and its process.
+    #[cfg(windows)]
+    #[test]
+    fn cleanup_names_a_running_program_that_refuses_writing() {
+        testing_logger::setup();
+        let mut td = TempDir::new(None, None, None).unwrap();
+        let dir = td.path().to_path_buf();
+        let exe = copy_ping(&dir, "ping.exe");
+        let everyone = "*S-1-1-0";
+        let deny = format!("{everyone}:(WD)");
+        run_hidden(
+            "icacls",
+            &[exe.as_os_str(), "/deny".as_ref(), deny.as_ref()],
+        );
+        let mut child = run_ping(&exe);
+        let pid = child.id();
+        let (guard_exe, guard_dir) = (exe.clone(), dir.clone());
+        let _restore = OnDrop(move || {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = std::process::Command::new("icacls")
+                .args([
+                    guard_exe.as_os_str(),
+                    "/remove:d".as_ref(),
+                    everyone.as_ref(),
+                ])
+                .stdout(std::process::Stdio::null())
+                .status();
+            let _ = std::fs::remove_dir_all(&guard_dir);
+        });
+
+        let result = td.cleanup_with_delays(Some("session-1"), &[]);
+
+        assert!(result.is_err(), "the running image was deleted");
+        let start = format!(
+            "Could not delete temporary directory {}: Access is denied. 1 file(s) could not \
+             be deleted, including ping.exe. Files are still locked open by: ",
+            dir.display()
+        );
+        let ping = format!("ping.exe (pid {pid})");
+        testing_logger::validate(|logs| {
+            let warns: Vec<_> = logs
+                .iter()
+                .filter(|l| l.level == log::Level::Warn)
+                .collect();
+            assert_eq!(warns.len(), 1, "{warns:?}");
+            assert!(
+                holders_in(&warns[0].body, &start).contains(&ping.as_str()),
+                "{}",
+                warns[0].body
+            );
+        });
+    }
+
+    /// A file whose ACLs refuse deletion (the file denies DELETE and its
+    /// directory denies deleting children) is reported, and no process holds it.
+    #[cfg(windows)]
+    #[test]
+    fn cleanup_reports_a_file_the_acls_protect() {
+        testing_logger::setup();
+        let mut td = TempDir::new(None, None, None).unwrap();
+        let dir = td.path().to_path_buf();
+        let sub = dir.join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        let file = sub.join("protected.bin");
+        std::fs::write(&file, b"x").unwrap();
+        let everyone = "*S-1-1-0";
+        run_hidden(
+            "icacls",
+            &[
+                file.as_os_str(),
+                "/deny".as_ref(),
+                format!("{everyone}:(DE)").as_ref(),
+            ],
+        );
+        run_hidden(
+            "icacls",
+            &[
+                sub.as_os_str(),
+                "/deny".as_ref(),
+                format!("{everyone}:(DC)").as_ref(),
+            ],
+        );
+        let (gf, gs, gd) = (file.clone(), sub.clone(), dir.clone());
+        let _restore = OnDrop(move || {
+            for p in [&gs, &gf] {
+                let _ = std::process::Command::new("icacls")
+                    .args([p.as_os_str(), "/remove:d".as_ref(), everyone.as_ref()])
+                    .stdout(std::process::Stdio::null())
+                    .status();
+            }
+            let _ = std::fs::remove_dir_all(&gd);
+        });
+
+        let result = td.cleanup_with_delays(Some("session-1"), &[]);
+
+        assert!(result.is_err(), "the protected file was deleted");
+        assert!(file.exists());
+        testing_logger::validate(|logs| {
+            let warns: Vec<_> = logs
+                .iter()
+                .filter(|l| l.level == log::Level::Warn)
+                .collect();
+            assert_eq!(warns.len(), 1, "{warns:?}");
+            assert_eq!(
+                warns[0].body,
+                format!(
+                    "Could not delete temporary directory {}: Access is denied. 1 file(s) could \
+                     not be deleted, including {}. No running process was found holding them \
+                     open. Giving up.",
+                    dir.display(),
+                    Path::new("sub").join("protected.bin").display()
+                )
+            );
+        });
     }
 
     /// The naming parameters match tempdir.md, written as literals so a

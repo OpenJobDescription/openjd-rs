@@ -44,7 +44,7 @@ Each command module exports an `Args` struct (clap derive) and an `execute()` fu
 | `serde_json` | JSON output formatting, inline JSON parameter parsing, path mapping rule loading |
 | `serde-saphyr` | YAML output formatting and YAML parameter/task file loading |
 | `tokio` | Async runtime (`rt-multi-thread`, `macros`) for session execution |
-| `log` | Logging facade; custom `Log` impl for subprocess output |
+| `log` | Logging facade; custom `Log` impl that prints subprocess output and session warnings and errors |
 | `chrono` | Timestamp formatting (local, UTC) for session logs |
 
 ## Public API Surface
@@ -124,7 +124,8 @@ this transparently.
 ### Global State for Logging
 
 `SESSION_START` and `TIMESTAMP_FORMAT` are `OnceLock<T>` globals initialized by the `run`
-command. The `SessionLogger` reads these to format timestamps on subprocess output lines.
+command. The `SessionLogger` reads these to format timestamps on the lines it prints (see
+[logging.md](logging.md)).
 
 This is global state, which is generally undesirable, but it's the pragmatic choice given
 `log::Log`'s interface constraint: the `log()` method receives only a `&Record` with no
