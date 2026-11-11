@@ -53,8 +53,9 @@ fn max_depth_constant_is_64() {
 // Pure `(((...1...)))` parses to just `1` in ruff (redundant parens are
 // dropped before AST construction), so the structural depth walker
 // doesn't reject it. What matters here is that the parser itself doesn't
-// crash on the recursion: with the worker-thread fallback, any input up
-// to `MAX_PARSE_INPUT_LEN` is survivable regardless of shape.
+// crash on the recursion: with the worker-thread fallback and the parser's
+// `stacker` feature, any input up to `MAX_PARSE_INPUT_LEN` is survivable
+// regardless of shape (`parser_survives_*_at_length_cap` below).
 
 #[test]
 fn parser_survives_deeply_nested_parens() {

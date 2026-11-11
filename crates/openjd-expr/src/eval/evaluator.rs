@@ -715,13 +715,8 @@ impl<'a> Evaluator<'a> {
                 }
                 // Preserve original source text for passthrough (e.g., "1.5e3", "3.500")
                 let original = self.expr_source.as_ref().and_then(|src| {
-                    // AST offsets are relative to the parsed text; multi-line
-                    // sources were wrapped in "(...)" before parsing, shifting
-                    // every offset by 1 (same compensation as error.rs carets).
-                    let shift = usize::from(src.contains('\n'));
-                    let start = n.range.start().to_usize().checked_sub(shift)?;
-                    let end = n.range.end().to_usize().checked_sub(shift)?;
-                    let s = src.get(start..end)?;
+                    // AST offsets are byte offsets into the expression text.
+                    let s = src.get(n.range.start().to_usize()..n.range.end().to_usize())?;
                     // Don't preserve malformed forms like "3." or ".5" or
                     // underscore-containing. Requiring the slice to round-trip
                     // to the value is a backstop against any offset mismatch:

@@ -1083,7 +1083,76 @@ fn undefined_dotted_variable_with_suggestion() {
     );
 }
 
+// --- Multi-line syntax errors ---
+//
+// A multi-line expression is parsed in the parser's parenthesized mode, so
+// syntax errors describe the text as written and never mention a `)` the
+// author didn't write (as they did when the expression was wrapped in `(...)`).
+
+#[test]
+fn multiline_missing_operator() {
+    assert_err(
+        "Param.A\nParam.B",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  Param.B\n",
+            "  ^~~~~",
+        ],
+    );
+}
+
+#[test]
+fn multiline_stray_assignment() {
+    assert_err(
+        "x\n= 1",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  = 1\n",
+            "  ^",
+        ],
+    );
+}
+
+#[test]
+fn multiline_unclosed_bracket() {
+    let e = ParsedExpression::new("[1,\n2").unwrap_err().to_string();
+    assert!(
+        e.starts_with("Syntax error: unexpected EOF while parsing\n"),
+        "{e}"
+    );
+    assert!(!e.contains("`)`"), "{e}");
+}
+
+#[test]
+fn multiline_format_string_caret_on_its_line() {
+    // FormatString spans are offsets into the format string itself, which
+    // was never wrapped; the caret must start at the `{{` on line 2.
+    let err = FormatString::new("line1\n{{ 1 + }}").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Failed to parse interpolation expression at [6, 15]. Reason: Syntax error: \
+         Expected an expression\n  {{ 1 + }}\n  ^~~~~~~~~"
+    );
+}
+
+#[test]
+fn multiline_keyword_attributes_resolve() {
+    let mut st = SymbolTable::new();
+    st.set("Param.if", 2i64).unwrap();
+    st.set("Param.class", 3i64).unwrap();
+    let v = ParsedExpression::new("Param.if\n  * Param.class")
+        .unwrap()
+        .evaluate(&st)
+        .unwrap();
+    assert_eq!(v.to_display_string(), "6");
+}
+
 // --- TestMultiLineExpressions: type error variants matching Python ---
+//
+// The caret sits on the operator, as on a single line and as in the original
+// pure-Python implementation. It used to land one byte right of the operator,
+// because multi-line expressions were parsed wrapped in `(...)` and the
+// caret computation didn't undo that shift.
 
 #[test]
 fn multiline_type_error_in_parens() {
@@ -1092,7 +1161,7 @@ fn multiline_type_error_in_parens() {
         &[
             "Cannot use '+' operator with int and string\n",
             "    1 + 'x'\n",
-            "    ~~~^~~~",
+            "    ~~^~~~~",
         ],
     );
 }
@@ -1104,7 +1173,7 @@ fn multiline_type_error_in_list() {
         &[
             "Cannot use '+' operator with int and string\n",
             "    2 + 'x',\n",
-            "    ~~~^~~~",
+            "    ~~^~~~~",
         ],
     );
 }
@@ -1116,7 +1185,7 @@ fn multiline_type_error_on_first_line() {
         &[
             "Cannot use '+' operator with int and string\n",
             "  1 + 'x' + (\n",
-            "  ~~~^~~~",
+            "  ~~^~~~~",
         ],
     );
 }
@@ -1128,7 +1197,7 @@ fn multiline_type_error_deeply_nested() {
         &[
             "Cannot use '+' operator with int and string\n",
             "      1 + 'x'\n",
-            "      ~~~^~~~",
+            "      ~~^~~~~",
         ],
     );
 }

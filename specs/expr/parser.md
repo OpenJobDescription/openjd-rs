@@ -65,13 +65,14 @@ nested brackets overflows even the 32 MB worker thread and aborts the process.
 Input string
     │
     ▼
+Keyword rename (one lexer pass; context-sensitive keywords)
+    │
+    ▼
 ruff_python_parser::parse_expression()
+  (parse_parenthesized_expression_range() for multi-line input)
     │
     ▼
 AST validation (allowlist of allowed node types)
-    │
-    ▼
-Keyword rename fixup (context-sensitive keywords)
     │
     ▼
 JSON literal normalization (null→None, true→True, false→False)
@@ -90,35 +91,38 @@ names in Python syntax. But the OpenJD expression language needs them to work af
 because job parameters can have any name — a parameter named `def` or `is` must be
 accessible as `Param.def` or `Param.is`.
 
-The solution:
+The solution, before parsing:
 
-1. Attempt to parse the expression
-2. If parsing fails, look at the offset the parser reported the error at. The parser
-   rejects a contextual keyword with "Expected an identifier, but found a keyword",
-   and its error range begins exactly at the keyword token
-3. If the token at that offset is directly preceded by `.` and is exactly a Python
-   keyword, replace it with a same-length placeholder identifier, which preserves
-   every other offset in the source
-4. Re-parse with the placeholder, repeating from step 1 — one keyword is renamed per
-   parse attempt, so an expression with several of them converges in several passes
-5. Record the renames in `keyword_renames: HashMap<String, String>` so the evaluator
+1. Tokenize the expression once with the parser's own lexer (`ruff_python_parser::lexer`),
+   in the same mode the parser will use
+2. For each keyword token that is exactly a Python keyword and directly follows a `.`
+   token, with nothing between them, replace it with a same-length placeholder
+   identifier, which preserves every offset in the source
+3. Parse the renamed text once
+4. Record the renames in `keyword_renames: HashMap<String, String>` so the evaluator
    can map placeholder names back to the original attribute names
+
+Placeholders are chosen left to right against the text as renamed so far, so a
+placeholder never collides with the source or with another placeholder, and repeated
+accesses (`A.class + B.class`) share one entry. Syntax errors are reported against the
+original text, which the same-length renames leave aligned.
 
 This matches the Python implementation's `ast_parse_keyword_context()` approach, which
 renames keywords before parsing and restores them after.
 
-> **The rename is located, not searched for.** Only the one position the parser
-> objected to is considered. This is what keeps the fixup out of string literals:
-> a keyword inside a literal is valid Python, so it is never the parser's error
-> location. Searching the source text for the first `.keyword` instead — the
+> **The lexer, not a text search, finds the keywords.** The lexer marks string
+> literals, so a keyword inside a literal is never a keyword token and is never
+> rewritten. Searching the source text for the first `.keyword` instead — the
 > original implementation — rewrote literals, so `'a.class' + X.class` evaluated
 > to `"a.alassc1"` instead of `"a.classc1"`, silently and with no error raised.
 >
-> The keyword token is delimited by scanning to the first non-identifier
-> character rather than by assuming a keyword's length, so `.assert` is not read
-> as `.as` followed by junk. All offsets involved are byte offsets; mixing a byte
-> offset into a `chars()` index was a latent defect in the original boundary
-> check on sources containing multi-byte characters.
+> **One pass, not one parse per keyword.** Until #489 the rename ran after a failed
+> parse, at the offset the parser objected to, and re-parsed the whole expression
+> once per keyword. That was quadratic: 64 KB of `a.if.if...` took 89 s, and a
+> 24 KB template stalled `openjd check` for 11 s. The lexer pass is linear.
+>
+> The keyword is delimited by the lexer's token, so `.assert` is not read as `.as`
+> followed by junk. All offsets involved are byte offsets.
 
 ### Reverse mapping at evaluation
 
@@ -166,8 +170,11 @@ Three independent mechanisms work together:
    `std::thread::Builder::stack_size`. That stack is not enough on its own:
    the parser recurses once per nested bracket or prefix operator, and
    64 KB of them overflows 32 MB. The parser's `stacker` feature covers the
-   rest, growing the stack on the heap once recursion passes about 20
-   levels, so the parser completes on *any* input up to
+   rest: once its recursion passes 20 levels it checks the remaining stack,
+   and when less than 100 KB is left it continues on a new 1 MB segment
+   allocated on the heap. The 32 MB thread is still needed for this
+   crate's own AST walkers. Together they let the parser complete on *any*
+   input up to
    `MAX_PARSE_INPUT_LEN` without our enumerating which token patterns drive
    its recursion. The parser has no bracket-nesting limit of its own, so
    nesting is bounded only by `MAX_PARSE_INPUT_LEN`.
@@ -250,12 +257,19 @@ a parameter name.
 
 ## Multi-line Expressions
 
-Expressions can span multiple lines via implicit line continuation (wrapping in
-parentheses). The parser handles this by:
+Expressions can span multiple lines via implicit line continuation, as if they were
+inside parentheses. An expression containing a newline is parsed with
+`ruff_python_parser::parse_parenthesized_expression_range`, the parser's parenthesized
+mode, which allows the line breaks without adding a `(` to the text. Every offset the
+parser reports, in AST ranges and errors alike, is therefore a byte offset into the
+expression as written, and error messages show only the relevant line with its
+columns (see [error-formatting.md](error-formatting.md)).
 
-1. Wrapping the expression in `(...)` before parsing
-2. Adjusting line numbers in the resulting AST back to the original
-3. Error messages show only the relevant line with correct column offsets
+Until #489 the expression was wrapped in `(...)` before parsing instead. That shifted
+every offset by one byte, which three consumers each undid separately and one didn't
+(the caret for a multi-line binary operator landed one byte right of the operator),
+and syntax errors could mention a `)` the author never wrote (`Param.A\nParam.B`
+gave ``Expected `)`, found identifier``).
 
 ## Divergence from Python
 

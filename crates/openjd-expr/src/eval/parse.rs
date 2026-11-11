@@ -81,73 +81,78 @@ fn make_replacement(keyword: &str, source: &str) -> String {
     "x".repeat(len)
 }
 
-/// Rewrite the contextual keyword at `kw_start` (a byte offset into `source`,
-/// taken from the parser's error location) to a same-length placeholder,
-/// recording the mapping in `renames`. Returns whether anything was rewritten.
+/// Rename every contextual keyword in `source` — a Python keyword used as
+/// an attribute name, as in `Param.if` — to a same-length placeholder
+/// identifier, recording each mapping in `renames`, and return the renamed
+/// text. Same-length placeholders keep every offset in the text unchanged.
 ///
-/// Renames only an attribute name: the token must be immediately preceded by
-/// `.` and be exactly a Python keyword. Both conditions are checked against the
-/// one position the parser objected to, never searched for elsewhere in
-/// `source`, which is what keeps keyword-like text inside string literals from
-/// being rewritten.
+/// The text is tokenized once with the parser's own lexer, in the same
+/// `mode` the parser will use. A keyword token is renamed when it is exactly
+/// a Python keyword and directly follows a `.` token, with nothing between
+/// them. The lexer marks string literals, so keyword-like text inside a
+/// literal (`'a.class'`) is never rewritten. This is one linear pass; the
+/// earlier approach re-parsed the whole expression once per keyword, which
+/// was quadratic (64 KB of `a.if.if...` took 89 s, #489).
 ///
-/// All offsets here are byte offsets. The token is delimited by scanning to the
-/// first non-identifier character rather than by assuming a keyword's length,
-/// so `.assert` is not mistaken for `.as` followed by junk, and a multi-byte
-/// character after the keyword cannot desynchronize the comparison.
-fn rename_keyword_at(
-    source: &mut String,
-    kw_start: usize,
+/// Placeholders are chosen left to right against the text as renamed so far,
+/// so a placeholder never collides with the source or with another
+/// placeholder, and repeated accesses (`A.class + B.class`) share one entry.
+fn rename_contextual_keywords(
+    source: &str,
+    mode: ruff_python_parser::Mode,
     renames: &mut HashMap<String, String>,
-) -> bool {
-    // Range-guard the offset rather than trusting it: because the multi-line
-    // wrap is undone by subtracting one, the parser reporting an error at the
-    // closing paren yields an offset one past the end of `source`.
-    if kw_start == 0 || kw_start >= source.len() {
-        return false;
+) -> String {
+    use ruff_python_ast::token::TokenKind;
+
+    // Collect the keyword ranges first: the lexer borrows `source`.
+    let mut keyword_ranges = Vec::new();
+    let mut lexer = ruff_python_parser::lexer::lex(source, mode);
+    let mut prev_dot_end = None;
+    loop {
+        let kind = lexer.next_token();
+        if kind == TokenKind::EndOfFile {
+            break;
+        }
+        let range = lexer.current_range();
+        if kind.is_keyword() && prev_dot_end == Some(range.start()) {
+            let token = &source[range];
+            if PYTHON_KEYWORDS.contains(&token) {
+                keyword_ranges.push(range);
+            }
+        }
+        prev_dot_end = (kind == TokenKind::Dot).then(|| range.end());
     }
-    // Attribute access only — the keyword must directly follow a '.'.
-    if source.as_bytes()[kw_start - 1] != b'.' {
-        return false;
+    if keyword_ranges.is_empty() {
+        return source.to_string();
     }
-    // No char-boundary check is needed for the slicing below: it is only
-    // reached once the preceding byte is an ASCII '.', and the byte after a
-    // complete ASCII character is always a char boundary.
-    let tail = &source[kw_start..];
-    let token_len = tail
-        .find(|c: char| !c.is_alphanumeric() && c != '_')
-        .unwrap_or(tail.len());
-    let token = &tail[..token_len];
-    if !PYTHON_KEYWORDS.contains(&token) {
-        return false;
+
+    let mut renamed = source.to_string();
+    for range in keyword_ranges {
+        let token = &source[range];
+        let replacement = renames
+            .iter()
+            .find(|(_, original)| original.as_str() == token)
+            .map(|(placeholder, _)| placeholder.clone())
+            .unwrap_or_else(|| {
+                let placeholder = make_replacement(token, &renamed);
+                renames.insert(placeholder.clone(), token.to_string());
+                placeholder
+            });
+        debug_assert_eq!(replacement.len(), token.len());
+        renamed.replace_range(
+            range.start().to_usize()..range.end().to_usize(),
+            &replacement,
+        );
     }
-    // Reuse the placeholder already chosen for this keyword, so that repeated
-    // accesses (`A.class + B.class`) map back through a single rename entry.
-    let replacement = renames
-        .iter()
-        .find(|(_, original)| original.as_str() == token)
-        .map(|(placeholder, _)| placeholder.clone())
-        .unwrap_or_else(|| {
-            let placeholder = make_replacement(token, source);
-            renames.insert(placeholder.clone(), token.to_string());
-            placeholder
-        });
-    // Same length, so every other offset in `source` is preserved and the next
-    // parse attempt reports positions that still line up with the original.
-    debug_assert_eq!(replacement.len(), token_len);
-    source.replace_range(kw_start..kw_start + token_len, &replacement);
-    true
+    renamed
 }
 
 /// Parse a Python expression, handling contextual keywords (Python keywords
 /// used as attribute names after '.').
 ///
-/// Matches the Python implementation's approach:
-/// 1. Try to parse
-/// 2. On syntax error, find keyword after '.' at error position
-/// 3. Replace with same-length identifier (preserves error positions)
-/// 4. Retry
-/// 5. After success, record renames so evaluator can map back
+/// Like the Python implementation, keywords after `.` are renamed to
+/// same-length identifiers before parsing (preserving every offset), and the
+/// renames are recorded so the evaluator can map back.
 impl ParsedExpression {
     /// Parse an expression using the "latest" profile
     /// ([`ExprProfile::latest`]): the current revision with *every* known
@@ -522,9 +527,11 @@ const FAST_PATH_INPUT_LEN: usize = 200;
 /// Maximum permitted source length (in bytes) for a single
 /// [`ParsedExpression`]. An absolute cap independent of any AST-shape
 /// analysis: the parser's recursive descent can recurse at most once per
-/// input byte, and its parse time is roughly linear in input length, so
-/// bounding input length bounds both its worst-case stack use and its work
-/// (see `tests/integration/test_parser_work_bound.rs`).
+/// input byte, so bounding input length bounds its worst-case stack use.
+/// It also bounds the parser's work: parse time is roughly linear in input
+/// length, except for unclosed nested f-strings, which are quadratic (about
+/// 0.5 s at this cap in a release build). See
+/// `tests/integration/test_parser_work_bound.rs`.
 ///
 /// Realistic template expressions are well under 1 KB; 64 KB is two
 /// orders of magnitude above that.
@@ -540,122 +547,119 @@ pub const MAX_PARSE_INPUT_LEN: usize = 64 * 1024;
 /// parse and is reclaimed when the thread ends.
 const PARSER_THREAD_STACK_SIZE: usize = 32 * 1024 * 1024;
 
-/// The actual parse loop: runs the ruff parser, handles the
-/// keyword-rename retry cycle, and wires up the resulting AST into a
-/// `ParsedExpression`. Factored out of [`ParsedExpression::new`] so it can
-/// be invoked either on the current thread (short inputs) or on a
-/// stack-enlarged worker thread (long inputs), without duplicating the
-/// loop body.
+/// The actual parse: renames contextual keywords, runs the ruff parser, and
+/// wires up the resulting AST into a `ParsedExpression`. Factored out of
+/// [`ParsedExpression::new`] so it can be invoked either on the current
+/// thread (short inputs) or on a stack-enlarged worker thread (long inputs),
+/// without duplicating the body.
+///
+/// Every step is linear in the source length: one lexer pass for the
+/// keyword renames, one parse, and AST walks bounded by
+/// [`MAX_EXPRESSION_DEPTH`]. In particular nothing re-parses the source per
+/// keyword or per error, which made `a.if.if...` quadratic (#489).
 fn parse_inner(
     raw: &str,
     expr_str: &str,
     profile: &ExprProfile,
 ) -> Result<ParsedExpression, ExpressionError> {
-    let mut source = expr_str.to_string();
+    // A multi-line expression is parsed as if it were inside parentheses,
+    // which gives it Python's implicit line continuation. The parser's
+    // parenthesized mode does this without adding a `(` to the text, so
+    // every offset it reports, in AST ranges and errors alike, is an offset
+    // into `expr_str` itself.
+    let mode = if expr_str.contains('\n') {
+        ruff_python_parser::Mode::ParenthesizedExpression
+    } else {
+        ruff_python_parser::Mode::Expression
+    };
+
     let mut keyword_renames: HashMap<String, String> = HashMap::new();
+    let source = rename_contextual_keywords(expr_str, mode, &mut keyword_renames);
 
-    // Wrap multi-line expressions in parentheses for implicit line continuation.
-    //
-    // NOTE: the wrap shifts every offset the parser reports — AST ranges and
-    // error locations alike — by +1 relative to the unwrapped expression text.
-    // There is no single place that undoes it; each consumer compensates on its
-    // own, and one of them does not compensate at all:
-    //
-    //   - `Display for ExpressionError` (error.rs:314) subtracts 1 from the
-    //     column when the expression contains a newline.
-    //   - `eval_number`'s float passthrough (evaluator.rs:508) subtracts a
-    //     shift derived the same way, before slicing the unwrapped source.
-    //   - the keyword retry below subtracts 1 from the parser's error offset.
-    //   - `compute_caret_offset` (error.rs:403) does NOT compensate. It indexes
-    //     `expr.as_bytes()` with raw, still-shifted AST offsets while `expr` is
-    //     the unwrapped source, so its backwards operator scan reads bytes one
-    //     position right of the intended ones. The BinOp arm is affected: the
-    //     caret for a multi-line `**` or `//` lands on the operator's second
-    //     character. The Attribute/Call/Subscript arms are unaffected because
-    //     they subtract two shifted offsets from each other, which cancels.
-    //
-    // Do not read this list as "handled". Centralizing the adjustment — record
-    // the shift on ParsedExpression at parse time, or normalize AST ranges once
-    // after a successful multi-line parse — would fix the caret defect and
-    // remove three copies of the same `- 1`, but it changes the diagnostic
-    // output of every multi-line BinOp error and so needs its own tests.
-    let is_multiline = source.contains('\n');
+    let parsed = match mode {
+        ruff_python_parser::Mode::ParenthesizedExpression => {
+            ruff_python_parser::parse_parenthesized_expression_range(
+                &source,
+                ruff_text_size::TextRange::up_to(ruff_text_size::TextSize::of(source.as_str())),
+            )
+        }
+        _ => ruff_python_parser::parse_expression(&source),
+    };
+    let expr_node = match parsed {
+        Ok(parsed) => parsed.into_expr(),
+        Err(e) => return Err(syntax_error(&e, expr_str)),
+    };
 
-    loop {
-        let to_parse = if is_multiline {
-            format!("({})", source)
-        } else {
-            source.clone()
-        };
+    // Structural validation (matches Python implementation)
+    validate_structure(&expr_node, expr_str, profile)?;
+    let mut accessed_symbols = HashSet::new();
+    let mut called_functions = HashSet::new();
+    let mut local_bindings = HashSet::new();
+    collect_symbols(
+        &expr_node,
+        &keyword_renames,
+        &mut accessed_symbols,
+        &mut called_functions,
+        &mut local_bindings,
+    );
+    // Check for nested comprehension variable shadowing
+    check_comprehension_shadowing(&expr_node, &HashSet::new(), expr_str)?;
+    Ok(ParsedExpression {
+        ast: expr_node,
+        source: raw.to_string(),
+        expr: expr_str.to_string(),
+        keyword_renames,
+        accessed_symbols,
+        called_functions,
+        local_bindings,
+    })
+}
 
-        match ruff_python_parser::parse_expression(&to_parse) {
-            Ok(parsed) => {
-                let expr_node = parsed.into_expr();
-                // Structural validation (matches Python implementation)
-                validate_structure(&expr_node, expr_str, profile)?;
-                let mut accessed_symbols = HashSet::new();
-                let mut called_functions = HashSet::new();
-                let mut local_bindings = HashSet::new();
-                collect_symbols(
-                    &expr_node,
-                    &keyword_renames,
-                    &mut accessed_symbols,
-                    &mut called_functions,
-                    &mut local_bindings,
-                );
-                // Check for nested comprehension variable shadowing
-                check_comprehension_shadowing(&expr_node, &HashSet::new(), expr_str)?;
-                return Ok(ParsedExpression {
-                    ast: expr_node,
-                    source: raw.to_string(),
-                    expr: expr_str.to_string(),
-                    keyword_renames,
-                    accessed_symbols,
-                    called_functions,
-                    local_bindings,
-                });
-            }
-            Err(e) => {
-                // Rename the contextual keyword the parser actually rejected.
-                //
-                // The parser reports "Expected an identifier, but found a
-                // keyword" with its range starting exactly at the keyword
-                // token, so the offending text is located rather than searched
-                // for. This is what keeps the retry out of string literals: a
-                // keyword inside a literal parses fine and is therefore never
-                // the parser's error location. Scanning `source` for the first
-                // `.keyword` instead used to rewrite literals — `'a.class' +
-                // X.class` evaluated to "a.alassc1" rather than "a.classc1",
-                // silently, because `.class` inside the literal came first.
-                let error_offset = e.location.start().to_usize();
-                // Undo the multi-line paren wrap: `to_parse` is "(" + source
-                // + ")", so every offset the parser reports sits one byte to
-                // the right of the same character in `source`.
-                let kw_start = if is_multiline {
-                    error_offset.saturating_sub(1)
-                } else {
-                    error_offset
-                };
-                let found = rename_keyword_at(&mut source, kw_start, &mut keyword_renames);
-                if !found {
-                    let msg = format!("Syntax error: {}", e.error);
-                    let start = e.location.start().to_usize();
-                    let end = e.location.end().to_usize();
-                    // For zero-width ranges (like EOF), point at the last char
-                    let (col, end_col) = if start == end && !source.is_empty() {
-                        (0, source.len())
-                    } else {
-                        (start.min(source.len()), end.min(source.len()))
-                    };
-                    let mut err = ExpressionError::new(msg);
-                    if !source.is_empty() {
-                        err = err.with_span(&source, col, end_col.max(col + 1));
-                    }
-                    return Err(err);
-                }
-            }
+/// Convert a ruff parse error into an [`ExpressionError`] with a caret into
+/// `source` (the expression text as written, before keyword renames, which
+/// keep every offset unchanged).
+fn syntax_error(e: &ruff_python_parser::ParseError, source: &str) -> ExpressionError {
+    let msg = format!(
+        "Syntax error: {}",
+        syntax_error_message(&e.error, e.location, source)
+    );
+    let start = e.location.start().to_usize();
+    let end = e.location.end().to_usize();
+    // For zero-width ranges (like EOF), point at the whole expression
+    let (col, end_col) = if start == end {
+        (0, source.len())
+    } else {
+        (start.min(source.len()), end.min(source.len()))
+    };
+    ExpressionError::new(msg).with_span(source, col, end_col.max(col + 1))
+}
+
+/// The text of a ruff parse error, with one repair: for a `0x`, `0o` or `0b`
+/// prefix with no digits, ruff's lexer reports the `Debug` form of Rust's
+/// `ParseIntError` (`ParseIntError { kind: Empty }`), which means nothing to
+/// a template author. Name the literal instead, as CPython does.
+fn syntax_error_message(
+    error: &ruff_python_parser::ParseErrorType,
+    location: ruff_text_size::TextRange,
+    source: &str,
+) -> String {
+    use ruff_python_parser::{LexicalErrorType, ParseErrorType};
+    if let ParseErrorType::Lexical(LexicalErrorType::OtherError(text)) = error {
+        if text.starts_with("ParseIntError") {
+            let radix = source
+                .get(location.start().to_usize()..)
+                .and_then(|t| t.as_bytes().get(1))
+                .map(u8::to_ascii_lowercase);
+            let kind = match radix {
+                Some(b'x') => "hexadecimal",
+                Some(b'o') => "octal",
+                Some(b'b') => "binary",
+                _ => "number",
+            };
+            return format!("invalid {kind} literal");
         }
     }
+    error.to_string()
 }
 
 /// Validate structural constraints on the AST that can't be caught by the parser.
@@ -1135,79 +1139,94 @@ mod tests {
         assert!(!parsed.keyword_renames.is_empty());
     }
 
-    /// Helper: rename at `kw_start` and report the rewritten source plus the
-    /// single (placeholder, original) pair recorded, if any.
-    fn rename_once(source: &str, kw_start: usize) -> (bool, String, Option<(String, String)>) {
-        let mut s = source.to_string();
+    /// Helper: run the rename pass in single-line mode and return the
+    /// rewritten source plus every (original, placeholder) pair, sorted.
+    fn rename_all(source: &str) -> (String, Vec<(String, String)>) {
         let mut renames = HashMap::new();
-        let found = rename_keyword_at(&mut s, kw_start, &mut renames);
-        let pair = renames.iter().next().map(|(p, o)| (p.clone(), o.clone()));
-        (found, s, pair)
+        let out =
+            rename_contextual_keywords(source, ruff_python_parser::Mode::Expression, &mut renames);
+        let mut pairs: Vec<_> = renames.into_iter().map(|(p, o)| (o, p)).collect();
+        pairs.sort();
+        (out, pairs)
     }
 
-    // These exercise `rename_keyword_at` directly rather than through
-    // evaluation. Going through evaluation cannot distinguish exact token
-    // delimiting from a keyword-prefix match, because `resolve_keyword_renames`
-    // rewrites `.placeholder` to `.original` as an unanchored substring and
-    // `make_replacement` only ever changes a keyword's first character — so a
-    // truncated "as" placeholder inside "assert" happens to reconstruct
-    // correctly. The defect is still real (the wrong keyword gets recorded as
-    // renamed), it is just invisible downstream, so it is pinned here.
+    // These exercise `rename_contextual_keywords` directly rather than
+    // through evaluation. Going through evaluation cannot distinguish exact
+    // token delimiting from a keyword-prefix match, because
+    // `resolve_keyword_renames` rewrites `.placeholder` to `.original` as an
+    // unanchored substring and `make_replacement` only ever changes a
+    // keyword's first character — so a truncated "as" placeholder inside
+    // "assert" would happen to reconstruct correctly. The defect would still
+    // be real (the wrong keyword recorded as renamed), just invisible
+    // downstream, so it is pinned here.
     #[test]
-    fn rename_keyword_at_delimits_the_whole_token() {
+    fn rename_delimits_the_whole_token() {
         // "assert" must be renamed as "assert", not as the keyword "as"
         // followed by leftover "sert".
-        let (found, source, pair) = rename_once("X.assert", 2);
-        assert!(found);
-        let (placeholder, original) = pair.expect("a rename must be recorded");
+        let (source, pairs) = rename_all("X.assert");
+        assert_eq!(pairs.len(), 1);
+        let (original, placeholder) = &pairs[0];
         assert_eq!(original, "assert");
         assert_eq!(placeholder.len(), "assert".len());
         assert_eq!(source, format!("X.{placeholder}"));
-        assert_eq!(source.len(), "X.assert".len());
     }
 
     #[test]
-    fn rename_keyword_at_renames_a_short_keyword_exactly() {
+    fn rename_renames_a_short_keyword_exactly() {
         // Negative control for the above: "as" on its own is still renamed.
-        let (found, source, pair) = rename_once("X.as + 1", 2);
-        assert!(found);
-        let (placeholder, original) = pair.expect("a rename must be recorded");
+        let (source, pairs) = rename_all("X.as + 1");
+        assert_eq!(pairs.len(), 1);
+        let (original, placeholder) = &pairs[0];
         assert_eq!(original, "as");
         assert_eq!(source, format!("X.{placeholder} + 1"));
     }
 
     #[test]
-    fn rename_keyword_at_ignores_non_keyword_attributes() {
+    fn rename_ignores_non_keyword_attributes() {
         // "iffy" starts with the keyword "if" but is a perfectly good
         // attribute name; nothing may be rewritten.
-        let (found, source, pair) = rename_once("X.iffy", 2);
-        assert!(!found);
-        assert_eq!(source, "X.iffy");
-        assert!(pair.is_none());
+        assert_eq!(rename_all("X.iffy"), ("X.iffy".to_string(), vec![]));
     }
 
     #[test]
-    fn rename_keyword_at_requires_a_preceding_dot() {
-        // A bare keyword is a genuine syntax error, not an attribute name.
-        let (found, source, _) = rename_once("1 + class", 4);
-        assert!(!found);
-        assert_eq!(source, "1 + class");
+    fn rename_requires_a_directly_preceding_dot() {
+        // A bare keyword is a genuine syntax error, not an attribute name,
+        // and so is a keyword separated from its `.` by white space.
+        assert_eq!(rename_all("1 + class"), ("1 + class".to_string(), vec![]));
+        assert_eq!(rename_all("X. class"), ("X. class".to_string(), vec![]));
+        // White space before the `.` is fine, as it is for any attribute.
+        let (source, pairs) = rename_all("X .class");
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(source, format!("X .{}", pairs[0].1));
     }
 
     #[test]
-    fn rename_keyword_at_tolerates_bad_offsets() {
-        // Offsets are range-guarded rather than trusted. One-past-the-end is
-        // reachable in practice: undoing the multi-line wrap subtracts one, so
-        // an error reported at the trailing ')' lands just past `source`.
-        // Without the guard, indexing `kw_start - 1` panics.
-        assert!(!rename_once("X.class", 0).0);
-        assert!(!rename_once("X.class", "X.class".len()).0);
-        assert!(!rename_once("X.class", "X.class".len() + 1).0);
-        assert!(!rename_once("X.class", 999).0);
-        // A mid-character offset needs no separate check, and is declined here
-        // by the dot check: byte 1 is inside the 3-byte '日', and the byte
-        // before it is not '.'.
-        assert!(!rename_once("日.class", 1).0);
+    fn rename_leaves_string_literals_alone() {
+        // `.class` inside the literal comes first and must not be touched.
+        let (source, pairs) = rename_all("'a.class' + X.class");
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(source, format!("'a.class' + X.{}", pairs[0].1));
+    }
+
+    #[test]
+    fn rename_handles_multi_byte_text_and_interpolations() {
+        let (source, pairs) = rename_all("'日' + 日.class + f'{X.if}'");
+        let names: Vec<_> = pairs.iter().map(|(o, _)| o.as_str()).collect();
+        assert_eq!(names, ["class", "if"]);
+        assert_eq!(source.len(), "'日' + 日.class + f'{X.if}'".len());
+        assert!(source.starts_with("'日' + 日."), "{source}");
+    }
+
+    #[test]
+    fn rename_shares_and_separates_placeholders() {
+        // Repeated accesses share one entry. Different keywords get different
+        // placeholders even when the first choice for one ("as" -> "bs") is
+        // what another ("is" -> "bs") already took.
+        let (source, pairs) = rename_all("A.is + B.as + C.is");
+        assert_eq!(pairs.len(), 2);
+        let (as_p, is_p) = (&pairs[0].1, &pairs[1].1);
+        assert_ne!(as_p, is_p);
+        assert_eq!(source, format!("A.{is_p} + B.{as_p} + C.{is_p}"));
     }
 
     #[test]

@@ -163,9 +163,11 @@ fn multiline_conditional() {
 }
 #[test]
 fn multiline_float_passthrough_not_misaligned() {
-    // Regression: multi-line sources are wrapped in "(...)" before parsing,
-    // shifting AST offsets by 1; float passthrough sliced the unwrapped
-    // source with the shifted range, displaying "2.5 " instead of "12.5".
+    // Regression: multi-line sources used to be wrapped in "(...)" before
+    // parsing, shifting AST offsets by 1; float passthrough once sliced the
+    // unwrapped source with the shifted range, displaying "2.5 " instead of
+    // "12.5". They are now parsed in the parser's parenthesized mode with no
+    // shift at all; this pins that the offsets still line up.
     assert_eq!(eval("12.5 if True else\n0.0").to_display_string(), "12.5");
     assert_eq!(
         eval("12.5 if False else\n30.25").to_display_string(),
@@ -176,9 +178,8 @@ fn multiline_float_passthrough_not_misaligned() {
 // `.keyword` and rewrote it, with no idea where the parser had actually
 // objected. For `'a.class' + X.class` the first match is inside the string
 // literal, so the literal was rewritten and the expression evaluated to
-// "a.alassc1" — a silently wrong value, with no error surfaced. The retry now
-// renames at the parser's error offset, which is never inside a literal
-// (a literal parses fine).
+// "a.alassc1" — a silently wrong value, with no error surfaced. The rename
+// now runs on the lexer's tokens, and a literal is a single string token.
 #[test]
 fn keyword_retry_leaves_string_literals_alone() {
     let mut st = SymbolTable::new();
@@ -271,10 +272,12 @@ fn keyword_retry_offsets_are_bytes_not_chars() {
 }
 
 #[test]
-fn keyword_retry_multiline_offset_is_unwrapped() {
-    // Multi-line sources are parsed wrapped in "(...)", so the parser's error
-    // offset is one byte right of `source`. If that shift were not undone the
-    // rename would land on the character after the keyword.
+fn keyword_rename_multiline_offsets_line_up() {
+    // Multi-line sources used to be parsed wrapped in "(...)", so offsets
+    // sat one byte right of `source`, and a rename that didn't undo the
+    // shift landed on the character after the keyword. The rename now runs
+    // on lexer tokens of the source itself; this pins that it still hits the
+    // keyword and skips the literal.
     let mut st = SymbolTable::new();
     st.set("X.class", "c1").unwrap();
     assert_eq!(
@@ -409,6 +412,31 @@ fn octal_upper() {
     assert_eq!(eval("0O52").to_display_string(), "42");
 }
 #[test]
+fn radix_prefix_without_digits_rejected() {
+    // ruff's lexer reports these as the Debug form of Rust's ParseIntError
+    // (`ParseIntError { kind: Empty }`); openjd-expr names the literal.
+    assert_err(
+        "0x",
+        &[
+            "Syntax error: invalid hexadecimal literal\n",
+            "  0x\n",
+            "  ^~",
+        ],
+    );
+    assert_err(
+        "0O",
+        &["Syntax error: invalid octal literal\n", "  0O\n", "  ^~"],
+    );
+    assert_err(
+        "0b1 + 0B",
+        &[
+            "Syntax error: invalid binary literal\n",
+            "  0b1 + 0B\n",
+            "        ^~",
+        ],
+    );
+}
+#[test]
 fn old_octal_rejected() {
     assert_err("0777", &["Syntax error: Invalid decimal integer literal\n"]);
 }
@@ -450,11 +478,25 @@ fn underscore_start_is_var() {
 }
 #[test]
 fn underscore_end_rejected() {
-    assert_err("123_", &["Syntax error: Unexpected token"]);
+    assert_err(
+        "123_",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  123_\n",
+            "     ^",
+        ],
+    );
 }
 #[test]
 fn double_underscore_rejected() {
-    assert_err("1__000", &["Syntax error: Unexpected token"]);
+    assert_err(
+        "1__000",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  1__000\n",
+            "   ^~~~~",
+        ],
+    );
 }
 #[test]
 fn underscore_after_hex_prefix() {
@@ -510,7 +552,14 @@ fn underscore_exponent() {
 }
 #[test]
 fn underscore_adj_decimal_rejected() {
-    assert_err("1_.5", &["Syntax error: Unexpected token"]);
+    assert_err(
+        "1_.5",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  1_.5\n",
+            "   ^",
+        ],
+    );
 }
 #[test]
 fn underscore_after_decimal_rejected() {
@@ -518,11 +567,25 @@ fn underscore_after_decimal_rejected() {
 }
 #[test]
 fn underscore_adj_exponent_rejected() {
-    assert_err("1_e10", &["Syntax error: Unexpected token"]);
+    assert_err(
+        "1_e10",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  1_e10\n",
+            "   ^~~~",
+        ],
+    );
 }
 #[test]
 fn underscore_after_exponent_rejected() {
-    assert_err("1e_10", &["Syntax error: Unexpected token"]);
+    assert_err(
+        "1e_10",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  1e_10\n",
+            "   ^~~~",
+        ],
+    );
 }
 
 // === TestUnsupportedPythonFeatures ===
