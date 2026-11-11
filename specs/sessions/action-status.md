@@ -53,10 +53,11 @@ is non-terminal.
 ## Lifecycle
 
 1. **Action starts**: Session sets `state = Running`, `started_at = now()`,
-   all other fields `None`. Callback fires. A call that fails before its action
-   is reported `Running` (building the symbol table, or resolving an environment's
-   `variables`) skips this step: the session sets `state = Failed` with the error's
-   message as `fail_message` itself and fires one callback (see
+   all other fields `None`. Callback fires. An `enter_environment`/`exit_environment`
+   call that fails before its action is reported `Running` (building the symbol table,
+   or — for enter — resolving an environment's `variables`) skips this step: the session
+   sets `state = Failed` with the error's message as `fail_message` itself and fires one
+   callback. `run_task` always reports `Running` first (see
    [session.md § Failures before an action starts](session.md#failures-before-an-action-starts)).
 
 2. **Directives arrive**: `apply_message` updates the relevant field and fires

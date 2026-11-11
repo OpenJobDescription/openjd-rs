@@ -37,7 +37,7 @@ Running ────────► ReadyEnding     (action failed/canceled/time
 Running ────────► Canceling       (cancel_action called)
 Canceling ──────► Ready           (action finished Success before the cancel reached it, session not in ending-only mode)
 Canceling ──────► ReadyEnding     (action ended Canceled/Failed/Timeout, OR session is in ending-only mode)
-Ready ──────────► ReadyEnding     (enter_environment / exit_environment failed before its action started)
+Ready ──────────► ReadyEnding     (enter_environment / exit_environment failed building the symbol table or resolving variables, before Running)
 ReadyEnding ───► Running          (exit_environment started)
 ReadyEnding ───► Ready            (clear_ending_only)
 Ready ──────────► Ended           (cleanup)
@@ -131,12 +131,16 @@ Once a call is accepted, any failure before its action's subprocess starts **fai
 action**, as in the Python library (`Session._fail_action_before_start`). The action
 status becomes `Failed`, with the error's message as its `fail_message` and no exit code;
 the callback reports it; and the session settles through `settle_after_action(Failed)`,
-so it is ending-only (`ReadyEnding`). This covers building the symbol table (an
-undeserializable `resolved_symtab`, a job or task parameter value that can't be coerced
-to its declared type, a `PATH` parameter over the path mapping limit), resolving an
-environment's `variables`, writing the path mapping rules file, and resolving or writing
-an RFC 0008 wrap hook's symbols and embedded files. It holds whether or not the
-environment has an `onEnter` or `onExit`. Failures after the subprocess is dispatched,
+so it is ending-only (`ReadyEnding`). Two of these run before the action is reported
+`Running`, so they occur even for an environment with no `onEnter`/`onExit`: building the
+symbol table (an undeserializable `resolved_symtab`, a job or task parameter value that
+can't be coerced to its declared type, a `PATH` parameter over the path mapping limit)
+and resolving an environment's `variables`. The rest run inside the `onEnter`/`onExit`
+(or `run_task`) action branch, after `Running`: writing the path mapping rules file and
+resolving or writing an RFC 0008 wrap hook's symbols and embedded files. (The Python
+runtime writes the path mapping rules file unconditionally, so it can fail that write for
+an environment with no `onEnter`/`onExit` where Rust does not — a pre-existing
+divergence.) Failures after the subprocess is dispatched,
 such as an embedded file that can't be written or a command that can't be started, were
 already failed actions (see [drive_action](#drive_action)).
 
@@ -256,9 +260,10 @@ must be `Send + Sync` because it's invoked from the async task processing `Actio
 values.
 
 The callback fires on:
-- Action start (state = Running) — except a failure while building the symbol table or
-  resolving an environment's `variables`, which happens before `Running` and reports
-  only the `Failed` state (see
+- Action start (state = Running) — except an `enter_environment` or `exit_environment`
+  failure while building the symbol table, or an `enter_environment` failure resolving an
+  environment's `variables`, which happens before `Running` and reports only the `Failed`
+  state. `run_task` always reports `Running` first (see
   [Failures before an action starts](#failures-before-an-action-starts))
 - Every `openjd_*` directive (progress, status, fail)
 - Action completion (state = Success/Failed/Canceled/Timeout)
@@ -340,8 +345,11 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 7. Processes `ActionMessage` values via `drive_action()` — env var changes from
    `openjd_env`/`openjd_unset_env` are applied to the environment's change set
 8. On success: state → `Ready` (or `ReadyEnding` if `ending_only`)
-9. On failure, whether of the `onEnter` or before it starts: the action is `Failed`,
-   `ending_only` is set, state → `ReadyEnding`, and the call returns the error
+9. On failure the session is ending-only and the call returns the error: a failure
+   before the subprocess starts records a `Failed` action with the error's message,
+   while an `onEnter` that runs and ends non-`Success` leaves the action in its own
+   terminal state (`Failed`, `Canceled` or `Timeout`) and returns
+   `EnvironmentScriptFailed`
 
 ### Exit
 

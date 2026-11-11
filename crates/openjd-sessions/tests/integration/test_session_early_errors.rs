@@ -3,7 +3,8 @@
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 //! Errors after a session call is accepted but before its action starts
-//! (specs/sessions/session.md § Brittle Sessions, error-handling.md).
+//! (specs/sessions/session.md § Failures before an action starts;
+//! error-handling.md § Rejections and failed actions).
 //!
 //! Once `enter_environment`, `exit_environment` or `run_task` has passed its
 //! up-front checks, a failure to prepare the action (building the symbol
@@ -377,6 +378,36 @@ async fn enter_with_overlong_variable_fails_the_action() {
          maximum of 2048.",
     )
     .await;
+}
+
+/// When more than one variable is invalid, the error reported is
+/// deterministic: variables resolve in sorted key order, so the
+/// alphabetically-first invalid one is reported regardless of the
+/// `variables` HashMap's iteration order. Pins the sort (a mutant that
+/// drops it reports whichever the map happens to visit first).
+#[tokio::test]
+async fn enter_with_several_bad_variables_reports_the_sorted_first() {
+    let root = TempDir::new().unwrap();
+    let (mut s, _seen) = session(&root, JobParameterValues::new());
+    let e = env_with_variables(
+        "Env",
+        Some(action("echo exited")),
+        &[
+            ("MMM_GOOD", "set"),
+            ("ZZZ_BAD", "{{Param.Missing}}"),
+            ("AAA_BAD", "{{Param.Missing}}"),
+        ],
+    );
+    let err = s
+        .enter_environment(&e, None, Some("env-1"), None)
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .starts_with("Failed to resolve env var 'AAA_BAD':"),
+        "the alphabetically-first invalid variable must be the one reported, got: {err}"
+    );
+    assert_eq!(s.state(), SessionState::ReadyEnding);
 }
 
 /// A failed variable resolution sets none of the environment's variables,
