@@ -164,8 +164,13 @@ two input modes:
   quote the value as given (`Value ' 7 x' is not a valid integer or integer string.`). A
   template's own numeric strings (`default`, `minValue`, `maxValue`, `allowedValues`) are
   trimmed the same way when they are decoded (`FlexInt`, `FlexFloat`), and so is the string
-  `JobIntParameterDefinition::check_constraints` and `JobFloatParameterDefinition::check_constraints`
-  parse.
+  the public `JobIntParameterDefinition::check_constraints` and
+  `JobFloatParameterDefinition::check_constraints` parse (job creation itself checks the
+  merged definition, which receives the coerced value). A string element of a `LIST[INT]`,
+  `LIST[FLOAT]` or `LIST[LIST[INT]]` value goes through the same coercion, so
+  `["1", " 2 "]` is `[1, 2]`. **Divergence from openjd-model-for-python:** Python requires
+  the elements of a list value to be numbers and rejects a string element
+  (`list items must be integers, got str`).
 
 - **Library input** (typed ExprValue): Validated via `coerce_to_job_parameter_type` — checks type
   compatibility, performs numeric widening (int → float), validates list element types.

@@ -302,8 +302,7 @@ budgets template validation and the session runtime apply.
      not apply §1.3.2 to range list elements of any type, with or without EXPR. It
      resolves each element to a string, so a `null` becomes an empty element and a
      list becomes its display text (`["b", "c"]`) instead of being dropped or
-     flattened, and there is no coercion: with EXPR, Python accepts a whole-field
-     STRING value `" 7 "` or `" 2.50 "` that openjd-rs rejects, and renders a STRING
+     flattened, and there is no coercion: with EXPR, Python renders a STRING
      value `"+5"` in a FLOAT element as `+5` where openjd-rs renders `5`. It converts a
      resolved INT or CHUNK[INT] element with Python's `int()`, which accepts
      underscores (`1_10` is 110), non-ASCII decimal digits (`١٠` and fullwidth

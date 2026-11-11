@@ -2981,6 +2981,23 @@ steps:
             stderr.contains("Task parameter 'I': expected INT, got '7 0'"),
             "stderr: {stderr}"
         );
+        // The errors quote the value as given, white space included (inline
+        // JSON, since the whole -t argument is trimmed before it is split).
+        for (tasks, expected) in [
+            (
+                r#"[{"I": " 7 0 ", "F": "2.5"}]"#,
+                "Task parameter 'I': expected INT, got ' 7 0 '",
+            ),
+            (
+                r#"[{"I": "7", "F": " 2.5x\t"}]"#,
+                "Task parameter 'F': expected FLOAT, got ' 2.5x\t'",
+            ),
+        ] {
+            let (code, _stdout, stderr) =
+                run_cli(&["run", path, "--tasks", tasks, "--extensions", ""]);
+            assert_ne!(code, 0, "{tasks} should fail");
+            assert!(stderr.contains(expected), "{tasks}: stderr: {stderr}");
+        }
     }
 
     #[test]

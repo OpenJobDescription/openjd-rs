@@ -8425,7 +8425,7 @@ fn submitted_numeric_parameter_values_reject_other_text() {
     // value of only white space, and U+200B (not `White_Space`) are errors, and
     // the message quotes the value as given.
     let template = numeric_params_template("");
-    for value in ["1 0", " ", "\u{200b}7"] {
+    for value in ["1 0", " ", "\u{200b}7", " 7x\t"] {
         let err = preprocess_numeric(&template, &[("I", value), ("F", "2.5")]).unwrap_err();
         assert_eq!(
             err.to_string(),
@@ -8640,4 +8640,43 @@ fn action_timeout_format_string_ignores_white_space() {
             parse_and_create(&template, &[("T", seven)]);
         }
     }
+}
+
+#[test]
+fn list_parameter_string_elements_ignore_white_space() {
+    // A string element of a LIST[INT], LIST[FLOAT] or LIST[LIST[INT]] value
+    // is coerced like a scalar INT or FLOAT value, so white space around its
+    // number is ignored too, and an error quotes the element as given.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {"name": "LI", "type": "LIST[INT]"},
+            {"name": "LF", "type": "LIST[FLOAT]"},
+            {"name": "LL", "type": "LIST[LIST[INT]]"}
+        ],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#;
+    let values = preprocess_numeric(
+        template,
+        &[
+            ("LI", r#"[1, " 2 ", "\t3\n"]"#),
+            ("LF", r#"[1.5, " 2.50 "]"#),
+            ("LL", r#"[[1, " 2"], ["\u00a03"]]"#),
+        ],
+    )
+    .unwrap();
+    assert_eq!(values["LI"].value.to_display_string(), "[1, 2, 3]");
+    assert_eq!(values["LF"].value.to_display_string(), "[1.5, 2.50]");
+    assert_eq!(values["LL"].value.to_display_string(), "[[1, 2], [3]]");
+    let err = preprocess_numeric(
+        template,
+        &[("LI", r#"[" 2 0 "]"#), ("LF", "[1.5]"), ("LL", "[[1]]")],
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'LI': Value ' 2 0 ' is not a valid integer or integer string."
+    );
 }

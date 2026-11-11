@@ -1699,7 +1699,8 @@ fn numeric_param_check_constraints_ignores_white_space_around_the_number() {
         "Parameter 'F': value 0.25 is less than minimum 0.5"
     );
     // White space inside the number, and U+200B, which is not white space.
-    for value in ["1 0", "\u{200b}7"] {
+    // The message quotes the value as given, with its white space.
+    for value in ["1 0", "\u{200b}7", " 7x\t"] {
         assert_eq!(
             check(0, value).unwrap_err(),
             format!("Parameter 'I': value '{value}' is not a valid integer")
