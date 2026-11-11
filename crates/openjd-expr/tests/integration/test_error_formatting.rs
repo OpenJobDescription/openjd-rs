@@ -1115,12 +1115,62 @@ fn multiline_stray_assignment() {
 
 #[test]
 fn multiline_unclosed_bracket() {
-    let e = ParsedExpression::new("[1,\n2").unwrap_err().to_string();
-    assert!(
-        e.starts_with("Syntax error: unexpected EOF while parsing\n"),
-        "{e}"
+    // End of input is a zero-width error; the caret goes on the last line,
+    // where the input ended, not on the first.
+    assert_err(
+        "[1,\n2",
+        &[
+            "Syntax error: unexpected EOF while parsing\n",
+            "  2\n",
+            "  ^",
+        ],
     );
-    assert!(!e.contains("`)`"), "{e}");
+    assert_err(
+        "{\n'a': 1,\n'b':",
+        &[
+            "Syntax error: unexpected EOF while parsing\n",
+            "  'b':\n",
+            "  ^~~~",
+        ],
+    );
+}
+
+#[test]
+fn multiline_error_at_end_of_input_is_on_the_last_line() {
+    assert_err(
+        "1 +\n2 +\n3 +\n4 +",
+        &["Syntax error: Expected an expression\n", "  4 +\n", "  ^~~"],
+    );
+}
+
+#[test]
+fn syntax_error_shows_keyword_attributes_as_written() {
+    // Contextual keywords are renamed to placeholders before parsing; the
+    // error must still show the text the author wrote, not `Param.af`.
+    assert_err(
+        "Param.if +",
+        &[
+            "Syntax error: Expected an expression\n",
+            "  Param.if +\n",
+            "  ^~~~~~~~~~",
+        ],
+    );
+    assert_err(
+        "X.is + Y.as +",
+        &[
+            "Syntax error: Expected an expression\n",
+            "  X.is + Y.as +\n",
+            "  ^",
+        ],
+    );
+    assert_err(
+        "Param.if\n + Param.class +",
+        &[
+            "Syntax error: Expected an expression\n",
+            "   + Param.class +\n",
+            "  ^",
+        ],
+    );
 }
 
 #[test]

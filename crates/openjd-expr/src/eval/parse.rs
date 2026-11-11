@@ -616,20 +616,28 @@ fn parse_inner(
 }
 
 /// Convert a ruff parse error into an [`ExpressionError`] with a caret into
-/// `source` (the expression text as written, before keyword renames, which
-/// keep every offset unchanged).
+/// `source`. Pass the expression text as written, not the keyword-renamed
+/// text the parser saw: the renames keep every offset unchanged, and the
+/// author should see `Param.if`, not its placeholder.
 fn syntax_error(e: &ruff_python_parser::ParseError, source: &str) -> ExpressionError {
     let msg = format!(
         "Syntax error: {}",
         syntax_error_message(&e.error, e.location, source)
     );
-    let start = e.location.start().to_usize();
-    let end = e.location.end().to_usize();
-    // For zero-width ranges (like EOF), point at the whole expression
+    let start = e.location.start().to_usize().min(source.len());
+    let end = e.location.end().to_usize().min(source.len());
+    // A zero-width range (such as end of input) has nothing to underline, so
+    // underline the line it is on: the whole expression when it is one line,
+    // and otherwise the line where the error is (for end of input, the last
+    // line), since the caret display shows only the line its span starts on.
     let (col, end_col) = if start == end {
-        (0, source.len())
+        let line_start = source[..start].rfind('\n').map_or(0, |i| i + 1);
+        let line_end = source[start..]
+            .find('\n')
+            .map_or(source.len(), |i| start + i);
+        (line_start, line_end)
     } else {
-        (start.min(source.len()), end.min(source.len()))
+        (start, end)
     };
     ExpressionError::new(msg).with_span(source, col, end_col.max(col + 1))
 }

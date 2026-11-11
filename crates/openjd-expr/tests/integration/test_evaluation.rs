@@ -181,7 +181,7 @@ fn multiline_float_passthrough_not_misaligned() {
 // "a.alassc1" — a silently wrong value, with no error surfaced. The rename
 // now runs on the lexer's tokens, and a literal is a single string token.
 #[test]
-fn keyword_retry_leaves_string_literals_alone() {
+fn keyword_rename_leaves_string_literals_alone() {
     let mut st = SymbolTable::new();
     st.set("X.class", "c1").unwrap();
     assert_eq!(
@@ -191,7 +191,7 @@ fn keyword_retry_leaves_string_literals_alone() {
 }
 
 #[test]
-fn keyword_retry_leaves_literals_alone_in_either_order() {
+fn keyword_rename_leaves_literals_alone_in_either_order() {
     // The literal after the keyword access was never the failing case (the
     // scan found the real one first), so it is the negative control: both
     // orders must now agree.
@@ -210,9 +210,9 @@ fn keyword_retry_leaves_literals_alone_in_either_order() {
 }
 
 #[test]
-fn keyword_retry_still_renames_multiple_distinct_keywords() {
-    // Negative control: the retry must still fix every contextual keyword,
-    // one parse attempt at a time, including repeats of the same keyword.
+fn keyword_rename_still_renames_multiple_distinct_keywords() {
+    // Negative control: the rename must still fix every contextual keyword,
+    // including repeats of the same keyword.
     let mut st = SymbolTable::new();
     st.set("A.class", "a1").unwrap();
     st.set("B.if", "b1").unwrap();
@@ -224,13 +224,9 @@ fn keyword_retry_still_renames_multiple_distinct_keywords() {
 }
 
 #[test]
-fn keyword_retry_handles_keyword_prefixes_of_other_keywords() {
-    // End-to-end smoke check only. It does NOT pin the token delimiting:
-    // truncating `.assert` to the keyword `.as` still evaluates correctly,
-    // because resolve_keyword_renames rewrites `.placeholder` to `.original`
-    // as an unanchored substring and make_replacement only changes a keyword's
-    // first character, so the truncated placeholder reconstructs by accident.
-    // The delimiting is pinned by the rename_keyword_at_* unit tests in
+fn keyword_rename_handles_keyword_prefixes_of_other_keywords() {
+    // End-to-end smoke check. The token delimiting itself (`.assert` renamed
+    // as `assert`, not `as`) is pinned by the rename_* unit tests in
     // eval/parse.rs, which observe the recorded rename directly.
     let mut st = SymbolTable::new();
     st.set("X.assert", "v").unwrap();
@@ -241,7 +237,29 @@ fn keyword_retry_handles_keyword_prefixes_of_other_keywords() {
 }
 
 #[test]
-fn keyword_retry_requires_attribute_position() {
+fn keyword_rename_maps_back_placeholders_that_are_prefixes_of_others() {
+    // `is` and `as` both want the placeholder `bs`, and `assert`, `async`
+    // and `await` want `bssert`, `bsync` and `bwait` (the `a...` forms are
+    // keywords). Mapping back by substring turned `Param.bssert` into
+    // `Param.isssert` whenever the rename map's hash order visited `bs`
+    // first, so these failed about half the time. Each run builds a fresh
+    // map with a fresh hash seed, so many runs cover both orders.
+    for (expr, a, b) in [
+        ("Param.is + Param.assert", "Param.is", "Param.assert"),
+        ("Param.as + Param.async", "Param.as", "Param.async"),
+        ("Param.is + Param.await", "Param.is", "Param.await"),
+    ] {
+        let mut st = SymbolTable::new();
+        st.set(a, 1i64).unwrap();
+        st.set(b, 2i64).unwrap();
+        for _ in 0..200 {
+            assert_eq!(eval_with(expr, &st).to_display_string(), "3", "{expr}");
+        }
+    }
+}
+
+#[test]
+fn keyword_rename_requires_attribute_position() {
     // Negative control for the "must follow a '.'" guard: a bare keyword is a
     // real syntax error and must not be renamed into a valid identifier.
     assert!(eval_err_msg("1 + class").contains("Syntax error"));
@@ -249,7 +267,7 @@ fn keyword_retry_requires_attribute_position() {
 }
 
 #[test]
-fn keyword_retry_offsets_are_bytes_not_chars() {
+fn keyword_rename_offsets_are_bytes_not_chars() {
     // The old boundary check indexed `source.chars().nth(byte_offset)`, mixing
     // a byte offset into a char index. With multi-byte characters ahead of the
     // attribute the two diverge, and `.if` inside `.iffy` could pass the

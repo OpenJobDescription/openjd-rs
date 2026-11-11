@@ -225,8 +225,8 @@ pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;
 pub const MAX_EXPRESSION_DEPTH: usize = 64;
 
 /// Maximum source length (in bytes) for a single `ParsedExpression::new`
-/// call. Sized to leave generous headroom on a debug-profile 32 MB
-/// parser-thread stack.
+/// call. Bounds the parser's stack use (with its `stacker` feature and the
+/// 32 MB parser thread) and its work (see parser.md, Depth Limit).
 pub const MAX_PARSE_INPUT_LEN: usize = 64 * 1024;
 ```
 

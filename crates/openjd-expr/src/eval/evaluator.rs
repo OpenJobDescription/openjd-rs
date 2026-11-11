@@ -2487,6 +2487,16 @@ fn build_dotted_name_from_attr(a: &ast::ExprAttribute) -> Option<String> {
     Some(parts.join("."))
 }
 
+/// Map each placeholder attribute in a dotted path back to the keyword it
+/// replaced (`Param.xf` back to `Param.if`).
+///
+/// Whole segments are matched, never substrings: one placeholder can be a
+/// prefix of another (`is` and `assert` become `bs` and `bssert`), and
+/// replacing `.bs` as a substring turned `Param.bssert` into
+/// `Param.isssert` whenever the hash map happened to visit `bs` first. The
+/// first segment is never a placeholder, because only names after a `.` are
+/// renamed, and a placeholder never occurs in the source, so no other
+/// segment can match one by accident.
 fn resolve_keyword_renames(
     name: &str,
     renames: &std::collections::HashMap<String, String>,
@@ -2494,12 +2504,11 @@ fn resolve_keyword_renames(
     if renames.is_empty() {
         return name.to_string();
     }
-    let mut result = name.to_string();
-    for (replacement, original) in renames {
-        // Replace .replacement with .original in dotted paths
-        let from = format!(".{replacement}");
-        let to = format!(".{original}");
-        result = result.replace(&from, &to);
+    let mut segments = name.split('.');
+    let mut result = segments.next().unwrap_or_default().to_string();
+    for segment in segments {
+        result.push('.');
+        result.push_str(renames.get(segment).map_or(segment, String::as_str));
     }
     result
 }

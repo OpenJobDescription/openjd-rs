@@ -103,8 +103,10 @@ The solution, before parsing:
    can map placeholder names back to the original attribute names
 
 Placeholders are chosen left to right against the text as renamed so far, so a
-placeholder never collides with the source or with another placeholder, and repeated
-accesses (`A.class + B.class`) share one entry. Syntax errors are reported against the
+placeholder never occurs in the source and no two keywords share one, and repeated
+accesses (`A.class + B.class`) share one entry. One placeholder can still be a prefix
+of another (`is` and `assert` become `bs` and `bssert`), so the evaluator maps them
+back by whole dotted-path segment, never by substring. Syntax errors are reported against the
 original text, which the same-length renames leave aligned.
 
 This matches the Python implementation's `ast_parse_keyword_context()` approach, which
@@ -265,6 +267,8 @@ parser reports, in AST ranges and errors alike, is therefore a byte offset into 
 expression as written, and error messages show only the relevant line with its
 columns (see [error-formatting.md](error-formatting.md)).
 
+A multi-line expression may end in a `#` comment, as in parentheses in Python.
+
 Until #489 the expression was wrapped in `(...)` before parsing instead. That shifted
 every offset by one byte, which three consumers each undid separately and one didn't
 (the caret for a multi-line binary operator landed one byte right of the operator),
@@ -277,3 +281,7 @@ The Python implementation uses `ast.parse(expr, mode='eval')` from the standard 
 The Rust implementation uses `ruff_python_parser::parse_expression()` which produces
 `ruff_python_ast` types instead of Python `ast` types. The AST structures are nearly
 identical, so the evaluator logic translates directly.
+
+Syntax errors are worded differently: the Python implementation reports CPython's
+`SyntaxError` messages, and this crate reports Ruff's (see "Error messages" above). The
+error location and caret format are the same.
