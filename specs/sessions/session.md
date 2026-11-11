@@ -135,9 +135,10 @@ so it is ending-only (`ReadyEnding`). Two of these run before the action is repo
 `Running`, so they occur even for an environment with no `onEnter`/`onExit`: building the
 symbol table (an undeserializable `resolved_symtab`, a job or task parameter value that
 can't be coerced to its declared type, a `PATH` parameter over the path mapping limit)
-and resolving an environment's `variables`. The rest run inside the `onEnter`/`onExit`
-(or `run_task`) action branch, after `Running`: writing the path mapping rules file and
-resolving or writing an RFC 0008 wrap hook's symbols and embedded files. (The Python
+and resolving an environment's `variables`. The rest run after `Running`: writing the path mapping rules file and resolving or
+writing an RFC 0008 wrap hook's symbols and embedded files (in the `onEnter`/`onExit`
+action branch), and, in `run_task` only, building the symbol table and coercing task
+parameter values (`run_task` reports `Running` before it builds the table). (The Python
 runtime writes the path mapping rules file unconditionally, so it can fail that write for
 an environment with no `onEnter`/`onExit` where Rust does not — a pre-existing
 divergence.) Failures after the subprocess is dispatched,
@@ -260,10 +261,11 @@ must be `Send + Sync` because it's invoked from the async task processing `Actio
 values.
 
 The callback fires on:
-- Action start (state = Running) — except an `enter_environment` or `exit_environment`
-  failure while building the symbol table, or an `enter_environment` failure resolving an
-  environment's `variables`, which happens before `Running` and reports only the `Failed`
-  state. `run_task` always reports `Running` first (see
+- Action start (state = Running) — but not for an `enter_environment`/`exit_environment`
+  action that has no `onEnter`/`onExit` (it records `Success` without a `Running`
+  callback), nor for a failure before that action is reported `Running` (building the
+  symbol table, or resolving an environment's `variables`), which reports only the
+  `Failed` state. `run_task` always reports `Running` first (see
   [Failures before an action starts](#failures-before-an-action-starts))
 - Every `openjd_*` directive (progress, status, fail)
 - Action completion (state = Success/Failed/Canceled/Timeout)

@@ -840,3 +840,96 @@ async fn enter_pre_start_failure_logs_the_banner() {
         );
     });
 }
+
+// ── Pre-start failures after the Running notification ────────────────
+//
+// Path mapping and RFC 0008 wrap-hook setup run inside the onEnter/onExit
+// action branch, after the session reports Running, so they settle through
+// fail_action_setup and fire [Running, Failed] (unlike the symbol-table and
+// variables failures above, which fire [Failed] only). These pin that
+// sequence for enter and exit; a mutant that drops the fail_action_setup at
+// those sites, or moves the Running notification after them, changes it.
+
+/// Make the session working directory unwritable so the path mapping rules
+/// file (written unconditionally) can't be created.
+#[cfg(unix)]
+fn make_working_dir_readonly(s: &Session) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(
+        s.working_directory(),
+        std::fs::Permissions::from_mode(0o500),
+    )
+    .unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn enter_path_mapping_write_failure_reports_running_then_failed() {
+    let root = TempDir::new().unwrap();
+    let (mut s, seen) = session(&root, JobParameterValues::new());
+    make_working_dir_readonly(&s);
+    // onEnter present, so the action is reported Running before path mapping.
+    let result = s
+        .enter_environment(
+            &env(
+                "Env",
+                Some(action("echo entered")),
+                Some(action("echo exited")),
+            ),
+            None,
+            Some("env-1"),
+            None,
+        )
+        .await;
+    let err = result.expect_err("the path mapping write must fail");
+    assert!(
+        matches!(err, SessionError::WorkingDirectory { .. }),
+        "expected WorkingDirectory, got {err:?}"
+    );
+    let status = s.action_status().unwrap();
+    assert_eq!(status.state, ActionState::Failed);
+    assert_eq!(
+        status.fail_message.as_deref(),
+        Some(err.to_string().as_str())
+    );
+    assert_eq!(
+        seen.lock().unwrap().as_slice(),
+        &[ActionState::Running, ActionState::Failed],
+        "a failure after Running reports Running then Failed"
+    );
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    assert_eq!(s.environments_entered(), ["env-1".to_string()]);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn exit_path_mapping_write_failure_reports_running_then_failed() {
+    let root = TempDir::new().unwrap();
+    let (mut s, seen) = session(&root, JobParameterValues::new());
+    let id = s
+        .enter_environment(
+            &env("Env", None, Some(action("echo exited"))),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let before = seen.lock().unwrap().len();
+    make_working_dir_readonly(&s);
+    // onExit present, so the exit action is reported Running before path mapping.
+    let result = s.exit_environment(&id, None, true, None).await;
+    let err = result.expect_err("the path mapping write must fail");
+    assert!(
+        matches!(err, SessionError::WorkingDirectory { .. }),
+        "expected WorkingDirectory, got {err:?}"
+    );
+    assert_eq!(s.action_status().unwrap().state, ActionState::Failed);
+    assert_eq!(
+        &seen.lock().unwrap()[before..],
+        &[ActionState::Running, ActionState::Failed],
+        "a failure after Running reports Running then Failed"
+    );
+    assert_eq!(s.state(), SessionState::ReadyEnding);
+    assert!(s.environments_entered().is_empty());
+}

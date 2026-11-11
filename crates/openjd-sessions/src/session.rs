@@ -1246,7 +1246,7 @@ impl Session {
     /// its action's subprocess started (e.g. the symbol table failing to
     /// build, wrap-symbol seeding or path mapping materialization failing
     /// before the subprocess dispatch). Such a failure fails the action,
-    /// as in the Python runtime (spec § Brittle Sessions).
+    /// as in the Python runtime (spec § Failures before an action starts).
     ///
     /// Without this, an early `?` return would leave the session state
     /// `Running` with no terminal `ActionStatus` — callers polling for

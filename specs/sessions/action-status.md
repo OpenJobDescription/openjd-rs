@@ -57,7 +57,8 @@ is non-terminal.
    call that fails before its action is reported `Running` (building the symbol table,
    or — for enter — resolving an environment's `variables`) skips this step: the session
    sets `state = Failed` with the error's message as `fail_message` itself and fires one
-   callback. `run_task` always reports `Running` first (see
+   callback. `run_task` always reports `Running` first. An enter/exit action with no
+   `onEnter`/`onExit` records `Success` directly, also without a `Running` callback (see
    [session.md § Failures before an action starts](session.md#failures-before-an-action-starts)).
 
 2. **Directives arrive**: `apply_message` updates the relevant field and fires
