@@ -725,29 +725,23 @@ pub(super) fn coerce_to_job_parameter_type(
 
 /// Coerce a string value to the target type.
 ///
-/// An INT or FLOAT value is an `<intstring>` or `<floatstring>`, so white
-/// space around the number is ignored (Template Schemas §7.5); a FLOAT keeps
-/// its text without it. Messages quote `s` as given.
+/// An INT or FLOAT value is an `<intstring>` or `<floatstring>`, parsed by
+/// [`openjd_expr::ExprValue::from_str_coerce`]: white space around the number
+/// is ignored (Template Schemas §7.5), and a FLOAT keeps its text without it.
+/// Messages quote `s` as given.
 pub(super) fn coerce_from_str(
     s: &str,
     param_type: JobParameterType,
 ) -> Result<openjd_expr::ExprValue, String> {
-    use openjd_expr::ExprValue;
+    use openjd_expr::{ExprType, ExprValue, PathFormat};
     Ok(match param_type {
-        JobParameterType::Int => s
-            .trim()
-            .parse::<i64>()
-            .map(ExprValue::Int)
-            .map_err(|_| format!("Value '{s}' is not a valid integer or integer string."))?,
+        JobParameterType::Int => {
+            ExprValue::from_str_coerce(s, &ExprType::INT, PathFormat::Posix)
+                .map_err(|_| format!("Value '{s}' is not a valid integer or integer string."))?
+        }
         JobParameterType::Float => {
-            let text = s.trim();
-            let f = text
-                .parse::<f64>()
-                .map_err(|_| format!("Value '{s}' is not a valid float."))?;
-            ExprValue::Float(
-                openjd_expr::value::Float64::with_str(f, text.to_string())
-                    .map_err(|_| format!("Value '{s}' is not a valid float."))?,
-            )
+            ExprValue::from_str_coerce(s, &ExprType::FLOAT, PathFormat::Posix)
+                .map_err(|_| format!("Value '{s}' is not a valid float."))?
         }
         JobParameterType::Bool => match s.to_lowercase().as_str() {
             "true" | "yes" | "on" | "1" => ExprValue::Bool(true),

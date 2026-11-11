@@ -8422,10 +8422,11 @@ fn submitted_numeric_parameter_values_check_constraints_after_trimming() {
 #[test]
 fn submitted_numeric_parameter_values_reject_other_text() {
     // Only white space around the number is ignored. White space inside it, a
-    // value of only white space, and U+200B (not `White_Space`) are errors, and
-    // the message quotes the value as given.
+    // value of only white space, and U+200B, U+001C and U+001F (not
+    // `White_Space`, though Python's `str.isspace` counts the last two) are
+    // errors, and the message quotes the value as given.
     let template = numeric_params_template("");
-    for value in ["1 0", " ", "\u{200b}7", " 7x\t"] {
+    for value in ["1 0", " ", "\u{200b}7", "\u{1c}7", "7\u{1f}", " 7x\t"] {
         let err = preprocess_numeric(&template, &[("I", value), ("F", "2.5")]).unwrap_err();
         assert_eq!(
             err.to_string(),

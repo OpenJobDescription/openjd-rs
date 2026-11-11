@@ -1217,7 +1217,7 @@ impl JobFloatParameterDefinition {
         reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
     )]
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
-        // An `<floatstring>`: white space around the number is ignored
+        // A `<floatstring>`: white space around the number is ignored
         // (Template Schemas §7.5).
         let parsed: f64 = value.trim().parse().map_err(|_| {
             format!(

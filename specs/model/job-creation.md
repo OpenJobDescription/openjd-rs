@@ -194,6 +194,8 @@ budgets template validation and the session runtime apply.
      depending on a job parameter is first checked here.
    - Host requirement values (amounts min/max, attribute values). Resolved amount bounds
      must be finite `f64` values; non-numeric, NaN, and infinite results are rejected.
+     White space around the number is ignored (Template Schemas §7.5), in a whole-field
+     expression's `float?` coercion and in a multi-segment string alike.
      Resolved `attributes[].anyOf` / `.allOf` elements are re-checked against
      `<AttributeCapabilityValue>` (§3.3.2.2) via
      `capabilities::validate_attribute_capability_value`, because decode skips that check

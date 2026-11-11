@@ -608,7 +608,8 @@ Unicode `White_Space` property, which is the set the spec names. It is not CPyth
 `str.isspace` set, which adds U+001C..U+001F; CPython's own `int()` and `float()` reject
 those too (see function-library.md). White space inside the number, or a string of only
 white space, is still an error. Error messages quote the string as given:
-`Cannot convert ' 4 2 ' to int: invalid digit found in string`.
+`Cannot convert ' 4 2 ' to int: invalid digit found in string`. The JSON transport
+decoder does not apply this rule (see [JSON Transport Format](#json-transport-format)).
 
 `from_str_coerce` is not a subset of the target-type coercion table above, and the
 two are deliberately distinct: this is the entry point from outside the expression
@@ -642,6 +643,13 @@ display string and scalar values are serialized as JSON strings:
 
 `from_json_transport` takes a `PathFormat` parameter to construct path values with the
 correct format for the receiving process.
+
+Decoding parses a string value as [from_str_coerce](#from_str_coerce) does, except that an
+`int` or `float` value must be the number exactly: the white space a numeric string may
+have around it is not part of the transport format, since `to_json_transport` never writes
+it. `{"type": "int", "value": " 42 "}` is an error
+(`Cannot convert ' 42 ' to int: invalid digit found in string`), in a list and in a
+`SymbolTable` entry too.
 
 ### Shared Format with SerializedSymbolTable
 

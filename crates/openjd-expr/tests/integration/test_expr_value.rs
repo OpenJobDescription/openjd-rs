@@ -657,6 +657,40 @@ fn transport_float_roundtrip() {
 }
 
 #[test]
+fn transport_numbers_are_exact() {
+    // The JSON transport writes numbers without white space, and reading
+    // one back does not apply the numeric-string rule (Template Schemas
+    // §7.5) that `from_str_coerce` does: a padded int or float is an error,
+    // in a scalar, in a list, and in a serialized symbol table.
+    for (json, expected) in [
+        (
+            serde_json::json!({"type": "int", "value": " 42 "}),
+            "Cannot convert ' 42 ' to int: invalid digit found in string",
+        ),
+        (
+            serde_json::json!({"type": "float", "value": "\t3.5"}),
+            "Cannot convert '\t3.5' to float: invalid float literal",
+        ),
+        (
+            serde_json::json!({"type": "list[int]", "value": ["1", " 2"]}),
+            "Cannot convert ' 2' to int: invalid digit found in string",
+        ),
+    ] {
+        let err = ExprValue::from_json_transport(&json, PathFormat::Posix).unwrap_err();
+        assert_eq!(err.to_string(), expected, "{json}");
+    }
+    let err = serde_json::from_value::<openjd_expr::SymbolTable>(serde_json::json!([
+        {"name": "Param.N", "type": "int", "value": " 9 "}
+    ]))
+    .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("Cannot convert ' 9 ' to int: invalid digit found in string"),
+        "{err}"
+    );
+}
+
+#[test]
 fn transport_string_roundtrip() {
     let v = ExprValue::String("hello world".to_string());
     let json = v.to_json_transport();

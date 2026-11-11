@@ -2917,9 +2917,10 @@ steps:
     #[test]
     fn test_task_param_numeric_values_ignore_white_space() {
         // INT and FLOAT task parameter values are numeric strings: white
-        // space around the number is ignored (Template Schemas §7.5), from
-        // --task-param and from --tasks alike. White space inside the
-        // number is still an error.
+        // space around the number (Unicode `White_Space`) is ignored
+        // (Template Schemas §7.5), from --task-param and from --tasks alike.
+        // White space inside the number, and characters that are not
+        // `White_Space`, are still errors, quoted as given.
         let mut tmpl = NamedTempFile::with_suffix(".yaml").unwrap();
         write!(
             tmpl,
@@ -2935,15 +2936,20 @@ steps:
     - name: F
       type: FLOAT
       range: [2.5]
+    - name: S
+      type: STRING
+      range: [abc]
   script:
     actions:
       onRun:
         command: python
-        args: ["-c", "print('VALUES=[{{{{Task.Param.I}}}}][{{{{Task.Param.F}}}}]')"]
+        args: ["-c", "print('VALUES=[{{{{Task.Param.I}}}}][{{{{Task.Param.F}}}}][{{{{Task.Param.S}}}}]')"]
 "#
         )
         .unwrap();
         let path = tmpl.path().to_str().unwrap();
+        // The whole -t argument is trimmed before it is split, so the STRING
+        // value has no outer spaces either.
         let (code, stdout, stderr) = run_cli(&[
             "run",
             path,
@@ -2951,21 +2957,25 @@ steps:
             "I=\t7",
             "-t",
             "F=\u{a0}2.5",
+            "-t",
+            " S=abc ",
             "--extensions",
             "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("VALUES=[7][2.5]"), "stdout: {stdout}");
-        let (code, stdout, stderr) = run_cli(&[
-            "run",
-            path,
-            "--tasks",
-            r#"[{"I": " 7\n", "F": "\t2.5 "}]"#,
-            "--extensions",
-            "",
-        ]);
-        assert_eq!(code, 0, "stderr: {stderr}");
-        assert!(stdout.contains("VALUES=[7][2.5]"), "stdout: {stdout}");
+        assert!(stdout.contains("VALUES=[7][2.5][abc]"), "stdout: {stdout}");
+        for tasks in [
+            r#"[{"I": " 7\n", "F": "\t2.5 ", "S": "abc"}]"#,
+            r#"[{"I": "\u3000 7", "F": "2.5\u2028", "S": "abc"}]"#,
+        ] {
+            let (code, stdout, stderr) =
+                run_cli(&["run", path, "--tasks", tasks, "--extensions", ""]);
+            assert_eq!(code, 0, "{tasks}: stderr: {stderr}");
+            assert!(
+                stdout.contains("VALUES=[7][2.5][abc]"),
+                "{tasks}: stdout: {stdout}"
+            );
+        }
         let (code, _stdout, stderr) = run_cli(&[
             "run",
             path,
@@ -2973,6 +2983,8 @@ steps:
             "I=7 0",
             "-t",
             "F=2.5",
+            "-t",
+            "S=abc",
             "--extensions",
             "",
         ]);
@@ -2981,20 +2993,47 @@ steps:
             stderr.contains("Task parameter 'I': expected INT, got '7 0'"),
             "stderr: {stderr}"
         );
-        // The errors quote the value as given, white space included (inline
-        // JSON, since the whole -t argument is trimmed before it is split).
-        for (tasks, expected) in [
+        // Inline JSON, so the value keeps white space at both ends.
+        for (i, f, expected) in [
             (
-                r#"[{"I": " 7 0 ", "F": "2.5"}]"#,
+                " 7 0 ",
+                "2.5",
                 "Task parameter 'I': expected INT, got ' 7 0 '",
             ),
             (
-                r#"[{"I": "7", "F": " 2.5x\t"}]"#,
+                "\\u001c7",
+                "2.5",
+                "Task parameter 'I': expected INT, got '\u{1c}7'",
+            ),
+            (
+                "\\u200b7",
+                "2.5",
+                "Task parameter 'I': expected INT, got '\u{200b}7'",
+            ),
+            (
+                "7",
+                " 2.5x\\t",
                 "Task parameter 'F': expected FLOAT, got ' 2.5x\t'",
             ),
+            (
+                "7",
+                "2.5\\u001f",
+                "Task parameter 'F': expected FLOAT, got '2.5\u{1f}'",
+            ),
+            (
+                "7",
+                "\\ufeff2.5",
+                "Task parameter 'F': expected FLOAT, got '\u{feff}2.5'",
+            ),
+            (
+                "7",
+                " inf ",
+                "Task parameter 'F': value must be finite, got ' inf '",
+            ),
         ] {
+            let tasks = format!(r#"[{{"I": "{i}", "F": "{f}", "S": "abc"}}]"#);
             let (code, _stdout, stderr) =
-                run_cli(&["run", path, "--tasks", tasks, "--extensions", ""]);
+                run_cli(&["run", path, "--tasks", &tasks, "--extensions", ""]);
             assert_ne!(code, 0, "{tasks} should fail");
             assert!(stderr.contains(expected), "{tasks}: stderr: {stderr}");
         }
