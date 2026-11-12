@@ -54,6 +54,14 @@ and `.d.ts` files. The package entry point is `index.js`, which re-exports
 `FunctionLibrary` you pass rather than use it up (see
 `specs/openjd-for-js/spec.md`, "Package Entry Point").
 
+## Limits
+
+An expression may be at most 512 bytes long (64 KB in native builds). wasm32 can't
+spawn the worker thread that native builds parse long expressions on, and the cap keeps
+the parser's recursion within the JS engine's call stack. Each `{{ }}` interpolation
+in a format string counts separately. See `specs/openjd-for-js/spec.md`, "Expression
+Length".
+
 ## Minimum supported Rust version
 
 Rust **1.97.0**. Enforced in CI.

@@ -230,28 +230,47 @@ uses, and `wasm32-wasip1`) can't spawn threads: `std::thread::Builder::spawn`
 returns an error. So on wasm32 `ParsedExpression::new` parses every input on
 the caller's thread, and the input cap is what keeps that safe. There are
 two stacks on wasm32. The shadow stack, in linear memory, holds the frames
-whose address is taken; `stacker` can't find its limit there, so the first
-time the parser asks (past 20 levels) it moves to a 1 MB heap segment, as on
-other targets. The WebAssembly engine's own call stack holds a frame for
-every call, and nothing in the module can grow it. When it runs out, the
-engine throws a JS `RangeError` out of the middle of the parse, which skips
-every Rust destructor and leaves the module's state inconsistent.
+whose address is taken. `stacker` can't find its limit there
+(`remaining_stack()` is `None`), so when the parser starts (ruff calls
+`stacker::maybe_grow` once at parse entry, and again past 20 levels of
+recursion) it moves to a fresh 1 MB heap segment, which it frees when the
+parse returns. Every wasm32 parse allocates that megabyte. The WebAssembly
+engine's own call stack holds a frame for every call, and nothing in the
+module can grow it. When it runs out, the engine throws a JS `RangeError`
+out of the middle of the parse. That skips every Rust destructor, so the
+heap segment leaks (about half a megabyte of linear memory per `RangeError`,
+measured over 100 of them), and `stacker`'s recorded limit and the shadow
+stack pointer are left pointing into it: the module's state is
+inconsistent.
 
 The engine's stack limit, not the AST depth limit, decides which inputs fail
-this way, because the parser recurses before the depth walker runs. Measured
-in Node.js 24 (V8, default `--stack-size=984` KB, release build), the first
-`RangeError` comes at about 1,300 bytes of unclosed `(` or `[`, 1,850 bytes
-of `-`, 1,900 bytes of unclosed `f'{`, and 21 KB of `a.b.c...` (whose
-deeply left-nested AST overflows when it is dropped). The cost is linear in
-the stack size, about 770 bytes of engine stack per byte of unclosed `(`. So
-on wasm32 `MAX_PARSE_INPUT_LEN` is **512 bytes**, which needs about 400 KB
-(every such input at the cap parses under `--stack-size=400`, and unclosed
-`(` overflows under 300), under half of V8's default. Browsers' limits were
-not measured. Inputs at most 512 bytes long are also well inside this
-crate's own walkers and the evaluator, which the depth limit bounds. Each
-`{{ }}` interpolation in a format string is parsed separately, so the cap
-applies to each one, not to the whole string. The cap makes openjd-for-js
-reject expressions between 513 bytes and 64 KB that other targets accept.
+this way, because the parser recurses before the depth walker runs. The
+engine's optimizing tier uses larger frames than its baseline tier, so a
+module that has already parsed many expressions needs more stack for the
+same input than a fresh one. Measured in Node.js 24 (V8, default
+`--stack-size=984` KB, release build), the first `RangeError` comes at
+about 1,250 bytes of unclosed `{` and 1,300 bytes of unclosed `(` or `[` in
+a fresh module, but at about 850 bytes of unclosed `{` once the module is
+warmed up. Prefix `-` and unclosed `f'{` cost less per byte (about 1,850
+and 1,900 bytes in a fresh module), and `a.b.c...` overflows only at about
+21 KB, when its deeply left-nested AST is dropped. The cost is linear in the stack size, about 1,150 bytes of
+engine stack per byte of unclosed `{` when warmed up.
+
+So on wasm32 `MAX_PARSE_INPUT_LEN` is **512 bytes**. The costliest input of
+that length, unclosed `{` or `(`, needs about 400 KB of engine stack in a
+fresh module and about 600 KB in a warmed one, so it fits V8's default
+with about 1.6 times to spare. `js-tests/expression-length.test.js` in
+openjd-for-js checks the deepest shapes at the cap in 720 KB after a
+warm-up. A cap of 768 bytes would leave about 10% to spare; 512 keeps a
+margin for engines and threads with smaller stacks. Browsers' and Web
+Workers' limits were not measured. The bound holds for release builds
+only: a debug wasm build needs about twice the stack and overflows on
+512 bytes of unclosed `{` at V8's default. Inputs at most 512 bytes long
+are well inside this crate's own walkers and the evaluator, which the depth
+limit bounds. Each `{{ }}` interpolation in a format string is parsed
+separately, so the cap applies to each one, not to the whole string. The
+cap makes openjd-for-js reject expressions between 513 bytes and 64 KB that
+other targets accept.
 
 Exceeding the limit returns `ExpressionErrorKind::ExpressionTooDeep { depth,
 limit: 64 }` with normal caret formatting.

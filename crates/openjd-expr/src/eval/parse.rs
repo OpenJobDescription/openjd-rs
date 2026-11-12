@@ -556,10 +556,11 @@ const FAST_PATH_INPUT_LEN: usize = 200;
 /// each recursion level also takes a frame on the WebAssembly engine's own
 /// call stack, which nothing can grow. Overflowing that stack throws a JS
 /// `RangeError` out of the middle of the parse, which leaves the module's
-/// state inconsistent. Measured in Node.js 24 (V8's default 984 KB stack),
-/// the costliest input is unclosed `(`, at about 770 bytes of engine stack
-/// per input byte, so 512 bytes needs about 400 KB: under half of V8's
-/// default. See `specs/expr/parser.md` (Depth Limit).
+/// state inconsistent. Measured in Node.js 24 in a release build, the
+/// costliest 512-byte inputs (unclosed `{` or `(`) need about 600 KB of
+/// engine stack once the module is warmed up, which fits V8's default
+/// 984 KB with about 1.6 times to spare. See `specs/expr/parser.md` (Depth
+/// Limit, "wasm32").
 #[cfg(not(target_arch = "wasm32"))]
 pub const MAX_PARSE_INPUT_LEN: usize = 64 * 1024;
 /// Maximum permitted source length (in bytes) for a single

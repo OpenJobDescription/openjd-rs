@@ -11,64 +11,29 @@
 // ordinary error.
 
 import { describe, it, expect, beforeAll } from "vitest";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { getModule } from "./helpers.js";
+import { SHAPES, fit, moduleCap, parseOutcome, warmUp } from "./deep-shapes.js";
 
 /** openjd-expr's `MAX_PARSE_INPUT_LEN` in a wasm32 build. */
 const CAP = 512;
+
+/**
+ * Engine stack, in KB, that the deep shapes at the cap must fit in after a
+ * warm-up. Node's default is 984 KB. A warmed module needed at most about
+ * 600 KB in Node.js 24, so this leaves some room for variation between Node
+ * versions while still failing if the parser's frames grow by about a fifth,
+ * or if the cap is raised much above 512 bytes.
+ */
+const REDUCED_STACK_KB = 720;
 
 let mod;
 
 beforeAll(async () => {
   mod = await getModule();
 });
-
-/** The largest `n` for which `shape(n)` is at most `cap` bytes. */
-function fit(shape, cap) {
-  let n = 0;
-  while (shape(n + 1).length <= cap) n++;
-  return n;
-}
-
-/**
- * Parse `src`, returning `"OK"` or the error. Rethrows a RangeError, which
- * means the engine's call stack overflowed.
- */
-function parseOutcome(src) {
-  let parsed;
-  try {
-    parsed = mod.parseExpression(src);
-  } catch (e) {
-    if (e instanceof RangeError) throw e;
-    return e;
-  }
-  parsed.free();
-  return "OK";
-}
-
-// The shapes that recurse deepest per input byte: nested and unclosed
-// brackets, prefix operators, f-strings, and long left-nested chains.
-// Each maps to the outcome expected at the cap: "OK", or a pattern the error
-// message matches.
-const SHAPES = {
-  "nested parentheses": [(n) => "(".repeat(n) + "1" + ")".repeat(n), "OK"],
-  "nested lists": [(n) => "[".repeat(n) + "1" + "]".repeat(n), /nesting depth/],
-  "nested calls": [(n) => "f(".repeat(n) + "1" + ")".repeat(n), /nesting depth/],
-  "unclosed parentheses": [(n) => "(".repeat(n) + "1", /unexpected EOF/],
-  "unclosed lists": [(n) => "[".repeat(n) + "1", /unexpected EOF/],
-  "unclosed calls": [(n) => "f(".repeat(n) + "1", /unexpected EOF/],
-  "unclosed calls on juxtaposed names": [(n) => "[i f(".repeat(n) + "x", /Syntax error/],
-  "unary minus": [(n) => "-".repeat(n) + "1", /nesting depth/],
-  "not": [(n) => "not ".repeat(n) + "1", /nesting depth/],
-  "power": [(n) => "2**".repeat(n) + "1", /nesting depth/],
-  "conditional": [(n) => "1 if 1 else ".repeat(n) + "1", "OK"],
-  "lambda": [(n) => "lambda:".repeat(n) + "1", /Lambda/],
-  "unclosed f-strings": [(n) => "f'{".repeat(n) + "x", /f-string/],
-  "attribute chain": [(n) => "a" + ".b".repeat(n), /nesting depth/],
-  "keyword attribute chain": [(n) => "a" + ".if".repeat(n), /nesting depth/],
-  "binary operator chain": [(n) => "1" + "+1".repeat(n), /nesting depth/],
-  "subscript chain": [(n) => "x" + "[0]".repeat(n), /nesting depth/],
-  "nested comprehensions": [(n) => "[x for x in ".repeat(n) + "[1]" + "]".repeat(n), "OK"],
-};
 
 describe("long expressions", () => {
   it("parses and evaluates an expression longer than 200 bytes", () => {
@@ -84,6 +49,7 @@ describe("long expressions", () => {
   });
 
   it("accepts an expression of exactly the cap", () => {
+    expect(moduleCap(mod)).toBe(CAP);
     const src = "'" + "a".repeat(CAP - 2) + "'";
     expect(src.length).toBe(CAP);
     const st = new mod.SymbolTable();
@@ -103,7 +69,7 @@ describe("long expressions", () => {
 
   it("measures the cap after trimming white space", () => {
     const src = "   " + "'" + "a".repeat(CAP - 2) + "'" + "\n ";
-    expect(parseOutcome(src)).toBe("OK");
+    expect(parseOutcome(mod, src)).toBe("OK");
   });
 });
 
@@ -112,7 +78,7 @@ describe("deeply nested expressions at the cap", () => {
     it(`${name}: parses or throws an ordinary error`, () => {
       const src = shape(fit(shape, CAP));
       expect(src.length).toBeGreaterThan(CAP - 12);
-      const outcome = parseOutcome(src);
+      const outcome = parseOutcome(mod, src);
       if (expected === "OK") {
         expect(outcome).toBe("OK");
       } else {
@@ -124,10 +90,31 @@ describe("deeply nested expressions at the cap", () => {
 
   it("rejects the same shapes at 64 KB by length, before parsing", () => {
     for (const [shape] of Object.values(SHAPES)) {
-      const outcome = parseOutcome(shape(fit(shape, 64 * 1024)));
+      const outcome = parseOutcome(mod, shape(fit(shape, 64 * 1024)));
       expect(outcome).toBeInstanceOf(Error);
       expect(outcome.message).toMatch(/exceeds maximum allowed \(512 bytes/);
     }
+  });
+
+  it("parses them after a warm-up, too", () => {
+    // The engine's optimized frames are larger than its baseline ones.
+    warmUp(mod);
+    for (const [shape] of Object.values(SHAPES)) {
+      parseOutcome(mod, shape(fit(shape, CAP)));
+    }
+  });
+
+  it(`parses them in ${REDUCED_STACK_KB} KB of engine stack`, () => {
+    // Guards the margin below Node's default 984 KB stack, which the shapes
+    // above, run at the default, can't see. The child process reads the cap
+    // from the module, so it also fails if the cap is raised.
+    const child = join(dirname(fileURLToPath(import.meta.url)), "deep-shapes-child.js");
+    const out = execFileSync(process.execPath, [`--stack-size=${REDUCED_STACK_KB}`, child], {
+      encoding: "utf8",
+    });
+    const { cap, results } = JSON.parse(out.trim().split("\n").pop());
+    expect(cap).toBe(CAP);
+    expect(results).toEqual(Object.fromEntries(Object.keys(SHAPES).map((k) => [k, "ok"])));
   });
 
   it("leaves the module usable afterwards", () => {
@@ -141,12 +128,19 @@ describe("deeply nested expressions at the cap", () => {
 
 describe("format strings", () => {
   it("applies the cap to each interpolation, not the whole string", () => {
-    // Twenty 40-byte interpolations: 900 bytes in all, each under the cap.
+    // Twenty 43-byte interpolations, 860 bytes in all, each expression 37
+    // bytes.
     const part = "{{ " + "1" + " + 1".repeat(9) + " }}";
+    expect(part.repeat(20).length).toBe(860);
     const fs = new mod.FormatString(part.repeat(20));
     const st = new mod.SymbolTable();
     expect(fs.resolve(st)).toBe("10".repeat(20));
     st.free();
     fs.free();
+  });
+
+  it("rejects an interpolation over the cap", () => {
+    const src = "{{ '" + "a".repeat(CAP) + "' }}";
+    expect(() => new mod.FormatString(src)).toThrow(/maximum allowed \(512 bytes in WebAssembly builds\)/);
   });
 });
