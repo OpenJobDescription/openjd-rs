@@ -178,9 +178,10 @@ two input modes:
   checks the merged definition, which receives the coerced value). A string element of a `LIST[INT]`,
   `LIST[FLOAT]` or `LIST[LIST[INT]]` value goes through the same coercion, so
   `["1", " 2 "]` is `[1, 2]`. **Divergence from openjd-model-for-python:** Python requires
-  the elements of a list value, and the items of a list parameter's `default` and `item`
-  constraints, to be numbers, and rejects a string element (`list items must be integers, got
-  str`).
+  the elements of a list value, the items of a list parameter's `default`, and the `item`
+  constraints of a `LIST[INT]` or `LIST[LIST[INT]]`, to be numbers, and rejects a string
+  (`list items must be integers, got str`). It accepts numeric strings in `LIST[FLOAT]` item
+  constraints, which it reads as `Decimal`.
 
 - **Library input** (typed ExprValue): Validated via `coerce_to_job_parameter_type` — checks type
   compatibility, performs numeric widening (int → float), validates list element types. A native
@@ -195,7 +196,7 @@ two input modes:
   (`LIST[INT]`, `LIST[FLOAT]`, or an inner list of `LIST[LIST[INT]]`) is refused
   (`item[0]: Cannot coerce path to INT`), while the same text in JSON is a number. A JSON number
   is read as an `f64`, so `'[1.50]'` is `[1.5]` while a native float keeps `1.50`; the values are
-  equal. An element error names the element in either form
+  equal, but an error quotes each form's text (`'1.50'` against `'1.5'`). An element error names the element in either form
   (`item[1]: Value '1 000' is not a valid integer or integer string.`, or `item[1][0]: ...` in a
   `LIST[LIST[INT]]`).
 

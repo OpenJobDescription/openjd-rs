@@ -1381,7 +1381,8 @@ pub(super) fn coerce_json_to_job_parameter_type(
 /// path element is refused under an INT or FLOAT element type (`Cannot coerce path to
 /// INT`), while the same text as a JSON string is a number; and a JSON number is read
 /// as an `f64`, so a native float keeps a spelling (`1.50`) that the JSON number `1.50`
-/// does not. The values compare equal.
+/// does not. The values compare equal, but an error quotes each form's text (`'1.50'`
+/// against `'1.5'`).
 /// A numeric string element is a number with the white space around it ignored
 /// (Template Schemas §7.5), and a FLOAT string keeps its spelling.
 ///
@@ -1436,8 +1437,8 @@ fn coerce_native_list_element(
             ExprValue::Int(_) | ExprValue::Float(_) => "a number",
             ExprValue::Bool(_) => "a boolean",
             ExprValue::Null => "null",
-            other => other.type_name(),
             // e.g. `range_expr`, which only a hand-built list of lists can hold.
+            other => other.type_name(),
         };
         return Err(format!(
             "Value is not a list for parameter type {}. Got {got}.",
