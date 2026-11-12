@@ -250,10 +250,13 @@ impl JobParameterDefinition {
         }
     }
 
-    #[allow(
-        missing_docs,
-        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-    )]
+    /// The default as text that job creation parses with the declared type: the value
+    /// itself for a scalar, and JSON for a list.
+    ///
+    /// A `LIST[FLOAT]` default item written as a numeric string is a JSON string holding
+    /// its spelling without white space (`[1.5,"2.50"]` for `default: [1.5, " 2.50"]`),
+    /// so it keeps that spelling (Template Schemas §2.14); a number item is a JSON number.
+    /// A caller that reads the JSON back must accept both forms for each item.
     pub fn default_value(&self) -> Option<String> {
         match self {
             Self::STRING(p) => p.default.clone(),

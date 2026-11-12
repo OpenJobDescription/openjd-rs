@@ -8816,8 +8816,39 @@ fn native_list_parameter_values_coerce_like_json_text() {
             .unwrap_or_else(|e| panic!("{name} native: {e}"));
         let from_json = preprocess_numeric(NUMERIC_LISTS_TEMPLATE, &[json])
             .unwrap_or_else(|e| panic!("{name} JSON {}: {e}", json.1));
+        // Compare the display too: value equality ignores a float's spelling.
         assert_eq!(from_native[name].value.to_display_string(), expected);
+        assert_eq!(
+            from_json[name].value.to_display_string(),
+            expected,
+            "{name}"
+        );
         assert_eq!(from_native[name].value, from_json[name].value, "{name}");
+    }
+}
+
+#[test]
+fn an_empty_native_list_of_lists_becomes_a_list_of_int_lists() {
+    // An empty list of lists has no inner list to check, so its element type is
+    // what decides it. Whatever that type, a LIST[LIST[INT]] value comes out as
+    // `list[list[int]]`, as the JSON text `[]` does, and joins with other int lists.
+    use openjd_expr::{ExprType, ExprValue};
+    for element_type in [
+        ExprType::list(ExprType::STRING),
+        ExprType::list(ExprType::BOOL),
+        ExprType::list(ExprType::INT),
+        ExprType::NULLTYPE,
+    ] {
+        let native = ExprValue::ListList(vec![], element_type.clone(), 0);
+        let values = preprocess_values(NUMERIC_LISTS_TEMPLATE, &[("LL", native)])
+            .unwrap_or_else(|e| panic!("{element_type}: {e}"));
+        let json = preprocess_numeric(NUMERIC_LISTS_TEMPLATE, &[("LL", "[]")]).unwrap();
+        assert_eq!(
+            values["LL"].value.expr_type(),
+            ExprType::list(ExprType::list(ExprType::INT)),
+            "{element_type}"
+        );
+        assert_eq!(values["LL"].value.expr_type(), json["LL"].value.expr_type());
     }
 }
 
@@ -8853,6 +8884,21 @@ fn native_list_parameter_values_reject_a_bad_element_like_json_text() {
             ("LL", native_strings(&["1"])),
             ("LL", r#"["1"]"#),
             "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a string.",
+        ),
+        (
+            ("LL", ExprValue::make_list(vec![ExprValue::Int(1)], openjd_expr::ExprType::INT).unwrap()),
+            ("LL", "[1]"),
+            "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a number.",
+        ),
+        (
+            ("LL", ExprValue::make_list(vec![native_float("1.5")], openjd_expr::ExprType::FLOAT).unwrap()),
+            ("LL", "[1.5]"),
+            "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a number.",
+        ),
+        (
+            ("LL", ExprValue::make_list(vec![ExprValue::Bool(false)], openjd_expr::ExprType::BOOL).unwrap()),
+            ("LL", "[false]"),
+            "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a boolean.",
         ),
     ];
     for (native, json, expected) in cases {

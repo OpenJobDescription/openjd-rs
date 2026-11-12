@@ -280,8 +280,10 @@ const MAX_RESOLVED_NUMERIC_LEN: usize = 100;
 /// not counting white space (Template Schemas §7.5), for the cap
 /// [`MAX_RESOLVED_NUMERIC_LEN`].
 ///
-/// When the value is fully static this is exact: the resolved text with
-/// the white space around it removed. Otherwise it is
+/// When the resolved value is known this is exact: the resolved text with
+/// the white space around it removed. Otherwise (a segment is unresolved,
+/// or the concatenation passed `MAX_STATIC_RESOLVED_VALUE_LEN` so no value
+/// was kept) it is
 /// `min_resolved_string_len` less the white space in the literal segments,
 /// which always appears in the resolution. White space that a concrete
 /// expression segment evaluates to (`{{ ' ' * 200 }}` before an

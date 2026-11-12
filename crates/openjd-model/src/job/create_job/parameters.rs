@@ -814,13 +814,9 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
             )
             | (ExprValue::ListInt(_), JobParameterType::ListInt)
             | (ExprValue::ListFloat(_), JobParameterType::ListFloat)
-            | (ExprValue::ListBool(_), JobParameterType::ListBool)
-    ) || matches!(
-        (value, param_type),
-        // A list of lists is a LIST[LIST[INT]] only when every inner list is a list of
-        // ints. Any other inner list, such as a list of numeric strings, is coerced.
-        (ExprValue::ListList(items, _, _), JobParameterType::ListListInt)
-            if items.iter().all(|item| matches!(item, ExprValue::ListInt(_)))
+            | (ExprValue::ListBool(_), JobParameterType::ListBool) // No `ListList` arm: a list of lists is rebuilt element by element (see
+                                                                   // `coerce_to_job_parameter_type`), so its inner lists and its element type
+                                                                   // come out as `list[int]` even when it is empty or holds lists of strings.
     )
 }
 

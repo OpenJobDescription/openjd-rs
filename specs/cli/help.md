@@ -103,7 +103,7 @@ try_context_aware_help(&args)
 | No default | `[required]` |
 | STRING/PATH with newlines | `[default: see below]` + multi-line block at end |
 | STRING/PATH without newlines | `[default: 'value']` (quoted) |
-| Other types | `[default: value]` (unquoted) |
+| Other types | `[default: value]` (unquoted). A list default is its JSON text, which `-p` accepts; a `LIST[FLOAT]` item written as a numeric string shows as a JSON string, keeping its spelling (`[1.5,"2.50"]`) |
 
 Multi-line defaults (common for script content in PATH parameters) are shown after the
 description to avoid breaking the compact single-line format.

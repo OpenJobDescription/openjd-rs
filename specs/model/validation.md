@@ -416,9 +416,10 @@ so they use a soft 100-character cap (`MAX_RESOLVED_NUMERIC_LEN`): no
 reasonable numeric value is longer, and an i64 needs at most 20
 characters. White space around a numeric string is ignored (Template
 Schemas §7.5), so the cap does not count it: a format string padded with
-white space passes exactly when the same padded literal does. A fully
-static value is measured after trimming; otherwise the lower bound
-subtracts the white space in the literal segments. White space a concrete
+white space passes exactly when the same padded literal does. When the
+resolved value is known it is measured after trimming; otherwise (a segment
+is unresolved, or the value is over `MAX_STATIC_RESOLVED_VALUE_LEN`) the
+lower bound subtracts the white space in the literal segments. White space a concrete
 expression segment evaluates to (`{{ ' ' * 200 }}{{ Param.X }}`) still
 counts, because the static resolution reports only the total length.
 

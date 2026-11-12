@@ -62,7 +62,10 @@ EXPR extension variants (§2.9–2.16):
 Common methods on all variants:
 - `name() -> &str`
 - `job_param_type() -> JobParameterType`
-- `default_value() -> Option<String>` — Returns the default as a string representation
+- `default_value() -> Option<String>` — Returns the default as text job creation parses: the value
+  for a scalar, JSON for a list. A `LIST[FLOAT]` item written as a numeric string is a JSON string
+  holding its spelling (`[1.5,"2.50"]`), so a reader of the JSON must accept a number or a string
+  for each item
 - `check_constraints(&ExprValue) -> Result<(), String>` — Runtime value validation
 - `validate_definition(&EffectiveLimits) -> Result<(), Vec<String>>` — Template-level consistency (accumulates errors)
 
@@ -184,8 +187,12 @@ two input modes:
   list under `LIST[INT]`, `LIST[FLOAT]` or `LIST[LIST[INT]]` is coerced element by element through
   the same rule as the JSON text form (`coerce_list_elements`), so `[" 1", "2 "]` as a list of
   strings is `[1, 2]`, exactly as the text `'[" 1", "2 "]'` is, and a FLOAT string keeps its
-  spelling. The other list types still need their exact list variant: a `ListPath` value is refused
-  for `LIST[STRING]` and `LIST[PATH]`. An element error names the element in either form
+  spelling. A list of lists is always rebuilt this way, so it comes out as `list[list[int]]` even
+  when empty. The other list types still need their exact list variant: a `ListPath` value is
+  refused for `LIST[STRING]` and `LIST[PATH]` by design, and `LIST[BOOL]` was left out of this
+  change's scope. **Known gap:** for those types a native list and its JSON text form can still
+  differ, for example a native list of `"true"` strings is refused for `LIST[BOOL]` while the text
+  `'["true"]'` is accepted. An element error names the element in either form
   (`item[1]: Value '1 000' is not a valid integer or integer string.`, or `item[1][0]: ...` in a
   `LIST[LIST[INT]]`).
 
