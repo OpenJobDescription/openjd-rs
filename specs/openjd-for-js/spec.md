@@ -533,8 +533,9 @@ wasm32 can't spawn the worker thread that native builds parse long expressions o
 parser runs on the caller's stack. Each level of its recursion takes a frame on the
 WebAssembly engine's call stack, which the module can't grow, and overflowing it throws a
 `RangeError` that leaks memory and leaves the module in an inconsistent state. With the cap,
-the worst input needs about 600 KB of engine stack once the module is warmed up, which fits
-V8's default of 984 KB (Node.js and Chrome) with about 1.6 times to spare. This holds for
+the worst input needs up to about 600 KB of engine stack in Node.js 24 once the module is
+warmed up (Node.js 22 and 26 need less), which fits Node's default of 984 KB with about
+1.6 times to spare. This holds for
 the release build that `npm run build` makes; a debug build needs about twice the stack.
 See `specs/expr/parser.md` (Depth Limit, "wasm32") for the measurements. Browsers' own stack
 limits, and those of Web Workers, were not measured. `js-tests/expression-length.test.js`

@@ -23,9 +23,10 @@ const CAP = 512;
 /**
  * Engine stack, in KB, that the deep shapes at the cap must fit in after a
  * warm-up. Node's default is 984 KB. A warmed module needed at most about
- * 600 KB in Node.js 24, so this leaves some room for variation between Node
- * versions while still failing if the parser's frames grow by about a fifth,
- * or if the cap is raised much above 512 bytes.
+ * 600 KB in Node.js 24 and about 440 KB in Node.js 26 (both on arm64), so
+ * on Node.js 24 this fails if the parser's frames grow by about a fifth,
+ * and on Node.js 26 if they grow by more than half. A raised cap fails the
+ * `cap` check below in any case.
  */
 const REDUCED_STACK_KB = 720;
 
