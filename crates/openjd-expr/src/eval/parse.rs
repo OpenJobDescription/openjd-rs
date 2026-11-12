@@ -208,10 +208,15 @@ fn rename_contextual_keywords(
             None => {
                 let placeholder = make_replacement(token, &used).ok_or_else(|| {
                     ExpressionError::new(format!(
-                        "Cannot parse the attribute '{token}': the expression uses every \
-                         {}-character identifier, which leaves no placeholder for the keyword",
+                        "Cannot parse the attribute '{token}': the expression uses nearly \
+                         every {}-character name, so the keyword can't be renamed for parsing",
                         token.len()
                     ))
+                    .with_span(
+                        source,
+                        range.start().to_usize(),
+                        range.end().to_usize(),
+                    )
                 })?;
                 used.insert(placeholder.clone());
                 renames.insert(placeholder.clone(), token.to_string());
@@ -1345,6 +1350,28 @@ mod tests {
         );
     }
 
+    /// Every two-character ASCII identifier, built from character ranges
+    /// rather than from the search's own alphabets, so a test catches a
+    /// character dropped from them.
+    fn all_two_char_identifiers() -> HashSet<String> {
+        let start: Vec<char> = ('a'..='z').chain('A'..='Z').chain(['_']).collect();
+        let cont: Vec<char> = start.iter().copied().chain('0'..='9').collect();
+        let mut all = HashSet::new();
+        for &a in &start {
+            for &b in &cont {
+                all.insert(format!("{a}{b}"));
+            }
+        }
+        all
+    }
+
+    #[test]
+    fn make_replacement_tries_every_first_letter() {
+        // With `af` to `yf` taken, the first-letter search still reaches `zf`.
+        let used: HashSet<String> = (b'a'..=b'y').map(|c| format!("{}f", c as char)).collect();
+        assert_eq!(make_replacement("if", &used).as_deref(), Some("zf"));
+    }
+
     #[test]
     fn make_replacement_searches_past_the_first_letter() {
         let mut used: HashSet<String> = (b'a'..=b'z').map(|c| format!("{}f", c as char)).collect();
@@ -1362,17 +1389,21 @@ mod tests {
     }
 
     #[test]
-    fn make_replacement_reports_exhaustion() {
-        let mut used = HashSet::new();
-        for &a in PLACEHOLDER_START {
-            for &b in PLACEHOLDER_CONTINUE {
-                used.insert(format!("{}{}", a as char, b as char));
-            }
+    fn make_replacement_reaches_every_identifier() {
+        // Whichever single identifier is left free, the search finds it:
+        // uppercase, digits and `_`, in either position.
+        let all = all_two_char_identifiers();
+        assert_eq!(all.len(), 53 * 63);
+        for free in ["aZ", "Za", "a0", "Z9", "_a", "a_", "__"] {
+            let mut used = all.clone();
+            used.remove(free);
+            assert_eq!(make_replacement("if", &used).as_deref(), Some(free));
         }
+        // A keyword is never chosen, even when it is the only name left.
+        let mut used = all.clone();
+        used.remove("as");
         assert_eq!(make_replacement("if", &used), None);
-        // One free identifier, the very last in the search order, is found.
-        used.remove("__");
-        assert_eq!(make_replacement("if", &used).as_deref(), Some("__"));
+        assert_eq!(make_replacement("if", &all), None);
     }
 
     #[test]

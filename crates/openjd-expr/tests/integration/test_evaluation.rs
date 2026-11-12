@@ -379,9 +379,10 @@ fn keyword_placeholder_avoids_other_nfkc_forms() {
 
 #[test]
 fn keyword_placeholder_avoids_normalized_bare_names() {
-    // A comprehension variable is a bare name, written here in fullwidth so
-    // the parser reads it as `af`, the first-choice placeholder for `if`.
-    // The variable and the keyword attribute must stay apart.
+    // Guard, not a regression test: this passed before the fix too, because
+    // a bare first segment is never mapped back. A comprehension variable
+    // written in fullwidth is the name `af`, the first-choice placeholder
+    // for `if`, and the variable and the keyword attribute must stay apart.
     let mut st = SymbolTable::new();
     st.set("Param.if", 3i64).unwrap();
     let parsed =
@@ -445,12 +446,36 @@ fn keyword_placeholder_search_exhaustion_is_an_error() {
     assert!(expr.len() <= openjd_expr::MAX_PARSE_INPUT_LEN);
     let err = match ParsedExpression::new(&expr) {
         Ok(_) => panic!("expected an error, got a parsed expression"),
-        Err(e) => e.message(),
+        Err(e) => e,
     };
-    assert!(
-        err.contains("placeholder") && err.contains("'if'"),
-        "got: {err}"
+    assert_eq!(
+        err.message(),
+        "Cannot parse the attribute 'if': the expression uses nearly every \
+         2-character name, so the keyword can't be renamed for parsing"
     );
+    // The error points at the keyword.
+    let at = expr.len() - "if]".len();
+    assert_eq!(err.expr(), Some(expr.as_str()));
+    assert_eq!(
+        (err.col_offset(), err.end_col_offset()),
+        (Some(at), Some(at + 2))
+    );
+    // Names with a digit or an uppercase letter count: with all of those
+    // left out, there are free names again.
+    for keep in [
+        |n: &str| !n.chars().any(|c| c.is_ascii_digit()),
+        |n: &str| !n.chars().any(|c| c.is_ascii_uppercase()),
+    ] {
+        let some: Vec<&str> = attrs
+            .iter()
+            .map(String::as_str)
+            .filter(|a| keep(&a[2..]))
+            .collect();
+        let expr = format!("[{}, X.if]", some.join(","));
+        let parsed = ParsedExpression::new(&expr).unwrap();
+        assert!(parsed.accessed_symbols().contains("X.if"));
+        assert_eq!(parsed.accessed_symbols().len(), some.len() + 1);
+    }
     // One identifier fewer leaves a free placeholder, and it is not one the
     // expression uses.
     let expr = format!("[{}, X.if]", attrs[1..].join(","));
