@@ -57,29 +57,73 @@ const PYTHON_KEYWORDS: &[&str] = &[
     "with", "yield",
 ];
 
-/// Generate a same-length replacement identifier that doesn't appear in the source.
-fn make_replacement(keyword: &str, source: &str) -> String {
-    // Deterministic: replace the first character, trying 'a' to 'z' until
-    // the result is unused and not a keyword, e.g. "if" → "af",
-    // "def" → "aef", "is" → "bs" ("as" is a keyword). The all-'x' fallback
-    // is not checked against the source (openjd-rs#333).
+/// Characters a placeholder may start with, and characters it may continue
+/// with: ASCII only, so a placeholder has the keyword's byte length.
+const PLACEHOLDER_START: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_";
+const PLACEHOLDER_CONTINUE: &[u8] =
+    b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+
+/// Choose a placeholder for `keyword`: an ASCII identifier of the same byte
+/// length that is not a Python keyword and not in `used`. Returns `None` only
+/// when every such identifier is taken.
+///
+/// The first choice replaces the keyword's first character, trying `a` to
+/// `z`: `if` becomes `af`, `def` becomes `aef`, and `is` becomes `bs` (`as`
+/// is a keyword). When all 26 are taken, every identifier of that length is
+/// tried in order. Each candidate costs one set lookup, and at most
+/// `used.len()` of them are taken and `PYTHON_KEYWORDS.len()` are keywords,
+/// so the wider search stops within one more candidate than that. Running out needs
+/// every two-character identifier (about 3,300) in one expression, so only
+/// the two-letter keywords can ever reach it.
+fn make_replacement(keyword: &str, used: &HashSet<String>) -> Option<String> {
+    let free = |candidate: &str| !used.contains(candidate) && !PYTHON_KEYWORDS.contains(&candidate);
+    let tail = &keyword[1..];
+    if let Some(first) = (b'a'..=b'z')
+        .map(|c| format!("{}{tail}", c as char))
+        .find(|candidate| free(candidate))
+    {
+        return Some(first);
+    }
+    // Every identifier of this length, as an odometer over the digits of
+    // `index`: position 0 counts through PLACEHOLDER_START, the rest through
+    // PLACEHOLDER_CONTINUE.
     let len = keyword.len();
-    for prefix in b'a'..=b'z' {
-        let mut replacement = String::with_capacity(len);
-        replacement.push(prefix as char);
-        for (_i, c) in keyword.chars().enumerate().skip(1) {
-            // Use the original chars but shifted, to maintain length
-            replacement.push(if c.is_alphabetic() { c } else { 'x' });
+    let mut index = vec![0usize; len];
+    loop {
+        let candidate: String = index
+            .iter()
+            .enumerate()
+            .map(|(pos, &i)| {
+                let alphabet = if pos == 0 {
+                    PLACEHOLDER_START
+                } else {
+                    PLACEHOLDER_CONTINUE
+                };
+                alphabet[i] as char
+            })
+            .collect();
+        if free(&candidate) {
+            return Some(candidate);
         }
-        if replacement.len() == len
-            && !source.contains(&replacement)
-            && !PYTHON_KEYWORDS.contains(&replacement.as_str())
-        {
-            return replacement;
+        // Advance the last position, carrying into earlier ones.
+        let mut pos = len;
+        loop {
+            if pos == 0 {
+                return None;
+            }
+            pos -= 1;
+            let base = if pos == 0 {
+                PLACEHOLDER_START.len()
+            } else {
+                PLACEHOLDER_CONTINUE.len()
+            };
+            index[pos] += 1;
+            if index[pos] < base {
+                break;
+            }
+            index[pos] = 0;
         }
     }
-    // Fallback: all x's
-    "x".repeat(len)
 }
 
 /// Rename every contextual keyword in `source` — a Python keyword used as
@@ -95,20 +139,28 @@ fn make_replacement(keyword: &str, source: &str) -> String {
 /// earlier approach re-parsed the whole expression once per keyword, which
 /// was quadratic (64 KB of `a.if.if...` took 89 s, #489).
 ///
-/// Placeholders are chosen left to right against the text as renamed so far,
-/// and repeated accesses (`A.class + B.class`) share one entry. That keeps
-/// a placeholder distinct from the source and from other placeholders,
-/// except when `make_replacement` falls back to its unchecked all-`x` form
-/// (openjd-rs#333).
+/// The evaluator maps a placeholder back wherever it appears as a name, so a
+/// placeholder must differ from every name in the parsed expression. The
+/// same pass therefore collects each identifier and keyword token as the
+/// parser will see it: the parser NFKC-normalizes non-ASCII identifiers, so
+/// fullwidth `ｂｓ` and the ligature `ﬀ` are the names `bs` and `ff`. The
+/// raw text alone doesn't show those. Placeholders are chosen against that
+/// set, and each one joins it, so different keywords get different
+/// placeholders. Repeated accesses (`A.class + B.class`) share one entry.
+///
+/// Fails only when no identifier of a keyword's length is free (see
+/// [`make_replacement`]).
 fn rename_contextual_keywords(
     source: &str,
     mode: ruff_python_parser::Mode,
     renames: &mut HashMap<String, String>,
-) -> String {
+) -> Result<String, ExpressionError> {
     use ruff_python_ast::token::TokenKind;
+    use unicode_normalization::UnicodeNormalization;
 
-    // Collect the keyword ranges first: the lexer borrows `source`.
+    // Collect the ranges first: the lexer borrows `source`.
     let mut keyword_ranges = Vec::new();
+    let mut name_tokens = Vec::new();
     let mut lexer = ruff_python_parser::lexer::lex(source, mode);
     let mut prev_dot_end = None;
     loop {
@@ -117,6 +169,10 @@ fn rename_contextual_keywords(
             break;
         }
         let range = lexer.current_range();
+        if kind == TokenKind::Identifier || kind.is_keyword() {
+            let non_ascii = lexer.current_flags().is_non_ascii_identifier();
+            name_tokens.push((range, non_ascii));
+        }
         if kind.is_keyword() && prev_dot_end == Some(range.start()) {
             let token = &source[range];
             if PYTHON_KEYWORDS.contains(&token) {
@@ -126,28 +182,49 @@ fn rename_contextual_keywords(
         prev_dot_end = (kind == TokenKind::Dot).then(|| range.end());
     }
     if keyword_ranges.is_empty() {
-        return source.to_string();
+        return Ok(source.to_string());
     }
 
+    let mut used: HashSet<String> = name_tokens
+        .into_iter()
+        .map(|(range, non_ascii)| {
+            let text = &source[range];
+            if non_ascii {
+                text.nfkc().collect()
+            } else {
+                text.to_string()
+            }
+        })
+        .collect();
     let mut renamed = source.to_string();
     for range in keyword_ranges {
         let token = &source[range];
-        let replacement = renames
+        let existing = renames
             .iter()
             .find(|(_, original)| original.as_str() == token)
-            .map(|(placeholder, _)| placeholder.clone())
-            .unwrap_or_else(|| {
-                let placeholder = make_replacement(token, &renamed);
+            .map(|(placeholder, _)| placeholder.clone());
+        let replacement = match existing {
+            Some(placeholder) => placeholder,
+            None => {
+                let placeholder = make_replacement(token, &used).ok_or_else(|| {
+                    ExpressionError::new(format!(
+                        "Cannot parse the attribute '{token}': the expression uses every \
+                         {}-character identifier, which leaves no placeholder for the keyword",
+                        token.len()
+                    ))
+                })?;
+                used.insert(placeholder.clone());
                 renames.insert(placeholder.clone(), token.to_string());
                 placeholder
-            });
+            }
+        };
         debug_assert_eq!(replacement.len(), token.len());
         renamed.replace_range(
             range.start().to_usize()..range.end().to_usize(),
             &replacement,
         );
     }
-    renamed
+    Ok(renamed)
 }
 
 /// Parse a Python expression, handling contextual keywords (Python keywords
@@ -577,7 +654,7 @@ fn parse_inner(
     };
 
     let mut keyword_renames: HashMap<String, String> = HashMap::new();
-    let source = rename_contextual_keywords(expr_str, mode, &mut keyword_renames);
+    let source = rename_contextual_keywords(expr_str, mode, &mut keyword_renames)?;
 
     let parsed = match mode {
         ruff_python_parser::Mode::ParenthesizedExpression => {
@@ -1166,7 +1243,8 @@ mod tests {
     fn rename_all(source: &str) -> (String, Vec<(String, String)>) {
         let mut renames = HashMap::new();
         let out =
-            rename_contextual_keywords(source, ruff_python_parser::Mode::Expression, &mut renames);
+            rename_contextual_keywords(source, ruff_python_parser::Mode::Expression, &mut renames)
+                .unwrap();
         let mut pairs: Vec<_> = renames.into_iter().map(|(p, o)| (o, p)).collect();
         pairs.sort();
         (out, pairs)
@@ -1244,6 +1322,57 @@ mod tests {
         let (as_p, is_p) = (&pairs[0].1, &pairs[1].1);
         assert_ne!(as_p, is_p);
         assert_eq!(source, format!("A.{is_p} + B.{as_p} + C.{is_p}"));
+    }
+
+    #[test]
+    fn rename_avoids_names_the_parser_normalizes() {
+        // Fullwidth `ｂｓ` and the ligature `ﬀ` are the names `bs` and `ff` to
+        // the parser, so neither may be a placeholder.
+        let (source, pairs) = rename_all("X.\u{ff42}\u{ff53} + X.is");
+        assert_eq!(pairs, [("is".to_string(), "cs".to_string())]);
+        assert_eq!(source, "X.\u{ff42}\u{ff53} + X.cs");
+        let (_, pairs) = rename_all("X.af + X.bf + X.cf + X.df + X.ef + X.\u{fb00} + X.if");
+        assert_eq!(pairs, [("if".to_string(), "gf".to_string())]);
+    }
+
+    #[test]
+    fn rename_only_avoids_whole_names() {
+        // Text in a literal, or inside a longer name, is not a name the
+        // parser sees, so the first choice is still free.
+        assert_eq!(
+            rename_all("'af' + X.afx + X.if").1,
+            [("if".to_string(), "af".to_string())]
+        );
+    }
+
+    #[test]
+    fn make_replacement_searches_past_the_first_letter() {
+        let mut used: HashSet<String> = (b'a'..=b'z').map(|c| format!("{}f", c as char)).collect();
+        assert_eq!(make_replacement("if", &used).as_deref(), Some("aa"));
+        used.insert("aa".to_string());
+        assert_eq!(make_replacement("if", &used).as_deref(), Some("ab"));
+        // The search skips keywords: with `aa` to `ar` taken, `as` is next.
+        used.extend((b'a'..=b'r').map(|c| format!("a{}", c as char)));
+        assert_eq!(make_replacement("if", &used).as_deref(), Some("at"));
+        // Longer keywords search the same way.
+        let used: HashSet<String> = (b'a'..=b'z')
+            .map(|c| format!("{}lass", c as char))
+            .collect();
+        assert_eq!(make_replacement("class", &used).as_deref(), Some("aaaaa"));
+    }
+
+    #[test]
+    fn make_replacement_reports_exhaustion() {
+        let mut used = HashSet::new();
+        for &a in PLACEHOLDER_START {
+            for &b in PLACEHOLDER_CONTINUE {
+                used.insert(format!("{}{}", a as char, b as char));
+            }
+        }
+        assert_eq!(make_replacement("if", &used), None);
+        // One free identifier, the very last in the search order, is found.
+        used.remove("__");
+        assert_eq!(make_replacement("if", &used).as_deref(), Some("__"));
     }
 
     #[test]

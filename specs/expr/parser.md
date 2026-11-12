@@ -106,14 +106,22 @@ The solution, before parsing:
 4. Record the renames in `keyword_renames: HashMap<String, String>` so the evaluator
    can map placeholder names back to the original attribute names
 
-Placeholders (`make_replacement`) replace the keyword's first character, trying `a` to
-`z` against the text as renamed so far, so `if` becomes `af` and `is` becomes `bs`
-(`as` is a keyword). Two keywords get different placeholders, and repeated accesses
+Placeholders (`make_replacement`) must differ from every name in the parsed
+expression, because the evaluator maps a placeholder back wherever it appears as a
+name. The same lexer pass collects every identifier and keyword token as the parser
+will see it. The parser NFKC-normalizes non-ASCII identifiers, so fullwidth `ｂｓ` and
+the ligature `ﬀ` are the names `bs` and `ff`, which the raw text doesn't show. Each
+chosen placeholder joins that set. The first choice replaces the keyword's first
+character, trying `a` to `z`, so `if` becomes `af` and `is` becomes `bs` (`as` is a
+keyword). When all 26 are taken, every ASCII identifier of the keyword's length is
+tried in order (`aa`, `ab`, ...), skipping keywords. The search ends within one more
+candidate than there are names and keywords, so it stays linear. Only a two-letter
+keyword can run out, and only in an expression that uses every one of the 3,334
+two-character identifiers that aren't keywords; that is a parse error naming the
+attribute. Two keywords get different placeholders, and repeated accesses
 (`A.class + B.class`) share one entry. One placeholder can be a prefix of another
 (`is` and `assert` become `bs` and `bssert`), so the evaluator maps them back by whole
-dotted-path segment, never by substring. Known gap: if all 26 candidates are taken,
-the all-`x` fallback is not checked against the source and can equal an attribute the
-author wrote (openjd-rs#333). Syntax errors are reported against the
+dotted-path segment, never by substring. Syntax errors are reported against the
 original text, which the same-length renames leave aligned.
 
 This matches the Python implementation's `ast_parse_keyword_context()` approach, which

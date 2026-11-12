@@ -319,6 +319,146 @@ fn keyword_rename_multiline_offsets_line_up() {
     );
 }
 
+// Regression: a keyword placeholder was checked only against the raw text,
+// but the parser NFKC-normalizes non-ASCII identifiers. Fullwidth `ｂｓ`
+// therefore parsed as `bs`, the placeholder for `is`, and was mapped back to
+// `Param.is`: this evaluated to "isis", and `accessed_symbols` listed only
+// `Param.is`. Placeholders are now checked against every identifier as the
+// parser sees it.
+#[test]
+fn keyword_placeholder_avoids_fullwidth_identifiers() {
+    let mut st = SymbolTable::new();
+    st.set("Param.bs", "fullwidth-bs").unwrap();
+    st.set("Param.is", "is").unwrap();
+    for (expr, expected) in [
+        ("Param.\u{ff42}\u{ff53} + Param.is", "fullwidth-bsis"),
+        ("Param.is + Param.\u{ff42}\u{ff53}", "isfullwidth-bs"),
+        (
+            "Param.\u{ff42}\u{ff53} if Param.is == 'is' else ''",
+            "fullwidth-bs",
+        ),
+    ] {
+        let parsed = ParsedExpression::new(expr).unwrap();
+        let mut symbols: Vec<_> = parsed.accessed_symbols().iter().cloned().collect();
+        symbols.sort();
+        assert_eq!(symbols, ["Param.bs", "Param.is"], "{expr}");
+        assert_eq!(
+            parsed.evaluate(&st).unwrap().to_display_string(),
+            expected,
+            "{expr}"
+        );
+    }
+}
+
+#[test]
+fn keyword_placeholder_avoids_other_nfkc_forms() {
+    // Mathematical bold `𝐚𝐟` normalizes to `af`, the first choice for `if`.
+    let mut st = SymbolTable::new();
+    st.set("Param.af", 1i64).unwrap();
+    st.set("Param.if", 10i64).unwrap();
+    assert_eq!(
+        eval_with("Param.\u{1d41a}\u{1d41f} + Param.if", &st).to_display_string(),
+        "11"
+    );
+    // The ligature `ﬀ` normalizes to `ff`, which `if` gets once `af` to `ef`
+    // are taken.
+    let mut st = SymbolTable::new();
+    st.set("Param.if", 1i64).unwrap();
+    for (i, name) in ["af", "bf", "cf", "df", "ef"].iter().enumerate() {
+        st.set(&format!("Param.{name}"), 10i64 << i).unwrap();
+    }
+    st.set("Param.ff", 1000i64).unwrap();
+    let expr = "Param.if + Param.af + Param.bf + Param.cf + Param.df + Param.ef + Param.\u{fb00}";
+    let parsed = ParsedExpression::new(expr).unwrap();
+    assert!(parsed.accessed_symbols().contains("Param.ff"));
+    assert_eq!(
+        parsed.evaluate(&st).unwrap().to_display_string(),
+        (1 + 10 + 20 + 40 + 80 + 160 + 1000).to_string()
+    );
+}
+
+#[test]
+fn keyword_placeholder_avoids_normalized_bare_names() {
+    // A comprehension variable is a bare name, written here in fullwidth so
+    // the parser reads it as `af`, the first-choice placeholder for `if`.
+    // The variable and the keyword attribute must stay apart.
+    let mut st = SymbolTable::new();
+    st.set("Param.if", 3i64).unwrap();
+    let parsed =
+        ParsedExpression::new("[\u{ff41}\u{ff46} for \u{ff41}\u{ff46} in [1, 2]] + [Param.if]")
+            .unwrap();
+    assert_eq!(
+        parsed.local_bindings().iter().collect::<Vec<_>>(),
+        [&"af".to_string()]
+    );
+    assert_eq!(
+        parsed.evaluate(&st).unwrap().to_display_string(),
+        "[1, 2, 3]"
+    );
+}
+
+// Regression for openjd-rs#333: once the 26 first-letter candidates were
+// taken, the placeholder fell back to an all-`x` name that was never checked,
+// so `Param.xx` was read as `Param.if` and this gave `[1, 1, 52]`.
+#[test]
+fn keyword_placeholder_fallback_is_checked() {
+    let letters: String = ('a'..='z').map(|c| format!("{c}f")).collect();
+    let expr = format!("[Param.if, Param.xx, len('{letters}')]");
+    let mut st = SymbolTable::new();
+    st.set("Param.if", 1i64).unwrap();
+    st.set("Param.xx", 2i64).unwrap();
+    let parsed = ParsedExpression::new(&expr).unwrap();
+    let mut symbols: Vec<_> = parsed.accessed_symbols().iter().cloned().collect();
+    symbols.sort();
+    assert_eq!(symbols, ["Param.if", "Param.xx"]);
+    assert_eq!(
+        parsed.evaluate(&st).unwrap().to_display_string(),
+        "[1, 2, 52]"
+    );
+}
+
+#[test]
+fn keyword_placeholder_search_exhaustion_is_an_error() {
+    // Every two-character identifier the parser accepts, used as an
+    // attribute, leaves no placeholder for `if`. That is an error, never a
+    // placeholder that collides with one of them.
+    let first = ('a'..='z').chain('A'..='Z').chain(['_']);
+    let rest: Vec<char> = ('a'..='z')
+        .chain('A'..='Z')
+        .chain('0'..='9')
+        .chain(['_'])
+        .collect();
+    let mut attrs = Vec::new();
+    // The two-letter keywords (`as`, `if`, `in`, `is`, `or`) would be
+    // renamed themselves, so they are left out.
+    let keywords = ["as", "if", "in", "is", "or"];
+    for a in first {
+        for &b in &rest {
+            let name = format!("{a}{b}");
+            if !keywords.contains(&name.as_str()) {
+                attrs.push(format!("Y.{name}"));
+            }
+        }
+    }
+    let all = attrs.join(",");
+    let expr = format!("[{all}, X.if]");
+    assert!(expr.len() <= openjd_expr::MAX_PARSE_INPUT_LEN);
+    let err = match ParsedExpression::new(&expr) {
+        Ok(_) => panic!("expected an error, got a parsed expression"),
+        Err(e) => e.message(),
+    };
+    assert!(
+        err.contains("placeholder") && err.contains("'if'"),
+        "got: {err}"
+    );
+    // One identifier fewer leaves a free placeholder, and it is not one the
+    // expression uses.
+    let expr = format!("[{}, X.if]", attrs[1..].join(","));
+    let parsed = ParsedExpression::new(&expr).unwrap();
+    assert!(parsed.accessed_symbols().contains("X.if"));
+    assert_eq!(parsed.accessed_symbols().len(), attrs.len());
+}
+
 #[test]
 fn multiline_float_passthrough_preserves_formatting() {
     // The passthrough must still preserve source formatting once aligned.

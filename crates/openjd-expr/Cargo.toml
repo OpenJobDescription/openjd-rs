@@ -45,3 +45,8 @@ serde_json = { workspace = true }
 ruff_python_parser = { version = "=0.0.21", features = ["stacker"] }
 ruff_python_ast = "=0.0.21"
 ruff_text_size = "=0.0.21"
+
+# NFKC-normalizes non-ASCII identifiers the same way the parser does, so a
+# keyword placeholder can be checked against every name the parser will see.
+# ruff_python_parser already depends on it, so the build gains no new crate.
+unicode-normalization = { version = "0.1.23", default-features = false, features = ["std"] }
