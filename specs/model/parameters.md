@@ -165,18 +165,29 @@ two input modes:
   ignored (Template Schemas §7.5): `" 7 "` is `7`, and a FLOAT keeps its text without the white
   space. White space is the Unicode `White_Space` property (what `str::trim` removes). Errors
   quote the value as given (`Value ' 7 x' is not a valid integer or integer string.`). A
-  template's own numeric strings (`default`, `minValue`, `maxValue`, `allowedValues`) are
-  trimmed the same way when they are decoded (`FlexInt`, `FlexFloat`), and so is the string
-  the public `JobIntParameterDefinition::check_constraints` and
-  `JobFloatParameterDefinition::check_constraints` parse (job creation itself checks the
-  merged definition, which receives the coerced value). A string element of a `LIST[INT]`,
+  template's own numeric strings (`default`, `minValue`, `maxValue`, `allowedValues`, and a list
+  parameter's `default` items and `item` constraints, Template Schemas §2.13, §2.14, §2.16) are
+  trimmed the same way when they are decoded (`FlexInt`, `FlexFloat`). A FLOAT default, and a
+  `LIST[FLOAT]` default item, written as a string keeps its spelling without the white space:
+  `default: [1.50, " 2.50"]` is `[1.5, 2.50]` (`default_value` writes the string item back as a
+  JSON string). The string the public `JobIntParameterDefinition::check_constraints` and
+  `JobFloatParameterDefinition::check_constraints` parse is trimmed too (job creation itself
+  checks the merged definition, which receives the coerced value). A string element of a `LIST[INT]`,
   `LIST[FLOAT]` or `LIST[LIST[INT]]` value goes through the same coercion, so
   `["1", " 2 "]` is `[1, 2]`. **Divergence from openjd-model-for-python:** Python requires
-  the elements of a list value to be numbers and rejects a string element
-  (`list items must be integers, got str`).
+  the elements of a list value, and the items of a list parameter's `default` and `item`
+  constraints, to be numbers, and rejects a string element (`list items must be integers, got
+  str`).
 
 - **Library input** (typed ExprValue): Validated via `coerce_to_job_parameter_type` — checks type
-  compatibility, performs numeric widening (int → float), validates list element types.
+  compatibility, performs numeric widening (int → float), validates list element types. A native
+  list under `LIST[INT]`, `LIST[FLOAT]` or `LIST[LIST[INT]]` is coerced element by element through
+  the same rule as the JSON text form (`coerce_list_elements`), so `[" 1", "2 "]` as a list of
+  strings is `[1, 2]`, exactly as the text `'[" 1", "2 "]'` is, and a FLOAT string keeps its
+  spelling. The other list types still need their exact list variant: a `ListPath` value is refused
+  for `LIST[STRING]` and `LIST[PATH]`. An element error names the element in either form
+  (`item[1]: Value '1 000' is not a valid integer or integer string.`, or `item[1][0]: ...` in a
+  `LIST[LIST[INT]]`).
 
 ## Validation Context and Extension Effects
 

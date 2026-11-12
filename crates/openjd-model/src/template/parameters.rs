@@ -277,9 +277,19 @@ impl JobParameterDefinition {
                 let ints: Vec<i64> = v.iter().map(|i| i.0).collect();
                 serde_json::to_string(&ints).unwrap_or_default()
             }),
+            // An item written as a numeric string keeps its spelling (without the
+            // white space around it, Template Schemas §7.5), so it is written back as
+            // a JSON string; job creation parses it as a `<floatstring>`, as it does a
+            // FLOAT default. A number item is written as the number.
             Self::LIST_FLOAT(p) => p.default.as_ref().map(|v| {
-                let floats: Vec<f64> = v.iter().map(|f| f.0).collect();
-                serde_json::to_string(&floats).unwrap_or_default()
+                let items: Vec<serde_json::Value> = v
+                    .iter()
+                    .map(|f| match &f.1 {
+                        Some(text) => serde_json::Value::String(text.clone()),
+                        None => serde_json::json!(f.0),
+                    })
+                    .collect();
+                serde_json::to_string(&items).unwrap_or_default()
             }),
             Self::LIST_BOOL(p) => p.default.as_ref().map(|v| {
                 let bools: Vec<bool> = v.iter().map(|b| b.0).collect();

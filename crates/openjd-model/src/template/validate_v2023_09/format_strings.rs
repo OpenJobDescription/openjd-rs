@@ -263,15 +263,44 @@ fn build_task_scope_symtab(
 }
 
 /// Soft cap, in characters, on the resolved length of a numeric
-/// (`<posintstring>` / `<intstring>` / float-string) format-string field.
+/// (`<posintstring>` / `<intstring>` / float-string) format-string field,
+/// not counting white space.
 ///
-/// There is no exact maximum: leading zeros are permitted and values are
-/// trimmed, so a conforming integer string can be padded arbitrarily. Any
-/// resolution longer than this is unreasonable for a numeric field, though —
-/// an i64 needs at most 20 characters — so a lower bound past it is reported
-/// at template validation time rather than failing later at job creation or
-/// on the worker.
+/// White space around a numeric string is ignored (Template Schemas §7.5),
+/// so it is not counted: see [`min_numeric_len`]. A format string padded
+/// with white space therefore passes exactly when the same padded literal
+/// does. There is no exact maximum on the rest either, because leading
+/// zeros are permitted. Any value longer than this is unreasonable for a
+/// numeric field, though (an i64 needs at most 20 characters), so a lower
+/// bound past it is reported at template validation time rather than
+/// failing later at job creation or on the worker.
 const MAX_RESOLVED_NUMERIC_LEN: usize = 100;
+
+/// Lower bound, in characters, on the length of what `fs` resolves to,
+/// not counting white space (Template Schemas §7.5), for the cap
+/// [`MAX_RESOLVED_NUMERIC_LEN`].
+///
+/// When the value is fully static this is exact: the resolved text with
+/// the white space around it removed. Otherwise it is
+/// `min_resolved_string_len` less the white space in the literal segments,
+/// which always appears in the resolution. White space that a concrete
+/// expression segment evaluates to (`{{ ' ' * 200 }}` before an
+/// unresolved segment) still counts, since the static resolution only
+/// reports the total length. White space is the Unicode `White_Space`
+/// property, what `str::trim` removes, as in job creation's parse.
+fn min_numeric_len(sr: &openjd_expr::StaticResolution, fs: &FormatString) -> usize {
+    match &sr.resolved_value {
+        Some(ExprValue::Null) => 0,
+        Some(v) => v.to_display_string().trim().chars().count(),
+        None => {
+            let literal_ws: usize = fs
+                .literal_segments()
+                .map(|text| text.chars().filter(|c| c.is_whitespace()).count())
+                .sum();
+            sr.min_resolved_string_len.saturating_sub(literal_ws)
+        }
+    }
+}
 
 /// Longest valid resolved cancelation `mode` value.
 const MODE_MAX_LEN: usize = "NOTIFY_THEN_TERMINATE".len();
@@ -310,8 +339,9 @@ const NOTIFY_PERIOD_CONSTRAINT: ResolvedConstraint<'static> = ResolvedConstraint
 /// 1. **Lower bound** — if `min_resolved_string_len` already exceeds the
 ///    field's limit, no run-time resolution can conform, so validation
 ///    fails without knowing the unresolved parts. Numeric fields use the
-///    soft [`MAX_RESOLVED_NUMERIC_LEN`] (no exact maximum exists — leading
-///    zeros); the cancelation mode uses the longest valid enum literal.
+///    soft [`MAX_RESOLVED_NUMERIC_LEN`] on the length without white space
+///    ([`min_numeric_len`]; no exact maximum exists — leading zeros); the
+///    cancelation mode uses the longest valid enum literal.
 /// 2. **Full value check** — when `resolved_value` is present the field is
 ///    fully static, and the same check job creation or the worker would
 ///    run on the resolved value runs here.
@@ -465,6 +495,7 @@ impl ResolvedConstraint<'_> {
 /// Apply a [`ResolvedConstraint`] to what static evaluation determined.
 fn check_resolved_constraint(
     sr: &openjd_expr::StaticResolution,
+    fs: &FormatString,
     constraint: &ResolvedConstraint<'_>,
     path: &[PathElement],
     errors: &mut ValidationErrors,
@@ -723,15 +754,15 @@ fn check_resolved_constraint(
             parse_msg,
             nullable,
         } => {
-            // Stage 1: soft character bound. No exact maximum exists
-            // (leading zeros, trimming), but a resolution this long
-            // cannot be a reasonable integer.
-            if sr.min_resolved_string_len > MAX_RESOLVED_NUMERIC_LEN {
+            // Stage 1: soft character bound, not counting white space
+            // (§7.5). No exact maximum exists (leading zeros), but a
+            // resolution this long cannot be a reasonable integer.
+            let len = min_numeric_len(sr, fs);
+            if len > MAX_RESOLVED_NUMERIC_LEN {
                 errors.add(
                     path,
                     format!(
-                        "resolves to at least {} characters, which cannot be a reasonable integer value.",
-                        sr.min_resolved_string_len
+                        "resolves to at least {len} characters, which cannot be a reasonable integer value."
                     ),
                 );
                 return;
@@ -773,12 +804,13 @@ fn check_resolved_constraint(
             }
         }
         ResolvedConstraint::Float { positive, msg } => {
-            if sr.min_resolved_string_len > MAX_RESOLVED_NUMERIC_LEN {
+            // Soft character bound, not counting white space (§7.5).
+            let len = min_numeric_len(sr, fs);
+            if len > MAX_RESOLVED_NUMERIC_LEN {
                 errors.add(
                     path,
                     format!(
-                        "resolves to at least {} characters, which cannot be a reasonable number.",
-                        sr.min_resolved_string_len
+                        "resolves to at least {len} characters, which cannot be a reasonable number."
                     ),
                 );
                 return;
@@ -1085,7 +1117,7 @@ fn validate_fs_with(
     match fs.validate_expressions(symtab, &ev.options(target.as_ref())) {
         Ok(sr) => {
             if let Some(c) = constraint {
-                check_resolved_constraint(&sr, c, path, errors);
+                check_resolved_constraint(&sr, fs, c, path, errors);
             }
             Some(sr)
         }
