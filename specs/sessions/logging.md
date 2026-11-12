@@ -107,6 +107,7 @@ to provide visual structure in log output.
 | `tempdir.rs` | `FILE_PATH \| PROCESS_CONTROL \| EXCEPTION_INFO` | Warning per failed Windows cleanup pass: files left and the processes holding them |
 | `session.rs` | `FILE_PATH \| EXCEPTION_INFO` | Error when a working directory could not be deleted after the retries |
 | `session.rs` | `EXCEPTION_INFO` | "Action failed to run" errors |
+| `session.rs` | `EXCEPTION_INFO` | Warning when `exit_environment` can't build the symbol table from its exit-time input and uses the one the environment was entered with |
 | `subprocess.rs` | `COMMAND_OUTPUT` | Stdout/stderr lines from the subprocess |
 | `subprocess.rs` | `BANNER` | Output header banner |
 | `runner/env_script.rs` | `BANNER` | Subsection banner before action execution |

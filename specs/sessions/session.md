@@ -157,10 +157,11 @@ variant: only the rejection variants above leave the session unchanged.
 A failed `enter_environment` leaves the environment on `environments_entered`, as in
 Python, and the caller must still exit it. When the caller didn't pass an `identifier`,
 the environment is `environments_entered().last()`. A failed `exit_environment` has
-already removed the environment, so it still counts as an exit, and its `onExit` has not
-run. `exit_environment` doesn't fail on a symbol table it can't build from its own
-`resolved_symtab` while the one the environment was entered with still builds; it runs
-the `onExit` with that one (see [Exit](#exit) step 5).
+already removed the environment, so it still counts as an exit. When it failed before
+its action started, its `onExit` has not run. `exit_environment` doesn't fail when the
+symbol table can't be built from its exit-time input (its `resolved_symtab`, or the
+from-scratch table when none is given) while the table the environment was entered with
+still builds; it runs the `onExit` with that one (see [Exit](#exit) step 5).
 
 Which callbacks a pre-start failure fires depends on when it happens relative to the
 `Running` notification. `enter_environment` and `exit_environment` report only a `Failed`

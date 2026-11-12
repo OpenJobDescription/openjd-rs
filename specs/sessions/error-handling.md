@@ -185,8 +185,9 @@ one of two kinds:
   `EnvironmentScriptFailed` and the action status is the script's own terminal state
   (`Failed`, `Canceled` or `Timeout`); `run_task` instead returns `Ok` with that state.
   Either way the session is ending-only. One exception: `exit_environment` doesn't fail
-  when only its own `resolved_symtab` can't build the symbol table. It falls back to the
-  table the environment was entered with, logs a warning, and runs the `onExit`
+  when only its exit-time input (its `resolved_symtab`, or the from-scratch table when
+  none is given) can't build the symbol table. It falls back to the table the
+  environment was entered with, logs a warning, and runs the `onExit`
   ([session.md § Exit](session.md#exit) step 5).
 
 The table in
