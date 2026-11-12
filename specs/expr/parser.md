@@ -116,9 +116,9 @@ character, trying `a` to `z`, so `if` becomes `af` and `is` becomes `bs` (`as` i
 keyword). When all 26 are taken, every ASCII identifier of the keyword's length is
 tried in order (`aa`, `ab`, ...), skipping keywords. The search ends within one more
 candidate than there are names and keywords, so it stays linear. Only a two-letter
-keyword can run out, and only in an expression that uses every one of the 3,334
-two-character identifiers that aren't keywords; that is a parse error naming the
-attribute. Two keywords get different placeholders, and repeated accesses
+keyword can run out, and only in an expression that uses nearly all of the 3,334
+two-character identifiers that aren't keywords (placeholders already chosen for other
+keywords count too); that is a parse error naming the attribute. Two keywords get different placeholders, and repeated accesses
 (`A.class + B.class`) share one entry. One placeholder can be a prefix of another
 (`is` and `assert` become `bs` and `bssert`), so the evaluator maps them back by whole
 dotted-path segment, never by substring. Syntax errors are reported against the
