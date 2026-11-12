@@ -18,9 +18,11 @@ a `HashMap<String, ExprValue>`.
 openjd run template.yaml -p Frames=1-100 -p OutputDir=/output
 ```
 
-The string is split on the first `=`. The key becomes the parameter name, the value
-becomes an `ExprValue::String`. No type coercion is performed — the model crate's
-`preprocess_job_parameters()` handles type validation and coercion later.
+The whole argument is trimmed, then split on the first `=`. The key becomes the parameter
+name, the value becomes an `ExprValue::String`. No type coercion is performed — the model
+crate's `preprocess_job_parameters()` handles type validation and coercion later. Because of
+the trim, `-p "N= 7x "` reports the value as `' 7x'`; a value in inline JSON or a parameter
+file keeps white space at both ends.
 
 ### Format 2: File Reference
 
@@ -95,6 +97,9 @@ openjd run template.yaml -t Frame=42 -t Quality=high
 
 - Each argument must contain exactly one `=` with non-empty name and value
 - Duplicate parameter names are errors
+- The whole argument is trimmed before it is split, so `-t "Frame=7 "` gives the value `7`.
+  Coercing the value to its declared type is a separate step
+  ([run.md](run.md#explicit-task-parameters)).
 - All errors are collected and reported together (not fail-fast)
 
 ### Error Accumulation

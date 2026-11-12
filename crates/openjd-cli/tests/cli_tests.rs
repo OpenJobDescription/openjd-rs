@@ -2954,6 +2954,198 @@ steps:
     }
 
     #[test]
+    fn test_task_param_numeric_values_ignore_white_space() {
+        // INT and FLOAT task parameter values are numeric strings: white
+        // space around the number (Unicode `White_Space`) is ignored
+        // (Template Schemas §7.5), from --task-param and from --tasks alike.
+        // White space inside the number, and characters that are not
+        // `White_Space`, are still errors, quoted as given.
+        let mut tmpl = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            tmpl,
+            r#"specificationVersion: jobtemplate-2023-09
+name: Padded
+steps:
+- name: S
+  parameterSpace:
+    taskParameterDefinitions:
+    - name: I
+      type: INT
+      range: [7]
+    - name: F
+      type: FLOAT
+      range: [2.5]
+    - name: S
+      type: STRING
+      range: [abc]
+  script:
+    actions:
+      onRun:
+        command: python
+        args: ["-c", "print('VALUES=[{{{{Task.Param.I}}}}][{{{{Task.Param.F}}}}][{{{{Task.Param.S}}}}]')"]
+"#
+        )
+        .unwrap();
+        let path = tmpl.path().to_str().unwrap();
+        // The whole -t argument is trimmed before it is split, so the STRING
+        // value has no outer spaces either.
+        let (code, stdout, stderr) = run_cli(&[
+            "run",
+            path,
+            "-t",
+            "I=\t7",
+            "-t",
+            "F=\u{a0}2.5",
+            "-t",
+            " S=abc ",
+            "--extensions",
+            "",
+        ]);
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("VALUES=[7][2.5][abc]"), "stdout: {stdout}");
+        for tasks in [
+            r#"[{"I": " 7\n", "F": "\t2.5 ", "S": "abc"}]"#,
+            r#"[{"I": "\u3000 7", "F": "2.5\u2028", "S": "abc"}]"#,
+        ] {
+            let (code, stdout, stderr) =
+                run_cli(&["run", path, "--tasks", tasks, "--extensions", ""]);
+            assert_eq!(code, 0, "{tasks}: stderr: {stderr}");
+            assert!(
+                stdout.contains("VALUES=[7][2.5][abc]"),
+                "{tasks}: stdout: {stdout}"
+            );
+        }
+        let (code, _stdout, stderr) = run_cli(&[
+            "run",
+            path,
+            "-t",
+            "I=7 0",
+            "-t",
+            "F=2.5",
+            "-t",
+            "S=abc",
+            "--extensions",
+            "",
+        ]);
+        assert_ne!(code, 0, "white space inside the number should fail");
+        assert!(
+            stderr
+                .lines()
+                .any(|l| l == "ERROR: Task parameter 'I': expected INT, got '7 0'"),
+            "stderr: {stderr}"
+        );
+        // Inline JSON, so the value keeps white space at both ends.
+        for (i, f, expected) in [
+            (
+                " 7 0 ",
+                "2.5",
+                "Task parameter 'I': expected INT, got ' 7 0 '",
+            ),
+            (
+                "\\u001c7",
+                "2.5",
+                "Task parameter 'I': expected INT, got '\u{1c}7'",
+            ),
+            (
+                "\\u200b7",
+                "2.5",
+                "Task parameter 'I': expected INT, got '\u{200b}7'",
+            ),
+            (
+                "7",
+                " 2.5x\\t",
+                "Task parameter 'F': expected FLOAT, got ' 2.5x\t'",
+            ),
+            (
+                "7",
+                "2.5\\u001f",
+                "Task parameter 'F': expected FLOAT, got '2.5\u{1f}'",
+            ),
+            (
+                "7",
+                "\\ufeff2.5",
+                "Task parameter 'F': expected FLOAT, got '\u{feff}2.5'",
+            ),
+            (
+                "7",
+                " inf ",
+                "Task parameter 'F': value must be finite, got ' inf '",
+            ),
+        ] {
+            let tasks = format!(r#"[{{"I": "{i}", "F": "{f}", "S": "abc"}}]"#);
+            let (code, _stdout, stderr) =
+                run_cli(&["run", path, "--tasks", &tasks, "--extensions", ""]);
+            assert_ne!(code, 0, "{tasks} should fail");
+            let expected = format!("ERROR: {expected}");
+            assert!(
+                stderr.lines().any(|l| l == expected),
+                "{tasks}: stderr: {stderr}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_job_param_numeric_values_ignore_white_space() {
+        // A string value for an INT or FLOAT job parameter is a numeric
+        // string (Template Schemas §7.5). `-p K=V` trims the whole argument
+        // before it splits it, so its error quotes the value without the
+        // trailing white space; inline JSON keeps the value as given.
+        let mut tmpl = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            tmpl,
+            r#"specificationVersion: jobtemplate-2023-09
+name: Padded
+parameterDefinitions:
+- name: N
+  type: INT
+- name: F
+  type: FLOAT
+steps:
+- name: S
+  script:
+    actions:
+      onRun:
+        command: python
+        args: ["-c", "print('VALUES=[{{{{Param.N}}}}][{{{{Param.F}}}}]')"]
+"#
+        )
+        .unwrap();
+        let path = tmpl.path().to_str().unwrap();
+        let (code, stdout, stderr) = run_cli(&[
+            "run",
+            path,
+            "-p",
+            "N=\u{3000}7",
+            "-p",
+            r#"{"F": " 2.50\t"}"#,
+            "--extensions",
+            "",
+        ]);
+        assert_eq!(code, 0, "stderr: {stderr}");
+        assert!(stdout.contains("VALUES=[7][2.50]"), "stdout: {stdout}");
+        // A parameter file keeps the value as given, too.
+        let mut params = NamedTempFile::with_suffix(".json").unwrap();
+        write!(params, r#"{{"N": " 7x "}}"#).unwrap();
+        let params_arg = format!("file://{}", params.path().display());
+        for (n, quoted) in [
+            (" N= 7x ", "' 7x'"),
+            (r#"{"N": " 7x "}"#, "' 7x '"),
+            (params_arg.as_str(), "' 7x '"),
+        ] {
+            let (code, _stdout, stderr) =
+                run_cli(&["run", path, "-p", n, "-p", "F=2.5", "--extensions", ""]);
+            assert_ne!(code, 0, "{n} should fail");
+            let expected = format!(
+                "ERROR: Validation error: Parameter 'N': Value {quoted} is not a valid integer or integer string."
+            );
+            assert!(
+                stderr.lines().any(|l| l == expected),
+                "{n}: stderr: {stderr}"
+            );
+        }
+    }
+
+    #[test]
     fn test_tasks_from_json_file() {
         let mut f = NamedTempFile::with_suffix(".json").unwrap();
         write!(f, r#"[{{"TaskNumber": "1", "TaskMessage": "Hi!"}}]"#).unwrap();

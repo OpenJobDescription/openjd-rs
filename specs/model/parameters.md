@@ -76,8 +76,11 @@ Common methods on all variants:
 
 These are two distinct operations:
 
-- **`check_constraints`** runs at `preprocess_job_parameters` time against user-provided values.
-  It checks: value within min/max range, value in allowedValues, string length within bounds.
+- **`check_constraints`** checks a value against the definition's own constraints: value within
+  min/max range, value in allowedValues, string length within bounds. Job creation applies the
+  same checks to user-provided values through the merged definition
+  (`MergedParameterDefinition::check_constraints`, called by `preprocess_job_parameters` and
+  `create_job`).
 
 - **`validate_definition`** runs during template validation (Pass 3). It checks: min ≤ max,
   minLength ≤ maxLength, default satisfies own constraints, allowedValues entries satisfy
@@ -157,7 +160,20 @@ PATH parameters have special handling throughout the pipeline:
 two input modes:
 
 - **CLI input** (string values): Parsed via `coerce_from_str` — handles numeric parsing,
-  boolean aliases (`yes`/`no`/`on`/`off`/`1`/`0`), JSON list parsing for list types.
+  boolean aliases (`yes`/`no`/`on`/`off`/`1`/`0`), JSON list parsing for list types. An INT or
+  FLOAT value is an `<intstring>` or `<floatstring>`, so white space around the number is
+  ignored (Template Schemas §7.5): `" 7 "` is `7`, and a FLOAT keeps its text without the white
+  space. White space is the Unicode `White_Space` property (what `str::trim` removes). Errors
+  quote the value as given (`Value ' 7 x' is not a valid integer or integer string.`). A
+  template's own numeric strings (`default`, `minValue`, `maxValue`, `allowedValues`) are
+  trimmed the same way when they are decoded (`FlexInt`, `FlexFloat`), and so is the string
+  the public `JobIntParameterDefinition::check_constraints` and
+  `JobFloatParameterDefinition::check_constraints` parse (job creation itself checks the
+  merged definition, which receives the coerced value). A string element of a `LIST[INT]`,
+  `LIST[FLOAT]` or `LIST[LIST[INT]]` value goes through the same coercion, so
+  `["1", " 2 "]` is `[1, 2]`. **Divergence from openjd-model-for-python:** Python requires
+  the elements of a list value to be numbers and rejects a string element
+  (`list items must be integers, got str`).
 
 - **Library input** (typed ExprValue): Validated via `coerce_to_job_parameter_type` — checks type
   compatibility, performs numeric widening (int → float), validates list element types.

@@ -832,25 +832,45 @@ impl ExprValue {
     }
 
     /// Coerce a string value to the given type.
+    ///
+    /// For an `int` or `float` target, white space around the number is
+    /// ignored, as for the numeric strings of Template Schemas §7.5: `" 7 "`
+    /// is `7`. White space is the Unicode `White_Space` property, which is
+    /// what [`str::trim`] removes. A `float` keeps the text it was written
+    /// with, without that white space. Error messages quote `s` as given.
     pub fn from_str_coerce(
         s: &str,
         target: &ExprType,
         path_format: PathFormat,
     ) -> Result<Self, String> {
+        Self::parse_str_as(s, target, path_format, str::trim)
+    }
+
+    /// [`Self::from_str_coerce`], with `number_text` choosing the text an
+    /// `int` or `float` target parses: [`str::trim`] for a numeric string,
+    /// the identity for the JSON transport, whose numbers are written by
+    /// [`Self::to_json_transport`] and so never padded.
+    fn parse_str_as(
+        s: &str,
+        target: &ExprType,
+        path_format: PathFormat,
+        number_text: fn(&str) -> &str,
+    ) -> Result<Self, String> {
         match target.code() {
-            TypeCode::Int => s
+            TypeCode::Int => number_text(s)
                 .parse::<i64>()
                 .map(ExprValue::Int)
                 .map_err(|e| format!("Cannot convert '{s}' to int: {e}")),
             TypeCode::Float => {
-                let v: f64 = s
+                let text = number_text(s);
+                let v: f64 = text
                     .parse()
                     .map_err(|e| format!("Cannot convert '{s}' to float: {e}"))?;
                 if v.is_infinite() || v.is_nan() {
                     return Err(format!("Cannot convert '{s}' to float"));
                 }
                 Ok(ExprValue::Float(
-                    Float64::with_str(v, s.to_string()).map_err(|e| e.to_string())?,
+                    Float64::with_str(v, text.to_string()).map_err(|e| e.to_string())?,
                 ))
             }
             TypeCode::Bool => match s.to_lowercase().as_str() {
@@ -1488,7 +1508,9 @@ impl ExprValue {
         let s = value
             .as_str()
             .ok_or_else(|| format!("Expected string value for {target}"))?;
-        ExprValue::from_str_coerce(s, target, path_format)
+        // Transport numbers are exact: the white space a numeric string may
+        // have (Template Schemas §7.5) is not part of the transport format.
+        ExprValue::parse_str_as(s, target, path_format, |t| t)
     }
 
     /// Returns `true` if this value is a list variant.

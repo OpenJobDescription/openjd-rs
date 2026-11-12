@@ -1663,3 +1663,82 @@ fn path_param_maxlength_uses_chars_not_bytes() {
         "10-character path '/tmp/héllo' should pass maxLength=10 (char count, not byte count)"
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// INT/FLOAT check_constraints on a numeric string (Template Schemas §7.5)
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn numeric_param_check_constraints_ignores_white_space_around_the_number() {
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [
+            {"name": "I", "type": "INT", "minValue": 1, "maxValue": 9},
+            {"name": "F", "type": "FLOAT", "minValue": 0.5, "maxValue": 9.5}
+        ],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#,
+    );
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
+    let params = jt.parameter_definitions.as_ref().unwrap();
+    let check = |i: usize, s: &str| {
+        params[i].check_constraints(&openjd_expr::ExprValue::String(s.to_string()))
+    };
+    for value in [" 7 ", "\t7\n", "\u{a0}7\u{3000}"] {
+        check(0, value).unwrap_or_else(|e| panic!("{value:?}: {e}"));
+        check(1, &value.replace('7', "2.5")).unwrap_or_else(|e| panic!("{value:?}: {e}"));
+    }
+    assert_eq!(
+        check(0, " 10 ").unwrap_err(),
+        "Parameter 'I': value 10 exceeds maximum 9"
+    );
+    assert_eq!(
+        check(1, " 0.25 ").unwrap_err(),
+        "Parameter 'F': value 0.25 is less than minimum 0.5"
+    );
+    // White space inside the number, and U+200B and U+001C, which are not
+    // white space.
+    // The message quotes the value as given, with its white space.
+    for value in ["1 0", "\u{200b}7", "\u{1c}7", " 7x\t"] {
+        assert_eq!(
+            check(0, value).unwrap_err(),
+            format!("Parameter 'I': value '{value}' is not a valid integer")
+        );
+        assert_eq!(
+            check(1, value).unwrap_err(),
+            format!("Parameter 'F': value '{value}' is not a valid float")
+        );
+    }
+}
+
+#[test]
+fn numeric_param_template_strings_keep_their_text_without_white_space() {
+    // A FLOAT `default` written as a string keeps the text it was written
+    // with, minus the white space around it (Template Schemas §7.5), as a
+    // submitted value does. An INT default keeps only its value.
+    let v = yaml_val(
+        "{\"specificationVersion\": \"jobtemplate-2023-09\", \"name\": \"Test\",
+         \"parameterDefinitions\": [
+             {\"name\": \"F\", \"type\": \"FLOAT\", \"default\": \"  2.50\\t\", \"minValue\": \"\\u3000 0.50\"},
+             {\"name\": \"I\", \"type\": \"INT\", \"default\": \" 007\\n\"}
+         ],
+         \"steps\": [{\"name\": \"S\", \"script\": {\"actions\": {\"onRun\": {\"command\": \"run\"}}}}]}",
+    );
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
+    let params = jt.parameter_definitions.as_ref().unwrap();
+    match (&params[0], &params[1]) {
+        (
+            openjd_model::template::JobParameterDefinition::FLOAT(f),
+            openjd_model::template::JobParameterDefinition::INT(i),
+        ) => {
+            let default = f.default.as_ref().unwrap();
+            assert_eq!((default.0, default.1.as_deref()), (2.5, Some("2.50")));
+            let min = f.min_value.as_ref().unwrap();
+            assert_eq!((min.0, min.1.as_deref()), (0.5, Some("0.50")));
+            assert_eq!(i.default.as_ref().unwrap().0, 7);
+        }
+        other => panic!("unexpected definitions {other:?}"),
+    }
+}

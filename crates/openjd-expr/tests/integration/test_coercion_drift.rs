@@ -47,6 +47,9 @@ fn sample_values() -> Vec<ExprValue> {
         float(2.5),
         ExprValue::String("7".to_string()),
         ExprValue::String("7.5".to_string()),
+        // White space around a number is ignored by string -> int / float
+        // (Template Schemas §7.5), so a padded string converts like "7".
+        ExprValue::String(" 7\t".to_string()),
         ExprValue::String("true".to_string()),
         ExprValue::String("1-3".to_string()),
         ExprValue::String("hello".to_string()),

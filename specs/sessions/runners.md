@@ -240,7 +240,9 @@ timeout field, returns the `default`. A single whole-field expression resolves w
 target type `int?` (Template Schemas §5): a `null` result means "not provided" (the
 default applies), and coercible values like `{{ 120.0 }}` or `{{ '120' }}` become the
 int they denote. A multi-segment format string concatenates to a string and is parsed
-as an integer. The resolved value must be a positive integer (seconds); zero is
+as an integer. Either way, white space around the number is ignored, as for a
+`<posintstring>` (Template Schemas §7.5): `{{ ' 120 ' }}` and `" {{ 120 }} "` are 120.
+The resolved value must be a positive integer (seconds); zero is
 rejected with an error.
 
 The same target-typing applies to the other numeric/enum cancelation fields:

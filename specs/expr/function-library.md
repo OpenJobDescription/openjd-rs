@@ -659,7 +659,8 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   strings come from template data where `'1_0'` is more likely a mistake
   than a readability separator, and the implicit string→int/float coercion
   of format-string results and parameter values (`ExprValue::from_str_coerce`)
-  stays ASCII-only.
+  stays ASCII-only in its digits. It trims the same `White_Space` set as
+  `int()`/`float()` around the number.
 - **`title()` and `capitalize()`** (§2.2.4) also match Python exactly.
   `title()` follows CPython's `do_title`: a character is titlecased when the
   previous character is not cased, lowercased otherwise — so digits and
