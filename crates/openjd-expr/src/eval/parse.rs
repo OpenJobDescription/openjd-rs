@@ -190,6 +190,8 @@ fn rename_contextual_keywords(
         .map(|(range, non_ascii)| {
             let text = &source[range];
             if non_ascii {
+                // Same crate and normalization as ruff_python_parser, so the two
+                // can't disagree.
                 text.nfkc().collect()
             } else {
                 text.to_string()
