@@ -602,7 +602,8 @@ pub(crate) fn strip_redundant_leading_zeros(text: &str) -> Cow<'_, str> {
 }
 
 /// One value a FLOAT range list's format string element contributed, or why
-/// it is not a valid one.
+/// it is not a valid one. A float member of a whole-field range expression's
+/// list goes through the same rule, so the two forms keep the same spellings.
 ///
 /// A float that carries a spelling different from what `format_float` gives,
 /// alone or as a member of a list, and an integer render as written: the
@@ -706,12 +707,20 @@ fn resolve_float_range(
                 Ok(val) if val.is_list() => {
                     let elements = val.list_elements().unwrap();
                     elements
-                        .iter()
-                        .map(|e| match e {
-                            // No text: an expression element came from a literal
-                            // or an int, so `{{ [2.50] }}` is 2.5 (§7.5).
-                            ExprValue::Float(f) => float64(f.value(), param_name),
-                            ExprValue::Int(i) => float64(*i as f64, param_name),
+                        .into_iter()
+                        .enumerate()
+                        .map(|(k, e)| match e {
+                            // A float copied unchanged keeps its spelling
+                            // (Expression Language §1.3.4), by the same rule as
+                            // a range list element, so `{{ Param.LF }}` and
+                            // `["{{ Param.LF }}"]` give the same tasks.
+                            ExprValue::Float(_) => float_range_value(e, limits).map_err(|detail| {
+                                ModelError::Expression(ExpressionError::new(format!(
+                                    "Task parameter '{param_name}' range[{k}]: {detail}"
+                                )))
+                            }),
+                            // Converted to float (§1.3.12), so it has no spelling.
+                            ExprValue::Int(i) => float64(i as f64, param_name),
                             other => Err(ModelError::Expression(ExpressionError::new(format!(
                                 "Expected float in range, got {}",
                                 other.type_name()

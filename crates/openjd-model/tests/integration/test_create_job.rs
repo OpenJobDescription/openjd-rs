@@ -1580,6 +1580,66 @@ fn test_create_job_float_range_list_null_drops_and_list_flattens() {
     );
 }
 
+/// Expression Language §1.3.4: a float copied unchanged keeps its spelling, so
+/// a whole-field range expression keeps each float member's spelling, as the
+/// same value does as a range list element (§1.3.12). Integer members are
+/// converted to float and computed floats have no spelling, as in a list item.
+#[test]
+fn test_create_job_float_range_expression_keeps_spelling() {
+    let renderings = |range_json: &str, params: &[(&str, &str)]| {
+        frame_float_renderings(&parse_and_create(
+            &expr_range_list_template("FLOAT", range_json),
+            params,
+        ))
+    };
+    let floats = [("Floats", r#"[" 1.00 ", "2.50"]"#)];
+    assert_eq!(
+        renderings(r#""{{ Param.Floats }}""#, &floats),
+        ["1.00", "2.50"]
+    );
+    assert_eq!(
+        renderings(r#""{{ Param.Floats }}""#, &floats),
+        renderings(r#"["{{ Param.Floats }}"]"#, &floats),
+        "the whole-field and list-element forms agree"
+    );
+    let job = parse_and_create(
+        &expr_range_list_template(
+            "FLOAT",
+            r#""{{ [Param.Ratio, Param.Floats[1], 1.50, 1e3, 2.5, Param.Value, Param.Ratio * 2] }}""#,
+        ),
+        &[("Ratio", " 2.50 "), ("Floats", r#"[1, "07.250"]"#)],
+    );
+    assert_eq!(
+        frame_float_renderings(&job),
+        ["2.50", "7.250", "1.50", "1e3", "2.5", "10.0", "5.0"]
+    );
+    // A spelling equal to what `format_float` gives is not stored, as for a
+    // range list element.
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        r#"{"float":{"range":["2.50","7.250","1.50","1e3",2.5,10.0,5.0]}}"#
+    );
+}
+
+/// A whole-field range expression keeps a float member's spelling up to
+/// `max_task_param_string_len` characters, and only its value past that, as a
+/// range list element does.
+#[test]
+fn test_create_job_float_range_expression_spelling_length_cap() {
+    let at_cap = format!("1.{}", "0".repeat(1022));
+    let over_cap = format!("1.{}", "0".repeat(1023));
+    let job = parse_and_create(
+        &expr_range_list_template("FLOAT", r#""{{ Param.Floats }}""#),
+        &[("Floats", &format!(r#"["{at_cap}", "{over_cap}"]"#))],
+    );
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        format!(r#"{{"float":{{"range":["{at_cap}",1.0]}}}}"#)
+    );
+}
+
 /// A `<floatstring>` keeps its spelling up to `max_task_param_string_len`
 /// characters, and only its value past that.
 #[test]

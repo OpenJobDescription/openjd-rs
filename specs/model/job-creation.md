@@ -284,9 +284,12 @@ budgets template validation and the session runtime apply.
      `<floatstring>` `"10"` would, not `10.0`. A float keeps the spelling it carries,
      alone or as a list member, when that spelling differs from what `format_float`
      gives (an equal one renders the same, and is not stored): a FLOAT job parameter
-     given as `2.50` renders `2.50`, and so does `{{ [Param.F] }}` as an element (the whole-field range
-     expression `"{{ [Param.F] }}"` renders `2.5`, because `resolve_float_range`
-     drops spellings there). A float with no spelling, such as a computed one or an
+     given as `2.50` renders `2.50`, and so does `{{ [Param.F] }}` as an element. The
+     float members of a whole-field range expression's list go through the same rule
+     (`float_range_value`), so `"{{ [Param.F] }}"` also renders `2.50` and
+     `"{{ Param.Floats }}"` gives the same tasks as `["{{ Param.Floats }}"]` (Expression
+     Language §1.3.4); its integer members are converted to float, as a list member's
+     are. A float with no spelling, such as a computed one or an
      integer list member converted to float, renders through `format_float`:
      `{{ Param.Ints }}` with `[3, 4]` gives `3.0` and `4.0`. A STRING value that is an integer coerces to `int`
      first (Expression Language §1.2.3 prefers `int` for a string), so it renders as
