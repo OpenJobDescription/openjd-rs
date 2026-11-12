@@ -48,6 +48,20 @@ fn max_depth_constant_is_64() {
     assert_eq!(MAX_EXPRESSION_DEPTH, 64);
 }
 
+/// Only wasm32 builds lower the cap (to 512 bytes, see
+/// `MAX_PARSE_INPUT_LEN`); native builds keep 64 KB. The wasm32 cap is
+/// tested by openjd-for-js's `js-tests/expression-length.test.js`.
+#[test]
+fn max_parse_input_len_is_64_kib_on_native_targets() {
+    assert_eq!(MAX_PARSE_INPUT_LEN, 64 * 1024);
+    let err = ParsedExpression::new(&format!("'{}'", "a".repeat(64 * 1024 - 1)))
+        .expect_err("one byte over the cap");
+    assert_eq!(
+        err.message(),
+        "Expression source length (65537 bytes) exceeds maximum allowed (65536 bytes)"
+    );
+}
+
 // ── Parser survival: shapes that would blow the default thread stack ──
 //
 // Pure `(((...1...)))` parses to just `1` in ruff (redundant parens are

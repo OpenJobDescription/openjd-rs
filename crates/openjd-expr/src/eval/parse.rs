@@ -210,12 +210,19 @@ impl ParsedExpression {
         // recurse at most once per input character, so the cap bounds the
         // stack the parser (growing its own with `stacker`) and the worker
         // thread need, and the parser's work. Inputs exceeding this size are
-        // rejected without invoking the parser at all.
+        // rejected without invoking the parser at all. On wasm32 the cap is
+        // much lower, because it is what bounds the engine's call stack (see
+        // `MAX_PARSE_INPUT_LEN`).
         if expr_str.len() > MAX_PARSE_INPUT_LEN {
             return Err(ExpressionError::new(format!(
-                "Expression source length ({} bytes) exceeds maximum allowed ({} bytes)",
+                "Expression source length ({} bytes) exceeds maximum allowed ({} bytes{})",
                 expr_str.len(),
-                MAX_PARSE_INPUT_LEN
+                MAX_PARSE_INPUT_LEN,
+                if cfg!(target_arch = "wasm32") {
+                    " in WebAssembly builds"
+                } else {
+                    ""
+                }
             )));
         }
 
@@ -227,7 +234,10 @@ impl ParsedExpression {
         // thread regardless of shape. The structural depth walker still
         // catches excessive AST depth that might arise from the parser's
         // own node-building patterns.
-        if expr_str.len() <= FAST_PATH_INPUT_LEN {
+        //
+        // wasm32 can't spawn threads, so every input parses on the current
+        // thread there. The wasm32 `MAX_PARSE_INPUT_LEN` keeps that safe.
+        if expr_str.len() <= FAST_PATH_INPUT_LEN || cfg!(target_arch = "wasm32") {
             return parse_inner(expr, expr_str, profile);
         }
 
@@ -511,7 +521,8 @@ fn build_symbol_name(expr: &ast::Expr, renames: &HashMap<String, String>) -> Opt
 pub const MAX_EXPRESSION_DEPTH: usize = 64;
 
 /// Input-length threshold below which [`ParsedExpression::new`] parses on
-/// the current thread instead of spawning a worker thread.
+/// the current thread instead of spawning a worker thread. On wasm32, which
+/// can't spawn threads, every input parses on the current thread.
 ///
 /// A recursive-descent parser cannot recurse more times than there are
 /// input characters to consume, and the ruff parser's empirical overflow
@@ -538,7 +549,26 @@ const FAST_PATH_INPUT_LEN: usize = 200;
 ///
 /// Realistic template expressions are well under 1 KB; 64 KB is two
 /// orders of magnitude above that.
+///
+/// On wasm32 the cap is 512 bytes. wasm32 can't spawn the parser thread, so
+/// the parser runs on the caller's stack, and the parser's `stacker` feature
+/// can't help there: it moves only the shadow stack in linear memory, while
+/// each recursion level also takes a frame on the WebAssembly engine's own
+/// call stack, which nothing can grow. Overflowing that stack throws a JS
+/// `RangeError` out of the middle of the parse, which leaves the module's
+/// state inconsistent. Measured in Node.js 24 (V8's default 984 KB stack),
+/// the costliest input is unclosed `(`, at about 770 bytes of engine stack
+/// per input byte, so 512 bytes needs about 400 KB: under half of V8's
+/// default. See `specs/expr/parser.md` (Depth Limit).
+#[cfg(not(target_arch = "wasm32"))]
 pub const MAX_PARSE_INPUT_LEN: usize = 64 * 1024;
+/// Maximum permitted source length (in bytes) for a single
+/// [`ParsedExpression`]: 512 bytes in a wasm32 build, where the parser runs
+/// on the caller's stack and the WebAssembly engine's call stack, which
+/// can't be grown, bounds how deep it can recurse. Other targets allow
+/// 64 KB. See `specs/expr/parser.md` (Depth Limit).
+#[cfg(target_arch = "wasm32")]
+pub const MAX_PARSE_INPUT_LEN: usize = 512;
 
 /// Stack size for the parser thread used when the source string is longer
 /// than [`FAST_PATH_INPUT_LEN`]. On its own, 32 MB does not cover every

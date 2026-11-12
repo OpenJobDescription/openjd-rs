@@ -92,7 +92,8 @@ impl ParsedExpression {
     ///
     /// Long inputs (>200 bytes) are parsed on a dedicated 32 MB-stack
     /// worker thread to survive recursive-descent depth on debug builds;
-    /// this is transparent to the caller.
+    /// this is transparent to the caller. On wasm32, which can't spawn
+    /// threads, every input is parsed on the caller's thread.
     pub fn new(expr: &str) -> Result<ParsedExpression, ExpressionError>;
 
     /// Parse an expression under a caller-supplied profile.
@@ -227,7 +228,12 @@ pub const MAX_EXPRESSION_DEPTH: usize = 64;
 /// Maximum source length (in bytes) for a single `ParsedExpression::new`
 /// call. Bounds the parser's stack use (with its `stacker` feature and the
 /// 32 MB parser thread) and its work (see parser.md, Depth Limit).
+#[cfg(not(target_arch = "wasm32"))]
 pub const MAX_PARSE_INPUT_LEN: usize = 64 * 1024;
+/// On wasm32 the parser runs on the caller's stack, and the cap bounds its
+/// use of the engine's call stack (see parser.md, Depth Limit, "wasm32").
+#[cfg(target_arch = "wasm32")]
+pub const MAX_PARSE_INPUT_LEN: usize = 512;
 ```
 
 Additional per-module caps (see each module section below):

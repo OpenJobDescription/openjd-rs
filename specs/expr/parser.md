@@ -54,6 +54,8 @@ each bump.
 **`stacker` feature.** With it, the parser grows its stack on the heap once its
 recursion gets deep (see Depth Limit below). Without it, 64 KB of `-` or of
 nested brackets overflows even the 32 MB worker thread and aborts the process.
+On wasm32 it grows only the shadow stack in linear memory, not the engine's
+call stack (see "wasm32" under Depth Limit).
 
 **Error messages.** Syntax errors carry Ruff's own wording, prefixed with
 `Syntax error: `, for example `Expected an expression` for `1 +` and
@@ -167,7 +169,8 @@ Three independent mechanisms work together:
 
 1. **Absolute input-size cap.** `ParsedExpression::new` rejects any source
    longer than [`MAX_PARSE_INPUT_LEN`](../../crates/openjd-expr/src/eval/parse.rs)
-   (currently **64 KB**) before invoking the parser. This bounds the parser's
+   (currently **64 KB**, and **512 bytes** on wasm32; see below) before
+   invoking the parser. This bounds the parser's
    worst-case recursion depth at source length: a recursive-descent parser
    cannot recurse more times than there are input characters to consume.
 
@@ -189,6 +192,9 @@ Three independent mechanisms work together:
    `MAX_PARSE_INPUT_LEN` without our enumerating which token patterns drive
    its recursion. The parser has no bracket-nesting limit of its own, so
    nesting is bounded only by `MAX_PARSE_INPUT_LEN`.
+
+   wasm32 has no worker thread (see below), so every input takes the fast
+   path there.
 
    The fast-path threshold is deliberately decoupled from
    `MAX_EXPRESSION_DEPTH`: the depth cap is a semantic abuse ceiling on
@@ -218,6 +224,34 @@ cap + worker thread + the parser's `stacker` feature + depth walker +
 evaluator guard together ensure that
 no input to `ParsedExpression::new` or `Evaluator::evaluate` can cause a
 process abort.
+
+**wasm32.** wasm32 targets (`wasm32-unknown-unknown`, which openjd-for-js
+uses, and `wasm32-wasip1`) can't spawn threads: `std::thread::Builder::spawn`
+returns an error. So on wasm32 `ParsedExpression::new` parses every input on
+the caller's thread, and the input cap is what keeps that safe. There are
+two stacks on wasm32. The shadow stack, in linear memory, holds the frames
+whose address is taken; `stacker` can't find its limit there, so the first
+time the parser asks (past 20 levels) it moves to a 1 MB heap segment, as on
+other targets. The WebAssembly engine's own call stack holds a frame for
+every call, and nothing in the module can grow it. When it runs out, the
+engine throws a JS `RangeError` out of the middle of the parse, which skips
+every Rust destructor and leaves the module's state inconsistent.
+
+The engine's stack limit, not the AST depth limit, decides which inputs fail
+this way, because the parser recurses before the depth walker runs. Measured
+in Node.js 24 (V8, default `--stack-size=984` KB, release build), the first
+`RangeError` comes at about 1,300 bytes of unclosed `(` or `[`, 1,850 bytes
+of `-`, 1,900 bytes of unclosed `f'{`, and 21 KB of `a.b.c...` (whose
+deeply left-nested AST overflows when it is dropped). The cost is linear in
+the stack size, about 770 bytes of engine stack per byte of unclosed `(`. So
+on wasm32 `MAX_PARSE_INPUT_LEN` is **512 bytes**, which needs about 400 KB
+(every such input at the cap parses under `--stack-size=400`, and unclosed
+`(` overflows under 300), under half of V8's default. Browsers' limits were
+not measured. Inputs at most 512 bytes long are also well inside this
+crate's own walkers and the evaluator, which the depth limit bounds. Each
+`{{ }}` interpolation in a format string is parsed separately, so the cap
+applies to each one, not to the whole string. The cap makes openjd-for-js
+reject expressions between 513 bytes and 64 KB that other targets accept.
 
 Exceeding the limit returns `ExpressionErrorKind::ExpressionTooDeep { depth,
 limit: 64 }` with normal caret formatting.

@@ -200,7 +200,7 @@ Callers who want non-throwing validation use `try { decodeJobTemplate(...) } cat
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `evaluateExpression` | `(expr: string, symbols: SymbolTable, lib?: FunctionLibrary, options?: EvalOptions) → ExprValue` | Evaluate an EXPR extension expression. `lib` is borrowed: the caller keeps it, can pass it to later calls, and frees it. `options` lets the host cap memory and operation use per call; omit to use the built-in defaults. |
-| `parseExpression` | `(expr: string) → ParsedExpression` | Parse an expression for repeated evaluation. |
+| `parseExpression` | `(expr: string) → ParsedExpression` | Parse an expression for repeated evaluation. Throws for an expression over 512 bytes (see [Expression Length](#expression-length)). |
 | `getDefaultLibrary` | `() → FunctionLibrary` | Get the default function library (includes builtins like `len`, `str`, `int`, etc.). |
 | `getDefaultMemoryLimit` | `() → number` | Report the built-in memory budget (bytes) used when `EvalOptions.memoryLimit` is omitted. Informational only. |
 | `getDefaultOperationLimit` | `() → number` | Report the built-in operation budget used when `EvalOptions.operationLimit` is omitted. Informational only. |
@@ -517,6 +517,25 @@ which shares its engine. Only Node.js is tested, in CI on Node 26.
 In Node.js, pass the `.wasm` bytes to `init({ module_or_path: bytes })` or `initSync`.
 A bare `init()` fetches the `.wasm` next to the glue by URL, and Node's `fetch` does not
 read `file:` URLs. `js-tests/helpers.js` reads the file and passes the bytes.
+
+### Expression Length
+
+An expression's source may be at most **512 bytes** after trimming white space, against
+64 KB in native builds and the Python bindings. Longer expressions throw `Expression source
+length (N bytes) exceeds maximum allowed (512 bytes in WebAssembly builds)`, from
+`parseExpression`, `evaluateExpression`, `FormatString`, and template decoding alike. The
+cap applies to each `{{ }}` interpolation of a format string separately, not to the whole
+string, so a template that is valid elsewhere fails here only if one of its expressions is
+over 512 bytes.
+
+wasm32 can't spawn the worker thread that native builds parse long expressions on, so the
+parser runs on the caller's stack. Each level of its recursion takes a frame on the
+WebAssembly engine's call stack, which the module can't grow, and overflowing it throws a
+`RangeError` that leaves the module in an inconsistent state. The cap keeps the worst input
+under about 400 KB of engine stack, under half of V8's default in Node.js and Chrome. See
+`specs/expr/parser.md` (Depth Limit, "wasm32") for the measurements. Browsers' own stack
+limits, and those of Web Workers, were not measured. `js-tests/expression-length.test.js`
+checks the deepest shapes at the cap.
 
 ## Usage Example
 
