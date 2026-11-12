@@ -29,7 +29,7 @@ pub struct ActionStatus {
 | `state` | `ActionState` | Session | Current lifecycle state of the action |
 | `progress` | `Option<f64>` | `openjd_progress` | 0.0–100.0 progress percentage |
 | `status_message` | `Option<String>` | `openjd_status` | Human-readable status text |
-| `fail_message` | `Option<String>` | `openjd_fail` / `CancelMarkFailed` | Reason for failure |
+| `fail_message` | `Option<String>` | `openjd_fail` / `CancelMarkFailed`, or the session on a failure before the action starts | Reason for failure |
 | `exit_code` | `Option<i32>` | Subprocess exit | Process exit code, `None` while running |
 | `started_at` | `Option<SystemTime>` | Session | When the action began |
 | `ended_at` | `Option<SystemTime>` | Session | When the action completed |
@@ -53,7 +53,13 @@ is non-terminal.
 ## Lifecycle
 
 1. **Action starts**: Session sets `state = Running`, `started_at = now()`,
-   all other fields `None`. Callback fires.
+   all other fields `None`. Callback fires. An `enter_environment`/`exit_environment`
+   call that fails before its action is reported `Running` (building the symbol table,
+   or — for enter — resolving an environment's `variables`) skips this step: the session
+   sets `state = Failed` with the error's message as `fail_message` itself and fires one
+   callback. `run_task` always reports `Running` first. An enter/exit action with no
+   `onEnter`/`onExit` records `Success` directly, also without a `Running` callback (see
+   [session.md § Failures before an action starts](session.md#failures-before-an-action-starts)).
 
 2. **Directives arrive**: `apply_message` updates the relevant field and fires
    the callback after each message:

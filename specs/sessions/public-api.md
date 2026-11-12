@@ -123,6 +123,17 @@ impl Session {
     pub fn action_status(&self) -> Option<ActionStatus>;
 
     // ── Lifecycle actions (async) ──
+    //
+    // An error from these methods is either a rejection from the
+    // up-front checks (wrong state, an unknown or duplicate environment,
+    // LIFO order, the wrap-layer rule, run_subprocess's argument checks),
+    // which changes nothing, or a failed action, which makes the session
+    // ending-only. For a failure before the subprocess starts the action
+    // status is Failed with the error's message; for an onEnter/onExit
+    // that runs and ends non-Success the error is EnvironmentScriptFailed
+    // and the status is the script's own terminal state (Failed, Canceled
+    // or Timeout). A failed enter_environment leaves the environment
+    // entered. See session.md § Failures before an action starts.
 
     /// Enter an environment (runs its `onEnter` action, if any).
     /// Returns the identifier used to later `exit_environment`.
@@ -165,9 +176,10 @@ impl Session {
     /// further work. `true` only means "don't make the session
     /// ending-only on this exit", so a session that was Ready stays
     /// Ready for later `run_task` / `enter_environment` calls unless
-    /// the `onExit` action ends Failed, Canceled or Timeout, like any
-    /// other action. It
-    /// never brings an ending-only session back to Ready, for example
+    /// the exit fails — either before its action starts (building the
+    /// symbol table, path mapping, wrap-hook setup) or with an `onExit`
+    /// that ends Failed, Canceled or Timeout — like any other action.
+    /// It never brings an ending-only session back to Ready, for example
     /// after an earlier action ended Failed, Canceled or Timeout;
     /// only `clear_ending_only` does that.
     pub async fn exit_environment(

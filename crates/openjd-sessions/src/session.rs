@@ -1242,14 +1242,17 @@ impl Session {
         self.state = StoredState::Ready;
     }
 
-    /// Record a failure that occurred while setting up an action that has
-    /// already been reported as Running (e.g. wrap-symbol seeding or path
-    /// mapping materialization failing before the subprocess dispatch).
+    /// Record a failure that occurred after a call was accepted but before
+    /// its action's subprocess started (e.g. the symbol table failing to
+    /// build, wrap-symbol seeding or path mapping materialization failing
+    /// before the subprocess dispatch). Such a failure fails the action,
+    /// as in the Python runtime (spec § Failures before an action starts).
     ///
     /// Without this, an early `?` return would leave the session state
-    /// permanently `Running` with no terminal `ActionStatus` — callers
-    /// polling for completion (notably the Python bindings) would hang, and
-    /// nothing about the failure would appear in the session log.
+    /// `Running` with no terminal `ActionStatus` — callers polling for
+    /// completion (notably the Python bindings) would hang — or leave it
+    /// `Ready` with the previous action's status, and nothing about the
+    /// failure would appear in the session log.
     ///
     /// Marks the action Failed with the error message, resets cancellation
     /// state, drops out of Running, logs the failure, and notifies the
@@ -1269,6 +1272,16 @@ impl Session {
         self.settle_after_action(ActionState::Failed);
         self.notify_callback();
         e
+    }
+
+    /// [`fail_action_setup`](Self::fail_action_setup) for a failure before
+    /// the action was reported as `Running`: starts a new action status (so
+    /// the previous action's doesn't linger) and logs the call's section
+    /// `banner` first, so the failure appears under it in the session log.
+    fn fail_action_before_start(&mut self, banner: &str, e: SessionError) -> SessionError {
+        self.action.reset();
+        log_section_banner(&self.session_id, banner);
+        self.fail_action_setup(e)
     }
 
     /// Clean up the session. Deletes working directory if not retained.
@@ -1359,6 +1372,26 @@ impl Session {
     /// stored environment, so readers that run after this call returns — notably
     /// the RFC 0008 wrap hooks — see it either way. If both are supplied, the
     /// argument wins.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::InvalidState`] if the session isn't `Ready`,
+    /// [`SessionError::DuplicateEnvironment`] if `identifier` is already
+    /// entered, or [`SessionError::MultipleWrapEnvironments`] under the RFC
+    /// 0008 single-layer rule. These change nothing.
+    ///
+    /// Any other error fails the action and makes the session ending-only;
+    /// the environment stays entered, so the caller must still exit it (it
+    /// is the last entry of
+    /// [`environments_entered`](Self::environments_entered)). For a failure
+    /// before the `onEnter` subprocess starts — an undeserializable
+    /// `resolved_symtab`, a `variables` value that can't be resolved, a path
+    /// mapping or wrap-hook setup error — the action status is `Failed` with
+    /// the error's message, as in the Python runtime; this is the only kind
+    /// of failure possible when the environment has no `onEnter`. If the
+    /// `onEnter` runs and ends non-`Success`, the error is
+    /// [`SessionError::EnvironmentScriptFailed`] and the action status is
+    /// that terminal state (`Failed`, `Canceled` or `Timeout`).
     pub async fn enter_environment(
         &mut self,
         env: &Environment,
@@ -1373,6 +1406,10 @@ impl Session {
     }
 
     /// Enter an environment, returning both the identifier and the stdout from the onEnter script.
+    ///
+    /// # Errors
+    ///
+    /// As for [`enter_environment`](Self::enter_environment).
     pub async fn enter_environment_with_output(
         &mut self,
         env: &Environment,
@@ -1385,6 +1422,11 @@ impl Session {
                 expected: vec![SessionState::Ready],
                 current: self.state(),
             });
+        }
+        if let Some(id) = identifier {
+            if self.environments.contains_key(id) {
+                return Err(SessionError::DuplicateEnvironment { id: id.to_string() });
+            }
         }
 
         // RFC 0008 single-layer rule: at most one environment in the session
@@ -1408,15 +1450,8 @@ impl Session {
             }
         }
 
-        let symtab = self.build_symbol_table(None, resolved_symtab)?;
-
         let identifier = match identifier {
-            Some(id) => {
-                if self.environments.contains_key(id) {
-                    return Err(SessionError::DuplicateEnvironment { id: id.to_string() });
-                }
-                id.to_string()
-            }
+            Some(id) => id.to_string(),
             None => format!("{}:{}", self.session_id, uuid::Uuid::new_v4().simple()),
         };
         // A caller may supply an environment's resolved symbol table either on
@@ -1436,58 +1471,26 @@ impl Session {
         self.created_env_vars
             .insert(identifier.clone(), HashMap::new());
 
-        // Set static variables
-        if let Some(vars) = &env.variables {
-            for (key, fmt_str) in vars {
-                // Required string values (§4.4.2): a single whole-field
-                // expression resolves with target type `string`
-                // (Expression Language §1.3.2), so `null` and list values
-                // are errors rather than display renderings.
-                let value = fmt_str
-                    .resolve_with(
-                        &symtab,
-                        &crate::limits::fs_options(self.lib(), &self.limits)
-                            .with_target_type(&openjd_expr::ExprType::STRING),
-                    )
-                    .map(|v| match v {
-                        openjd_expr::ExprValue::String(s) => s,
-                        other => other.to_display_string(),
-                    })
-                    .map_err(|e| SessionError::FormatString {
-                        context: format!("env var '{key}'"),
-                        reason: e.to_string(),
-                    })?;
-                // A NUL in the resolved value would poison every subsequent
-                // Command::spawn in the session. Reject it here so the
-                // environment entry fails cleanly rather than bricking later
-                // actions — including the environment's own onExit teardown.
-                if value.contains('\0') {
-                    return Err(SessionError::FormatString {
-                        context: format!("env var '{key}'"),
-                        reason: "resolved value contains a NUL byte, which cannot be represented in a process environment.".to_string(),
-                    });
-                }
-                // Template Schemas §4.4.2: at most 2048 characters. This is
-                // the enforcement stage — template validation only catches
-                // statically knowable violations (an interpolation of an
-                // unresolved symbol contributes 0 to its lower bound), so a
-                // value that only becomes long here must be rejected here.
-                // Kept in sync with the model's
-                // EffectiveLimits::max_env_var_value_len.
-                let char_count = value.chars().count();
-                if char_count > ENV_VAR_VALUE_MAX_LEN {
-                    return Err(SessionError::FormatString {
-                        context: format!("env var '{key}'"),
-                        reason: format!(
-                            "resolved value is {char_count} characters, exceeding the maximum of {ENV_VAR_VALUE_MAX_LEN}."
-                        ),
-                    });
-                }
-                let norm_key = normalize_env_key(key);
-                self.env_vars.insert(norm_key.clone(), value.clone());
-                if let Some(changes) = self.created_env_vars.get_mut(&identifier) {
-                    changes.insert(norm_key, Some(value));
-                }
+        // From here on the call has been accepted and the environment is on
+        // the stack, so a failure fails the action (spec § Enter): the
+        // caller learns of it from the error and the action status, and
+        // exits the environment as usual.
+        let banner = format!("Entering Environment: {}", env.name);
+        let symtab = match self.build_symbol_table(None, resolved_symtab) {
+            Ok(symtab) => symtab,
+            Err(e) => return Err(self.fail_action_before_start(&banner, e)),
+        };
+
+        // Set static variables. All of them resolve before any is set, so a
+        // failure sets none of them, as in the Python runtime.
+        let variables = match self.resolve_env_variables(env, &symtab) {
+            Ok(variables) => variables,
+            Err(e) => return Err(self.fail_action_before_start(&banner, e)),
+        };
+        for (norm_key, value) in variables {
+            self.env_vars.insert(norm_key.clone(), value.clone());
+            if let Some(changes) = self.created_env_vars.get_mut(&identifier) {
+                changes.insert(norm_key, Some(value));
             }
         }
 
@@ -1697,6 +1700,74 @@ impl Session {
         Ok((identifier, output))
     }
 
+    /// Resolve the values of `env`'s `variables` against `symtab`,
+    /// returning each as a `(normalized name, value)` pair. Nothing is set
+    /// here, so the caller can set all of them or, on an error, none.
+    fn resolve_env_variables(
+        &self,
+        env: &Environment,
+        symtab: &SymbolTable,
+    ) -> Result<Vec<(String, String)>, SessionError> {
+        let Some(vars) = &env.variables else {
+            return Ok(Vec::new());
+        };
+        // Resolve in sorted key order so that, when more than one variable
+        // is invalid, the error reported is deterministic rather than
+        // dependent on `HashMap` iteration order. Nothing observable depends
+        // on the order the valid ones are returned in (they go into a map).
+        let mut entries: Vec<(&String, &openjd_model::FormatString)> = vars.iter().collect();
+        entries.sort_by(|a, b| a.0.cmp(b.0));
+        let mut resolved = Vec::with_capacity(entries.len());
+        for (key, fmt_str) in entries {
+            // Required string values (§4.4.2): a single whole-field
+            // expression resolves with target type `string`
+            // (Expression Language §1.3.2), so `null` and list values
+            // are errors rather than display renderings.
+            let value = fmt_str
+                .resolve_with(
+                    symtab,
+                    &crate::limits::fs_options(self.lib(), &self.limits)
+                        .with_target_type(&openjd_expr::ExprType::STRING),
+                )
+                .map(|v| match v {
+                    openjd_expr::ExprValue::String(s) => s,
+                    other => other.to_display_string(),
+                })
+                .map_err(|e| SessionError::FormatString {
+                    context: format!("env var '{key}'"),
+                    reason: e.to_string(),
+                })?;
+            // A NUL in the resolved value would poison every subsequent
+            // Command::spawn in the session. Reject it here so the
+            // environment entry fails cleanly rather than bricking later
+            // actions — including the environment's own onExit teardown.
+            if value.contains('\0') {
+                return Err(SessionError::FormatString {
+                    context: format!("env var '{key}'"),
+                    reason: "resolved value contains a NUL byte, which cannot be represented in a process environment.".to_string(),
+                });
+            }
+            // Template Schemas §4.4.2: at most 2048 characters. This is
+            // the enforcement stage — template validation only catches
+            // statically knowable violations (an interpolation of an
+            // unresolved symbol contributes 0 to its lower bound), so a
+            // value that only becomes long here must be rejected here.
+            // Kept in sync with the model's
+            // EffectiveLimits::max_env_var_value_len.
+            let char_count = value.chars().count();
+            if char_count > ENV_VAR_VALUE_MAX_LEN {
+                return Err(SessionError::FormatString {
+                    context: format!("env var '{key}'"),
+                    reason: format!(
+                        "resolved value is {char_count} characters, exceeding the maximum of {ENV_VAR_VALUE_MAX_LEN}."
+                    ),
+                });
+            }
+            resolved.push((normalize_env_key(key), value));
+        }
+        Ok(resolved)
+    }
+
     /// Exit an environment asynchronously, identified by its environment identifier.
     ///
     /// Environments must be exited in LIFO order (last entered, first exited).
@@ -1709,6 +1780,22 @@ impl Session {
     /// ending-only, for example because an action ended `Failed`, `Canceled` or
     /// `Timeout`, stays `ReadyEnding` until the caller calls
     /// [`clear_ending_only`](Self::clear_ending_only).
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::InvalidState`] if the session isn't `Ready` or
+    /// `ReadyEnding`, [`SessionError::UnknownEnvironment`], or
+    /// [`SessionError::LifoViolation`]. These change nothing.
+    ///
+    /// Any other error fails the action and makes the session ending-only.
+    /// The environment has already been removed, so the failed exit still
+    /// counts as an exit. For a failure before the `onExit` subprocess
+    /// starts — an undeserializable `resolved_symtab`, a path mapping or
+    /// wrap-hook setup error — the action status is `Failed` with the
+    /// error's message; this is the only kind possible when there is no
+    /// `onExit`. If the `onExit` runs and ends non-`Success`, the error is
+    /// [`SessionError::EnvironmentScriptFailed`] and the action status is
+    /// that terminal state (`Failed`, `Canceled` or `Timeout`).
     pub async fn exit_environment(
         &mut self,
         identifier: &EnvironmentIdentifier,
@@ -1745,8 +1832,6 @@ impl Session {
             });
         }
 
-        let symtab = self.build_symbol_table(None, resolved_symtab)?;
-
         // Evaluate env vars BEFORE removing from tracking (matching Python)
         // Box to keep off the async state machine — see run_task for rationale.
         let env_vars = Box::new(self.evaluate_env_vars(os_env_vars));
@@ -1774,6 +1859,17 @@ impl Session {
         if env_has_any_wrap_hook(&env) {
             self.wrap_env_file_records.remove(identifier);
         }
+
+        // As in the Python runtime, the symbol table is built only once the
+        // environment is off the stack: a failure here fails the action, and
+        // the failed exit still counts as an exit.
+        let symtab = match self.build_symbol_table(None, resolved_symtab) {
+            Ok(symtab) => symtab,
+            Err(e) => {
+                let banner = format!("Exiting Environment: {}", env.name);
+                return Err(self.fail_action_before_start(&banner, e));
+            }
+        };
 
         let output = if env
             .script
@@ -1986,6 +2082,17 @@ impl Session {
     /// `step_name` is the name of the step whose task is being run; it is
     /// surfaced as `WrappedStep.Name` to a wrapping environment's
     /// `onWrapTaskRun` hook (RFC 0008).
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::InvalidState`] if the session isn't `Ready`, which
+    /// changes nothing. Any other error is a failed action: the action
+    /// status is `Failed` with the error's message and the session is
+    /// ending-only. That covers both a failure before the subprocess starts
+    /// (an undeserializable `resolved_symtab`, a task parameter value that
+    /// can't be coerced to its type) and one from dispatching it (a command
+    /// that can't be started). An action that runs to a non-`Success` state
+    /// returns `Ok` with that state.
     pub async fn run_task(
         &mut self,
         step_name: &str,
@@ -2001,13 +2108,15 @@ impl Session {
             });
         }
 
-        let symtab = self.build_symbol_table(task_parameter_values, resolved_symtab)?;
-
         self.action.reset();
         self.state = StoredState::Running;
         self.notify_callback();
 
         log_section_banner(&self.session_id, "Running Task");
+
+        let symtab = self
+            .build_symbol_table(task_parameter_values, resolved_symtab)
+            .map_err(|e| self.fail_action_setup(e))?;
 
         let cancel_token = self.new_action_cancel_token();
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
