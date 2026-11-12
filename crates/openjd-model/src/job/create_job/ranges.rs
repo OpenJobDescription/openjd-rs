@@ -705,6 +705,11 @@ fn resolve_float_range(
             // if evaluation fails.
             match expr.resolve_with(symtab, &budgets.fs_options()) {
                 Ok(val) if val.is_list() => {
+                    let member_error = |k: usize, detail: String| {
+                        ModelError::Expression(ExpressionError::new(format!(
+                            "Task parameter '{param_name}' range expression element {k}: {detail}"
+                        )))
+                    };
                     let elements = val.list_elements().unwrap();
                     elements
                         .into_iter()
@@ -713,13 +718,14 @@ fn resolve_float_range(
                             // A float copied unchanged keeps its spelling
                             // (Expression Language §1.3.4), by the same rule as
                             // a range list element, so `{{ Param.LF }}` and
-                            // `["{{ Param.LF }}"]` give the same tasks.
-                            ExprValue::Float(_) => float_range_value(e, limits).map_err(|detail| {
-                                ModelError::Expression(ExpressionError::new(format!(
-                                    "Task parameter '{param_name}' range[{k}]: {detail}"
-                                )))
-                            }),
-                            // Converted to float (§1.3.12), so it has no spelling.
+                            // `["{{ Param.LF }}"]` give the same tasks. The
+                            // error is not expected: an expression's float is
+                            // finite and its spelling parses. `k` indexes the
+                            // evaluated list, as there is no list as written.
+                            ExprValue::Float(_) => float_range_value(e, limits)
+                                .map_err(|detail| member_error(k, detail)),
+                            // A member of a `list[int]`, converted to float
+                            // (§1.3.12), so it has no spelling.
                             ExprValue::Int(i) => float64(i as f64, param_name),
                             other => Err(ModelError::Expression(ExpressionError::new(format!(
                                 "Expected float in range, got {}",

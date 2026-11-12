@@ -1582,8 +1582,9 @@ fn test_create_job_float_range_list_null_drops_and_list_flattens() {
 
 /// Expression Language §1.3.4: a float copied unchanged keeps its spelling, so
 /// a whole-field range expression keeps each float member's spelling, as the
-/// same value does as a range list element (§1.3.12). Integer members are
-/// converted to float and computed floats have no spelling, as in a list item.
+/// same value does as a range list element (§1.3.12). The members of a
+/// `list[int]` are converted to float and computed floats have no spelling, as
+/// in a list item.
 #[test]
 fn test_create_job_float_range_expression_keeps_spelling() {
     let renderings = |range_json: &str, params: &[(&str, &str)]| {
@@ -1602,6 +1603,14 @@ fn test_create_job_float_range_expression_keeps_spelling() {
         renderings(r#"["{{ Param.Floats }}"]"#, &floats),
         "the whole-field and list-element forms agree"
     );
+    // The members of a `list[int]` are converted to float, in both forms.
+    for range_json in [r#""{{ Param.Ints }}""#, r#""{{ range(3, 5) }}""#] {
+        assert_eq!(renderings(range_json, &[]), ["3.0", "4.0"], "{range_json}");
+    }
+    assert_eq!(
+        renderings(r#""{{ Param.Ints }}""#, &[]),
+        renderings(r#"["{{ Param.Ints }}"]"#, &[])
+    );
     let job = parse_and_create(
         &expr_range_list_template(
             "FLOAT",
@@ -1609,6 +1618,8 @@ fn test_create_job_float_range_expression_keeps_spelling() {
         ),
         &[("Ratio", " 2.50 "), ("Floats", r#"[1, "07.250"]"#)],
     );
+    // `Param.Value` is an int in a list with floats, so the list is a
+    // `list[float]` and its member a float with no spelling.
     assert_eq!(
         frame_float_renderings(&job),
         ["2.50", "7.250", "1.50", "1e3", "2.5", "10.0", "5.0"]
