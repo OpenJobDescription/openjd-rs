@@ -16,16 +16,12 @@ const TEST_TOKEN: &str = "AbCdEfGhIjKlMnOpQrStUv";
 /// "wrong-token" tests.
 const WRONG_TOKEN: &str = "ZyXwVuTsRqPoNmLkJiHgFe";
 
-fn helper_path() -> std::path::PathBuf {
-    // The helper binary is built alongside the tests
-    let mut path = std::env::current_exe().unwrap();
-    path.pop(); // remove test binary name
-    path.pop(); // remove "deps"
-    path.push("openjd_helper");
-    if cfg!(windows) {
-        path.set_extension("exe");
-    }
-    path
+fn helper_path() -> &'static std::path::Path {
+    // Cargo builds the package's bin target before its integration tests and
+    // passes its full path, including any `.exe` suffix. Don't derive it from
+    // `current_exe()`: where Cargo puts test binaries isn't stable (Rust
+    // 1.100 moved them out of `target/<profile>/deps/`).
+    std::path::Path::new(env!("CARGO_BIN_EXE_openjd_helper"))
 }
 
 /// Spawn the helper with the given argv (beyond the binary path).
