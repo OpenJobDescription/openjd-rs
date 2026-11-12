@@ -1171,23 +1171,50 @@ fn multiline_zero_width_error_mid_line_underlines_its_whole_line() {
 #[test]
 fn non_printable_character_is_named() {
     // ruff prints the character itself, which shows nothing for a
-    // non-breaking space; it is named by code point, as CPython does.
-    for (expr, name) in [
-        ("a\u{a0}b", "U+00A0"),
-        ("a\u{200b}b", "U+200B"),
-        ("a\u{1b}b", "U+001B"),
+    // non-breaking space; it is named by code point, as CPython does. The
+    // error spans the character's UTF-8 bytes, starting at byte 1.
+    //
+    // For U+00A0 (2 bytes) and U+200B (3 bytes) the underline is drawn one
+    // column per byte (`^~`, `^~~`), though the character is one column wide
+    // or less. Every multi-byte character is drawn that way, as in the Python
+    // implementation (see superscript_digit_to_int_error). That width isn't
+    // what this test is about, so only the caret's start is asserted here.
+    for (expr, name, end, caret) in [
+        ("a\u{a0}b", "U+00A0", 3, "   ^"),
+        ("a\u{200b}b", "U+200B", 4, "   ^"),
+        ("a\u{1b}b", "U+001B", 2, "   ^"),
     ] {
-        let msg = ParsedExpression::new(expr).unwrap_err().message();
+        let e = ParsedExpression::new(expr).unwrap_err();
         assert_eq!(
-            msg,
+            e.message(),
             format!("Syntax error: invalid non-printable character {name}")
         );
+        assert_eq!(
+            (e.col_offset(), e.end_col_offset()),
+            (Some(1), Some(end)),
+            "{name}"
+        );
+        assert_err(
+            expr,
+            &[
+                &format!("Syntax error: invalid non-printable character {name}\n"),
+                &format!("  {expr}\n"),
+                caret,
+            ],
+        );
     }
+    // A one-byte character gets exactly one caret, with nothing after it.
+    assert!(eval_err("a\u{1b}b").ends_with("\n   ^"));
     // A printable character is still shown as itself.
-    assert_eq!(
-        ParsedExpression::new("a $ b").unwrap_err().message(),
-        "Syntax error: Got unexpected token $"
+    assert_err(
+        "a $ b",
+        &[
+            "Syntax error: Got unexpected token $\n",
+            "  a $ b\n",
+            "    ^",
+        ],
     );
+    assert!(eval_err("a $ b").ends_with("\n    ^"));
 }
 
 #[test]
