@@ -13,7 +13,7 @@ rustdoc shows the first paragraph in module lists. Each public function of
 It builds both jobs, runs [`diff_jobs`](job-diff.md) on them, adds a *template layer* for
 what a built job cannot show, and tags every change with its origin and stage. The result
 is one `TemplateDiff`, which can be printed, serialized, compared, or turned into an
-[apply plan](job-apply.md). Design: SuperDaveDocs `docs/dag-diff/03-template-diff.md`.
+[apply plan](job-apply.md).
 The command-line form is [`openjd diff`](../cli/diff.md).
 
 ## Entry points
