@@ -289,7 +289,11 @@ budgets template validation and the session runtime apply.
      (`float_range_value`), so `"{{ [Param.F] }}"` also renders `2.50` and
      `"{{ Param.Floats }}"` gives the same tasks as `["{{ Param.Floats }}"]` (Expression
      Language §1.3.4); its integer members are converted to float, as a list member's
-     are. A float with no spelling, such as a computed one or an
+     are. A spelling that is not a number, which only an API caller's `Float64` can
+     carry, fails in both forms: `Task parameter '<name>' range[<k>]: value '<text>' is
+     not a number` for a list element, and `Task parameter '<name>' range expression
+     element <i>: ...` for the whole-field form, where `<i>` is the member's index in
+     the evaluated list. A float with no spelling, such as a computed one or an
      integer list member converted to float, renders through `format_float`:
      `{{ Param.Ints }}` with `[3, 4]` gives `3.0` and `4.0`. A STRING value that is an integer coerces to `int`
      first (Expression Language §1.2.3 prefers `int` for a string), so it renders as
