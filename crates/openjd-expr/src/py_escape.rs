@@ -84,7 +84,7 @@ fn select_quote(value: &str) -> char {
 ///
 /// Below `U+0080` the answer is fixed for all time, so that range is decided
 /// arithmetically and skips the table lookup.
-fn is_non_printable(c: char) -> bool {
+pub(crate) fn is_non_printable(c: char) -> bool {
     if c.is_ascii() {
         return (c as u32) < 0x20 || c == '\x7f';
     }

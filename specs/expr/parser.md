@@ -57,7 +57,11 @@ nested brackets overflows even the 32 MB worker thread and aborts the process.
 
 **Error messages.** Syntax errors carry Ruff's own wording, prefixed with
 `Syntax error: `, for example `Expected an expression` for `1 +` and
-`unexpected EOF while parsing` for `(1 + 2`. These are not CPython's messages.
+`unexpected EOF while parsing` for `(1 + 2`. These are not CPython's messages. Two of Ruff's
+messages are reworded because they mean nothing to a template author: a character that
+doesn't print is named by code point (`invalid non-printable character U+00A0`, not the
+invisible character itself), and a `0x`, `0o` or `0b` prefix with no digits is
+`invalid hexadecimal literal` and so on, not `ParseIntError { kind: Empty }`.
 
 ## Parsing Pipeline
 
@@ -104,7 +108,7 @@ The solution, before parsing:
 
 Placeholders (`make_replacement`) replace the keyword's first character, trying `a` to
 `z` against the text as renamed so far, so `if` becomes `af` and `is` becomes `bs`
-(`as` is a keyword). Two keywords never share a placeholder, and repeated accesses
+(`as` is a keyword). Two keywords get different placeholders, and repeated accesses
 (`A.class + B.class`) share one entry. One placeholder can be a prefix of another
 (`is` and `assert` become `bs` and `bssert`), so the evaluator maps them back by whole
 dotted-path segment, never by substring. Known gap: if all 26 candidates are taken,

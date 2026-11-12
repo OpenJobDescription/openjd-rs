@@ -660,7 +660,7 @@ fn leading_whitespace_preserved() {
 fn syntax_error_has_message() {
     assert_err(
         "1 +",
-        &["Syntax error: Expected an expression\n", "  1 +\n", "  ^"],
+        &["Syntax error: Expected an expression\n", "  1 +\n", "  ^~~"],
     );
 }
 
@@ -673,7 +673,7 @@ fn unclosed_paren() {
         &[
             "Syntax error: unexpected EOF while parsing\n",
             "  (1 + 2\n",
-            "  ^",
+            "  ^~~~~~",
         ],
     );
 }
@@ -685,7 +685,7 @@ fn unclosed_bracket() {
         &[
             "Syntax error: unexpected EOF while parsing\n",
             "  [1, 2\n",
-            "  ^",
+            "  ^~~~~",
         ],
     );
 }
@@ -697,7 +697,7 @@ fn unclosed_string() {
         &[
             "Syntax error: missing closing quote in string literal\n",
             "  'hello\n",
-            "  ^",
+            "  ^~~~~~",
         ],
     );
 }
@@ -1155,6 +1155,42 @@ fn multiline_zero_width_error_mid_input_is_on_its_line() {
             "  1 :\n",
             "  ^~~",
         ],
+    );
+}
+
+#[test]
+fn multiline_zero_width_error_mid_line_underlines_its_whole_line() {
+    // Here the zero-width error sits inside the first line, not at its end,
+    // so the underline must still run to the end of that line.
+    assert_err(
+        "'\\u06'\n+ 1",
+        &[
+            "Syntax error: Got unexpected unicode\n",
+            "  '\\u06'\n",
+            "  ^~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn non_printable_character_is_named() {
+    // ruff prints the character itself, which shows nothing for a
+    // non-breaking space; it is named by code point, as CPython does.
+    for (expr, name) in [
+        ("a\u{a0}b", "U+00A0"),
+        ("a\u{200b}b", "U+200B"),
+        ("a\u{1b}b", "U+001B"),
+    ] {
+        let msg = ParsedExpression::new(expr).unwrap_err().message();
+        assert_eq!(
+            msg,
+            format!("Syntax error: invalid non-printable character {name}")
+        );
+    }
+    // A printable character is still shown as itself.
+    assert_eq!(
+        ParsedExpression::new("a $ b").unwrap_err().message(),
+        "Syntax error: Got unexpected token $"
     );
 }
 

@@ -467,11 +467,25 @@ fn radix_prefix_without_digits_rejected() {
 }
 #[test]
 fn old_octal_rejected() {
-    assert_err("0777", &["Syntax error: Invalid decimal integer literal\n"]);
+    assert_err(
+        "0777",
+        &[
+            "Syntax error: Invalid decimal integer literal\n",
+            "  0777\n",
+            "  ^~~~",
+        ],
+    );
 }
 #[test]
 fn leading_zero_rejected() {
-    assert_err("007", &["Syntax error: Invalid decimal integer literal\n"]);
+    assert_err(
+        "007",
+        &[
+            "Syntax error: Invalid decimal integer literal\n",
+            "  007\n",
+            "  ^~~",
+        ],
+    );
 }
 #[test]
 fn double_zero() {

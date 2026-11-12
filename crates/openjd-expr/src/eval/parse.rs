@@ -96,8 +96,10 @@ fn make_replacement(keyword: &str, source: &str) -> String {
 /// was quadratic (64 KB of `a.if.if...` took 89 s, #489).
 ///
 /// Placeholders are chosen left to right against the text as renamed so far,
-/// so a placeholder never collides with the source or with another
-/// placeholder, and repeated accesses (`A.class + B.class`) share one entry.
+/// and repeated accesses (`A.class + B.class`) share one entry. That keeps
+/// a placeholder distinct from the source and from other placeholders,
+/// except when `make_replacement` falls back to its unchecked all-`x` form
+/// (openjd-rs#333).
 fn rename_contextual_keywords(
     source: &str,
     mode: ruff_python_parser::Mode,
@@ -643,16 +645,27 @@ fn syntax_error(e: &ruff_python_parser::ParseError, source: &str) -> ExpressionE
     ExpressionError::new(msg).with_span(source, col, end_col.max(col + 1))
 }
 
-/// The text of a ruff parse error, with one repair: for a `0x`, `0o` or `0b`
-/// prefix with no digits, ruff's lexer reports the `Debug` form of Rust's
-/// `ParseIntError` (`ParseIntError { kind: Empty }`), which means nothing to
-/// a template author. Name the literal instead, as CPython does.
+/// The text of a ruff parse error, with two repairs where ruff's text means
+/// nothing to a template author, each worded as CPython words it:
+/// - an unrecognized character that doesn't print (a non-breaking space, a
+///   control character) is named by code point instead of printed;
+/// - for a `0x`, `0o` or `0b` prefix with no digits, ruff's lexer reports
+///   the `Debug` form of Rust's `ParseIntError` (`ParseIntError { kind:
+///   Empty }`); the literal is named instead.
 fn syntax_error_message(
     error: &ruff_python_parser::ParseErrorType,
     location: ruff_text_size::TextRange,
     source: &str,
 ) -> String {
     use ruff_python_parser::{LexicalErrorType, ParseErrorType};
+    if let ParseErrorType::Lexical(LexicalErrorType::UnrecognizedToken { tok }) = error {
+        // ruff prints the character itself, which is invisible for a
+        // non-breaking space or a control character. Name it, as CPython
+        // does, using CPython's own definition of printable.
+        if crate::py_escape::is_non_printable(*tok) {
+            return format!("invalid non-printable character U+{:04X}", u32::from(*tok));
+        }
+    }
     if let ParseErrorType::Lexical(LexicalErrorType::OtherError(text)) = error {
         if text.starts_with("ParseIntError") {
             let radix = source
