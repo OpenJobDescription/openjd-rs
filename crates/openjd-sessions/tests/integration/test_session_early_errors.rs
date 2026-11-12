@@ -107,6 +107,10 @@ fn bad_symtab() -> SerializedSymbolTable {
 const BAD_SYMTAB_MESSAGE: &str =
     "Failed to deserialize resolved_symtab: SerializedSymbolTable: expected JSON array";
 
+/// The error for `SerializedSymbolTable::from_json_str("[1]")`.
+const OTHER_BAD_SYMTAB_MESSAGE: &str =
+    "Failed to deserialize resolved_symtab: SerializedSymbolTable: missing 'name' field";
+
 /// Every status the session reported through its callback, in order.
 type Seen = Arc<Mutex<Vec<ActionState>>>;
 
@@ -463,41 +467,237 @@ async fn enter_with_one_bad_variable_sets_none_of_them() {
 
 // ── exit_environment ─────────────────────────────────────────────────
 
-/// Python removes the environment from tracking before it builds the
-/// symbol table, so the failed exit still counts as an exit: the
-/// environment is gone and its onExit never runs.
+/// An environment whose onEnter creates `marker` and whose onExit removes
+/// it, standing in for an onEnter that starts something (a container, a
+/// daemon) its onExit must stop.
+fn marker_env(name: &str, marker: &std::path::Path) -> Environment {
+    let m = marker.display();
+    env(
+        name,
+        Some(action(&format!("touch '{m}'"))),
+        Some(action(&format!("rm '{m}' && echo exited"))),
+    )
+}
+
+/// A resolved symbol table binding `Param.Greeting` to `value`.
+fn greeting_symtab(value: &str) -> SerializedSymbolTable {
+    let mut st = openjd_expr::SymbolTable::new();
+    st.set("Param.Greeting", ExprValue::String(value.into()))
+        .unwrap();
+    SerializedSymbolTable::from_symtab(&st)
+}
+
+/// An environment whose onExit prints `Param.Greeting`.
+fn greeting_env(name: &str) -> Environment {
+    env(
+        name,
+        None,
+        Some(action("echo \"greeting={{Param.Greeting}}\"")),
+    )
+}
+
+/// The session log records the bad exit-time table as a warning, after
+/// the "Exiting Environment" banner.
+fn assert_fallback_warning_logged(env_name: &str, cause: &str) {
+    let expected = format!(
+        "The symbol table for exiting environment '{env_name}' could not be built \
+         ({cause}); using the symbol table it was entered with."
+    );
+    testing_logger::validate(|logs| {
+        let bodies: Vec<&str> = logs.iter().map(|l| l.body.as_str()).collect();
+        let banner = bodies
+            .iter()
+            .position(|b| b.contains(&format!("Exiting Environment: {env_name}")))
+            .unwrap_or_else(|| panic!("exit banner must be logged: {bodies:?}"));
+        let warning = bodies
+            .iter()
+            .position(|b| *b == expected)
+            .unwrap_or_else(|| panic!("fallback warning must be logged: {bodies:?}"));
+        assert!(
+            warning > banner,
+            "the warning follows the banner: {bodies:?}"
+        );
+        let level = logs[warning].level;
+        assert_eq!(level, log::Level::Warn);
+    });
+}
+
+/// How-Jobs-Are-Run: a Session exits every Environment it entered. When the
+/// table supplied at exit can't be deserialized, the onExit still runs, with
+/// the table the environment was entered with, so whatever its onEnter
+/// started is stopped. The exit succeeds: the action is the onExit's own.
 #[tokio::test]
-async fn exit_with_undeserializable_resolved_symtab_fails_the_action() {
+async fn exit_with_undeserializable_resolved_symtab_still_runs_on_exit() {
     for keep_session_running in [true, false] {
         let root = TempDir::new().unwrap();
+        let marker = root.path().join("on-enter-started-this");
         let (mut s, seen) = session(&root, JobParameterValues::new());
         let id = s
-            .enter_environment(
-                &env("Env", None, Some(action("echo exited"))),
-                None,
-                None,
-                None,
-            )
+            .enter_environment(&marker_env("Env", &marker), None, None, None)
             .await
             .unwrap();
+        assert!(marker.exists(), "onEnter must create the marker");
         let before = seen.lock().unwrap().len();
-        let result = s
+        let out = s
             .exit_environment(&id, Some(&bad_symtab()), keep_session_running, None)
-            .await;
-        assert_failed_action(&s, &seen, result, BAD_SYMTAB_MESSAGE);
-        // Exit builds the symbol table after removing the environment and
-        // before reporting Running, so the only callback it adds is Failed.
+            .await
+            .expect("the exit must succeed with the enter-time table");
+        assert!(!marker.exists(), "onExit must run and remove the marker");
+        assert!(out.contains("exited"), "{out:?}");
+        let status = s.action_status().unwrap();
+        assert_eq!(status.state, ActionState::Success);
+        assert_eq!(status.fail_message, None);
         assert_eq!(
             &seen.lock().unwrap()[before..],
-            &[ActionState::Failed],
-            "exit must report only Failed, no Running"
+            &[ActionState::Running, ActionState::Success]
         );
         assert!(s.environments_entered().is_empty());
-        match s.exit_environment(&id, None, true, None).await {
-            Err(SessionError::UnknownEnvironment { identifier }) => assert_eq!(identifier, id),
-            other => panic!("the environment must already be exited, got {other:?}"),
+        let expected_state = if keep_session_running {
+            SessionState::Ready
+        } else {
+            SessionState::ReadyEnding
+        };
+        assert_eq!(s.state(), expected_state);
+    }
+}
+
+/// The fallback is the table stored on the environment at enter time,
+/// whichever route supplied it (the `resolved_symtab` argument or the
+/// `Environment::resolved_symtab` field), and it is logged as a warning.
+#[tokio::test]
+async fn exit_fallback_uses_the_table_the_environment_was_entered_with() {
+    for via_argument in [true, false] {
+        testing_logger::setup();
+        let root = TempDir::new().unwrap();
+        let (mut s, _seen) = session(&root, JobParameterValues::new());
+        let mut e = greeting_env("GreetEnv");
+        let id = if via_argument {
+            s.enter_environment(&e, Some(&greeting_symtab("from-enter")), None, None)
+                .await
+                .unwrap()
+        } else {
+            e.resolved_symtab = Some(greeting_symtab("from-enter"));
+            s.enter_environment(&e, None, None, None).await.unwrap()
+        };
+        let out = s
+            .exit_environment(&id, Some(&bad_symtab()), true, None)
+            .await
+            .unwrap();
+        assert!(out.contains("greeting=from-enter"), "{out:?}");
+        assert_eq!(s.state(), SessionState::Ready);
+        assert_fallback_warning_logged("GreetEnv", BAD_SYMTAB_MESSAGE);
+    }
+}
+
+/// An environment without an onExit falls back the same way: the exit
+/// records Success and logs the warning, instead of failing.
+#[tokio::test]
+async fn exit_without_on_exit_falls_back_and_succeeds() {
+    testing_logger::setup();
+    let root = TempDir::new().unwrap();
+    let (mut s, seen) = session(&root, JobParameterValues::new());
+    let id = s
+        .enter_environment(&env("Plain", None, None), None, None, None)
+        .await
+        .unwrap();
+    let before = seen.lock().unwrap().len();
+    let out = s
+        .exit_environment(&id, Some(&bad_symtab()), true, None)
+        .await
+        .unwrap();
+    assert_eq!(out, "");
+    assert_eq!(&seen.lock().unwrap()[before..], &[ActionState::Success]);
+    assert_eq!(s.state(), SessionState::Ready);
+    assert_fallback_warning_logged("Plain", BAD_SYMTAB_MESSAGE);
+}
+
+/// The fallback applies to any failure to build the exit-time table, not
+/// only deserialization. Here the exit passes no table, so the session builds
+/// one from its job parameter values, and an INT value that can't be coerced
+/// fails that; the table supplied at enter (which carries the parameters
+/// already resolved) still builds.
+#[tokio::test]
+async fn exit_without_a_table_falls_back_when_the_job_parameters_fail() {
+    testing_logger::setup();
+    let root = TempDir::new().unwrap();
+    let (mut s, _seen) = session(&root, job_param("N", JobParameterType::Int, "abc"));
+    let id = s
+        .enter_environment(
+            &greeting_env("GreetEnv"),
+            Some(&greeting_symtab("from-enter")),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let out = s.exit_environment(&id, None, true, None).await.unwrap();
+    assert!(out.contains("greeting=from-enter"), "{out:?}");
+    assert_fallback_warning_logged(
+        "GreetEnv",
+        "Failed to coerce parameter 'RawParam.N': Cannot convert 'abc' to int: invalid digit found in string",
+    );
+}
+
+/// An environment entered with a stored table that can't be deserialized
+/// either: there is no usable enter-time table to fall back to, so the exit
+/// fails before its onExit starts, as it did before the fallback. Its
+/// enter succeeded only because enter builds from the `resolved_symtab`
+/// argument, which was absent.
+fn env_with_bad_stored_table(e: Environment) -> Environment {
+    Environment {
+        resolved_symtab: Some(bad_symtab()),
+        ..e
+    }
+}
+
+/// When the stored table is no better, the exit fails before onExit starts
+/// and reports the exit-time table's error; the failed exit still counts
+/// as an exit. Whatever onEnter started keeps running (documented in
+/// specs/sessions/session.md § Exit).
+#[tokio::test]
+async fn exit_with_no_usable_table_fails_the_action() {
+    // The same bad table at exit as stored, and a different bad one, whose
+    // own error is the one reported.
+    let other_bad = SerializedSymbolTable::from_json_str("[1]").unwrap();
+    let cases: [(&SerializedSymbolTable, &str); 2] = [
+        (&bad_symtab(), BAD_SYMTAB_MESSAGE),
+        (&other_bad, OTHER_BAD_SYMTAB_MESSAGE),
+    ];
+    for (exit_table, expected) in cases {
+        for keep_session_running in [true, false] {
+            let root = TempDir::new().unwrap();
+            let marker = root.path().join("on-enter-started-this");
+            let (mut s, seen) = session(&root, JobParameterValues::new());
+            let id = s
+                .enter_environment(
+                    &env_with_bad_stored_table(marker_env("Env", &marker)),
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+            let before = seen.lock().unwrap().len();
+            let result = s
+                .exit_environment(&id, Some(exit_table), keep_session_running, None)
+                .await;
+            assert_failed_action(&s, &seen, result, expected);
+            // Exit builds the symbol table after removing the environment
+            // and before reporting Running, so the only callback it adds is
+            // Failed.
+            assert_eq!(
+                &seen.lock().unwrap()[before..],
+                &[ActionState::Failed],
+                "exit must report only Failed, no Running"
+            );
+            assert!(marker.exists(), "onExit must not have run");
+            assert!(s.environments_entered().is_empty());
+            match s.exit_environment(&id, None, true, None).await {
+                Err(SessionError::UnknownEnvironment { identifier }) => assert_eq!(identifier, id),
+                other => panic!("the environment must already be exited, got {other:?}"),
+            }
+            assert_refused_until_cleared(&mut s).await;
         }
-        assert_refused_until_cleared(&mut s).await;
     }
 }
 
@@ -514,7 +714,7 @@ async fn exit_pre_start_failure_resets_status_and_logs_banner() {
     let (mut s, _seen) = session(&root, JobParameterValues::new());
     let id = s
         .enter_environment(
-            &env("MyEnv", None, Some(action("echo exited"))),
+            &env_with_bad_stored_table(env("MyEnv", None, Some(action("echo exited")))),
             None,
             None,
             None,
@@ -574,7 +774,12 @@ async fn exit_failure_leaves_the_outer_environment_exitable() {
         .await
         .unwrap();
     let inner = s
-        .enter_environment(&env("Inner", None, None), None, None, None)
+        .enter_environment(
+            &env_with_bad_stored_table(env("Inner", None, None)),
+            None,
+            None,
+            None,
+        )
         .await
         .unwrap();
     let result = s
@@ -913,20 +1118,20 @@ async fn enter_path_mapping_write_failure_reports_running_then_failed() {
     assert_eq!(s.environments_entered(), ["env-1".to_string()]);
 }
 
+/// A path mapping write failure at exit fails the action before onExit
+/// starts, so whatever onEnter started keeps running. Unchanged by the
+/// symbol-table fallback: specs/sessions/session.md § Exit documents it.
 #[cfg(unix)]
 #[tokio::test]
 async fn exit_path_mapping_write_failure_reports_running_then_failed() {
     let root = TempDir::new().unwrap();
+    let marker = root.path().join("on-enter-started-this");
     let (mut s, seen) = session(&root, JobParameterValues::new());
     let id = s
-        .enter_environment(
-            &env("Env", None, Some(action("echo exited"))),
-            None,
-            None,
-            None,
-        )
+        .enter_environment(&marker_env("Env", &marker), None, None, None)
         .await
         .unwrap();
+    assert!(marker.exists());
     let before = seen.lock().unwrap().len();
     make_working_dir_readonly(&s);
     // onExit present, so the exit action is reported Running before path mapping.
@@ -944,4 +1149,5 @@ async fn exit_path_mapping_write_failure_reports_running_then_failed() {
     );
     assert_eq!(s.state(), SessionState::ReadyEnding);
     assert!(s.environments_entered().is_empty());
+    assert!(marker.exists(), "onExit must not have run");
 }

@@ -1787,13 +1787,20 @@ impl Session {
     /// `ReadyEnding`, [`SessionError::UnknownEnvironment`], or
     /// [`SessionError::LifoViolation`]. These change nothing.
     ///
+    /// If the symbol table can't be built from `resolved_symtab` (for
+    /// example it can't be deserialized), it is built from the table the
+    /// environment was entered with instead, and the `onExit` runs with it;
+    /// the session log records the exit-time error as a warning, and the
+    /// call succeeds or fails on the `onExit` alone.
+    ///
     /// Any other error fails the action and makes the session ending-only.
     /// The environment has already been removed, so the failed exit still
     /// counts as an exit. For a failure before the `onExit` subprocess
-    /// starts — an undeserializable `resolved_symtab`, a path mapping or
-    /// wrap-hook setup error — the action status is `Failed` with the
-    /// error's message; this is the only kind possible when there is no
-    /// `onExit`. If the `onExit` runs and ends non-`Success`, the error is
+    /// starts — a symbol table that can't be built from either table, a
+    /// path mapping or wrap-hook setup error — the action status is
+    /// `Failed` with the error's message, and the `onExit` doesn't run;
+    /// this is the only kind possible when there is no `onExit`. If the
+    /// `onExit` runs and ends non-`Success`, the error is
     /// [`SessionError::EnvironmentScriptFailed`] and the action status is
     /// that terminal state (`Failed`, `Canceled` or `Timeout`).
     pub async fn exit_environment(
@@ -1863,11 +1870,43 @@ impl Session {
         // As in the Python runtime, the symbol table is built only once the
         // environment is off the stack: a failure here fails the action, and
         // the failed exit still counts as an exit.
-        let symtab = match self.build_symbol_table(None, resolved_symtab) {
-            Ok(symtab) => symtab,
+        //
+        // If the exit-time input can't build the table, build it from the
+        // table the environment was entered with instead, so the onExit
+        // still runs and stops whatever the onEnter started (How Jobs Are
+        // Run: a Session exits every Environment it entered). The stored
+        // table is skipped when it is the same input, which would fail the
+        // same way. Only when neither builds does the exit fail here, with
+        // the exit-time error. The bad exit-time input is logged as a
+        // warning after the banner; the action is the onExit's own.
+        let built = match self.build_symbol_table(None, resolved_symtab) {
+            Ok(symtab) => Ok((symtab, None)),
+            Err(e) if env.resolved_symtab.as_ref() != resolved_symtab => {
+                match self.build_symbol_table(None, env.resolved_symtab.as_ref()) {
+                    Ok(symtab) => Ok((symtab, Some(e))),
+                    Err(_) => Err(e),
+                }
+            }
+            Err(e) => Err(e),
+        };
+        let (symtab, fallback_cause) = match built {
+            Ok(built) => built,
             Err(e) => {
                 let banner = format!("Exiting Environment: {}", env.name);
                 return Err(self.fail_action_before_start(&banner, e));
+            }
+        };
+        let log_exit_banner = |session_id: &str| {
+            log_section_banner(session_id, &format!("Exiting Environment: {}", env.name));
+            if let Some(e) = &fallback_cause {
+                session_log!(
+                    warn,
+                    session_id,
+                    LogContent::EXCEPTION_INFO,
+                    "The symbol table for exiting environment '{}' could not be built \
+                     ({e}); using the symbol table it was entered with.",
+                    env.name
+                );
             }
         };
 
@@ -1881,10 +1920,7 @@ impl Session {
             self.state = StoredState::Running;
             self.notify_callback();
 
-            log_section_banner(
-                &self.session_id,
-                &format!("Exiting Environment: {}", env.name),
-            );
+            log_exit_banner(&self.session_id);
 
             let cancel_token = self.new_action_cancel_token();
             let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
@@ -2058,10 +2094,7 @@ impl Session {
             self.action.exit_code = None;
             self.settle_after_action(ActionState::Success);
 
-            log_section_banner(
-                &self.session_id,
-                &format!("Exiting Environment: {}", env.name),
-            );
+            log_exit_banner(&self.session_id);
 
             self.action.ended_at = Some(std::time::SystemTime::now());
 
