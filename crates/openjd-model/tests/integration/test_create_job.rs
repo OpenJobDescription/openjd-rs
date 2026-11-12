@@ -8828,6 +8828,54 @@ fn native_list_parameter_values_coerce_like_json_text() {
 }
 
 #[test]
+fn a_native_path_element_is_not_read_as_a_number() {
+    // A documented difference from JSON text: a path element is refused under an
+    // INT or FLOAT element type, where the same text as a JSON string is a number.
+    use openjd_expr::{ExprType, ExprValue};
+    let paths = || {
+        ExprValue::make_list(
+            vec![ExprValue::new_path("1", PathFormat::Posix)],
+            ExprType::PATH,
+        )
+        .unwrap()
+    };
+    for (native, expected) in [
+        (
+            ("LI", paths()),
+            "Validation error: Parameter 'LI': item[0]: Cannot coerce path to INT",
+        ),
+        (
+            ("LF", paths()),
+            "Validation error: Parameter 'LF': item[0]: Cannot coerce path to FLOAT",
+        ),
+        (
+            (
+                "LL",
+                ExprValue::ListList(vec![paths()], ExprType::list(ExprType::PATH), 0),
+            ),
+            "Validation error: Parameter 'LL': item[0][0]: Cannot coerce path to INT",
+        ),
+    ] {
+        let err = preprocess_values(NUMERIC_LISTS_TEMPLATE, &[native]).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+    // A range expression in a hand-built list of lists names its type.
+    let range = ExprValue::RangeExpr("1-3".parse().unwrap());
+    let err = preprocess_values(
+        NUMERIC_LISTS_TEMPLATE,
+        &[(
+            "LL",
+            ExprValue::ListList(vec![range], ExprType::RANGE_EXPR, 0),
+        )],
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got range_expr."
+    );
+}
+
+#[test]
 fn an_empty_native_list_of_lists_becomes_a_list_of_int_lists() {
     // An empty list of lists has no inner list to check, so its element type is
     // what decides it. Whatever that type, a LIST[LIST[INT]] value comes out as

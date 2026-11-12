@@ -189,11 +189,13 @@ two input modes:
   strings is `[1, 2]`, exactly as the text `'[" 1", "2 "]'` is, and a FLOAT string keeps its
   spelling. A list of lists is always rebuilt this way, so it comes out as `list[list[int]]` even
   when empty. The other list types still need their exact list variant: a `ListPath` value is
-  refused for `LIST[STRING]` and `LIST[PATH]` by design, and `LIST[BOOL]` was left out of this
-  change's scope. **Known gap:** for those types a native list and its JSON text form can still
-  differ, for example a native list of `"true"` strings is refused for `LIST[BOOL]` while the text
-  `'["true"]'` is accepted. A native path element under `LIST[INT]` or `LIST[FLOAT]` is refused
-  (`item[0]: Cannot coerce path to INT`), while the same text in JSON is a number. An element error names the element in either form
+  refused for `LIST[STRING]` and `LIST[PATH]` by design. **Known gaps:** a native `LIST[BOOL]`
+  value is not coerced element by element, so a native list of `"true"` strings is refused while
+  the text `'["true"]'` is accepted. A native path element under an INT or FLOAT element type
+  (`LIST[INT]`, `LIST[FLOAT]`, or an inner list of `LIST[LIST[INT]]`) is refused
+  (`item[0]: Cannot coerce path to INT`), while the same text in JSON is a number. A JSON number
+  is read as an `f64`, so `'[1.50]'` is `[1.5]` while a native float keeps `1.50`; the values are
+  equal. An element error names the element in either form
   (`item[1]: Value '1 000' is not a valid integer or integer string.`, or `item[1][0]: ...` in a
   `LIST[LIST[INT]]`).
 

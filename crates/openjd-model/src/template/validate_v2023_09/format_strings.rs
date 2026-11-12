@@ -287,7 +287,7 @@ const MAX_RESOLVED_NUMERIC_LEN: usize = 100;
 /// `min_resolved_string_len` less the white space in the literal segments,
 /// which always appears in the resolution. White space that a concrete
 /// expression segment evaluates to (`{{ ' ' * 200 }}` before an
-/// unresolved segment) still counts, since the static resolution only
+/// unresolved segment, or in a value too long to keep) still counts, since the static resolution only
 /// reports the total length. White space is the Unicode `White_Space`
 /// property, what `str::trim` removes, as in job creation's parse.
 fn min_numeric_len(sr: &openjd_expr::StaticResolution, fs: &FormatString) -> usize {
