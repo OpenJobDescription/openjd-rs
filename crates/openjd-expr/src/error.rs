@@ -436,7 +436,7 @@ fn compute_caret_offset(expr: &str, node: &ruff_python_ast::Expr) -> usize {
             let mut i = right_start.saturating_sub(1);
             while i > left_end
                 && i < bytes.len()
-                && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'(')
+                && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | b'(')
             {
                 i -= 1;
             }

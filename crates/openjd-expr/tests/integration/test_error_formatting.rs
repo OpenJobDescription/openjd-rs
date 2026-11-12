@@ -631,14 +631,10 @@ fn single_line_two_char_operator_caret_points_at_first_char() {
 }
 
 #[test]
-#[ignore = "known defect: compute_caret_offset (error.rs) does not undo the \
-            multi-line paren-wrap offset shift, so its backwards operator scan \
-            reads bytes one position to the right and the caret for a \
-            multi-line ** or // lands on the operator's second character \
-            (renders \"~~~^\" where \"~~^\" is correct). Diagnostic-only; see \
-            the NOTE in eval/parse.rs::parse_inner for the centralization that \
-            fixes it. Un-ignore then."]
 fn multiline_two_char_operator_caret_points_at_first_char() {
+    // compute_caret_offset scans back from the right operand to the operator,
+    // skipping white space; it now skips the line break too, so an operator
+    // at the end of a line is found.
     assert_err("1 **\n'a'", &["  1 **\n", "  ~~^"]);
     assert_err("1 //\n'a'", &["  1 //\n", "  ~~^"]);
 }
@@ -1192,6 +1188,36 @@ fn non_printable_character_is_named() {
         ParsedExpression::new("a $ b").unwrap_err().message(),
         "Syntax error: Got unexpected token $"
     );
+}
+
+#[test]
+fn zero_width_error_mid_last_line_underlines_to_the_end() {
+    // No line break follows the error, so the underline runs to the end of
+    // the input: the whole expression on one line, the last line otherwise.
+    assert_err(
+        "'\\u06' + 1",
+        &[
+            "Syntax error: Got unexpected unicode\n",
+            "  '\\u06' + 1\n",
+            "  ^~~~~~~~~~",
+        ],
+    );
+    assert_err(
+        "1 +\n'\\u06' + 1",
+        &[
+            "Syntax error: Got unexpected unicode\n",
+            "  '\\u06' + 1\n",
+            "  ^~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn zero_width_error_span_offsets() {
+    // The raw span, which openjd-model passes on as a diagnostic span, ends at
+    // the end of the error's own line, not of the last line.
+    let e = ParsedExpression::new("'\\u06'\n+ 1\n+ 2").unwrap_err();
+    assert_eq!((e.col_offset(), e.end_col_offset()), (Some(0), Some(6)));
 }
 
 #[test]

@@ -279,8 +279,12 @@ columns (see [error-formatting.md](error-formatting.md)).
 A multi-line expression may end in a `#` comment, as in parentheses in Python. Because
 the parser no longer sees an enclosing `(`, a few multi-line forms that this crate
 used to reject with a specific message (`x := \n1` as "Walrus operator (:=) is not
-supported", `a\nfor a in b` as "Generator expressions are not supported") now get a
-plain syntax error, as the same expression on one line always did.
+supported", `a\nfor a in b` as "Generator expressions are not supported; use a list comprehension")
+now get a plain syntax error, and multi-line `yield` (`yield\n1`), which main accepted
+and failed at evaluation, is now a syntax error, as the same expressions on one line
+always were. Conversely a leading byte-order mark (U+FEFF) on a multi-line expression is
+now ignored, as it is on one line. Parenthesized mode is therefore not quite the same as
+writing the parentheses: `(yield\n1)` still parses.
 
 A syntax error at a single point, such as end of input, underlines the line that
 point is on: the whole expression when it has one line, and otherwise that line (for
@@ -288,7 +292,8 @@ end of input, the last line), since the caret display shows one line.
 
 Until #489 the expression was wrapped in `(...)` before parsing instead. That shifted
 every offset by one byte, which three consumers each undid separately and one didn't
-(the caret for a multi-line binary operator landed one byte right of the operator),
+(the caret for a multi-line binary operator landed one byte right of the operator; an
+operator at the end of a line also needed the caret scan to skip the line break),
 and syntax errors could mention a `)` the author never wrote (`Param.A\nParam.B`
 gave ``Expected `)`, found identifier``).
 
