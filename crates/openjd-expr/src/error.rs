@@ -329,12 +329,6 @@ impl fmt::Display for ExpressionError {
             self.inner.end_col_offset,
         ) {
             let is_multiline = expr.contains('\n');
-            // For multi-line, the parser wraps in parens shifting offsets by 1
-            let (col, end_col) = if is_multiline {
-                (col.saturating_sub(1), end_col.saturating_sub(1))
-            } else {
-                (col, end_col)
-            };
 
             // Find the line containing col_offset and adjust to line-relative offsets
             let (expr_line, line_col, line_end_col) = if is_multiline {
@@ -442,7 +436,7 @@ fn compute_caret_offset(expr: &str, node: &ruff_python_ast::Expr) -> usize {
             let mut i = right_start.saturating_sub(1);
             while i > left_end
                 && i < bytes.len()
-                && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'(')
+                && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r' | b'(')
             {
                 i -= 1;
             }

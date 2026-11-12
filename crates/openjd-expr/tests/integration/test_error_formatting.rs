@@ -631,14 +631,10 @@ fn single_line_two_char_operator_caret_points_at_first_char() {
 }
 
 #[test]
-#[ignore = "known defect: compute_caret_offset (error.rs) does not undo the \
-            multi-line paren-wrap offset shift, so its backwards operator scan \
-            reads bytes one position to the right and the caret for a \
-            multi-line ** or // lands on the operator's second character \
-            (renders \"~~~^\" where \"~~^\" is correct). Diagnostic-only; see \
-            the NOTE in eval/parse.rs::parse_inner for the centralization that \
-            fixes it. Un-ignore then."]
 fn multiline_two_char_operator_caret_points_at_first_char() {
+    // compute_caret_offset scans back from the right operand to the operator,
+    // skipping white space; it now skips the line break too, so an operator
+    // at the end of a line is found.
     assert_err("1 **\n'a'", &["  1 **\n", "  ~~^"]);
     assert_err("1 //\n'a'", &["  1 //\n", "  ~~^"]);
 }
@@ -658,7 +654,10 @@ fn leading_whitespace_preserved() {
 
 #[test]
 fn syntax_error_has_message() {
-    assert_err("1 +", &["Syntax error: invalid syntax\n", "  1 +\n", "  ^"]);
+    assert_err(
+        "1 +",
+        &["Syntax error: Expected an expression\n", "  1 +\n", "  ^~~"],
+    );
 }
 
 // === TestSyntaxErrorCarets ===
@@ -667,7 +666,11 @@ fn syntax_error_has_message() {
 fn unclosed_paren() {
     assert_err(
         "(1 + 2",
-        &["Syntax error: '(' was never closed\n", "  (1 + 2\n", "  ^"],
+        &[
+            "Syntax error: unexpected EOF while parsing\n",
+            "  (1 + 2\n",
+            "  ^~~~~~",
+        ],
     );
 }
 
@@ -675,7 +678,11 @@ fn unclosed_paren() {
 fn unclosed_bracket() {
     assert_err(
         "[1, 2",
-        &["Syntax error: '[' was never closed\n", "  [1, 2\n", "  ^"],
+        &[
+            "Syntax error: unexpected EOF while parsing\n",
+            "  [1, 2\n",
+            "  ^~~~~",
+        ],
     );
 }
 
@@ -684,9 +691,9 @@ fn unclosed_string() {
     assert_err(
         "'hello",
         &[
-            "Syntax error: unterminated string literal (detected at line 1)\n",
+            "Syntax error: missing closing quote in string literal\n",
             "  'hello\n",
-            "  ^",
+            "  ^~~~~~",
         ],
     );
 }
@@ -1072,7 +1079,234 @@ fn undefined_dotted_variable_with_suggestion() {
     );
 }
 
+// --- Multi-line syntax errors ---
+//
+// A multi-line expression is parsed in the parser's parenthesized mode, so
+// syntax errors describe the text as written and never mention a `)` the
+// author didn't write (as they did when the expression was wrapped in `(...)`).
+
+#[test]
+fn multiline_missing_operator() {
+    assert_err(
+        "Param.A\nParam.B",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  Param.B\n",
+            "  ^~~~~",
+        ],
+    );
+}
+
+#[test]
+fn multiline_stray_assignment() {
+    assert_err(
+        "x\n= 1",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  = 1\n",
+            "  ^",
+        ],
+    );
+}
+
+#[test]
+fn multiline_unclosed_bracket() {
+    // End of input is a zero-width error; the caret goes on the last line,
+    // where the input ended, not on the first.
+    assert_err(
+        "[1,\n2",
+        &[
+            "Syntax error: unexpected EOF while parsing\n",
+            "  2\n",
+            "  ^",
+        ],
+    );
+    assert_err(
+        "{\n'a': 1,\n'b':",
+        &[
+            "Syntax error: unexpected EOF while parsing\n",
+            "  'b':\n",
+            "  ^~~~",
+        ],
+    );
+}
+
+#[test]
+fn multiline_error_at_end_of_input_is_on_the_last_line() {
+    assert_err(
+        "1 +\n2 +\n3 +\n4 +",
+        &["Syntax error: Expected an expression\n", "  4 +\n", "  ^~~"],
+    );
+}
+
+#[test]
+fn multiline_zero_width_error_mid_input_is_on_its_line() {
+    // A zero-width error before the end of input underlines the line it is
+    // on (here the middle line), not the first or the last.
+    assert_err(
+        "f'{\n1 :\nx",
+        &[
+            "Syntax error: f-string: newlines are not allowed in format specifiers when \
+             using single quotes\n",
+            "  1 :\n",
+            "  ^~~",
+        ],
+    );
+}
+
+#[test]
+fn multiline_zero_width_error_mid_line_underlines_its_whole_line() {
+    // Here the zero-width error sits inside the first line, not at its end,
+    // so the underline must still run to the end of that line.
+    assert_err(
+        "'\\u06'\n+ 1",
+        &[
+            "Syntax error: Got unexpected unicode\n",
+            "  '\\u06'\n",
+            "  ^~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn non_printable_character_is_named() {
+    // ruff prints the character itself, which shows nothing for a
+    // non-breaking space; it is named by code point, as CPython does. The
+    // error spans the character's UTF-8 bytes, starting at byte 1.
+    //
+    // For U+00A0 (2 bytes) and U+200B (3 bytes) the underline is drawn one
+    // column per byte (`^~`, `^~~`), though the character is one column wide
+    // or less. Every multi-byte character is drawn that way, as in the Python
+    // implementation (see superscript_digit_to_int_error). That width isn't
+    // what this test is about, so only the caret's start is asserted here.
+    for (expr, name, end, caret) in [
+        ("a\u{a0}b", "U+00A0", 3, "   ^"),
+        ("a\u{200b}b", "U+200B", 4, "   ^"),
+        ("a\u{1b}b", "U+001B", 2, "   ^"),
+    ] {
+        let e = ParsedExpression::new(expr).unwrap_err();
+        assert_eq!(
+            e.message(),
+            format!("Syntax error: invalid non-printable character {name}")
+        );
+        assert_eq!(
+            (e.col_offset(), e.end_col_offset()),
+            (Some(1), Some(end)),
+            "{name}"
+        );
+        assert_err(
+            expr,
+            &[
+                &format!("Syntax error: invalid non-printable character {name}\n"),
+                &format!("  {expr}\n"),
+                caret,
+            ],
+        );
+    }
+    // A one-byte character gets exactly one caret, with nothing after it.
+    assert!(eval_err("a\u{1b}b").ends_with("\n   ^"));
+    // A printable character is still shown as itself.
+    assert_err(
+        "a $ b",
+        &[
+            "Syntax error: Got unexpected token $\n",
+            "  a $ b\n",
+            "    ^",
+        ],
+    );
+    assert!(eval_err("a $ b").ends_with("\n    ^"));
+}
+
+#[test]
+fn zero_width_error_mid_last_line_underlines_to_the_end() {
+    // No line break follows the error, so the underline runs to the end of
+    // the input: the whole expression on one line, the last line otherwise.
+    assert_err(
+        "'\\u06' + 1",
+        &[
+            "Syntax error: Got unexpected unicode\n",
+            "  '\\u06' + 1\n",
+            "  ^~~~~~~~~~",
+        ],
+    );
+    assert_err(
+        "1 +\n'\\u06' + 1",
+        &[
+            "Syntax error: Got unexpected unicode\n",
+            "  '\\u06' + 1\n",
+            "  ^~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn zero_width_error_span_offsets() {
+    // The raw span, which openjd-model passes on as a diagnostic span, ends at
+    // the end of the error's own line, not of the last line.
+    let e = ParsedExpression::new("'\\u06'\n+ 1\n+ 2").unwrap_err();
+    assert_eq!((e.col_offset(), e.end_col_offset()), (Some(0), Some(6)));
+}
+
+#[test]
+fn syntax_error_shows_keyword_attributes_as_written() {
+    // Contextual keywords are renamed to placeholders before parsing; the
+    // error must still show the text the author wrote, not `Param.af`.
+    assert_err(
+        "Param.if +",
+        &[
+            "Syntax error: Expected an expression\n",
+            "  Param.if +\n",
+            "  ^~~~~~~~~~",
+        ],
+    );
+    assert_err(
+        "X.is + Y.as +",
+        &[
+            "Syntax error: Expected an expression\n",
+            "  X.is + Y.as +\n",
+            "  ^~~~~~~~~~~~~",
+        ],
+    );
+    assert_err(
+        "Param.if\n + Param.class +",
+        &[
+            "Syntax error: Expected an expression\n",
+            "   + Param.class +\n",
+            "  ^~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+#[test]
+fn multiline_format_string_caret_on_its_line() {
+    // FormatString spans are offsets into the format string itself, which
+    // was never wrapped; the caret must start at the `{{` on line 2.
+    let err = FormatString::new("line1\n{{ 1 + }}").unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Failed to parse interpolation expression at [6, 15]. Reason: Syntax error: \
+         Expected an expression\n  {{ 1 + }}\n  ^~~~~~~~~"
+    );
+}
+
+#[test]
+fn multiline_keyword_attributes_resolve() {
+    let mut st = SymbolTable::new();
+    st.set("Param.if", 2i64).unwrap();
+    st.set("Param.class", 3i64).unwrap();
+    let v = ParsedExpression::new("Param.if\n  * Param.class")
+        .unwrap()
+        .evaluate(&st)
+        .unwrap();
+    assert_eq!(v.to_display_string(), "6");
+}
+
 // --- TestMultiLineExpressions: type error variants matching Python ---
+//
+// The caret sits on the operator, as on a single line and as in the original
+// pure-Python implementation. It used to land one byte right of the operator,
+// because multi-line expressions were parsed wrapped in `(...)` and the
+// caret computation didn't undo that shift.
 
 #[test]
 fn multiline_type_error_in_parens() {
@@ -1081,7 +1315,7 @@ fn multiline_type_error_in_parens() {
         &[
             "Cannot use '+' operator with int and string\n",
             "    1 + 'x'\n",
-            "    ~~~^~~~",
+            "    ~~^~~~~",
         ],
     );
 }
@@ -1093,7 +1327,7 @@ fn multiline_type_error_in_list() {
         &[
             "Cannot use '+' operator with int and string\n",
             "    2 + 'x',\n",
-            "    ~~~^~~~",
+            "    ~~^~~~~",
         ],
     );
 }
@@ -1105,7 +1339,7 @@ fn multiline_type_error_on_first_line() {
         &[
             "Cannot use '+' operator with int and string\n",
             "  1 + 'x' + (\n",
-            "  ~~~^~~~",
+            "  ~~^~~~~",
         ],
     );
 }
@@ -1117,7 +1351,7 @@ fn multiline_type_error_deeply_nested() {
         &[
             "Cannot use '+' operator with int and string\n",
             "      1 + 'x'\n",
-            "      ~~~^~~~",
+            "      ~~^~~~~",
         ],
     );
 }
@@ -1173,7 +1407,7 @@ fn format_string_parse_error_carries_caret() {
     // the raw format-string source and a caret over the failing {{...}}.
     let err = FormatString::new("hello {{ 1 + }} world").unwrap_err();
     let expected = "\
-Failed to parse interpolation expression at [6, 15]. Reason: Syntax error: invalid syntax
+Failed to parse interpolation expression at [6, 15]. Reason: Syntax error: Expected an expression
   hello {{ 1 + }} world
         ^~~~~~~~~";
     assert_eq!(err.to_string(), expected);

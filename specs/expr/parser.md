@@ -10,13 +10,10 @@ Defined in `eval/parse.rs`.
 
 ## Parser Selection: ruff_python_parser
 
-The `ruff_python_parser` from [astral-sh/ruff](https://github.com/astral-sh/ruff) is
-used via the `rustpython-ruff_python_parser` crate on crates.io.
-
-The `rustpython-ruff_python_parser` package on crates.io is a republished version of
-the same code as `ruff_python_parser` in the `astral-sh/ruff` monorepo. The RustPython
-project republishes it under this name. Users seeing `rustpython-ruff_python_parser` in
-`Cargo.toml` or `Cargo.lock` should know it is the same parser, not a fork.
+The `ruff_python_parser`, `ruff_python_ast` and `ruff_text_size` crates that
+Astral publishes to crates.io from the [astral-sh/ruff](https://github.com/astral-sh/ruff)
+monorepo are used directly. Astral describes them as internal components of
+Ruff, publishes them about weekly as `0.0.x`, and makes no stability promise.
 
 **Why ruff over rustpython-parser:**
 
@@ -24,20 +21,47 @@ project republishes it under this name. Users seeing `rustpython-ruff_python_par
 - ruff is actively maintained (daily commits, backed by Astral)
 - rustpython-parser has had no substantive code changes since early 2025
 
+**Why not the `rustpython-ruff_*` crates.** Until #489 the crate used
+`rustpython-ruff_python_parser`, which the RustPython project publishes from its
+own fork of ruff. Its 0.16.10 is not the same code as Astral's: the fork adds
+CPython-style syntax-error hints ("invalid syntax. Perhaps you forgot a
+comma?") that parse ahead speculatively, rewind, and parse the same tokens
+again. The hints nest inside brackets, so an invalid expression's parse time
+doubled with each unclosed bracket level (`"f(a " * 24 + "x"`, 97 bytes, took
+12 s), and a run of juxtaposed tokens inside one bracket was cubic in its
+length. Expressions are untrusted template input, so that was a denial of
+service. Astral's parser has no such hints and parses every one of those inputs
+in milliseconds. `tests/integration/test_parser_work_bound.rs` holds the
+reproducers with a time bound, so a parser bump that brings the behavior back
+fails CI.
+
 ```toml
-ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "=0.16.10" }
-ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "=0.16.10" }
-ruff_text_size = { package = "rustpython-ruff_text_size", version = "=0.16.10" }
+ruff_python_parser = { version = "=0.0.21", features = ["stacker"] }
+ruff_python_ast = "=0.0.21"
+ruff_text_size = "=0.0.21"
 ```
 
 **Exact version pin.** The ruff crates are pinned with `=` because they make
-breaking AST changes in 0.x patch releases. For example, 0.16.10 replaced
-`ExprCompare`'s `left` and `comparators` fields with a single `operands` list.
-With the earlier `^0.16.5` requirement, anything that resolved dependencies
-without our `Cargo.lock` failed to compile `openjd-expr`. That included
-downstream users and the cargo-semver-checks step in the release-plz workflow.
-Upgrade all three crates together and review the upstream AST changes as part
-of each bump.
+breaking AST changes without notice. For example, rustpython-ruff 0.16.10
+replaced `ExprCompare`'s `left` and `comparators` fields with a single
+`operands` list in a patch release. With the earlier `^0.16.5` requirement,
+anything that resolved dependencies without our `Cargo.lock` failed to compile
+`openjd-expr`. That included downstream users and the cargo-semver-checks step
+in the release-plz workflow. Upgrade all three crates together, review the
+upstream AST changes, and keep `test_parser_work_bound.rs` passing as part of
+each bump.
+
+**`stacker` feature.** With it, the parser grows its stack on the heap once its
+recursion gets deep (see Depth Limit below). Without it, 64 KB of `-` or of
+nested brackets overflows even the 32 MB worker thread and aborts the process.
+
+**Error messages.** Syntax errors carry Ruff's own wording, prefixed with
+`Syntax error: `, for example `Expected an expression` for `1 +` and
+`unexpected EOF while parsing` for `(1 + 2`. These are not CPython's messages. Two of Ruff's
+messages are reworded because they mean nothing to a template author: a character that
+doesn't print is named by code point (`invalid non-printable character U+00A0`, not the
+invisible character itself), and a `0x`, `0o` or `0b` prefix with no digits is
+`invalid hexadecimal literal` and so on, not `ParseIntError { kind: Empty }`.
 
 ## Parsing Pipeline
 
@@ -45,13 +69,14 @@ of each bump.
 Input string
     │
     ▼
+Keyword rename (one lexer pass; context-sensitive keywords)
+    │
+    ▼
 ruff_python_parser::parse_expression()
+  (parse_parenthesized_expression_range() for multi-line input)
     │
     ▼
 AST validation (allowlist of allowed node types)
-    │
-    ▼
-Keyword rename fixup (context-sensitive keywords)
     │
     ▼
 JSON literal normalization (null→None, true→True, false→False)
@@ -70,45 +95,55 @@ names in Python syntax. But the OpenJD expression language needs them to work af
 because job parameters can have any name — a parameter named `def` or `is` must be
 accessible as `Param.def` or `Param.is`.
 
-The solution:
+The solution, before parsing:
 
-1. Attempt to parse the expression
-2. If parsing fails, look at the offset the parser reported the error at. The parser
-   rejects a contextual keyword with "Expected an identifier, but found a keyword",
-   and its error range begins exactly at the keyword token
-3. If the token at that offset is directly preceded by `.` and is exactly a Python
-   keyword, replace it with a same-length placeholder identifier, which preserves
-   every other offset in the source
-4. Re-parse with the placeholder, repeating from step 1 — one keyword is renamed per
-   parse attempt, so an expression with several of them converges in several passes
-5. Record the renames in `keyword_renames: HashMap<String, String>` so the evaluator
+1. Tokenize the expression once with the parser's own lexer (`ruff_python_parser::lexer`),
+   in the same mode the parser will use
+2. For each keyword token that is exactly a Python keyword and directly follows a `.`
+   token, with nothing between them, replace it with a same-length placeholder
+   identifier, which preserves every offset in the source
+3. Parse the renamed text once
+4. Record the renames in `keyword_renames: HashMap<String, String>` so the evaluator
    can map placeholder names back to the original attribute names
+
+Placeholders (`make_replacement`) replace the keyword's first character, trying `a` to
+`z` against the text as renamed so far, so `if` becomes `af` and `is` becomes `bs`
+(`as` is a keyword). Two keywords get different placeholders, and repeated accesses
+(`A.class + B.class`) share one entry. One placeholder can be a prefix of another
+(`is` and `assert` become `bs` and `bssert`), so the evaluator maps them back by whole
+dotted-path segment, never by substring. Known gap: if all 26 candidates are taken,
+the all-`x` fallback is not checked against the source and can equal an attribute the
+author wrote (openjd-rs#333). Syntax errors are reported against the
+original text, which the same-length renames leave aligned.
 
 This matches the Python implementation's `ast_parse_keyword_context()` approach, which
 renames keywords before parsing and restores them after.
 
-> **The rename is located, not searched for.** Only the one position the parser
-> objected to is considered. This is what keeps the fixup out of string literals:
-> a keyword inside a literal is valid Python, so it is never the parser's error
-> location. Searching the source text for the first `.keyword` instead — the
+> **The lexer, not a text search, finds the keywords.** The lexer marks string
+> literals, so a keyword inside a literal is never a keyword token and is never
+> rewritten. Searching the source text for the first `.keyword` instead — the
 > original implementation — rewrote literals, so `'a.class' + X.class` evaluated
 > to `"a.alassc1"` instead of `"a.classc1"`, silently and with no error raised.
 >
-> The keyword token is delimited by scanning to the first non-identifier
-> character rather than by assuming a keyword's length, so `.assert` is not read
-> as `.as` followed by junk. All offsets involved are byte offsets; mixing a byte
-> offset into a `chars()` index was a latent defect in the original boundary
-> check on sources containing multi-byte characters.
+> **One pass, not one parse per keyword.** Until #489 the rename ran after a failed
+> parse, at the offset the parser objected to, and re-parsed the whole expression
+> once per keyword. That was quadratic: 64 KB of `a.if.if...` took 89 s, and a
+> 24 KB template stalled `openjd check` for 11 s. The lexer pass is linear.
+>
+> The keyword is delimited by the lexer's token, so `.assert` is not read as `.as`
+> followed by junk. All offsets involved are byte offsets.
 
 ### Reverse mapping at evaluation
 
 The parse-time replacement only rewrites the source; the resulting AST contains the
-placeholder names (`xf` for `if`, `xlse` for `else`, etc.). The evaluator's
+placeholder names (`af` for `if`, `alse` for `else`, etc.). The evaluator's
 `eval_attribute` consults the `keyword_renames` map whenever it constructs a symbol
-lookup key from an AST `Attribute` node, so a parsed-as-`Param.xf` access becomes a
-real lookup of `Param.if` in the symbol table. Error messages also undo the
-placeholder: `ExpressionError::with_node` uses the original source text (which still
-contains `if`), so users never see the placeholder in diagnostics.
+lookup key from an AST `Attribute` node, so a parsed-as-`Param.af` access becomes a
+real lookup of `Param.if` in the symbol table. Error carets also show the original
+text: `ExpressionError::with_node` and syntax errors use the source as written (which
+still contains `if`). Known gap: messages that name an attribute from the AST still
+show the placeholder (`Undefined variable: 'Param.af'`, `Cannot access attribute 'af'
+on int`; openjd-rs#465).
 
 ## AST Validation
 
@@ -143,11 +178,17 @@ Three independent mechanisms work together:
    and the ruff parser's empirical overflow threshold on Rust's default
    2 MB thread stack is well above 200 frames (≥ 500 observed in release
    builds). Longer inputs run on a dedicated thread with a 32 MB stack via
-   `std::thread::Builder::stack_size`, which comfortably accommodates any
-   input up to `MAX_PARSE_INPUT_LEN` even in debug builds. The
-   worker-thread approach lets us parse *any* AST shape safely without
-   enumerating which token patterns drive parser recursion — whatever
-   shape the grammar produces, the parser has enough stack to complete.
+   `std::thread::Builder::stack_size`. That stack is not enough on its own:
+   the parser recurses once per nested bracket or prefix operator, and
+   64 KB of them overflows 32 MB. The parser's `stacker` feature covers the
+   rest: once its recursion passes 20 levels it checks the remaining stack,
+   and when less than 100 KB is left it continues on a new 1 MB segment
+   allocated on the heap. The 32 MB thread is still needed for this
+   crate's own AST walkers. Together they let the parser complete on *any*
+   input up to
+   `MAX_PARSE_INPUT_LEN` without our enumerating which token patterns drive
+   its recursion. The parser has no bracket-nesting limit of its own, so
+   nesting is bounded only by `MAX_PARSE_INPUT_LEN`.
 
    The fast-path threshold is deliberately decoupled from
    `MAX_EXPRESSION_DEPTH`: the depth cap is a semantic abuse ceiling on
@@ -173,7 +214,8 @@ before they can exhaust the evaluator's stack.
 
 Rust threads default to 2 MB of stack, and Rust cannot recover from stack
 overflow via `std::panic::catch_unwind` — it aborts the process. The input
-cap + worker thread + depth walker + evaluator guard together ensure that
+cap + worker thread + the parser's `stacker` feature + depth walker +
+evaluator guard together ensure that
 no input to `ParsedExpression::new` or `Evaluator::evaluate` can cause a
 process abort.
 
@@ -226,12 +268,34 @@ a parameter name.
 
 ## Multi-line Expressions
 
-Expressions can span multiple lines via implicit line continuation (wrapping in
-parentheses). The parser handles this by:
+Expressions can span multiple lines via implicit line continuation, as if they were
+inside parentheses. An expression containing a newline is parsed with
+`ruff_python_parser::parse_parenthesized_expression_range`, the parser's parenthesized
+mode, which allows the line breaks without adding a `(` to the text. Every offset the
+parser reports, in AST ranges and errors alike, is therefore a byte offset into the
+expression as written, and error messages show only the relevant line with its
+columns (see [error-formatting.md](error-formatting.md)).
 
-1. Wrapping the expression in `(...)` before parsing
-2. Adjusting line numbers in the resulting AST back to the original
-3. Error messages show only the relevant line with correct column offsets
+A multi-line expression may end in a `#` comment, as in parentheses in Python. Because
+the parser no longer sees an enclosing `(`, a few multi-line forms that this crate
+used to reject with a specific message (`x := \n1` as "Walrus operator (:=) is not
+supported", `a\nfor a in b` as "Generator expressions are not supported; use a list comprehension")
+now get a plain syntax error, and multi-line `yield` (`yield\n1`), which main accepted
+and failed at evaluation, is now a syntax error, as the same expressions on one line
+always were. Conversely a leading byte-order mark (U+FEFF) on a multi-line expression is
+now ignored, as it is on one line. Parenthesized mode is therefore not quite the same as
+writing the parentheses: `(yield\n1)` still parses.
+
+A syntax error at a single point, such as end of input, underlines the line that
+point is on: the whole expression when it has one line, and otherwise that line (for
+end of input, the last line), since the caret display shows one line.
+
+Until #489 the expression was wrapped in `(...)` before parsing instead. That shifted
+every offset by one byte, which three consumers each undid separately and one didn't
+(the caret for a multi-line binary operator landed one byte right of the operator; an
+operator at the end of a line also needed the caret scan to skip the line break),
+and syntax errors could mention a `)` the author never wrote (`Param.A\nParam.B`
+gave ``Expected `)`, found identifier``).
 
 ## Divergence from Python
 
@@ -239,3 +303,8 @@ The Python implementation uses `ast.parse(expr, mode='eval')` from the standard 
 The Rust implementation uses `ruff_python_parser::parse_expression()` which produces
 `ruff_python_ast` types instead of Python `ast` types. The AST structures are nearly
 identical, so the evaluator logic translates directly.
+
+Syntax errors are worded differently: the Python implementation reports CPython's
+`SyntaxError` messages, and this crate reports Ruff's (see "Error messages" above).
+The caret format is the same, but the caret's width and position can differ (for
+`(1 + 2`, Python marks one character and this crate the whole expression).

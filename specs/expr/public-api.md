@@ -225,8 +225,8 @@ pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;
 pub const MAX_EXPRESSION_DEPTH: usize = 64;
 
 /// Maximum source length (in bytes) for a single `ParsedExpression::new`
-/// call. Sized to leave generous headroom on a debug-profile 32 MB
-/// parser-thread stack.
+/// call. Bounds the parser's stack use (with its `stacker` feature and the
+/// 32 MB parser thread) and its work (see parser.md, Depth Limit).
 pub const MAX_PARSE_INPUT_LEN: usize = 64 * 1024;
 ```
 
@@ -1621,6 +1621,12 @@ impl ExpressionError {
 impl std::fmt::Display for ExpressionError;   // multi-line caret-annotated form
 impl std::error::Error for ExpressionError;   // source() returns &kind
 ```
+
+`with_node` takes a node from the `ruff_python_ast` crate that Astral
+publishes, pinned at `=0.0.21` (see [parser.md](parser.md)). A caller that
+passes a node must depend on that same crate and version. Before #489 the type
+came from `rustpython-ruff_python_ast` 0.16.10, which is a different crate, so
+nodes from it no longer type-check.
 
 ## Function Implementations (`functions::*`)
 

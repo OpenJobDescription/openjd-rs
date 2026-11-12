@@ -163,9 +163,11 @@ fn multiline_conditional() {
 }
 #[test]
 fn multiline_float_passthrough_not_misaligned() {
-    // Regression: multi-line sources are wrapped in "(...)" before parsing,
-    // shifting AST offsets by 1; float passthrough sliced the unwrapped
-    // source with the shifted range, displaying "2.5 " instead of "12.5".
+    // Regression: multi-line sources used to be wrapped in "(...)" before
+    // parsing, shifting AST offsets by 1; float passthrough once sliced the
+    // unwrapped source with the shifted range, displaying "2.5 " instead of
+    // "12.5". They are now parsed in the parser's parenthesized mode with no
+    // shift at all; this pins that the offsets still line up.
     assert_eq!(eval("12.5 if True else\n0.0").to_display_string(), "12.5");
     assert_eq!(
         eval("12.5 if False else\n30.25").to_display_string(),
@@ -176,11 +178,10 @@ fn multiline_float_passthrough_not_misaligned() {
 // `.keyword` and rewrote it, with no idea where the parser had actually
 // objected. For `'a.class' + X.class` the first match is inside the string
 // literal, so the literal was rewritten and the expression evaluated to
-// "a.alassc1" — a silently wrong value, with no error surfaced. The retry now
-// renames at the parser's error offset, which is never inside a literal
-// (a literal parses fine).
+// "a.alassc1" — a silently wrong value, with no error surfaced. The rename
+// now runs on the lexer's tokens, and a literal is a single string token.
 #[test]
-fn keyword_retry_leaves_string_literals_alone() {
+fn keyword_rename_leaves_string_literals_alone() {
     let mut st = SymbolTable::new();
     st.set("X.class", "c1").unwrap();
     assert_eq!(
@@ -190,7 +191,7 @@ fn keyword_retry_leaves_string_literals_alone() {
 }
 
 #[test]
-fn keyword_retry_leaves_literals_alone_in_either_order() {
+fn keyword_rename_leaves_literals_alone_in_either_order() {
     // The literal after the keyword access was never the failing case (the
     // scan found the real one first), so it is the negative control: both
     // orders must now agree.
@@ -209,9 +210,9 @@ fn keyword_retry_leaves_literals_alone_in_either_order() {
 }
 
 #[test]
-fn keyword_retry_still_renames_multiple_distinct_keywords() {
-    // Negative control: the retry must still fix every contextual keyword,
-    // one parse attempt at a time, including repeats of the same keyword.
+fn keyword_rename_still_renames_multiple_distinct_keywords() {
+    // Negative control: the rename must still fix every contextual keyword,
+    // including repeats of the same keyword.
     let mut st = SymbolTable::new();
     st.set("A.class", "a1").unwrap();
     st.set("B.if", "b1").unwrap();
@@ -223,13 +224,9 @@ fn keyword_retry_still_renames_multiple_distinct_keywords() {
 }
 
 #[test]
-fn keyword_retry_handles_keyword_prefixes_of_other_keywords() {
-    // End-to-end smoke check only. It does NOT pin the token delimiting:
-    // truncating `.assert` to the keyword `.as` still evaluates correctly,
-    // because resolve_keyword_renames rewrites `.placeholder` to `.original`
-    // as an unanchored substring and make_replacement only changes a keyword's
-    // first character, so the truncated placeholder reconstructs by accident.
-    // The delimiting is pinned by the rename_keyword_at_* unit tests in
+fn keyword_rename_handles_keyword_prefixes_of_other_keywords() {
+    // End-to-end smoke check. The token delimiting itself (`.assert` renamed
+    // as `assert`, not `as`) is pinned by the rename_* unit tests in
     // eval/parse.rs, which observe the recorded rename directly.
     let mut st = SymbolTable::new();
     st.set("X.assert", "v").unwrap();
@@ -240,7 +237,40 @@ fn keyword_retry_handles_keyword_prefixes_of_other_keywords() {
 }
 
 #[test]
-fn keyword_retry_requires_attribute_position() {
+fn keyword_rename_maps_back_placeholders_that_are_prefixes_of_others() {
+    // `is` and `as` both want the placeholder `bs`, and `assert`, `async`
+    // and `await` want `bssert`, `bsync` and `bwait` (the `a...` forms are
+    // keywords). Mapping back by substring turned `Param.bssert` into
+    // `Param.isssert` whenever the rename map's hash order visited `bs`
+    // first, so these failed about half the time. Each run builds a fresh
+    // map with a fresh hash seed, so many runs cover both orders.
+    for (expr, a, b) in [
+        ("Param.is + Param.assert", "Param.is", "Param.assert"),
+        ("Param.as + Param.async", "Param.as", "Param.async"),
+        ("Param.is + Param.await", "Param.is", "Param.await"),
+    ] {
+        let mut st = SymbolTable::new();
+        st.set(a, 1i64).unwrap();
+        st.set(b, 2i64).unwrap();
+        for _ in 0..200 {
+            assert_eq!(eval_with(expr, &st).to_display_string(), "3", "{expr}");
+        }
+    }
+}
+
+#[test]
+fn keyword_rename_maps_back_every_segment() {
+    // Placeholders in the middle of a dotted path map back as well as the
+    // last segment does.
+    let mut st = SymbolTable::new();
+    st.set("X.if.y", 7i64).unwrap();
+    st.set("X.if.class", 8i64).unwrap();
+    assert_eq!(eval_with("X.if.y", &st).to_display_string(), "7");
+    assert_eq!(eval_with("X.if.class", &st).to_display_string(), "8");
+}
+
+#[test]
+fn keyword_rename_requires_attribute_position() {
     // Negative control for the "must follow a '.'" guard: a bare keyword is a
     // real syntax error and must not be renamed into a valid identifier.
     assert!(eval_err_msg("1 + class").contains("Syntax error"));
@@ -248,7 +278,7 @@ fn keyword_retry_requires_attribute_position() {
 }
 
 #[test]
-fn keyword_retry_offsets_are_bytes_not_chars() {
+fn keyword_rename_offsets_are_bytes_not_chars() {
     // The old boundary check indexed `source.chars().nth(byte_offset)`, mixing
     // a byte offset into a char index. With multi-byte characters ahead of the
     // attribute the two diverge, and `.if` inside `.iffy` could pass the
@@ -271,10 +301,12 @@ fn keyword_retry_offsets_are_bytes_not_chars() {
 }
 
 #[test]
-fn keyword_retry_multiline_offset_is_unwrapped() {
-    // Multi-line sources are parsed wrapped in "(...)", so the parser's error
-    // offset is one byte right of `source`. If that shift were not undone the
-    // rename would land on the character after the keyword.
+fn keyword_rename_multiline_offsets_line_up() {
+    // Multi-line sources used to be parsed wrapped in "(...)", so offsets
+    // sat one byte right of `source`, and a rename that didn't undo the
+    // shift landed on the character after the keyword. The rename now runs
+    // on lexer tokens of the source itself; this pins that it still hits the
+    // keyword and skips the literal.
     let mut st = SymbolTable::new();
     st.set("X.class", "c1").unwrap();
     assert_eq!(
@@ -409,12 +441,51 @@ fn octal_upper() {
     assert_eq!(eval("0O52").to_display_string(), "42");
 }
 #[test]
+fn radix_prefix_without_digits_rejected() {
+    // ruff's lexer reports these as the Debug form of Rust's ParseIntError
+    // (`ParseIntError { kind: Empty }`); openjd-expr names the literal.
+    assert_err(
+        "0x",
+        &[
+            "Syntax error: invalid hexadecimal literal\n",
+            "  0x\n",
+            "  ^~",
+        ],
+    );
+    assert_err(
+        "0O",
+        &["Syntax error: invalid octal literal\n", "  0O\n", "  ^~"],
+    );
+    assert_err(
+        "0b1 + 0B",
+        &[
+            "Syntax error: invalid binary literal\n",
+            "  0b1 + 0B\n",
+            "        ^~",
+        ],
+    );
+}
+#[test]
 fn old_octal_rejected() {
-    assert_err("0777", &["Syntax error: leading zeros in decimal integer literals are not permitted; use an 0o prefix for octal integers\n"]);
+    assert_err(
+        "0777",
+        &[
+            "Syntax error: Invalid decimal integer literal\n",
+            "  0777\n",
+            "  ^~~~",
+        ],
+    );
 }
 #[test]
 fn leading_zero_rejected() {
-    assert_err("007", &["Syntax error: leading zeros in decimal integer literals are not permitted; use an 0o prefix for octal integers\n"]);
+    assert_err(
+        "007",
+        &[
+            "Syntax error: Invalid decimal integer literal\n",
+            "  007\n",
+            "  ^~~",
+        ],
+    );
 }
 #[test]
 fn double_zero() {
@@ -450,11 +521,25 @@ fn underscore_start_is_var() {
 }
 #[test]
 fn underscore_end_rejected() {
-    assert_err("123_", &["Syntax error: invalid decimal literal"]);
+    assert_err(
+        "123_",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  123_\n",
+            "     ^",
+        ],
+    );
 }
 #[test]
 fn double_underscore_rejected() {
-    assert_err("1__000", &["Syntax error: invalid decimal literal"]);
+    assert_err(
+        "1__000",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  1__000\n",
+            "   ^~~~~",
+        ],
+    );
 }
 #[test]
 fn underscore_after_hex_prefix() {
@@ -510,7 +595,14 @@ fn underscore_exponent() {
 }
 #[test]
 fn underscore_adj_decimal_rejected() {
-    assert_err("1_.5", &["Syntax error: invalid decimal literal"]);
+    assert_err(
+        "1_.5",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  1_.5\n",
+            "   ^",
+        ],
+    );
 }
 #[test]
 fn underscore_after_decimal_rejected() {
@@ -518,11 +610,25 @@ fn underscore_after_decimal_rejected() {
 }
 #[test]
 fn underscore_adj_exponent_rejected() {
-    assert_err("1_e10", &["Syntax error: invalid decimal literal"]);
+    assert_err(
+        "1_e10",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  1_e10\n",
+            "   ^~~~",
+        ],
+    );
 }
 #[test]
 fn underscore_after_exponent_rejected() {
-    assert_err("1e_10", &["Syntax error: invalid decimal literal"]);
+    assert_err(
+        "1e_10",
+        &[
+            "Syntax error: Unexpected token at the end of an expression\n",
+            "  1e_10\n",
+            "   ^~~~",
+        ],
+    );
 }
 
 // === TestUnsupportedPythonFeatures ===

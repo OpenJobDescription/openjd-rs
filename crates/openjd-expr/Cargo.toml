@@ -27,16 +27,21 @@ serde_json = { workspace = true }
 # The EXPR language is defined as a subset of Python expression syntax, and the
 # spec recommends the ruff parser for Rust implementations. It's the most actively
 # maintained Python parser in the Rust ecosystem (daily commits, backed by Astral).
-# Published to crates.io by the RustPython project under the `rustpython-` prefix
-# (https://github.com/RustPython/RustPython/pull/7532).
+# These are Astral's own crates, published from astral-sh/ruff. Don't switch to
+# the `rustpython-ruff_*` republish: its 0.16.10 adds error hints that make
+# error recovery exponential in bracket depth (#489).
 # See specs/expr/parser.md for the full evaluation.
 #
-# These are pinned to an exact version (`=`) on purpose. The ruff crates do not
-# follow semver for 0.x patch releases: 0.16.10 replaced `ExprCompare::left` and
-# the `comparators` field with `operands`/`runtime_comparators`, which broke any
-# build resolving `^0.16.5` without our Cargo.lock (including downstream users and
-# cargo-semver-checks in the release-plz workflow). Bump all three together and
-# review the upstream AST changes when updating.
-ruff_python_parser = { package = "rustpython-ruff_python_parser", version = "=0.16.10" }
-ruff_python_ast = { package = "rustpython-ruff_python_ast", version = "=0.16.10" }
-ruff_text_size = { package = "rustpython-ruff_text_size", version = "=0.16.10" }
+# These are pinned to an exact version (`=`) on purpose. The ruff crates are
+# internal components of Ruff with no semver promise, and a 0.x patch release
+# can change the AST (rustpython-ruff 0.16.10 replaced `ExprCompare::left` and
+# `comparators` with `operands`), which breaks any build that resolves without
+# our Cargo.lock (downstream users, cargo-semver-checks in release-plz). Bump all
+# three together, review the upstream AST changes, and keep
+# tests/integration/test_parser_work_bound.rs passing when updating.
+#
+# The `stacker` feature lets the parser grow its stack on deep recursion
+# (`-` * 65535 + `1` overflows a 32 MB stack without it). Keep it on.
+ruff_python_parser = { version = "=0.0.21", features = ["stacker"] }
+ruff_python_ast = "=0.0.21"
+ruff_text_size = "=0.0.21"

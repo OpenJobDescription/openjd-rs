@@ -189,8 +189,9 @@ operators, `ExprCall` for function calls).
 ## Multi-line Expressions
 
 For multi-line expressions (using implicit line continuation), only the relevant line
-is shown. The `lineno` from the AST node selects the line, and `col_offset` is relative
-to that line.
+is shown. Error spans are byte offsets into the whole expression as written (the parser
+reports them that way; see [parser.md](parser.md#multi-line-expressions)); `Display`
+selects the line containing the span's start and draws the caret relative to that line.
 
 ## "Did You Mean?" Suggestions
 

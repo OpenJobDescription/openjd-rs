@@ -31,7 +31,7 @@ Expression language for [Open Job Description] (OpenJD) templates. Part of the
 The parser is built on [`ruff_python_parser`], the same Python parser Astral
 uses in Ruff and the OpenJD spec recommends for Rust implementations.
 
-[`ruff_python_parser`]: https://crates.io/crates/rustpython-ruff_python_parser
+[`ruff_python_parser`]: https://crates.io/crates/ruff_python_parser
 
 ## Minimum supported Rust version
 

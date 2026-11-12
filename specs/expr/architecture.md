@@ -153,15 +153,15 @@ pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;  // 10M ops
 
 | Crate | Purpose | Source |
 |-------|---------|--------|
-| `ruff_python_parser` | Python expression parsing | crates.io (`rustpython-ruff_python_parser` =0.16.10, exact pin — see [parser.md](parser.md)) |
-| `ruff_python_ast` | Python AST types | crates.io (`rustpython-ruff_python_ast` =0.16.10, exact pin) |
+| `ruff_python_parser` | Python expression parsing | crates.io (Astral's `ruff_python_parser` =0.0.21 with the `stacker` feature, exact pin — see [parser.md](parser.md)) |
+| `ruff_python_ast` | Python AST types | crates.io (Astral's `ruff_python_ast` =0.0.21, exact pin) |
 | `regex` | Regular expression evaluation | crates.io |
 | `xxhash-rust` | Fast hashing (internal) | crates.io |
 | `serde` | Serialization (FormatString, PathMappingRule) | crates.io |
 
-The ruff parser is consumed via the `rustpython-ruff_python_parser` crate on crates.io,
-which republishes the ruff parser code. See [parser.md](parser.md) for the rationale
-behind choosing ruff over rustpython-parser.
+The ruff parser is consumed through the crates Astral publishes from the ruff monorepo,
+not the `rustpython-ruff_*` republish. See [parser.md](parser.md) for the rationale
+behind choosing ruff over rustpython-parser, and why not the rustpython-ruff crates.
 
 ## Design Constraints (from the specification)
 
