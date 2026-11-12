@@ -812,6 +812,18 @@ fn numeric_cap_ignores_white_space_padding_around_an_unresolved_value() {
 }
 
 #[test]
+fn numeric_cap_counts_white_space_from_a_concrete_expression_before_an_unresolved_one() {
+    // The documented limit of the bound: the static resolution only reports a
+    // total length, so white space an expression evaluates to still counts
+    // when another segment is unresolved. Fully static, it is trimmed.
+    check_err_exact(
+        &job_with_notify("{{ ' ' * 200 }}{{ Param.X }}"),
+        "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> script -> actions -> onRun -> cancelation:\n\tresolves to at least 200 characters, which cannot be a reasonable integer value.",
+    );
+    check_ok(&job_with_notify("{{ ' ' * 200 }}{{ 5 }}"));
+}
+
+#[test]
 fn numeric_cap_still_rejects_a_long_value_inside_white_space_padding() {
     // The cap is 100 characters other than white space. 100 digits pass
     // and 101 fail, with or without the padding, static or not.

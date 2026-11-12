@@ -814,10 +814,11 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
             )
             | (ExprValue::ListInt(_), JobParameterType::ListInt)
             | (ExprValue::ListFloat(_), JobParameterType::ListFloat)
-            | (ExprValue::ListBool(_), JobParameterType::ListBool) // No `ListList` arm: a list of lists is rebuilt element by element (see
-                                                                   // `coerce_to_job_parameter_type`), so its inner lists and its element type
-                                                                   // come out as `list[int]` even when it is empty or holds lists of strings.
+            | (ExprValue::ListBool(_), JobParameterType::ListBool)
     )
+    // No `ListList` arm: a list of lists is rebuilt element by element (see
+    // `coerce_to_job_parameter_type`), so its inner lists and its element type come out
+    // as `list[int]` even when it is empty or holds lists of strings.
 }
 
 /// Options controlling how PATH parameters are resolved in [`preprocess_job_parameters`].
@@ -1376,7 +1377,9 @@ pub(super) fn coerce_json_to_job_parameter_type(
 /// [`coerce_json_to_job_parameter_type`], and a native list under `LIST[INT]`,
 /// `LIST[FLOAT]` or `LIST[LIST[INT]]` passes [`coerce_native_list_element`]. Both end
 /// at [`coerce_to_job_parameter_type`] for each leaf, so for those types a native list
-/// and the same list as JSON text give the same value.
+/// and the same list as JSON text give the same value. One exception: a native path
+/// element is refused under an INT or FLOAT element type (`Cannot coerce path to INT`),
+/// while the same text as a JSON string is a number.
 /// A numeric string element is a number with the white space around it ignored
 /// (Template Schemas §7.5), and a FLOAT string keeps its spelling.
 ///

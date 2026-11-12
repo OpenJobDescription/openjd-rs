@@ -2211,6 +2211,37 @@ mod context_aware_help {
     }
 
     #[test]
+    fn test_help_shows_a_list_default_as_its_json_text() {
+        // A list default displays as the JSON text `-p` accepts. A LIST[FLOAT] item
+        // written as a numeric string keeps its spelling as a JSON string.
+        let mut f = NamedTempFile::with_suffix(".json").unwrap();
+        write!(
+            f,
+            r#"{{
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["EXPR"],
+            "name": "ListDefaults",
+            "parameterDefinitions": [
+                {{"name": "LF", "type": "LIST[FLOAT]", "default": [1.50, " 2.50"]}},
+                {{"name": "LI", "type": "LIST[INT]", "default": [" 1", 2]}}
+            ],
+            "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}}}]
+        }}"#
+        )
+        .unwrap();
+        let (code, stdout, _stderr) = run_cli(&["run", f.path().to_str().unwrap(), "--help"]);
+        assert_eq!(code, 0);
+        assert!(
+            stdout.contains(r#"LF (LIST[FLOAT]) [default: [1.5,"2.50"]]"#),
+            "stdout: {stdout}"
+        );
+        assert!(
+            stdout.contains("LI (LIST[INT]) [default: [1,2]]"),
+            "stdout: {stdout}"
+        );
+    }
+
+    #[test]
     fn test_help_with_multiple_parameters() {
         let mut f = NamedTempFile::with_suffix(".json").unwrap();
         write!(f, r#"{{

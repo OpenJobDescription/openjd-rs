@@ -192,7 +192,8 @@ two input modes:
   refused for `LIST[STRING]` and `LIST[PATH]` by design, and `LIST[BOOL]` was left out of this
   change's scope. **Known gap:** for those types a native list and its JSON text form can still
   differ, for example a native list of `"true"` strings is refused for `LIST[BOOL]` while the text
-  `'["true"]'` is accepted. An element error names the element in either form
+  `'["true"]'` is accepted. A native path element under `LIST[INT]` or `LIST[FLOAT]` is refused
+  (`item[0]: Cannot coerce path to INT`), while the same text in JSON is a number. An element error names the element in either form
   (`item[1]: Value '1 000' is not a valid integer or integer string.`, or `item[1][0]: ...` in a
   `LIST[LIST[INT]]`).
 

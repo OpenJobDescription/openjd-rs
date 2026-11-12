@@ -8896,6 +8896,23 @@ fn native_list_parameter_values_reject_a_bad_element_like_json_text() {
             "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a number.",
         ),
         (
+            (
+                "LL",
+                ExprValue::make_list(
+                    vec![ExprValue::new_path("1", PathFormat::Posix)],
+                    openjd_expr::ExprType::PATH,
+                )
+                .unwrap(),
+            ),
+            ("LL", r#"["1"]"#),
+            "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a string.",
+        ),
+        (
+            ("LL", ExprValue::ListList(vec![ExprValue::Null], openjd_expr::ExprType::list(openjd_expr::ExprType::INT), 0)),
+            ("LL", "[null]"),
+            "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got null.",
+        ),
+        (
             ("LL", ExprValue::make_list(vec![ExprValue::Bool(false)], openjd_expr::ExprType::BOOL).unwrap()),
             ("LL", "[false]"),
             "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a boolean.",
@@ -8962,22 +8979,22 @@ fn list_parameter_defaults_and_item_constraints_take_numeric_strings() {
 
 #[test]
 fn list_parameter_default_rejects_a_string_that_is_not_a_number() {
-    for (param, message) in [
+    for (param, expected) in [
         (
             r#"{"name": "LI", "type": "LIST[INT]", "default": ["1 000"]}"#,
-            "Cannot parse '1 000' as integer",
+            "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '1 000' as integer",
         ),
         (
             r#"{"name": "LF", "type": "LIST[FLOAT]", "default": ["1.5x"]}"#,
-            "Cannot parse '1.5x' as float",
+            "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '1.5x' as float",
         ),
         (
             r#"{"name": "LF", "type": "LIST[FLOAT]", "item": {"maxValue": "1 0"}}"#,
-            "Cannot parse '1 0' as float",
+            "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '1 0' as float",
         ),
         (
             r#"{"name": "LL", "type": "LIST[LIST[INT]]", "default": [["\u200b1"]]}"#,
-            "Cannot parse '\u{200b}1' as integer",
+            "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '\u{200b}1' as integer",
         ),
     ] {
         let v: serde_json::Value = serde_saphyr::from_str(&format!(
@@ -8989,6 +9006,31 @@ fn list_parameter_default_rejects_a_string_that_is_not_a_number() {
         let err = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default())
             .expect_err(param)
             .to_string();
-        assert!(err.contains(message), "{param}: {err}");
+        assert_eq!(err, expected, "{param}");
     }
+}
+
+#[test]
+fn list_float_default_value_writes_a_string_item_as_a_json_string() {
+    // The text job creation parses (and `MergedParameterDefinition::default` holds):
+    // a numeric-string item is a JSON string with its spelling and no white space, a
+    // number item a JSON number.
+    let v: serde_json::Value = serde_saphyr::from_str(
+        r#"{"specificationVersion": "jobtemplate-2023-09", "extensions": ["EXPR"], "name": "T",
+            "parameterDefinitions": [
+                {"name": "LF", "type": "LIST[FLOAT]", "default": [1.50, "2.50", " 3.250\t", 4]},
+                {"name": "LI", "type": "LIST[INT]", "default": [" 1", 2]}
+            ],
+            "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]}"#,
+    )
+    .unwrap();
+    let jt = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
+    let params = jt.parameter_definitions.as_ref().unwrap();
+    assert_eq!(
+        params[0].default_value().as_deref(),
+        Some(r#"[1.5,"2.50","3.250",4.0]"#)
+    );
+    assert_eq!(params[1].default_value().as_deref(), Some("[1,2]"));
+    let merged = openjd_model::merge_job_parameter_definitions(&jt, &[]).unwrap();
+    assert_eq!(merged[0].default, params[0].default_value());
 }
