@@ -1,0 +1,9 @@
+# `openjd diff` example (script let): new side, against let_script_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: Demo
+steps:
+  - name: Render
+    script:
+      let: ["quality = 'final'"]
+      actions: {onRun: {command: render, args: ["{{quality}}"]}}

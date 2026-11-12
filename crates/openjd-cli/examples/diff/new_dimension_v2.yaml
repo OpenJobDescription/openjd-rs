@@ -1,0 +1,11 @@
+# `openjd diff` example (task parameter added): new side, against new_dimension_v1.yaml.
+# The new `Eye` dimension is not read by any argument, so only the tasks change.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    parameterSpace:
+      taskParameterDefinitions:
+        - {name: Frame, type: INT, range: "1-10"}
+        - {name: Eye, type: STRING, range: [left, right]}
+    script: {actions: {onRun: {command: render, args: ["{{Task.Param.Frame}}"]}}}

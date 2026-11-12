@@ -39,7 +39,11 @@ openjd_model              — crate root re-exports, the main public surface
 ├── error                 — ModelError + structured validation errors
 ├── format_string         — re-exported from openjd_expr
 ├── job                   — instantiated (resolved) job types
+│   ├── apply             — unstable: plan/validate/execute a DiffTree through JobApplier
 │   ├── create_job        — pipeline functions + MergedParameterDefinition
+│   ├── diff              — unstable: diff_jobs/diff_steps/diff_environments → DiffTree
+│   ├── task_delta        — unstable: task_delta → TaskDelta (product box algebra)
+│   ├── template_diff     — unstable: diff_templates/diff_job_template_with_parameter_sets → TemplateDiff
 │   ├── step_param_space  — StepParameterSpaceIterator
 │   └── step_dependency_graph — StepDependencyGraph + friends
 ├── symbol_table          — re-exported from openjd_expr
@@ -709,6 +713,196 @@ pub struct job::AttributeRequirement {
 
 pub struct job::StepDependency {
     pub depends_on: String,
+}
+```
+
+### Job Diff (unstable)
+
+Breadth-first structural diff; see [job-diff.md](job-diff.md).
+
+```rust
+pub fn job::diff::diff_jobs(old: &Job, new: &Job, options: &DiffOptions) -> DiffTree;
+pub fn job::diff::diff_steps(old: &Step, new: &Step, options: &DiffOptions) -> DiffTree;
+pub fn job::diff::diff_environments(old: &Environment, new: &Environment, options: &DiffOptions) -> DiffTree;
+
+#[derive(Debug, Clone, Default)] #[non_exhaustive]
+pub struct job::diff::DiffOptions { /* private */ }
+impl DiffOptions {
+    pub fn with_max_depth(self, depth: usize) -> Self;      // nodes at depth >= d are not expanded
+    pub fn with_resolved_symtab(self, include: bool) -> Self; // default true
+}
+
+pub type job::diff::DiffNodeId = usize;
+pub struct job::diff::DiffTree { /* private */ }
+impl DiffTree {
+    pub fn root(&self) -> &DiffNode;
+    pub fn is_changed(&self) -> bool;
+    pub fn node(&self, id: DiffNodeId) -> Option<&DiffNode>;
+    pub fn nodes(&self) -> &[DiffNode];                     // breadth-first order
+    pub fn child(&self, id: DiffNodeId, segment: &str) -> Option<DiffNodeId>;
+    pub fn find(&self, path: &str) -> Option<DiffNodeId>;   // "steps[Render].script.onRun"
+    pub fn path(&self, id: DiffNodeId) -> String;
+    pub fn changed(&self) -> impl Iterator<Item = (DiffNodeId, &DiffNode)>;
+}
+impl Display for DiffTree; // indented listing of changes
+
+#[non_exhaustive]
+pub struct job::diff::DiffNode {
+    pub kind: DiffNodeKind,
+    pub segment: String,
+    pub status: DiffStatus,
+    pub depth: usize,
+    pub parent: Option<DiffNodeId>,
+    pub children: Vec<DiffNodeId>,
+    pub field_changes: Vec<FieldChange>,
+    pub expanded: bool,
+    pub key: Option<String>,        // name, for elements of a named collection
+    pub old_index: Option<usize>,   // position in the old collection (not an identity)
+    pub new_index: Option<usize>,   // position in the new collection
+    pub step_index: Option<usize>,  // enclosing step: new.steps index, or old.steps if removed
+}
+impl DiffNode { pub fn is_changed(&self) -> bool; }
+
+pub struct job::diff::FieldChange { pub field: String, pub before: serde_json::Value, pub after: serde_json::Value }
+pub enum job::diff::DiffStatus { Unchanged, Added, Removed, Modified }
+#[non_exhaustive]
+pub enum job::diff::DiffNodeKind { Job, JobParameter, Environment, Step, StepScript, EnvironmentScript,
+    Action, EmbeddedFile, ParameterSpace, TaskParameter, HostRequirements }
+```
+
+### Task Delta (unstable)
+
+Product decomposition of a step's task change; see [job-diff.md](job-diff.md#task-delta-jobtask_delta).
+
+```rust
+pub fn job::task_delta::task_delta(old: Option<&StepParameterSpace>, new: Option<&StepParameterSpace>) -> TaskDelta;
+
+pub enum job::task_delta::TaskDelta {
+    Unchanged,
+    Product(Box<ProductDelta>),
+    Fallback { reason: String },
+}
+pub struct job::task_delta::ProductDelta { pub old: TaskBox, pub kept: TaskBox, pub added: Vec<TaskBox>, pub removed: Vec<TaskBox> }
+
+pub struct job::task_delta::TaskBox { /* private */ }
+impl TaskBox {
+    pub fn space(&self) -> &StepParameterSpace;       // list ranges, product in definition order
+    pub fn len(&self) -> u64;                          // product of range lengths, saturating
+    pub fn is_empty(&self) -> bool;
+    pub fn tasks(&self) -> Result<StepParameterSpaceIterator, ModelError>;
+    pub fn index_of(&self, task: &TaskParameterSet) -> Option<u64>; // row-major position
+}
+```
+
+### Template Diff (unstable)
+
+Diff two templates or two parameter sets, with origins and stages; see
+[template-diff.md](template-diff.md).
+
+```rust
+pub fn job::template_diff::diff_templates(old: &TemplateInput, new: &TemplateInput, options: &DiffOptions) -> Result<TemplateDiff, ModelError>;
+pub fn job::template_diff::diff_job_template_with_parameter_sets(template: &TemplateInput, old: &JobParameterInputValues, new: &JobParameterInputValues, options: &DiffOptions) -> Result<TemplateDiff, ModelError>;
+pub fn job::template_diff::diff_built_jobs(old: Job, new: Job, options: &DiffOptions) -> TemplateDiff;   // origin Job, no template layer
+pub fn job::template_diff::job_from_str(text: &str) -> Result<Job, ModelError>;   // JSON or YAML serde form of a Job
+pub struct job::template_diff::JobDocument<'a>(pub &'a Job);   // Serialize: the Job serde form, parameters and environment variables sorted; Debug, Clone, Copy
+
+pub enum job::template_diff::TemplateSource { Path(PathBuf), Text(String), Value(serde_json::Value), Decoded(Box<JobTemplate>) }
+impl TemplateSource { pub fn guess(s: &str) -> Self; }   // Path if s names an existing file, else Text
+
+pub struct job::template_diff::TemplateInput { /* private */ }   // Debug, Clone
+impl TemplateInput {
+    pub fn new(source: TemplateSource) -> Self;          // every extension, default limits
+    pub fn param(self, name: impl Into<String>, value: impl Into<String>) -> Self;
+    pub fn params(self, values: impl IntoIterator<Item = (String, ExprValue)>) -> Self;
+    pub fn environment(self, source: TemplateSource) -> Self;
+    pub fn extensions(self, names: &[&str]) -> Self;
+    pub fn no_extensions(self) -> Self;
+    pub fn limits(self, limits: CallerLimits) -> Self;
+    pub fn template_dir(self, dir: impl Into<PathBuf>) -> Self;   // relative PATH defaults
+    pub fn cwd(self, dir: impl Into<PathBuf>) -> Self;            // relative PATH values
+    pub fn parameters(&self) -> &JobParameterInputValues;
+    pub fn build(&self) -> Result<Job, ModelError>;
+}
+
+pub struct job::template_diff::TemplateDiff { pub changes: Vec<Change>, pub steps: Vec<StepSummary>, pub job: DiffTree,
+    pub old_job: Job, pub new_job: Job, pub notes: Vec<Note> }
+impl TemplateDiff {
+    pub fn is_changed(&self) -> bool;
+    pub fn changes_at<'a>(&'a self, prefix: &'a str) -> impl Iterator<Item = &'a Change> + 'a;   // path prefix; ambiguous for names with ] or .
+    pub fn changes_in_step<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a Change> + 'a;   // Change::step == name, exact
+    pub fn step(&self, name: &str) -> Option<&StepSummary>;
+    pub fn plan(&self) -> Result<ApplyPlan<'_>, ModelError>;   // job::apply::plan(old_job, new_job)
+    pub fn stat(&self) -> DiffStat;
+}
+pub struct job::template_diff::Change { pub layer: Layer, pub path: String,
+    pub step: Option<String>,   // the owning step's name, from the diff tree; None at job level
+    pub field: String, pub before: Option<Shown>, pub after: Option<Shown>, pub origin: Origin, pub stage: Stage }
+pub struct job::template_diff::Note { pub step: Option<String>, pub text: String }   // Display and Serialize: "steps[S]: text" or "text"
+pub struct job::template_diff::Shown { pub raw: serde_json::Value, pub text: String }
+pub enum job::template_diff::Layer { Template, Job }
+pub enum job::template_diff::Origin { Template, Parameters, Both, Job }
+pub enum job::template_diff::Stage { Template, Parameters, Job, RunTime }
+pub struct job::template_diff::StepSummary { pub name: String, pub status: DiffStatus,
+    pub old_index: Option<usize>, pub new_index: Option<usize>, pub tasks: TaskSummary,
+    pub tasks_unknown: Option<String> }   // why the counts are 0: "adaptive chunking" or "cannot count tasks"
+impl StepSummary { pub fn stat_line(&self) -> String; }
+pub enum job::template_diff::TaskSummary { Unchanged { count: u64 }, Product { kept: BoxSummary, added: Vec<BoxSummary>, removed: Vec<BoxSummary> },
+    Replaced { old_count: u64, new_count: u64, reason: String }, Added { count: u64 }, Removed { count: u64 } }
+pub struct job::template_diff::BoxSummary { pub count: u64, pub dims: Vec<(String, String)> }
+pub struct job::template_diff::DiffStat { pub steps_changed: u64, pub steps_added: u64, pub steps_removed: u64,
+    pub tasks_kept: u64, pub tasks_added: u64, pub tasks_removed: u64, pub tasks_replaced: u64 }   // also Copy, Default
+```
+
+The result types derive `Debug`, `Clone`, `PartialEq` (`Eq` except `TemplateDiff`) and
+`Serialize` (camelCase), and implement `Display`: `TemplateDiff` the grouped listing,
+`Change` one line, `StepSummary` the step's task block, `TaskSummary` and `BoxSummary`
+their parts, `DiffStat` the totals line, and `Layer`, `Origin`, `Stage` and `Shown` their
+text. `TemplateDiff`'s listing ends with one `note: …` line per note. `Layer`, `Origin`
+and `Stage` are also `Copy`, `Eq` and `Hash`, and `Layer` is `Ord`
+(changes sort by it). Inputs that fail to build return `ModelError` naming the input
+(`old template`, `new parameters`, `the template`). `TemplateDiff` serializes `oldJob`
+and `newJob` as `JobDocument`s, so its serde form is deterministic; `openjd build` prints
+the same form, and `job_from_str` reads it back. Task counts saturate at `u64::MAX`.
+
+### Job Apply (unstable)
+
+Ordered, gated application of a job diff to a store; see [job-apply.md](job-apply.md).
+
+```rust
+pub fn job::apply::plan<'a>(old: &'a Job, new: &'a Job) -> Result<ApplyPlan<'a>, ModelError>;   // diffs with default options
+pub fn job::apply::validate<A: JobApplier>(plan: &ApplyPlan<'_>, policy: &dyn MutationPolicy, store: &mut A) -> Result<(), ApplyError<A::Error>>;
+pub fn job::apply::execute<A: JobApplier>(plan: &ApplyPlan<'_>, store: &mut A, resume_from: usize) -> Result<ApplyReport, ApplyError<A::Error>>;
+pub fn job::apply::apply<A: JobApplier>(old: &Job, new: &Job, policy: &dyn MutationPolicy, store: &mut A) -> Result<ApplyReport, ApplyError<A::Error>>;
+
+pub type job::apply::StepIndex = usize;
+pub enum job::apply::Op<'a, T> { Add { new: &'a T }, Modify { old: &'a T, new: &'a T, node: DiffNodeId }, Remove { old: &'a T } } // Copy
+pub enum job::apply::TaskChange { Boxes(Box<ProductDelta>), All, Replace }
+#[non_exhaustive] pub enum job::apply::MutationKind { JobMetadata, JobExtensions, ParameterValue, ParameterAdd, ParameterRemove,
+    EnvVariables, EnvScript, EnvMetadata, EnvSymbols, EnvAdd, EnvRemove, EnvReorder, StepMetadata, StepScript,
+    StepHostRequirements, StepDependencies, StepSymbols, StepParameterSpace, StepAdd, StepRemove, StepReorder, TaskAppend, TaskRemove, TaskReplace }
+#[non_exhaustive] pub enum job::apply::Action<'a> { Job(Op<'a, Job>), Parameter(Op<'a, JobParameter>), Environment(usize, Op<'a, Environment>),
+    Step(StepIndex, Op<'a, Step>), Tasks { step: StepIndex, space: Option<&'a StepParameterSpace>, change: TaskChange } }
+pub struct job::apply::PlannedOp<'a> { pub kinds: BTreeSet<MutationKind>, pub action: Action<'a> }
+pub struct job::apply::ApplyPlan<'a> { pub ops: Vec<PlannedOp<'a>>, pub diff: DiffTree }
+impl ApplyPlan<'_> { pub fn kinds(&self) -> BTreeSet<MutationKind>; }
+pub struct job::apply::ApplyReport { pub applied: usize }
+pub enum job::apply::ApplyError<E> { Refused { op: usize, refusal: Refusal }, Store { op: usize, error: E }, Model(ModelError) }
+pub struct job::apply::Refusal { pub kind: MutationKind, pub reason: String }
+
+pub trait job::apply::MutationPolicy { fn allows(&self, op: &PlannedOp<'_>) -> Result<(), Refusal>; }
+pub struct job::apply::AllowList(pub HashSet<MutationKind>);
+impl AllowList { pub fn of(kinds: impl IntoIterator<Item = MutationKind>) -> Self; }
+
+pub trait job::apply::JobApplier {
+    type Error;
+    fn check(&mut self, op: &PlannedOp<'_>) -> Result<(), Self::Error>;   // default Ok
+    fn job(&mut self, op: Op<'_, Job>) -> Result<(), Self::Error>;
+    fn parameter(&mut self, op: Op<'_, JobParameter>) -> Result<(), Self::Error>;
+    fn environment(&mut self, index: usize, op: Op<'_, Environment>) -> Result<(), Self::Error>;
+    fn step(&mut self, step: StepIndex, op: Op<'_, Step>) -> Result<(), Self::Error>;
+    fn tasks(&mut self, step: StepIndex, space: Option<&StepParameterSpace>, change: &TaskChange) -> Result<(), Self::Error>;
+    fn begin(&mut self) -> Result<(), Self::Error>;    // default Ok
+    fn commit(&mut self) -> Result<(), Self::Error>;   // default Ok
 }
 ```
 

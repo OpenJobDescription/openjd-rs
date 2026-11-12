@@ -1,0 +1,12 @@
+# `openjd diff` example (environment script let): new side, against env_let_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: Demo
+jobEnvironments:
+  - name: Tools
+    script:
+      let: ["tool = 'v2'"]
+      actions: {onEnter: {command: "{{tool}}"}}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

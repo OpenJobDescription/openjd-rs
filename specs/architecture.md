@@ -48,7 +48,10 @@ openjd-rs/
 │           ├── main.rs
 │           ├── check.rs
 │           ├── summary.rs
-│           ├── run.rs
+│           ├── run/
+│           ├── build.rs
+│           ├── diff.rs
+│           ├── common.rs
 │           └── help.rs
 └── specs/                      # Design specs
     ├── architecture.md
@@ -97,7 +100,7 @@ Runtime library. Depends on openjd-model and openjd-expr. Provides:
 
 ### openjd-cli
 Binary crate. Depends on all three libraries.
-Commands: `check` (validate templates), `summary` (job/step summary), `run` (execute jobs locally).
+Commands: `check` (validate templates), `summary` (job/step summary), `run` (execute jobs locally), `build` (print the built job; unstable), `diff` (diff two templates, parameter sets, or built jobs; unstable).
 
 ## Key Design Decisions
 

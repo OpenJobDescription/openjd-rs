@@ -79,6 +79,10 @@ mod test_simple_action_validation;
 mod test_step_dependency_graph;
 #[path = "integration/test_step_param_space_iter.rs"]
 mod test_step_param_space_iter;
+#[path = "integration/test_template_diff.rs"]
+mod test_template_diff;
+#[path = "integration/test_template_diff_property.rs"]
+mod test_template_diff_property;
 #[path = "integration/test_template_posix_paths.rs"]
 mod test_template_posix_paths;
 #[path = "integration/test_template_public_api.rs"]

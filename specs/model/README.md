@@ -24,6 +24,9 @@ but redesigned for Rust's type system and performance characteristics.
 | [job-creation.md](job-creation.md) | Job creation pipeline: parameter merging, preprocessing, symbol table, instantiation |
 | [parameter-space.md](parameter-space.md) | Lazy parameter space iteration: node tree, combination expressions, chunking |
 | [step-dependencies.md](step-dependencies.md) | Step dependency graph: construction, topological sort, cycle detection |
+| [job-diff.md](job-diff.md) | Unstable: breadth-first structural diff of jobs, steps and environments, and task deltas |
+| [template-diff.md](template-diff.md) | Unstable: diff two templates or two parameter sets, with the origin and stage of each change |
+| [job-apply.md](job-apply.md) | Unstable: ordered, gated application of a job diff through a storage-agnostic trait |
 | [capabilities.md](capabilities.md) | Standard capability constants, name validation functions, regex patterns |
 | [error-handling.md](error-handling.md) | Error types, structured error paths, validation error accumulation |
 

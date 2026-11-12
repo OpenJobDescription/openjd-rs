@@ -1,0 +1,8 @@
+# `openjd diff` example (host requirement amount): old side, against host_amount_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    hostRequirements:
+      amounts: [{name: amount.worker.vcpu, min: 4}]
+    script: {actions: {onRun: {command: render}}}

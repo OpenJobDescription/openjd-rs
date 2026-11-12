@@ -1,0 +1,6 @@
+# `openjd diff` example (step args): old side, against script_args_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render, args: [--fast]}}}

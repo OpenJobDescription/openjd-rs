@@ -1,0 +1,6 @@
+# `openjd diff` example (extensions): old side, against extensions_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

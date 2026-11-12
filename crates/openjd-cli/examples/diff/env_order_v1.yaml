@@ -1,0 +1,11 @@
+# `openjd diff` example (job environment order): old side, against env_order_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+jobEnvironments:
+  - name: Tools
+    variables: {TOOL: v1}
+  - name: License
+    variables: {LICENSE: lic}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

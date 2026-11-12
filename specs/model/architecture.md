@@ -50,6 +50,7 @@ src/
     │   ├── parameters.rs     # Parameter merging, preprocessing, symbol table
     │   ├── instantiate.rs    # Template → job type conversion
     │   └── ranges.rs         # Range expression evaluation
+    ├── template_diff.rs      # Unstable: template diff over diff_jobs (template-diff.md)
     ├── step_param_space.rs   # Lazy parameter space iteration
     └── step_dependency_graph.rs # Step dependency graph
 ```

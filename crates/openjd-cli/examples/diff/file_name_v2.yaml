@@ -1,0 +1,9 @@
+# `openjd diff` example (embedded file filename): new side, against file_name_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    script:
+      actions: {onRun: {command: bash, args: ["{{Task.File.Run}}"]}}
+      embeddedFiles:
+        - {name: Run, type: TEXT, filename: render.sh, data: "render"}

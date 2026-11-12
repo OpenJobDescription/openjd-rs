@@ -1,0 +1,11 @@
+# `openjd diff` example (step dependency order): old side, against dependencies_order_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Prep
+    script: {actions: {onRun: {command: prep}}}
+  - name: Render
+    script: {actions: {onRun: {command: render}}}
+  - name: Composite
+    dependencies: [{dependsOn: Prep}, {dependsOn: Render}]
+    script: {actions: {onRun: {command: comp}}}

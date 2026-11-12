@@ -1,0 +1,64 @@
+{
+  "name": "Demo",
+  "description": null,
+  "extensions": null,
+  "parameters": {
+    "Frames": {
+      "name": "Frames",
+      "paramType": "String",
+      "value": {
+        "String": "1-200"
+      }
+    }
+  },
+  "steps": [
+    {
+      "name": "Render",
+      "description": null,
+      "script": {
+        "let": null,
+        "actions": {
+          "onRun": {
+            "command": "render",
+            "args": [
+              "{{Task.Param.Frame}}"
+            ],
+            "timeout": null,
+            "cancelation": null
+          }
+        },
+        "embeddedFiles": null
+      },
+      "stepEnvironments": null,
+      "parameterSpace": {
+        "taskParameterDefinitions": {
+          "Frame": {
+            "int": {
+              "range": {
+                "rangeExpr": {
+                  "ranges": [
+                    {
+                      "start": 1,
+                      "end": 200,
+                      "step": 1
+                    }
+                  ],
+                  "cumulative_lengths": [
+                    200
+                  ],
+                  "length": 200
+                }
+              },
+              "chunks": null
+            }
+          }
+        },
+        "combination": null
+      },
+      "hostRequirements": null,
+      "dependencies": null,
+      "resolvedSymTab": []
+    }
+  ],
+  "jobEnvironments": null
+}

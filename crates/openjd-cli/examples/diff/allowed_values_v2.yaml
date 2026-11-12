@@ -1,0 +1,8 @@
+# `openjd diff` example (allowedValues): new side, against allowed_values_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+parameterDefinitions:
+  - {name: Quality, type: STRING, default: low, allowedValues: [low, medium, high]}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

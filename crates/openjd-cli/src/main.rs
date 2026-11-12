@@ -2,10 +2,12 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-//! OpenJD CLI — validate, summarize, and run job templates.
+//! OpenJD CLI — validate, summarize, run, build and diff job templates.
 
+mod build;
 mod check;
 mod common;
+mod diff;
 mod help;
 pub mod run;
 mod summary;
@@ -109,6 +111,10 @@ enum Commands {
     Summary(summary::SummaryArgs),
     /// Run a job template locally
     Run(run::RunArgs),
+    /// Print the job a template builds into, as JSON or YAML (unstable)
+    Build(build::BuildArgs),
+    /// Diff two templates, one template under two parameter sets, or two built jobs (unstable)
+    Diff(diff::DiffArgs),
 }
 
 #[tokio::main]
@@ -136,13 +142,19 @@ async fn main() {
         .collect();
     let cli = Cli::parse_from(rewritten);
     let result = match cli.command {
-        Commands::Check(args) => check::execute(args),
-        Commands::Summary(args) => summary::execute(args),
-        Commands::Run(args) => run::execute(args).await,
+        Commands::Check(args) => check::execute(args).map(|()| 0),
+        Commands::Summary(args) => summary::execute(args).map(|()| 0),
+        Commands::Run(args) => run::execute(args).await.map(|()| 0),
+        Commands::Build(args) => build::execute(args).map(|()| 0),
+        Commands::Diff(args) => diff::execute(args),
     };
-    if let Err(e) = result {
-        eprintln!("ERROR: {e}");
-        std::process::exit(1);
+    match result {
+        Ok(0) => {}
+        Ok(code) => std::process::exit(code),
+        Err(e) => {
+            eprintln!("ERROR: {e}");
+            std::process::exit(1);
+        }
     }
 }
 
