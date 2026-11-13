@@ -36,6 +36,13 @@ must contain a dictionary mapping parameter names to values. Each value is conve
 `ExprValue` via `json_val_to_expr()`:
 
 - JSON strings → `ExprValue::String`
+- JSON numbers → `ExprValue::Int` for an integer in the 64-bit signed range, otherwise
+  `ExprValue::Float`, as job creation reads a list item given as JSON. A number stays a
+  number, as the Python CLI passes it, so a FLOAT given as the number `2` is written
+  `2.0`, the way a computed float is (Expression Language §1.3.4). Its text instead
+  would be a `<floatstring>`, which keeps its spelling (Template Schemas §7.5): that is
+  what `-p F=2` gives, and it is written `2`. A STRING given a number gets the number's
+  text the same way (`1e+20` for `1e20`, as Python's `str(1e20)`).
 - All other JSON types → `ExprValue::String(value.to_string())` (stringified)
 
 ### Format 3: Inline JSON

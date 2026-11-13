@@ -258,10 +258,13 @@ impl JobParameterDefinition {
         match self {
             Self::STRING(p) => p.default.clone(),
             Self::INT(p) => p.default.as_ref().map(|v| v.to_string()),
-            Self::FLOAT(p) => p
-                .default
-                .as_ref()
-                .map(|v| v.1.clone().unwrap_or_else(|| v.0.to_string())),
+            // A default given as a string keeps its spelling (Template Schemas
+            // §7.5). One given as a number is written as a computed float is,
+            // CPython's `repr` (Expression Language §1.3.4): `2` is `2.0`.
+            Self::FLOAT(p) => p.default.as_ref().map(|v| {
+                v.1.clone()
+                    .unwrap_or_else(|| openjd_expr::value::format_float(v.0))
+            }),
             Self::PATH(p) => p.default.clone(),
             Self::BOOL(p) => p.default.as_ref().map(|v| v.0.to_string()),
             Self::RANGE_EXPR(p) => p.default.clone(),

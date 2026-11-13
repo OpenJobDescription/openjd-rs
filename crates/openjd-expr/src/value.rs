@@ -247,9 +247,9 @@ impl Float64 {
     pub(crate) fn display_len(&self) -> usize {
         self.original.as_ref().map_or_else(
             || {
-                // `format_float` uses Rust's shortest finite-f64 rendering;
-                // 32 bytes is a conservative upper bound including sign,
-                // decimal point, and exponent.
+                // `format_float` writes at most 24 bytes (a sign, 17
+                // significant digits, a point and a 5-byte exponent such as
+                // `e-308`); 32 bytes is a conservative upper bound.
                 32
             },
             |s| s.len(),
@@ -1965,28 +1965,86 @@ impl<'a> Iterator for ListIter<'a> {
 
 impl<'a> ExactSizeIterator for ListIter<'a> {}
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
+/// Write a float the way CPython's `repr(float)` writes it (Expression
+/// Language §1.3.4): the shortest decimal string that reads back as the same
+/// `f64`, ties between two shortest candidates going to the even digit.
+///
+/// The notation follows `repr`: fixed point with at least one digit after the
+/// point (`2.0`, `0.0001`, `1000000000000000.0`) when the decimal exponent is
+/// between -4 and 16, otherwise exponent notation with an explicit sign and at
+/// least two exponent digits (`1e+16`, `1e-05`, `1.5e+300`).
+///
+/// One intended difference from `repr`: zero is always `0.0`, never `-0.0`,
+/// because the expression language normalizes -0.0 to 0.0 ([`Float64::new`]).
+/// A non-finite value, which a [`Float64`] never holds, is written as Rust
+/// writes it (`NaN`, `inf`, `-inf`).
+#[must_use]
 pub fn format_float(f: f64) -> String {
     if f == 0.0 {
         return "0.0".to_string();
     }
-    let abs = f.abs();
-    if !(1e-4..1e16).contains(&abs) {
-        let rendered = format!("{f:e}");
-        if let Some((mantissa, exponent)) = rendered.split_once('e') {
-            if let Ok(exponent) = exponent.parse::<i32>() {
-                return format!("{mantissa}e{exponent:+03}");
+    if !f.is_finite() {
+        return f.to_string();
+    }
+    let mut buf = ryu::Buffer::new();
+    let (negative, digits, point) = decimal_digits(buf.format_finite(f));
+    let mut out = String::with_capacity(digits.len() + 8);
+    if negative {
+        out.push('-');
+    }
+    // `point` places the decimal point: the value is 0.<digits> * 10^point.
+    // CPython's `repr` uses fixed notation for -4 < point <= 16.
+    if (-3..=16).contains(&point) {
+        if point <= 0 {
+            out.push_str("0.");
+            out.extend(std::iter::repeat_n('0', point.unsigned_abs() as usize));
+            out.push_str(&digits);
+        } else {
+            let point = point as usize;
+            if digits.len() > point {
+                out.push_str(&digits[..point]);
+                out.push('.');
+                out.push_str(&digits[point..]);
+            } else {
+                out.push_str(&digits);
+                out.extend(std::iter::repeat_n('0', point - digits.len()));
+                out.push_str(".0");
             }
         }
-        rendered
-    } else if f.fract() == 0.0 {
-        format!("{}.0", f as i64)
     } else {
-        f.to_string()
+        out.push_str(&digits[..1]);
+        if digits.len() > 1 {
+            out.push('.');
+            out.push_str(&digits[1..]);
+        }
+        let exponent = point - 1;
+        out.push_str(&format!("e{exponent:+03}"));
     }
+    out
+}
+
+/// Split ryu's output for a finite, nonzero `f64` into its sign, its
+/// significant digits (no leading or trailing zeros), and the position of the
+/// decimal point, so that the value is `0.<digits> * 10^point`.
+///
+/// ryu writes either fixed notation (`0.001`, `123.45`, `100.0`) or exponent
+/// notation (`1e20`, `1.5e-7`); both are read here.
+fn decimal_digits(text: &str) -> (bool, String, i32) {
+    let (negative, text) = match text.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, text),
+    };
+    let (mantissa, exponent) = match text.split_once('e') {
+        Some((m, e)) => (m, e.parse::<i32>().expect("ryu writes a decimal exponent")),
+        None => (text, 0),
+    };
+    let (int_part, frac_part) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let all = format!("{int_part}{frac_part}");
+    let trimmed = all.trim_start_matches('0');
+    let leading_zeros = (all.len() - trimmed.len()) as i32;
+    let digits = trimmed.trim_end_matches('0').to_string();
+    let point = int_part.len() as i32 - leading_zeros + exponent;
+    (negative, digits, point)
 }
 
 /// Write `items` into `buf` as a JSON array, rendering each element with

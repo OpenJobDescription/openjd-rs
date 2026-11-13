@@ -41,7 +41,12 @@ missing_docs = "warn"
 [workspace.dependencies]
 shlex = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# `float_roundtrip`: read every JSON number as the nearest `f64`. Without it
+# serde_json's float parser can land one ULP off (1.4757395258967641e+20 reads
+# as 1.475739525896764e+20), and a FLOAT written as a number must keep its
+# exact value to be written as CPython's `repr` writes it.
+serde_json = { version = "1", features = ["float_roundtrip"] }
+ryu = "1"
 serde-saphyr = "2"
 thiserror = "2"
 regex = "1"

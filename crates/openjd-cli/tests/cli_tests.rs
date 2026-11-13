@@ -448,6 +448,106 @@ mod common_params {
         assert!(stdout.contains("DoTask FromFile"), "stdout: {stdout}");
     }
 
+    /// A template that echoes FLOAT, STRING, INT and LIST[FLOAT] parameters.
+    fn number_params_template() -> NamedTempFile {
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
+extensions: [EXPR]
+name: test
+parameterDefinitions:
+  - {{name: F, type: FLOAT}}
+  - {{name: S, type: STRING}}
+  - {{name: I, type: INT}}
+  - {{name: L, type: "LIST[FLOAT]"}}
+steps:
+  - name: s1
+    script:
+      actions:
+        onRun:
+          command: echo
+          args: ["F={{{{Param.F}}}} S={{{{Param.S}}}} I={{{{Param.I}}}} L={{{{Param.L}}}}"]
+"#
+        )
+        .unwrap();
+        f
+    }
+
+    #[test]
+    fn test_params_json_numbers_are_numbers() {
+        // A FLOAT given as a JSON or YAML number is written as CPython's `repr`
+        // writes it, as a computed float is (Expression Language §1.3.4); the
+        // Python CLI passes the number itself to job creation, too. A STRING
+        // given a number gets that number's text, `str(1e20)` in Python.
+        let template = number_params_template();
+        let template = template.path().to_str().unwrap();
+        let expected = "F=2.0 S=1e+20 I=3 L=[2.0, 1e-05]";
+        let inline = r#"{"F": 2, "S": 1e20, "I": 3, "L": [2, 0.00001]}"#;
+        let mut json = NamedTempFile::with_suffix(".json").unwrap();
+        write!(json, "{inline}").unwrap();
+        let mut yaml = NamedTempFile::with_suffix(".yaml").unwrap();
+        writeln!(yaml, "{{F: 2, S: 1e20, I: 3, L: [2, 0.00001]}}").unwrap();
+        for arg in [
+            inline.to_string(),
+            format!("file://{}", json.path().display()),
+            format!("file://{}", yaml.path().display()),
+        ] {
+            let (code, stdout, stderr) = run_cli(&["run", template, "-p", &arg]);
+            assert_eq!(code, 0, "{arg}: stderr: {stderr}");
+            assert!(stdout.contains(expected), "{arg}: stdout: {stdout}");
+        }
+        for (number, text) in [
+            ("0.00001", "1e-05"),
+            ("1e-7", "1e-07"),
+            ("1e16", "1e+16"),
+            ("1e15", "1000000000000000.0"),
+            ("-0.0", "0.0"),
+            ("1.4757395258967641e+20", "1.4757395258967641e+20"),
+        ] {
+            let arg = format!(r#"{{"F": {number}, "S": "s", "I": 1, "L": [{number}]}}"#);
+            let (code, stdout, stderr) = run_cli(&["run", template, "-p", &arg]);
+            assert_eq!(code, 0, "{arg}: stderr: {stderr}");
+            assert!(
+                stdout.contains(&format!("F={text} S=s I=1 L=[{text}]")),
+                "{arg}: stdout: {stdout}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_params_string_values_keep_their_spelling() {
+        // A FLOAT given as a string keeps its spelling (Template Schemas §7.5),
+        // from Key=Value or as a JSON string.
+        let template = number_params_template();
+        let template = template.path().to_str().unwrap();
+        for args in [
+            vec![
+                "-p",
+                "F=2",
+                "-p",
+                "S=1e20",
+                "-p",
+                "I=3",
+                "-p",
+                "L=[2, \"1e20\"]",
+            ],
+            vec![
+                "-p",
+                r#"{"F": "2", "S": "1e20", "I": "3", "L": [2, "1e20"]}"#,
+            ],
+        ] {
+            let mut cli_args = vec!["run", template];
+            cli_args.extend(&args);
+            let (code, stdout, stderr) = run_cli(&cli_args);
+            assert_eq!(code, 0, "{args:?}: stderr: {stderr}");
+            assert!(
+                stdout.contains("F=2 S=1e20 I=3 L=[2.0, 1e20]"),
+                "{args:?}: stdout: {stdout}"
+            );
+        }
+    }
+
     #[test]
     fn test_params_value_with_equals() {
         // Create a template that accepts a STRING param and echoes it

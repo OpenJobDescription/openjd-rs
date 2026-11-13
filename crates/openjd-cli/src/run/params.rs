@@ -62,10 +62,33 @@ pub fn parse_cli_parameters(
     Ok(params)
 }
 
+/// A parameter value from a JSON or YAML document.
+///
+/// A number stays a number, as the Python CLI passes it to job creation, so a
+/// FLOAT given as the number `2` is written `2.0`, the way a computed float is
+/// (Expression Language §1.3.4). Passing its text instead would make it a
+/// `<floatstring>`, which keeps its spelling (Template Schemas §7.5). A number
+/// is read as job creation reads a list item given as JSON: an integer in the
+/// 64-bit signed range is an INT, and any other number a FLOAT. Anything else
+/// is passed as its text.
 fn json_val_to_expr(v: &serde_json::Value) -> openjd_expr::ExprValue {
+    use openjd_expr::ExprValue;
     match v {
-        serde_json::Value::String(s) => openjd_expr::ExprValue::String(s.clone()),
-        other => openjd_expr::ExprValue::String(other.to_string()),
+        serde_json::Value::String(s) => ExprValue::String(s.clone()),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                ExprValue::Int(i)
+            } else if let Some(f) = n
+                .as_f64()
+                .and_then(|f| openjd_expr::value::Float64::new(f).ok())
+            {
+                ExprValue::Float(f)
+            } else {
+                // Not reached: serde_json has no non-finite numbers.
+                ExprValue::String(n.to_string())
+            }
+        }
+        other => ExprValue::String(other.to_string()),
     }
 }
 

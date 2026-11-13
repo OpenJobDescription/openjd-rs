@@ -392,7 +392,9 @@ Several wrapper types handle YAML's flexible value representations:
 | `NullableVec<T>` | Absent field, list of T | Explicit `null` | INT/FLOAT `allowedValues` |
 
 `FlexFloat` preserves the original string representation when parsed from a string, which
-is needed for round-trip fidelity in constraint checking.
+is needed for round-trip fidelity in constraint checking. A number has no spelling: its
+text is `format_float`'s, the same as a computed float's (see `default_value` in
+[parameters.md](parameters.md)).
 
 `NullableVec` exists because the spec distinguishes between an absent `allowedValues` field
 (no constraint) and an explicit `null` (invalid). Serde's `Option<Vec<T>>` would accept both.

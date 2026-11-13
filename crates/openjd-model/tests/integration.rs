@@ -31,6 +31,8 @@ mod test_error_messages;
 mod test_expr_parameters;
 #[path = "integration/test_feature_bundle_1.rs"]
 mod test_feature_bundle_1;
+#[path = "integration/test_float_number_repr.rs"]
+mod test_float_number_repr;
 #[path = "integration/test_host_requirements.rs"]
 mod test_host_requirements;
 #[path = "integration/test_job_cancelation_serde.rs"]
