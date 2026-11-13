@@ -108,6 +108,9 @@ try_context_aware_help(&args)
 Multi-line defaults (common for script content in PATH parameters) are shown after the
 description to avoid breaking the compact single-line format.
 
+A FLOAT default given as a number is written as a float value is, CPython's `repr`
+(`[default: 2.0]`, `[default: 1e+20]`), and one given as a string keeps its spelling.
+
 ### Constraint Display
 
 Constraints are collected into a list and joined with commas:
@@ -117,7 +120,7 @@ Constraints are collected into a list and joined with commas:
 | INT range | `range: 1 to 100` |
 | INT min only | `minimum: 1` |
 | INT max only | `maximum: 100` |
-| FLOAT range | `range: 0.0 to 1.0` |
+| FLOAT range | `range: 0.0 to 1.0` (also `minimum:` and `maximum:`; each value written by `format_float`, CPython's `repr`) |
 | String length range | `length: 1 to 256 characters` |
 | String min length | `minimum length: 1 characters` |
 | String max length | `maximum length: 256 characters` |

@@ -62,15 +62,18 @@ EXPR extension variants (§2.9–2.16):
 Common methods on all variants:
 - `name() -> &str`
 - `job_param_type() -> JobParameterType`
-- `default_value() -> Option<String>` — Returns the default as a string representation.
-  A FLOAT default given as a string keeps its spelling (Template Schemas §7.5); one given
-  as a YAML or JSON number is written by `openjd_expr::value::format_float`, CPython's
-  `repr` (Expression Language §1.3.4), so `default: 2` is `"2.0"` and `default: 1e20` is
-  `"1e+20"`. A `LIST[FLOAT]` default is JSON, and job creation reads a number item back
-  as the same `f64` (serde_json's `float_roundtrip` feature), so it too is written as
-  `repr` writes it.
+- `default_value() -> Option<String>` — Returns the default as a string representation
 - `check_constraints(&ExprValue) -> Result<(), String>` — Runtime value validation
 - `validate_definition(&EffectiveLimits) -> Result<(), Vec<String>>` — Template-level consistency (accumulates errors)
+
+A FLOAT default given as a string keeps its spelling in `default_value` (Template Schemas §7.5).
+One given as a YAML or JSON number is written by `openjd_expr::value::format_float`, CPython's
+`repr` (Expression Language §1.3.4), so `default: 2` is `"2.0"` and `default: 1e20` is `"1e+20"`.
+A `LIST[FLOAT]` default is JSON, and job creation reads a number item back as the same `f64`
+(serde_json's `float_roundtrip` feature), so it too is written as `repr` writes it. This applies
+with or without the EXPR extension. **Divergence from openjd-model-for-python:** the pure-Python
+model reads a FLOAT number default as a `Decimal` and writes it with `Decimal`'s `str`
+(`default: 2` is `2`, `default: 1.0e+20` is `1E+20`, `default: 0.00001` is `0.00001`).
 
 ### Constraint Checking vs Definition Validation
 

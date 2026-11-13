@@ -1970,9 +1970,9 @@ impl<'a> ExactSizeIterator for ListIter<'a> {}
 /// `f64`, ties between two shortest candidates going to the even digit.
 ///
 /// The notation follows `repr`: fixed point with at least one digit after the
-/// point (`2.0`, `0.0001`, `1000000000000000.0`) when the decimal exponent is
-/// between -4 and 16, otherwise exponent notation with an explicit sign and at
-/// least two exponent digits (`1e+16`, `1e-05`, `1.5e+300`).
+/// point (`2.0`, `0.0001`, `1000000000000000.0`) when `1e-4 <= |f| < 1e16`,
+/// otherwise exponent notation with an explicit sign and at least two exponent
+/// digits (`1e+16`, `1e-05`, `1.5e+300`).
 ///
 /// One intended difference from `repr`: zero is always `0.0`, never `-0.0`,
 /// because the expression language normalizes -0.0 to 0.0 ([`Float64::new`]).

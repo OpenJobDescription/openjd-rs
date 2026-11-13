@@ -859,10 +859,11 @@ Accessible as `openjd_expr::value::ListIter` (not re-exported at the crate root)
 /// Write a float the way CPython's `repr(float)` writes it (Expression
 /// Language §1.3.4): the shortest decimal string that reads back as the same
 /// `f64`, ties between two shortest candidates going to the even digit.
-/// Fixed point (`2.0`, `0.0001`, `1000000000000000.0`) when the decimal
-/// exponent is between -4 and 16, otherwise exponent notation with an
-/// explicit sign and at least two exponent digits (`1e+16`, `1e-05`).
-/// Zero is always `0.0`, the one intended difference from `repr`.
+/// Fixed point (`2.0`, `0.0001`, `1000000000000000.0`) when
+/// `1e-4 <= |f| < 1e16`, otherwise exponent notation with an explicit sign
+/// and at least two exponent digits (`1e+16`, `1e-05`). Zero is always
+/// `0.0`, the one intended difference from `repr`. A non-finite value, which
+/// a `Float64` never holds, is written as Rust writes it (`NaN`, `inf`).
 pub fn value::format_float(f: f64) -> String;
 ```
 

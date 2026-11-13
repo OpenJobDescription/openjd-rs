@@ -140,6 +140,14 @@ fn computed_float_in_an_expression_writes_as_cpython_repr() {
 }
 
 #[test]
+fn format_float_writes_non_finite_values_as_rust_does() {
+    // A `Float64` never holds one, but `format_float` is public.
+    assert_eq!(format_float(f64::NAN), "NaN");
+    assert_eq!(format_float(f64::INFINITY), "inf");
+    assert_eq!(format_float(f64::NEG_INFINITY), "-inf");
+}
+
+#[test]
 fn computed_negative_zero_writes_as_zero() {
     let expr = ParsedExpression::new("0.0 * -1.0").unwrap();
     let got = expr.evaluate(&SymbolTable::new()).unwrap();

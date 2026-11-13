@@ -64,31 +64,42 @@ pub fn parse_cli_parameters(
 
 /// A parameter value from a JSON or YAML document.
 ///
-/// A number stays a number, as the Python CLI passes it to job creation, so a
-/// FLOAT given as the number `2` is written `2.0`, the way a computed float is
-/// (Expression Language §1.3.4). Passing its text instead would make it a
-/// `<floatstring>`, which keeps its spelling (Template Schemas §7.5). A number
-/// is read as job creation reads a list item given as JSON: an integer in the
-/// 64-bit signed range is an INT, and any other number a FLOAT. Anything else
-/// is passed as its text.
+/// The Python CLI passes a number to job creation as a number, so a FLOAT
+/// given as the number `2` is written `2.0`, the way a computed float is
+/// (Expression Language §1.3.4). This passes the same text without changing
+/// how any other type reads a number:
+///
+/// - An integer in the 64-bit signed range is an `Int`, which every type
+///   reads as it reads the integer's text, except that a FLOAT widens it to a
+///   float (`2.0`).
+/// - A float is its text as Python writes it (`repr(float)`, which is also
+///   `str(float)`): `format_float`'s text, but `-0.0` for negative zero. A
+///   FLOAT keeps that text, which is `repr`'s, so the result is the same as a
+///   float with no text (zero has no sign there either). An INT or BOOL reads
+///   that text, so `3.0` is refused as it was when every number was text.
+/// - An integer outside the signed 64-bit range, which serde_json holds as a
+///   `u64`, is its digits, so a STRING keeps them and an INT error quotes them.
+///
+/// Anything else is passed as its JSON text.
 fn json_val_to_expr(v: &serde_json::Value) -> openjd_expr::ExprValue {
     use openjd_expr::ExprValue;
     match v {
         serde_json::Value::String(s) => ExprValue::String(s.clone()),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                ExprValue::Int(i)
-            } else if let Some(f) = n
-                .as_f64()
-                .and_then(|f| openjd_expr::value::Float64::new(f).ok())
-            {
-                ExprValue::Float(f)
-            } else {
-                // Not reached: serde_json has no non-finite numbers.
-                ExprValue::String(n.to_string())
-            }
-        }
+        serde_json::Value::Number(n) => match (n.as_i64(), n.as_f64()) {
+            (Some(i), _) => ExprValue::Int(i),
+            (None, Some(f)) if n.is_f64() => ExprValue::String(python_float_text(f)),
+            _ => ExprValue::String(n.to_string()),
+        },
         other => ExprValue::String(other.to_string()),
+    }
+}
+
+/// `f` as Python's `repr(float)` writes it.
+fn python_float_text(f: f64) -> String {
+    if f == 0.0 && f.is_sign_negative() {
+        "-0.0".to_string()
+    } else {
+        openjd_expr::value::format_float(f)
     }
 }
 

@@ -36,13 +36,7 @@ must contain a dictionary mapping parameter names to values. Each value is conve
 `ExprValue` via `json_val_to_expr()`:
 
 - JSON strings → `ExprValue::String`
-- JSON numbers → `ExprValue::Int` for an integer in the 64-bit signed range, otherwise
-  `ExprValue::Float`, as job creation reads a list item given as JSON. A number stays a
-  number, as the Python CLI passes it, so a FLOAT given as the number `2` is written
-  `2.0`, the way a computed float is (Expression Language §1.3.4). Its text instead
-  would be a `<floatstring>`, which keeps its spelling (Template Schemas §7.5): that is
-  what `-p F=2` gives, and it is written `2`. A STRING given a number gets the number's
-  text the same way (`1e+20` for `1e20`, as Python's `str(1e20)`).
+- JSON numbers → see [Value Coercion](#value-coercion)
 - All other JSON types → `ExprValue::String(value.to_string())` (stringified)
 
 ### Format 3: Inline JSON
@@ -75,21 +69,31 @@ the model crate's `CallerLimits::max_template_size`.
 
 ### Value Coercion
 
-`json_val_to_expr()` converts all JSON values to `ExprValue::String`:
+`json_val_to_expr()` converts a JSON or YAML value to an `ExprValue`. The model crate's
+parameter preprocessing then coerces it to the parameter's declared type.
 
-```rust
-fn json_val_to_expr(v: &serde_json::Value) -> ExprValue {
-    match v {
-        serde_json::Value::String(s) => ExprValue::String(s.clone()),
-        other => ExprValue::String(other.to_string()),
-    }
-}
-```
+- A string is an `ExprValue::String`.
+- An integer in the 64-bit signed range is an `ExprValue::Int`. Every type reads it as it
+  reads the integer's text, except that a FLOAT widens it to a float, so `{"F": 2}` is
+  written `2.0`, the way a computed float is (Expression Language §1.3.4).
+- A float is an `ExprValue::String` holding its text as Python writes it (`repr(float)`, which
+  is also `str(float)`): `format_float`'s text, but `-0.0` for negative zero. A FLOAT keeps
+  that text, which is the text it would have as a float with no spelling, so `{"F": 1e20}`
+  is written `1e+20` and `{"F": 0.00001}` `1e-05`. A STRING gets the same text Python's
+  `str` gives. An INT or BOOL reads the text, so `{"I": 3.0}` is refused, as `-p I=3.0` is.
+- An integer outside the signed 64-bit range (serde_json holds it as a `u64`) is a string of
+  its digits, so a STRING keeps them and an INT error quotes them.
+- Anything else (a boolean, `null`, a list, an object) is a string of its JSON text. A list
+  parameter reads that text as JSON.
 
-This means numeric JSON values like `{"Frames": 100}` become the string `"100"`. The
-model crate's parameter preprocessing handles parsing this string into the correct type
-based on the parameter definition. This matches the Python CLI's behavior where all
-parameter values pass through as strings initially.
+**Divergence from openjd-cli / openjd-model-for-python:** the Python CLI passes the decoded
+value itself. Its pure-Python model writes a FLOAT value given as a JSON integer as the
+integer (`{"F": 2}` is `2`, not `2.0`), and a float as `str(float)`, which is `repr`. A STRING given `true` is `True` in Python and `true` here. Python
+reads a YAML parameter file as YAML 1.1, so `F: 1e20` is the string `1e20` there and the
+number `1e20` here.
+
+A value given as `Key=Value` is always a string: `-p F=2` is the `<floatstring>` `2`, which
+keeps its spelling (Template Schemas §7.5) and is written `2`.
 
 ## Task Parameters (`-t` / `--task-param`)
 

@@ -516,6 +516,45 @@ steps:
     }
 
     #[test]
+    fn test_params_json_numbers_for_other_types_read_as_their_text() {
+        // Only a FLOAT changes when a number stays a number: every other type
+        // reads a JSON number as it reads the number's text.
+        let template = number_params_template();
+        let template = template.path().to_str().unwrap();
+        for (args, expected) in [
+            // A STRING gets the text Python's `str` gives.
+            (r#"{"F": 1, "S": 2, "I": 3, "L": []}"#, "S=2 I=3"),
+            (r#"{"F": 1, "S": 0.00001, "I": 3, "L": []}"#, "S=1e-05 I=3"),
+            (r#"{"F": 1, "S": -0.0, "I": 3, "L": []}"#, "S=-0.0 I=3"),
+            (
+                r#"{"F": 1, "S": 18446744073709551615, "I": 3, "L": []}"#,
+                "S=18446744073709551615 I=3",
+            ),
+        ] {
+            let (code, stdout, stderr) = run_cli(&["run", template, "-p", args]);
+            assert_eq!(code, 0, "{args}: stderr: {stderr}");
+            assert!(stdout.contains(expected), "{args}: stdout: {stdout}");
+        }
+        // An INT given a float, or an integer outside the signed 64-bit range,
+        // is refused, and the error quotes the number as written.
+        for (number, quoted) in [
+            ("3.0", "3.0"),
+            ("1e2", "100.0"),
+            ("9223372036854775808", "9223372036854775808"),
+            ("-9223372036854775809", "-9.223372036854776e+18"),
+        ] {
+            let args = format!(r#"{{"F": 1, "S": "s", "I": {number}, "L": []}}"#);
+            let (code, stdout, stderr) = run_cli(&["run", template, "-p", &args]);
+            assert_ne!(code, 0, "{args}: stdout: {stdout}");
+            let want = format!("Value '{quoted}' is not a valid integer or integer string.");
+            assert!(
+                stdout.contains(&want) || stderr.contains(&want),
+                "{args}: stdout: {stdout} stderr: {stderr}"
+            );
+        }
+    }
+
+    #[test]
     fn test_params_string_values_keep_their_spelling() {
         // A FLOAT given as a string keeps its spelling (Template Schemas §7.5),
         // from Key=Value or as a JSON string.
@@ -2350,6 +2389,37 @@ mod context_aware_help {
     }
 
     #[test]
+    fn test_help_writes_float_numbers_as_repr() {
+        // A FLOAT default and range given as numbers are written as a float
+        // value is, CPython's `repr`; a default given as a string keeps its
+        // spelling.
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
+name: FloatHelp
+parameterDefinitions:
+  - {{name: A, type: FLOAT, default: 2, minValue: 0, maxValue: 1e20}}
+  - {{name: B, type: FLOAT, default: "2.50", minValue: 0.00001}}
+  - {{name: C, type: FLOAT, maxValue: 1}}
+steps:
+  - name: s
+    script: {{actions: {{onRun: {{command: echo}}}}}}
+"#
+        )
+        .unwrap();
+        let (code, stdout, _stderr) = run_cli(&["run", f.path().to_str().unwrap(), "--help"]);
+        assert_eq!(code, 0);
+        for want in [
+            "A (FLOAT) [default: 2.0] (range: 0.0 to 1e+20)",
+            "B (FLOAT) [default: 2.50] (minimum: 1e-05)",
+            "C (FLOAT) [required] (maximum: 1.0)",
+        ] {
+            assert!(stdout.contains(want), "{want}: stdout: {stdout}");
+        }
+    }
+
+    #[test]
     fn test_help_includes_standard_options() {
         let tdir = templates_dir();
         let (code, stdout, _stderr) =
@@ -2458,7 +2528,8 @@ mod context_aware_help {
             stdout.contains("Ratio (FLOAT) [default: 0.5]"),
             "stdout: {stdout}"
         );
-        assert!(stdout.contains("range: 0 to 1"), "stdout: {stdout}");
+        // Written as a float value is (specs/cli/help.md).
+        assert!(stdout.contains("range: 0.0 to 1.0"), "stdout: {stdout}");
         assert!(
             stdout.contains("Username (STRING) [default: 'user']"),
             "stdout: {stdout}"
