@@ -108,6 +108,9 @@ try_context_aware_help(&args)
 Multi-line defaults (common for script content in PATH parameters) are shown after the
 description to avoid breaking the compact single-line format.
 
+A FLOAT default given as a number is written as a float value is, CPython's `repr`
+(`[default: 2.0]`, `[default: 1e+20]`), and one given as a string keeps its spelling.
+
 ### Constraint Display
 
 Constraints are collected into a list and joined with commas:
@@ -117,7 +120,7 @@ Constraints are collected into a list and joined with commas:
 | INT range | `range: 1 to 100` |
 | INT min only | `minimum: 1` |
 | INT max only | `maximum: 100` |
-| FLOAT range | `range: 0.0 to 1.0` |
+| FLOAT range | `range: 0.0 to 1.0` (also `minimum:` and `maximum:`; each value written by `format_float`, CPython's `repr`) |
 | String length range | `length: 1 to 256 characters` |
 | String min length | `minimum length: 1 characters` |
 | String max length | `maximum length: 256 characters` |
@@ -169,7 +172,9 @@ template, so a parse error is the correct response.
 | Trigger | argparse calls action when `-h` is encountered | Manual arg scanning in `main()` |
 | Fallback | Falls back to standard argparse help on parse error | Exits with error on parse error |
 | Integration | Integrated into argparse's help system | Completely separate from clap |
+| FLOAT numbers | `Decimal` text: `[default: 2]`, `range: 0 to 1E+20` | `format_float` (CPython `repr`): `[default: 2.0]`, `range: 0.0 to 1e+20` |
+| FLOAT `minValue`/`maxValue` given as a string | Keeps the spelling: `maximum: 3.50` | Written by `format_float`: `maximum: 3.5` |
 
 The Python approach is more elegant because it's integrated into the argument parser's
 help system. The Rust approach is a workaround for clap's lack of custom help actions,
-but it produces equivalent output.
+but it produces equivalent output, apart from how FLOAT values are written (see the table).
