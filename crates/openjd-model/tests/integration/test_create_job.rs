@@ -8345,12 +8345,25 @@ fn preprocess_numeric(
     template_json: &str,
     values: &[(&str, &str)],
 ) -> Result<openjd_model::JobParameterValues, openjd_model::ModelError> {
+    let values: Vec<(&str, openjd_expr::ExprValue)> = values
+        .iter()
+        .map(|(k, v)| (*k, openjd_expr::ExprValue::String(v.to_string())))
+        .collect();
+    preprocess_values(template_json, &values)
+}
+
+/// [`preprocess_numeric`] with typed input values, as an API caller (such as
+/// the Python bindings) passes them.
+fn preprocess_values(
+    template_json: &str,
+    values: &[(&str, openjd_expr::ExprValue)],
+) -> Result<openjd_model::JobParameterValues, openjd_model::ModelError> {
     let td = TestDirs::new();
     let v: serde_json::Value = serde_saphyr::from_str(template_json).unwrap();
     let jt = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
     let input: std::collections::HashMap<String, openjd_expr::ExprValue> = values
         .iter()
-        .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
+        .map(|(k, v)| (k.to_string(), v.clone()))
         .collect();
     preprocess_job_parameters(
         &jt,
@@ -8704,6 +8717,368 @@ fn list_parameter_string_elements_ignore_white_space() {
     .unwrap_err();
     assert_eq!(
         err.to_string(),
-        "Validation error: Parameter 'LI': Value ' 2 0 ' is not a valid integer or integer string."
+        "Validation error: Parameter 'LI': item[0]: Value ' 2 0 ' is not a valid integer or integer string."
     );
+}
+
+/// The list parameters of [`list_parameter_string_elements_ignore_white_space`], with
+/// defaults so that a test can supply one of them.
+const NUMERIC_LISTS_TEMPLATE: &str = r#"{
+    "specificationVersion": "jobtemplate-2023-09",
+    "extensions": ["EXPR"],
+    "name": "Test",
+    "parameterDefinitions": [
+        {"name": "LI", "type": "LIST[INT]", "default": [0]},
+        {"name": "LF", "type": "LIST[FLOAT]", "default": [0.5]},
+        {"name": "LL", "type": "LIST[LIST[INT]]", "default": [[0]]}
+    ],
+    "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+}"#;
+
+fn native_strings(items: &[&str]) -> openjd_expr::ExprValue {
+    openjd_expr::ExprValue::make_list(
+        items
+            .iter()
+            .map(|s| openjd_expr::ExprValue::String(s.to_string()))
+            .collect(),
+        openjd_expr::ExprType::STRING,
+    )
+    .unwrap()
+}
+
+fn native_float(text: &str) -> openjd_expr::ExprValue {
+    openjd_expr::ExprValue::Float(
+        openjd_expr::value::Float64::with_str(text.parse().unwrap(), text.to_string()).unwrap(),
+    )
+}
+
+#[test]
+fn native_list_parameter_values_coerce_like_json_text() {
+    // A list value can arrive as JSON text (the CLI's `-p`) or as a native
+    // list (an API caller such as the Python bindings). Both go through the
+    // same element coercion, so they give identical results: string
+    // elements are numbers with the white space around them ignored, and a
+    // FLOAT string keeps its spelling.
+    use openjd_expr::ExprValue;
+    let ints = ExprValue::make_list(
+        vec![ExprValue::Int(1), ExprValue::Int(2)],
+        openjd_expr::ExprType::INT,
+    )
+    .unwrap();
+    // A flat native list cannot mix numbers and strings (`make_list` refuses
+    // it), but a LIST[LIST[INT]] can hold a list of each.
+    let mixed_nested = ExprValue::ListList(
+        vec![ints, native_strings(&[" 3", "4\t"])],
+        openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
+        0,
+    );
+    let mixed_floats = ExprValue::make_list(
+        vec![ExprValue::Int(1), native_float("1.50")],
+        openjd_expr::ExprType::FLOAT,
+    )
+    .unwrap();
+    for (native, json, expected) in [
+        (
+            ("LI", native_strings(&[" 1", "2 ", "\t3\n"])),
+            ("LI", r#"[" 1", "2 ", "\t3\n"]"#),
+            "[1, 2, 3]",
+        ),
+        (
+            ("LF", native_strings(&[" 2.50 ", "\u{a0}1e3"])),
+            ("LF", r#"[" 2.50 ", "\u00a01e3"]"#),
+            "[2.50, 1e3]",
+        ),
+        (
+            ("LF", mixed_floats),
+            ("LF", r#"[1, "1.50"]"#),
+            "[1.0, 1.50]",
+        ),
+        (
+            (
+                "LL",
+                ExprValue::ListList(
+                    vec![native_strings(&[" 1", "2"]), native_strings(&["3 "])],
+                    openjd_expr::ExprType::list(openjd_expr::ExprType::STRING),
+                    0,
+                ),
+            ),
+            ("LL", r#"[[" 1", "2"], ["3 "]]"#),
+            "[[1, 2], [3]]",
+        ),
+        (
+            ("LL", mixed_nested),
+            ("LL", r#"[[1, 2], [" 3", "4\t"]]"#),
+            "[[1, 2], [3, 4]]",
+        ),
+    ] {
+        let name = native.0;
+        let from_native = preprocess_values(NUMERIC_LISTS_TEMPLATE, &[native])
+            .unwrap_or_else(|e| panic!("{name} native: {e}"));
+        let from_json = preprocess_numeric(NUMERIC_LISTS_TEMPLATE, &[json])
+            .unwrap_or_else(|e| panic!("{name} JSON {}: {e}", json.1));
+        // Compare the display too: value equality ignores a float's spelling.
+        assert_eq!(from_native[name].value.to_display_string(), expected);
+        assert_eq!(
+            from_json[name].value.to_display_string(),
+            expected,
+            "{name}"
+        );
+        assert_eq!(from_native[name].value, from_json[name].value, "{name}");
+    }
+}
+
+#[test]
+fn a_native_path_element_is_not_read_as_a_number() {
+    // A documented difference from JSON text: a path element is refused under an
+    // INT or FLOAT element type, where the same text as a JSON string is a number.
+    use openjd_expr::{ExprType, ExprValue};
+    let paths = || {
+        ExprValue::make_list(
+            vec![ExprValue::new_path("1", PathFormat::Posix)],
+            ExprType::PATH,
+        )
+        .unwrap()
+    };
+    for (native, expected) in [
+        (
+            ("LI", paths()),
+            "Validation error: Parameter 'LI': item[0]: Cannot coerce path to INT",
+        ),
+        (
+            ("LF", paths()),
+            "Validation error: Parameter 'LF': item[0]: Cannot coerce path to FLOAT",
+        ),
+        (
+            (
+                "LL",
+                ExprValue::ListList(vec![paths()], ExprType::list(ExprType::PATH), 0),
+            ),
+            "Validation error: Parameter 'LL': item[0][0]: Cannot coerce path to INT",
+        ),
+    ] {
+        let err = preprocess_values(NUMERIC_LISTS_TEMPLATE, &[native]).unwrap_err();
+        assert_eq!(err.to_string(), expected);
+    }
+    // A range expression in a hand-built list of lists names its type.
+    let range = ExprValue::RangeExpr("1-3".parse().unwrap());
+    let err = preprocess_values(
+        NUMERIC_LISTS_TEMPLATE,
+        &[(
+            "LL",
+            ExprValue::ListList(vec![range], ExprType::RANGE_EXPR, 0),
+        )],
+    )
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got range_expr."
+    );
+}
+
+#[test]
+fn an_empty_native_list_of_lists_becomes_a_list_of_int_lists() {
+    // An empty list of lists has no inner list to check, so its element type is
+    // what decides it. Whatever that type, a LIST[LIST[INT]] value comes out as
+    // `list[list[int]]`, as the JSON text `[]` does, and joins with other int lists.
+    use openjd_expr::{ExprType, ExprValue};
+    for element_type in [
+        ExprType::list(ExprType::STRING),
+        ExprType::list(ExprType::BOOL),
+        ExprType::list(ExprType::INT),
+        ExprType::NULLTYPE,
+    ] {
+        let native = ExprValue::ListList(vec![], element_type.clone(), 0);
+        let values = preprocess_values(NUMERIC_LISTS_TEMPLATE, &[("LL", native)])
+            .unwrap_or_else(|e| panic!("{element_type}: {e}"));
+        let json = preprocess_numeric(NUMERIC_LISTS_TEMPLATE, &[("LL", "[]")]).unwrap();
+        assert_eq!(
+            values["LL"].value.expr_type(),
+            ExprType::list(ExprType::list(ExprType::INT)),
+            "{element_type}"
+        );
+        assert_eq!(values["LL"].value.expr_type(), json["LL"].value.expr_type());
+    }
+}
+
+#[test]
+fn native_list_parameter_values_reject_a_bad_element_like_json_text() {
+    // An element that is not a number, a numeric string, or (for FLOAT) an
+    // int is refused with the scalar type's message, naming its position.
+    use openjd_expr::ExprValue;
+    // (native value, the same value as JSON text, the expected error)
+    type Case<'a> = ((&'a str, ExprValue), (&'a str, &'a str), &'a str);
+    let cases: Vec<Case> = vec![
+        (
+            ("LI", native_strings(&["1", "1 000"])),
+            ("LI", r#"["1", "1 000"]"#),
+            "Validation error: Parameter 'LI': item[1]: Value '1 000' is not a valid integer or integer string.",
+        ),
+        (
+            ("LF", native_strings(&["abc"])),
+            ("LF", r#"["abc"]"#),
+            "Validation error: Parameter 'LF': item[0]: Value 'abc' is not a valid float.",
+        ),
+        (
+            ("LI", ExprValue::make_list(vec![ExprValue::Bool(true)], openjd_expr::ExprType::BOOL).unwrap()),
+            ("LI", "[true]"),
+            "Validation error: Parameter 'LI': item[0]: Value 'true' is not a valid integer or integer string.",
+        ),
+        (
+            ("LL", ExprValue::ListList(vec![native_strings(&["1"]), native_strings(&["2", "x"])], openjd_expr::ExprType::list(openjd_expr::ExprType::STRING), 0)),
+            ("LL", r#"[["1"], ["2", "x"]]"#),
+            "Validation error: Parameter 'LL': item[1][1]: Value 'x' is not a valid integer or integer string.",
+        ),
+        (
+            ("LL", native_strings(&["1"])),
+            ("LL", r#"["1"]"#),
+            "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a string.",
+        ),
+        (
+            ("LL", ExprValue::make_list(vec![ExprValue::Int(1)], openjd_expr::ExprType::INT).unwrap()),
+            ("LL", "[1]"),
+            "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a number.",
+        ),
+        (
+            ("LL", ExprValue::make_list(vec![native_float("1.5")], openjd_expr::ExprType::FLOAT).unwrap()),
+            ("LL", "[1.5]"),
+            "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a number.",
+        ),
+        (
+            (
+                "LL",
+                ExprValue::make_list(
+                    vec![ExprValue::new_path("1", PathFormat::Posix)],
+                    openjd_expr::ExprType::PATH,
+                )
+                .unwrap(),
+            ),
+            ("LL", r#"["1"]"#),
+            "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a string.",
+        ),
+        (
+            ("LL", ExprValue::ListList(vec![ExprValue::Null], openjd_expr::ExprType::list(openjd_expr::ExprType::INT), 0)),
+            ("LL", "[null]"),
+            "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got null.",
+        ),
+        (
+            ("LL", ExprValue::make_list(vec![ExprValue::Bool(false)], openjd_expr::ExprType::BOOL).unwrap()),
+            ("LL", "[false]"),
+            "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a boolean.",
+        ),
+    ];
+    for (native, json, expected) in cases {
+        let from_native = preprocess_values(NUMERIC_LISTS_TEMPLATE, &[native]).unwrap_err();
+        let from_json = preprocess_numeric(NUMERIC_LISTS_TEMPLATE, &[json]).unwrap_err();
+        assert_eq!(from_native.to_string(), expected, "native {}", json.1);
+        assert_eq!(from_json.to_string(), expected, "JSON {}", json.1);
+    }
+}
+
+#[test]
+fn list_parameter_defaults_and_item_constraints_take_numeric_strings() {
+    // Template Schemas §2.13, §2.14 and §2.16: a list parameter's `default`
+    // and item `allowedValues`, `minValue` and `maxValue` may give a number as
+    // a numeric string, as a scalar INT or FLOAT default may. White space
+    // around it is ignored (§7.5), and a LIST[FLOAT] default string item keeps
+    // its spelling while a number item renders as the number.
+    let template = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "parameterDefinitions": [
+            {"name": "LI", "type": "LIST[INT]", "default": [" 1", "2 ", 3],
+             "item": {"minValue": "\t1", "maxValue": " 5 ", "allowedValues": [1, " 2", "3", 4]}},
+            {"name": "LF", "type": "LIST[FLOAT]", "default": [1.50, "2.50", " 3.250\t"],
+             "item": {"minValue": " 0.5", "maxValue": "9.5 ", "allowedValues": [1.5, " 2.5", "3.25", "4"]}},
+            {"name": "LL", "type": "LIST[LIST[INT]]", "default": [[" 1", 2], ["3 "]],
+             "item": {"item": {"minValue": " 0", "maxValue": "3 "}}},
+            {"name": "F", "type": "FLOAT", "default": " 2.50 "}
+        ],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }"#;
+    let values = preprocess_numeric(template, &[]).unwrap();
+    assert_eq!(values["LI"].value.to_display_string(), "[1, 2, 3]");
+    assert_eq!(values["LF"].value.to_display_string(), "[1.5, 2.50, 3.250]");
+    assert_eq!(values["LL"].value.to_display_string(), "[[1, 2], [3]]");
+    // The same as a scalar FLOAT default.
+    assert_eq!(values["F"].value.to_display_string(), "2.50");
+    // A string item constraint still rejects a value outside it.
+    for (name, value, expected) in [
+        (
+            "LI",
+            "[6]",
+            "Validation error: Parameter 'LI': item[0] value 6 exceeds maximum 5",
+        ),
+        (
+            "LF",
+            "[9.75]",
+            "Validation error: Parameter 'LF': item[0] value 9.75 exceeds maximum 9.5",
+        ),
+        (
+            "LL",
+            "[[4]]",
+            "Validation error: Parameter 'LL': item[0][0] value 4 exceeds maximum 3",
+        ),
+    ] {
+        let err = preprocess_numeric(template, &[(name, value)]).unwrap_err();
+        assert_eq!(err.to_string(), expected, "{name}={value}");
+    }
+}
+
+#[test]
+fn list_parameter_default_rejects_a_string_that_is_not_a_number() {
+    for (param, expected) in [
+        (
+            r#"{"name": "LI", "type": "LIST[INT]", "default": ["1 000"]}"#,
+            "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '1 000' as integer",
+        ),
+        (
+            r#"{"name": "LF", "type": "LIST[FLOAT]", "default": ["1.5x"]}"#,
+            "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '1.5x' as float",
+        ),
+        (
+            r#"{"name": "LF", "type": "LIST[FLOAT]", "item": {"maxValue": "1 0"}}"#,
+            "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '1 0' as float",
+        ),
+        (
+            r#"{"name": "LL", "type": "LIST[LIST[INT]]", "default": [["\u200b1"]]}"#,
+            "Validation error: 'jobtemplate-2023-09' failed checks: Cannot parse '\u{200b}1' as integer",
+        ),
+    ] {
+        let v: serde_json::Value = serde_saphyr::from_str(&format!(
+            r#"{{"specificationVersion": "jobtemplate-2023-09", "extensions": ["EXPR"], "name": "T",
+                "parameterDefinitions": [{param}],
+                "steps": [{{"name": "S", "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}}}]}}"#
+        ))
+        .unwrap();
+        let err = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default())
+            .expect_err(param)
+            .to_string();
+        assert_eq!(err, expected, "{param}");
+    }
+}
+
+#[test]
+fn list_float_default_value_writes_a_string_item_as_a_json_string() {
+    // The text job creation parses (and `MergedParameterDefinition::default` holds):
+    // a numeric-string item is a JSON string with its spelling and no white space, a
+    // number item a JSON number.
+    let v: serde_json::Value = serde_saphyr::from_str(
+        r#"{"specificationVersion": "jobtemplate-2023-09", "extensions": ["EXPR"], "name": "T",
+            "parameterDefinitions": [
+                {"name": "LF", "type": "LIST[FLOAT]", "default": [1.50, "2.50", " 3.250\t", 4]},
+                {"name": "LI", "type": "LIST[INT]", "default": [" 1", 2]}
+            ],
+            "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]}"#,
+    )
+    .unwrap();
+    let jt = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default()).unwrap();
+    let params = jt.parameter_definitions.as_ref().unwrap();
+    assert_eq!(
+        params[0].default_value().as_deref(),
+        Some(r#"[1.5,"2.50","3.250",4.0]"#)
+    );
+    assert_eq!(params[1].default_value().as_deref(), Some("[1,2]"));
+    let merged = openjd_model::merge_job_parameter_definitions(&jt, &[]).unwrap();
+    assert_eq!(merged[0].default, params[0].default_value());
 }

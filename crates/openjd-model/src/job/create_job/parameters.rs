@@ -673,6 +673,22 @@ pub(super) fn coerce_to_job_parameter_type(
         return Ok(value.clone());
     }
 
+    // A native list under a numeric list type: coerce element by element, through the
+    // same rule as a list given as JSON text (`coerce_json_to_job_parameter_type`). The
+    // other list types keep their exact-type check: a `ListPath` value is refused for
+    // `LIST[STRING]` and `LIST[PATH]` by design (see `value_matches_type`).
+    let numeric_list = matches!(
+        param_type,
+        JobParameterType::ListInt | JobParameterType::ListFloat | JobParameterType::ListListInt
+    );
+    if let (true, Some(element_type), Some(elements)) = (
+        numeric_list,
+        list_element_type(param_type),
+        value.list_elements(),
+    ) {
+        return coerce_list_elements(&elements, element_type, coerce_native_list_element);
+    }
+
     match (value, param_type) {
         (ExprValue::Int(i), JobParameterType::Float) => {
             return Ok(ExprValue::Float(
@@ -799,8 +815,10 @@ fn value_matches_type(value: &openjd_expr::ExprValue, param_type: JobParameterTy
             | (ExprValue::ListInt(_), JobParameterType::ListInt)
             | (ExprValue::ListFloat(_), JobParameterType::ListFloat)
             | (ExprValue::ListBool(_), JobParameterType::ListBool)
-            | (ExprValue::ListList(_, _, _), JobParameterType::ListListInt)
     )
+    // No `ListList` arm: a list of lists is rebuilt element by element (see
+    // `coerce_to_job_parameter_type`), so its inner lists and its element type come out
+    // as `list[int]` even when it is empty or holds lists of strings.
 }
 
 /// Options controlling how PATH parameters are resolved in [`preprocess_job_parameters`].
@@ -1334,21 +1352,7 @@ pub(super) fn coerce_json_to_job_parameter_type(
         // A list parameter: recurse, carrying the element type down. LIST[LIST[INT]]
         // recurses twice and reaches the Int arm at the leaves.
         (serde_json::Value::Array(arr), Some(element_type)) => {
-            let elements: Vec<openjd_expr::ExprValue> = arr
-                .iter()
-                .map(|element| coerce_json_to_job_parameter_type(element, element_type))
-                .collect::<Result<_, _>>()?;
-            // The hint types an empty list only, so it must name the variant the elements
-            // above produce. A PATH element coerces to an `ExprValue::String`, because a
-            // job parameter stores a path as a string -- see `value_matches_type` -- so
-            // `STRING` is the hint for `LIST[PATH]`. `PATH` here gave the empty case a
-            // `ListPath`, a second representation. Issue #389.
-            let hint = match element_type {
-                JobParameterType::Path => openjd_expr::ExprType::STRING,
-                other => other.expr_type(),
-            };
-            openjd_expr::ExprValue::make_list(elements, hint)
-                .map_err(|e| format!("Invalid list value: {e}"))
+            coerce_list_elements(arr, element_type, coerce_json_to_job_parameter_type)
         }
         // A list type whose value is not a list. Refused here because nothing downstream
         // does: `check_constraints` has no arm for a scalar under a list type, so passing it
@@ -1364,6 +1368,84 @@ pub(super) fn coerce_json_to_job_parameter_type(
             coerce_to_job_parameter_type(&value, param_type)
         }
     }
+}
+
+/// Coerce each element of a list value to `element_type` with `coerce`, and build the
+/// list.
+///
+/// The one place list elements are coerced: a list given as JSON text passes
+/// [`coerce_json_to_job_parameter_type`], and a native list under `LIST[INT]`,
+/// `LIST[FLOAT]` or `LIST[LIST[INT]]` passes [`coerce_native_list_element`]. Both end
+/// at [`coerce_to_job_parameter_type`] for each leaf, so for those types a native list
+/// and the same list as JSON text give the same value. Two differences remain: a native
+/// path element is refused under an INT or FLOAT element type (`Cannot coerce path to
+/// INT`), while the same text as a JSON string is a number; and a JSON number is read
+/// as an `f64`, so a native float keeps a spelling (`1.50`) that the JSON number `1.50`
+/// does not. The values compare equal, but an error quotes each form's text (`'1.50'`
+/// against `'1.5'`).
+/// A numeric string element is a number with the white space around it ignored
+/// (Template Schemas §7.5), and a FLOAT string keeps its spelling.
+///
+/// An error names the element: `item[1]: ...`, or `item[1][0]: ...` for a
+/// `LIST[LIST[INT]]` leaf.
+fn coerce_list_elements<T>(
+    elements: &[T],
+    element_type: JobParameterType,
+    coerce: impl Fn(&T, JobParameterType) -> Result<openjd_expr::ExprValue, String>,
+) -> Result<openjd_expr::ExprValue, String> {
+    let elements: Vec<openjd_expr::ExprValue> = elements
+        .iter()
+        .enumerate()
+        .map(|(i, element)| {
+            coerce(element, element_type).map_err(|e| match e.strip_prefix(ITEM_PREFIX) {
+                // A nested element's error: extend its index path.
+                Some(rest) => format!("{ITEM_PREFIX}{i}][{rest}"),
+                None => format!("{ITEM_PREFIX}{i}]: {e}"),
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    // The hint types an empty list only, so it must name the variant the elements
+    // above produce. A PATH element coerces to an `ExprValue::String`, because a
+    // job parameter stores a path as a string -- see `value_matches_type` -- so
+    // `STRING` is the hint for `LIST[PATH]`. `PATH` here gave the empty case a
+    // `ListPath`, a second representation. Issue #389.
+    let hint = match element_type {
+        JobParameterType::Path => openjd_expr::ExprType::STRING,
+        other => other.expr_type(),
+    };
+    openjd_expr::ExprValue::make_list(elements, hint)
+        .map_err(|e| format!("Invalid list value: {e}"))
+}
+
+/// How [`coerce_list_elements`] starts an error's element index path.
+const ITEM_PREFIX: &str = "item[";
+
+/// Coerce one element of a native list value, the counterpart of
+/// [`coerce_json_to_job_parameter_type`] for a list element.
+///
+/// A non-list element under a list element type (`LIST[LIST[INT]]`) is refused, as it
+/// is in JSON text. [`coerce_to_job_parameter_type`] would instead read a string
+/// element as JSON text, which only a whole value given as text should be.
+fn coerce_native_list_element(
+    value: &openjd_expr::ExprValue,
+    element_type: JobParameterType,
+) -> Result<openjd_expr::ExprValue, String> {
+    use openjd_expr::ExprValue;
+    if list_element_type(element_type).is_some() && !value.is_list() {
+        let got = match value {
+            ExprValue::String(_) | ExprValue::Path { .. } => "a string",
+            ExprValue::Int(_) | ExprValue::Float(_) => "a number",
+            ExprValue::Bool(_) => "a boolean",
+            ExprValue::Null => "null",
+            // e.g. `range_expr`, which only a hand-built list of lists can hold.
+            other => other.type_name(),
+        };
+        return Err(format!(
+            "Value is not a list for parameter type {}. Got {got}.",
+            element_type.as_spec_str()
+        ));
+    }
+    coerce_to_job_parameter_type(value, element_type)
 }
 
 /// The JSON type of `val`, for diagnostics.

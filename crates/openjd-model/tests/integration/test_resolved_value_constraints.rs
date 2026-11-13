@@ -763,6 +763,94 @@ fn amount_valid_and_unresolved_pass() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// The numeric length cap does not count white space (§7.5)
+// ══════════════════════════════════════════════════════════════
+//
+// White space around a numeric string is ignored (Template Schemas §7.5),
+// so the soft cap on a numeric field's resolved length counts only the
+// other characters. A format string padded with white space passes
+// exactly when the same padded literal does.
+
+/// 120 characters of white space: spaces, a tab, and U+3000 (written as
+/// JSON escapes, since the templates below are JSON).
+fn ws_pad() -> String {
+    format!("{}\\t\\u3000", " ".repeat(118))
+}
+
+#[test]
+fn numeric_cap_ignores_white_space_padding_around_a_static_value() {
+    let pad = ws_pad();
+    // leongdl's two examples on #530: 120 spaces before `{{ 5 }}` and
+    // `{{ 2 }}`. The literal forms already passed.
+    check_ok(&job_with_notify(&format!("{}{{{{ 5 }}}}", " ".repeat(120))));
+    check_ok(&job_with_amount(
+        "min",
+        &format!("{}{{{{ 2 }}}}", " ".repeat(120)),
+    ));
+    check_ok(&job_with_notify(&format!("{}5", " ".repeat(120))));
+    check_ok(&job_with_amount("min", &format!("{}2", " ".repeat(120))));
+    // Padding on both sides, other white space, and the other numeric
+    // fields that share the cap.
+    check_ok(&job_with_notify(&format!("{pad}{{{{ 5 }}}}{pad}")));
+    check_ok(&job_with_timeout(&format!("{pad}{{{{ 60 }}}}{pad}")));
+    check_ok(&job_with_chunks(&format!("{pad}{{{{ 2 }}}}{pad}"), None));
+    check_ok(&job_with_amount("max", &format!("{pad}{{{{ 2.5 }}}}{pad}")));
+}
+
+#[test]
+fn numeric_cap_ignores_white_space_padding_around_an_unresolved_value() {
+    // Not fully static: the bound subtracts the literal white space, so the
+    // padding does not count toward the cap.
+    let pad = ws_pad();
+    check_ok(&job_with_notify(&format!("{pad}{{{{ Param.X }}}}{pad}")));
+    check_ok(&job_with_timeout(&format!("{pad}{{{{ Param.X }}}}{pad}")));
+    check_ok(&job_with_chunks(&format!("{pad}{{{{ Param.X }}}}"), None));
+    check_ok(&job_with_amount(
+        "min",
+        &format!("{pad}{{{{ Param.X }}}}{pad}"),
+    ));
+}
+
+#[test]
+fn numeric_cap_counts_white_space_from_a_concrete_expression_before_an_unresolved_one() {
+    // The documented limit of the bound: the static resolution only reports a
+    // total length, so white space an expression evaluates to still counts
+    // when another segment is unresolved. Fully static, it is trimmed.
+    check_err_exact(
+        &job_with_notify("{{ ' ' * 200 }}{{ Param.X }}"),
+        "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> script -> actions -> onRun -> cancelation:\n\tresolves to at least 200 characters, which cannot be a reasonable integer value.",
+    );
+    check_ok(&job_with_notify("{{ ' ' * 200 }}{{ 5 }}"));
+}
+
+#[test]
+fn numeric_cap_still_rejects_a_long_value_inside_white_space_padding() {
+    // The cap is 100 characters other than white space. 100 digits pass
+    // and 101 fail, with or without the padding, static or not.
+    let pad = ws_pad();
+    let digits_100 = format!("{}5", "0".repeat(99));
+    check_ok(&job_with_notify(&format!(
+        "{pad}{{{{ '{digits_100}' }}}}{pad}"
+    )));
+    check_ok(&job_with_amount(
+        "min",
+        &format!("{pad}{digits_100}{{{{ '' }}}}"),
+    ));
+    check_err_exact(
+        &job_with_notify(&format!("{pad}{{{{ '0{digits_100}' }}}}{pad}")),
+        "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> script -> actions -> onRun -> cancelation:\n\tresolves to at least 101 characters, which cannot be a reasonable integer value.",
+    );
+    check_err_exact(
+        &job_with_amount("min", &format!("{pad}{{{{ Param.X }}}}{{{{ '9' * 101 }}}}{pad}")),
+        "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> hostRequirements -> amounts[0] -> min:\n\tresolves to at least 101 characters, which cannot be a reasonable number.",
+    );
+    check_err_exact(
+        &job_with_timeout(&format!("{pad}1{{{{ Param.X }}}}{}", "0".repeat(100))),
+        "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> script -> actions -> onRun -> timeout:\n\tresolves to at least 101 characters, which cannot be a reasonable integer value.",
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
 // Opt-in caller caps (Group B): action command/args (§5.1/§5.2)
 // and embedded-file data (§6.1.2) under CallerLimits
 // ══════════════════════════════════════════════════════════════

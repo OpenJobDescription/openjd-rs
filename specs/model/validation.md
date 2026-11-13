@@ -375,12 +375,12 @@ deferring it to job submission or the worker. Two stages of checking:
 | task param STRING/PATH range elements (Template Schemas §3.4.2) | `string? \| list[string]` | when certainly a string: ≤ 1024 | ≤ 1024 chars per element (a list flattens); PATH elements additionally must be non-empty (see below); `null` skips the element |
 | task param INT/CHUNK[INT]/FLOAT range list elements (Template Schemas §3.4.1.1, §3.4.1.2) | with EXPR `int? \| list[int]`, FLOAT `float? \| int \| list[float]`; without EXPR none, the element resolves to a string (`TaskParameterType::range_list_item_target`) | none | none beyond static typing against the target, which rejects a value that can never coerce (a `bool`, a `list[string]` with a non-numeric member such as `["a"]`). There is no fully-static value check: an element that resolves to a string that does not parse as a number, such as `"a{{ 1 }}"`, passes `check` and fails at job creation even when `check` could know it. `null` skips the element. The reference implementation does no static typing here, so its `check` accepts these templates and they fail when the job runs |
 | environment variable values (Template Schemas §4.4.2) | `string` | ≤ `max_env_var_value_len` (2048) | (length is the whole constraint) |
-| action `timeout` (FB1 `<posintstring>`, Template Schemas §5) | `int?` | soft cap: 100 chars | coerced integer > 0; `null` = unset |
-| `notifyPeriodInSeconds` (Template Schemas §5.3.2, FB1) | `int?` | soft cap: 100 chars | coerced integer > 0, ≤ 600; `null` = unset |
+| action `timeout` (FB1 `<posintstring>`, Template Schemas §5) | `int?` | soft cap: 100 chars, not counting white space | coerced integer > 0; `null` = unset |
+| `notifyPeriodInSeconds` (Template Schemas §5.3.2, FB1) | `int?` | soft cap: 100 chars, not counting white space | coerced integer > 0, ≤ 600; `null` = unset |
 | cancelation `mode` (FB1 deferred, Template Schemas §5.3) | `string?` | ≤ 21 chars (longest valid value) | `TERMINATE` / `NOTIFY_THEN_TERMINATE`; `null` = cancelation unset |
-| chunks `defaultTaskCount` (TASK_CHUNKING, Template Schemas §3.4.1.5) | `int` | soft cap: 100 chars | coerced integer ≥ 1 |
-| chunks `targetRuntimeSeconds` (TASK_CHUNKING, Template Schemas §3.4.1.5) | `int?` | soft cap: 100 chars | coerced integer ≥ 0; `null` = unset |
-| amount `min` / `max` (FB1 float strings, Template Schemas §3.3.1) | `float?` | soft cap: 100 chars | finite float, ≥ 0 / > 0; `null` = unset |
+| chunks `defaultTaskCount` (TASK_CHUNKING, Template Schemas §3.4.1.5) | `int` | soft cap: 100 chars, not counting white space | coerced integer ≥ 1 |
+| chunks `targetRuntimeSeconds` (TASK_CHUNKING, Template Schemas §3.4.1.5) | `int?` | soft cap: 100 chars, not counting white space | coerced integer ≥ 0; `null` = unset |
+| amount `min` / `max` (FB1 float strings, Template Schemas §3.3.1) | `float?` | soft cap: 100 chars, not counting white space | finite float, ≥ 0 / > 0; `null` = unset |
 | action `command` (Template Schemas §5.1) — **opt-in** `CallerLimits::max_resolved_arg_len` | none (resolution is `resolve_string_with`) | ≤ cap, unconditionally (everything renders inline into one string) | (length is the whole constraint) |
 | action `args[*]` (Template Schemas §5.2) — **opt-in** `CallerLimits::max_resolved_arg_len` | none (resolution is `resolve_with` with no target) | when certainly a string: ≤ cap | ≤ cap per final argv entry (a list flattens into one entry per element; `null` skips) |
 | embedded file `data` (Template Schemas §6.1.2) — **opt-in** `CallerLimits::max_resolved_data_len` | none (resolution is `resolve_string_with`) | ≤ cap, unconditionally | (length is the whole constraint) |
@@ -411,10 +411,17 @@ ordinary `Failed to parse interpolation expression` error at the field
 path. Job creation applies the same budgets to every evaluation it
 performs (see `specs/model/job-creation.md`).
 
-Numeric fields have no exact length maximum — leading zeros are legal and
-surrounding whitespace is tolerated in string forms — so they use a soft
-100-character cap (`MAX_RESOLVED_NUMERIC_LEN`): no reasonable numeric
-value is longer, and an i64 needs at most 20 characters.
+Numeric fields have no exact length maximum — leading zeros are legal —
+so they use a soft 100-character cap (`MAX_RESOLVED_NUMERIC_LEN`): no
+reasonable numeric value is longer, and an i64 needs at most 20
+characters. White space around a numeric string is ignored (Template
+Schemas §7.5), so the cap does not count it: a format string padded with
+white space passes exactly when the same padded literal does. When the
+resolved value is known it is measured after trimming; otherwise (a segment
+is unresolved, or the value is over `MAX_STATIC_RESOLVED_VALUE_LEN`) the
+lower bound subtracts the white space in the literal segments. White space a concrete
+expression segment evaluates to (`{{ ' ' * 200 }}{{ Param.X }}`) still
+counts, because the static resolution reports only the total length.
 
 #### Target types: the general rule
 

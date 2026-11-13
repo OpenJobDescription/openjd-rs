@@ -98,7 +98,8 @@ pub struct PathParameterOptions<'a> {
   around the number (Template Schemas §7.5; see [parameters.md](parameters.md#value-coercion)),
   boolean aliases (`yes`/`no`/`on`/`off`/`1`/`0`), JSON list parsing for list types
 - `coerce_to_job_parameter_type` — Validates typed input (library): type compatibility, numeric
-  widening (int → float), list element type validation
+  widening (int → float), and for `LIST[INT]`, `LIST[FLOAT]` and `LIST[LIST[INT]]` element-by-element
+  coercion through the same rule as JSON text (see [parameters.md](parameters.md#value-coercion))
 
 **Round trip:** a value `preprocess_job_parameters` returns should be a value it accepts as input.
 Both its input and output types are public, so a caller can hand its output straight back to it.
