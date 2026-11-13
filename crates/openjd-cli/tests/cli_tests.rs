@@ -521,6 +521,60 @@ steps:
     }
 
     #[test]
+    fn test_params_large_integer_reaches_a_float_by_every_route() {
+        // An integer of 2^63 or more is the only number whose text depends on
+        // the CLI knowing the parameter is a FLOAT: a smaller one is an INT
+        // value that a FLOAT widens to the same float. So it checks that the
+        // FLOAT names reach the parser from the job template and from an
+        // environment template, through inline JSON and `file://` JSON and
+        // YAML, for `run` and `summary`.
+        let mut env = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            env,
+            r#"specificationVersion: environment-2023-09
+parameterDefinitions:
+  - {{name: EF, type: FLOAT}}
+environment:
+  name: Env
+  script:
+    actions:
+      onEnter:
+        command: echo
+        args: ["EF={{{{Param.EF}}}}"]
+"#
+        )
+        .unwrap();
+        let template = number_params_template();
+        let template = template.path().to_str().unwrap();
+        let env = env.path().to_str().unwrap();
+        let values =
+            r#"{"F": 18446744073709551615, "EF": 9223372036854775808, "S": "s", "I": 1, "L": []}"#;
+        let mut json = NamedTempFile::with_suffix(".json").unwrap();
+        write!(json, "{values}").unwrap();
+        let mut yaml = NamedTempFile::with_suffix(".yaml").unwrap();
+        writeln!(yaml, "{values}").unwrap();
+        for arg in [
+            values.to_string(),
+            format!("file://{}", json.path().display()),
+            format!("file://{}", yaml.path().display()),
+        ] {
+            let (code, stdout, stderr) =
+                run_cli(&["run", template, "--environment", env, "-p", &arg]);
+            assert_eq!(code, 0, "{arg}: stderr: {stderr}");
+            for want in ["F=1.8446744073709552e+19 S=s", "EF=9.223372036854776e+18"] {
+                assert!(stdout.contains(want), "{arg}: {want}: stdout: {stdout}");
+            }
+            let (code, stdout, stderr) =
+                run_cli(&["summary", template, "--environment", env, "-p", &arg]);
+            assert_eq!(code, 0, "{arg}: stderr: {stderr}");
+            assert!(
+                stdout.contains("F (FLOAT): 1.8446744073709552e+19"),
+                "{arg}: stdout: {stdout}"
+            );
+        }
+    }
+
+    #[test]
     fn test_params_json_numbers_for_other_types_read_as_their_text() {
         // Only a FLOAT changes when a number stays a number: every other type
         // reads a JSON number as it reads the number's text.
