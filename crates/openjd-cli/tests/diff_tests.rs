@@ -40,11 +40,17 @@ fn openjd(args: &[&str], stdin: Option<&str>) -> Output {
 }
 
 fn stdout(o: &Output) -> String {
-    String::from_utf8(o.stdout.clone()).unwrap()
+    program_name_as_on_unix(String::from_utf8(o.stdout.clone()).unwrap())
 }
 
 fn stderr(o: &Output) -> String {
-    String::from_utf8(o.stderr.clone()).unwrap()
+    program_name_as_on_unix(String::from_utf8(o.stderr.clone()).unwrap())
+}
+
+/// clap names the program by its file name, which is `openjd.exe` on Windows.
+/// Only the `Usage:` lines carry it, so only those are rewritten.
+fn program_name_as_on_unix(text: String) -> String {
+    text.replace("Usage: openjd.exe ", "Usage: openjd ")
 }
 
 /// The line `openjd diff` prints to stderr before anything else.
