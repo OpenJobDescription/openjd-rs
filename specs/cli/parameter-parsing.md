@@ -70,27 +70,40 @@ the model crate's `CallerLimits::max_template_size`.
 ### Value Coercion
 
 `json_val_to_expr()` converts a JSON or YAML value to an `ExprValue`. The model crate's
-parameter preprocessing then coerces it to the parameter's declared type.
+parameter preprocessing then coerces it to the parameter's declared type. The caller passes
+the names of the FLOAT parameters the job and environment templates define
+(`float_parameter_names`), because a number given to a FLOAT is read differently:
 
 - A string is an `ExprValue::String`.
-- An integer in the 64-bit signed range is an `ExprValue::Int`. Every type reads it as it
-  reads the integer's text, except that a FLOAT widens it to a float, so `{"F": 2}` is
-  written `2.0`, the way a computed float is (Expression Language §1.3.4).
-- A float is an `ExprValue::String` holding its text as Python writes it (`repr(float)`, which
-  is also `str(float)`): `format_float`'s text, but `-0.0` for negative zero. A FLOAT keeps
-  that text, which is the text it would have as a float with no spelling, so `{"F": 1e20}`
-  is written `1e+20` and `{"F": 0.00001}` `1e-05`. A STRING gets the same text Python's
-  `str` gives. An INT or BOOL reads the text, so `{"I": 3.0}` is refused, as `-p I=3.0` is.
-- An integer outside the signed 64-bit range (serde_json holds it as a `u64`) is a string of
-  its digits, so a STRING keeps them and an INT error quotes them.
+- Any number given to a FLOAT parameter is an `ExprValue::Float` with no spelling, so it is
+  written the way a computed float is, CPython's `repr` (Expression Language §1.3.4):
+  `{"F": 2}` is `2.0`, `{"F": 1e20}` is `1e+20`, `{"F": 0.00001}` is `1e-05`, and
+  `{"F": 18446744073709551615}` is `1.8446744073709552e+19`. Zero is `0.0`.
+- For any other parameter, an integer in the 64-bit signed range is an `ExprValue::Int`,
+  which every type reads as it reads the integer's text.
+- For any other parameter, a float is an `ExprValue::String` holding its text as Python
+  writes it (`repr(float)`, which is also `str(float)`): `format_float`'s text, but `-0.0`
+  for negative zero. A STRING gets that text, as Python's `str` gives it. An INT or BOOL
+  reads the text, so `{"I": 3.0}` is refused, as `-p I=3.0` is.
+- For any other parameter, an integer above `i64::MAX` (serde_json holds it as a `u64`) is
+  a string of its digits, so a STRING keeps them and an INT error quotes them. serde_json
+  reads an integer below `i64::MIN` as a float, so it is written as one
+  (`-9.223372036854776e+18`) and an INT error quotes that text.
 - Anything else (a boolean, `null`, a list, an object) is a string of its JSON text. A list
-  parameter reads that text as JSON.
+  parameter reads that text as JSON, so a number item of a `LIST[FLOAT]` is a float with
+  no spelling too.
 
-**Divergence from openjd-cli / openjd-model-for-python:** the Python CLI passes the decoded
-value itself. Its pure-Python model writes a FLOAT value given as a JSON integer as the
-integer (`{"F": 2}` is `2`, not `2.0`), and a float as `str(float)`, which is `repr`. A STRING given `true` is `True` in Python and `true` here. Python
-reads a YAML parameter file as YAML 1.1, so `F: 1e20` is the string `1e20` there and the
-number `1e20` here.
+**Divergence from openjd-cli / openjd-model-for-python.** The Python CLI passes the decoded
+value itself, so the differences include:
+
+- A FLOAT value given as a JSON integer is written as the integer (`{"F": 2}` is `2`, not
+  `2.0`); a float is written as `str(float)`, which is `repr`.
+- A STRING given `true` is `True` in Python and `true` here, and one given an integer below
+  `i64::MIN` keeps its digits in Python.
+- Python refuses a number given to a BOOL, RANGE_EXPR or PATH parameter, a number item of a
+  `LIST[STRING]`, and a float item of a `LIST[INT]`; this CLI reads each as its text.
+- Python reads a YAML parameter file as YAML 1.1, so `F: 1e20` is the string `1e20` there and
+  the number `1e20` here.
 
 A value given as `Key=Value` is always a string: `-p F=2` is the `<floatstring>` `2`, which
 keeps its spelling (Template Schemas §7.5) and is written `2`.

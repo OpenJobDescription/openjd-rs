@@ -8,7 +8,7 @@ mod execution;
 mod params;
 mod result;
 
-pub use params::parse_cli_parameters;
+pub use params::{float_parameter_names, parse_cli_parameters};
 
 use clap::Args;
 use openjd_model::job::{Environment, Job, Step};

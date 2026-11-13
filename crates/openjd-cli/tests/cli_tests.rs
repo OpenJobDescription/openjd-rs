@@ -504,6 +504,11 @@ steps:
             ("1e15", "1000000000000000.0"),
             ("-0.0", "0.0"),
             ("1.4757395258967641e+20", "1.4757395258967641e+20"),
+            // Integers outside the signed 64-bit range: serde_json holds the
+            // first two as a u64 and reads the third as a float.
+            ("9223372036854775808", "9.223372036854776e+18"),
+            ("18446744073709551615", "1.8446744073709552e+19"),
+            ("-9223372036854775809", "-9.223372036854776e+18"),
         ] {
             let arg = format!(r#"{{"F": {number}, "S": "s", "I": 1, "L": [{number}]}}"#);
             let (code, stdout, stderr) = run_cli(&["run", template, "-p", &arg]);

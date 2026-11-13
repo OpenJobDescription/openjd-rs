@@ -241,9 +241,9 @@ Only one display implementation exists — the duplicate that once lived in
 `repr.rs` let a list-escaping bug survive in two places (openjd-rs#312).
 
 Scalars render as themselves: `null`, `true`/`false`, decimal integers, the
-float's preserved representation or else `format_float`'s (CPython's `repr`: the shortest
-round-trip digits, ties to even, `1e+16` and `1e-05` in exponent form), and strings and
-paths unquoted.
+float's preserved representation or else `format_float`'s (CPython's `repr`: the fewest
+digits that read back as the same value, the nearest of those, `1e+16` and `1e-05` in
+exponent form), and strings and paths unquoted.
 A `range_expr` renders as its canonical form (Template Schemas §3.4.1.1.1),
 like `"1-9:2"` for `range_expr("1,3,5,7,9")`, or as `<N>-<M>` for a
 `CONTIGUOUS` chunk; see [range-expr.md](range-expr.md#canonical-form-display).

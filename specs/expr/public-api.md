@@ -857,8 +857,9 @@ Accessible as `openjd_expr::value::ListIter` (not re-exported at the crate root)
 
 ```rust
 /// Write a float the way CPython's `repr(float)` writes it (Expression
-/// Language §1.3.4): the shortest decimal string that reads back as the same
-/// `f64`, ties between two shortest candidates going to the even digit.
+/// Language §1.3.4): the fewest significant digits that read back as the same
+/// `f64`; of several such strings, the one nearest the exact value; and of
+/// two equally near, the one whose last digit is even.
 /// Fixed point (`2.0`, `0.0001`, `1000000000000000.0`) when
 /// `1e-4 <= |f| < 1e16`, otherwise exponent notation with an explicit sign
 /// and at least two exponent digits (`1e+16`, `1e-05`). Zero is always
@@ -868,7 +869,7 @@ pub fn value::format_float(f: f64) -> String;
 ```
 
 The digits come from the `ryu` crate. Rust's own `{}` shortest form rounds a
-tie upward (`1000000000000000.3` for 1000000000000000.25) where `repr` rounds
+tie between two equally near strings upward (`1000000000000000.3` for 1000000000000000.25) where `repr` rounds
 half to even (`1000000000000000.2`).
 `tests/integration/test_float_repr_cpython.rs` compares `format_float`, and the
 display of a computed float, against `repr` for about 6,900 doubles recorded

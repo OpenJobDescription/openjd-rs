@@ -1966,8 +1966,9 @@ impl<'a> Iterator for ListIter<'a> {
 impl<'a> ExactSizeIterator for ListIter<'a> {}
 
 /// Write a float the way CPython's `repr(float)` writes it (Expression
-/// Language §1.3.4): the shortest decimal string that reads back as the same
-/// `f64`, ties between two shortest candidates going to the even digit.
+/// Language §1.3.4): the fewest significant digits that read back as the same
+/// `f64`; of several such strings, the one nearest the exact value; and of
+/// two equally near, the one whose last digit is even.
 ///
 /// The notation follows `repr`: fixed point with at least one digit after the
 /// point (`2.0`, `0.0001`, `1000000000000000.0`) when `1e-4 <= |f| < 1e16`,
