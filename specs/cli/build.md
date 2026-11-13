@@ -32,12 +32,14 @@ CLI's caller limits: the same decode, parameter preprocessing and `create_job` c
 
 ## Output
 
-The job as a `JobDocument` (`openjd_model::job::template_diff`), pretty JSON or YAML: the
-`Job`'s serde form with `parameters` and each environment's `variables` sorted by name, so
+The job as a `JobDocument` (`openjd_model::job::template_diff`), pretty JSON or YAML: a
+`"documentVersion": 1` field first, then the `Job`'s serde form with `parameters` and each environment's `variables` sorted by name, so
 the output is the same on every run (`create_job` fills `parameters` from a `HashMap`, and
-`Environment::variables` is a `HashMap`). It is serialized directly
-rather than through `serde_json::Value`. A `Value` object sorts its keys, which would
-reorder task parameter definitions and so change task order when the job is read back.
+`Environment::variables` is a `HashMap`), and parameters and parameter spaces in the host
+encoding of [`specs/model/host-support.md`](../model/host-support.md#host-encoding): a
+parameter is `{"name": "Frames", "type": "STRING", "value": "1-100"}`, and
+`taskParameterDefinitions` is a list in definition order. It is serialized directly rather
+than through `serde_json::Value`, so fields print in the structs' order.
 `job_from_str` reads either format back, and `openjd diff --jobs` on two outputs of
 `openjd build` for the same inputs prints `no changes`. The document is data, so it has no
 `status` or `message` field ([output-formatting.md](output-formatting.md#status-convention)).

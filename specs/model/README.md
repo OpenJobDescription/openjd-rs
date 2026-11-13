@@ -26,7 +26,8 @@ but redesigned for Rust's type system and performance characteristics.
 | [step-dependencies.md](step-dependencies.md) | Step dependency graph: construction, topological sort, cycle detection |
 | [job-diff.md](job-diff.md) | Unstable: breadth-first structural diff of jobs, steps and environments, and task deltas |
 | [template-diff.md](template-diff.md) | Unstable: diff two templates or two parameter sets, with the origin and stage of each change |
-| [job-apply.md](job-apply.md) | Unstable: ordered, gated application of a job diff through a storage-agnostic trait |
+| [job-apply.md](job-apply.md) | Unstable: ordered, gated application of a job diff through a storage-agnostic trait, and host adaptors |
+| [host-support.md](host-support.md) | Unstable: template fragments, job-scope symbol table, job digest, building from stored values, parameter merge |
 | [capabilities.md](capabilities.md) | Standard capability constants, name validation functions, regex patterns |
 | [error-handling.md](error-handling.md) | Error types, structured error paths, validation error accumulation |
 

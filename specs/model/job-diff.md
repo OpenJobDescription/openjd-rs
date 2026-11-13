@@ -57,12 +57,14 @@ descended.
 |---|---|---|
 | `steps`, `jobEnvironments`, `stepEnvironments`, `embeddedFiles` | `name` | `<collection>.order` field change |
 | `taskParameterDefinitions` | map key | `taskParameterDefinitions.order` when there is no `combination`, or it is `*` (then it fixes task order) |
-| `parameters` | map key | not a change |
+| `parameters` | map key, compared in name order | not a change |
 | `variables` | map key | not a change; entries are `variables.<KEY>` |
 | `hostRequirements.amounts` / `attributes` | `name` | `<collection>.order`; entries are `<collection>[<name>]` |
 | `dependencies` | set of `dependsOn` | `dependencies.order` |
 
-Children are ordered old-side first, then new-only entries. With duplicate names (not
+Children are ordered old-side first, then new-only entries. `parameters` are compared in
+name order, so the parameter nodes, their indices and `ApplyPlan`'s parameter ops do not
+depend on how either map was filled. With duplicate names (not
 possible in a validated job, but the fields are public) the first occurrence is matched
 and the later copies are compared as a list. When they differ, a
 `<collection>.duplicates` field change lists the repeated names, so the parent is never
@@ -79,7 +81,7 @@ None-vs-empty are recorded as `dependencies.order`.
 | node kind | segment from parent | own fields | children |
 |---|---|---|---|
 | Job | (root) | `name`, `description`, `extensions`, `steps.order`, `steps.duplicates`, `jobEnvironments`, `jobEnvironments.order` | `parameters[K]`, `jobEnvironments[N]`, `steps[N]` |
-| JobParameter | `parameters[K]` | `name`, `type`, `value` | — |
+| JobParameter | `parameters[K]` | `name`, `type`, `value` (written in the [host encoding](host-support.md#host-encoding): `"STRING"`, `"1-100"`) | — |
 | Step | `steps[N]` | `name`, `description`, `dependencies`, `dependencies.order`, `stepEnvironments`, `stepEnvironments.order`, `resolvedSymTab` | `script`, `stepEnvironments[N]`, `parameterSpace`, `hostRequirements` |
 | StepScript | `script` | `let`, `embeddedFiles`, `embeddedFiles.order` | `onRun`, `embeddedFiles[N]` |
 | Environment | `jobEnvironments[N]` / `stepEnvironments[N]` | `name`, `description`, `variables.K`, `variables`, `resolvedSymTab` | `script` |
@@ -87,7 +89,7 @@ None-vs-empty are recorded as `dependencies.order`.
 | Action | `onRun`, `onEnter`, ... | `command`, `args`, `timeout`, `cancelation` | — |
 | EmbeddedFile | `embeddedFiles[N]` | `name`, `type`, `filename`, `data`, `runnable`, `endOfLine` | — |
 | ParameterSpace | `parameterSpace` | `combination`, `taskParameterDefinitions.order` | `taskParameterDefinitions[K]` |
-| TaskParameter | `taskParameterDefinitions[K]` | `definition` (whole value) | — |
+| TaskParameter | `taskParameterDefinitions[K]` | `definition` (whole value, in the host encoding without its `name`: `{"type": "INT", "range": "1-100"}`) | — |
 | HostRequirements | `hostRequirements` | `amounts[N]`, `amounts.order`, `amounts`, `attributes[N]`, `attributes.order`, `attributes` | — |
 
 ## Identity and position
@@ -130,8 +132,10 @@ hashed, so a 10^6-frame range takes seconds in a release build. Interval arithme
 `RangeExpr` would remove that and is left for later. `old` is the whole old space, and
 `old.index_of(task)` is the row-major (rightmost fastest) position of a task at job
 creation. Equal spaces are `Unchanged`. A different dimension order (a definition reorder with no `combination` or with `*`, or a `combination` that orders the dimensions differently), or a different relative order of the values both sides share in any range, is `Fallback`, because kept tasks move; anything else is `Fallback { reason }`, where
-the caller enumerates and diffs by value. Tests: `src/test_task_delta.rs`, which checks
-each decomposition against brute-force enumeration.
+the caller enumerates and diffs by value. `ProductDelta::appended` and `removed` give the
+new and removed tasks, named by their parameter values, in the order a store creates or deletes them (see
+[job-apply.md](job-apply.md#task-identity)). Tests: `src/test_task_delta.rs`, which checks
+each decomposition, and both orders, against brute-force enumeration.
 
 Each `expand_*` destructures its model type exhaustively, so adding a model field fails
 to compile until the diff handles it.

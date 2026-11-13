@@ -93,7 +93,136 @@ fn check(old: &StepParameterSpace, new: &StepParameterSpace) -> TaskDelta {
     for (i, t) in all(old).iter().enumerate() {
         assert_eq!(old_box.index_of(t), Some(u64::try_from(i).unwrap()));
     }
+    check_host_order(pd, old, new);
     d
+}
+
+/// `appended()` and `removed()` against enumeration. Appended: the new
+/// tasks not in the old space, grouped by the first dimension whose value
+/// the old space lacks, each group in new iteration order. Removed: the old
+/// tasks not in the new space, with their old index, ascending.
+fn check_host_order(pd: &ProductDelta, old: &StepParameterSpace, new: &StepParameterSpace) {
+    let o: BTreeSet<String> = all(old).iter().map(key).collect();
+    let n: BTreeSet<String> = all(new).iter().map(key).collect();
+    let dims: Vec<&String> = pd.old.space().task_parameter_definitions.keys().collect();
+    let value = |t: &TaskParameterSet, d: &str| serde_json::to_string(&t[d].value).unwrap();
+    let old_values: Vec<BTreeSet<String>> = dims
+        .iter()
+        .map(|d| all(old).iter().map(|t| value(t, d)).collect())
+        .collect();
+    let mut want: Vec<(usize, String)> = all(new)
+        .iter()
+        .filter(|t| !o.contains(&key(t)))
+        .map(|t| {
+            let k = dims
+                .iter()
+                .zip(&old_values)
+                .position(|(d, olds)| !olds.contains(&value(t, d)))
+                .unwrap();
+            (k, key(t))
+        })
+        .collect();
+    want.sort_by_key(|w| w.0);
+    let want: Vec<String> = want.into_iter().map(|w| w.1).collect();
+    let got: Vec<String> = pd.appended().unwrap().map(|t| key(&t)).collect();
+    assert_eq!(got, want, "appended order");
+    assert_eq!(pd.appended_count(), u64::try_from(want.len()).unwrap());
+    let TaskDelta::Product(again) = task_delta(Some(old), Some(new)) else {
+        panic!("a second delta of the same spaces is a product too");
+    };
+    let again: Vec<String> = again.appended().unwrap().map(|t| key(&t)).collect();
+    assert_eq!(again, got, "a second delta yields the same order");
+
+    let want: Vec<(u64, String)> = all(old)
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| !n.contains(&key(t)))
+        .map(|(i, t)| (u64::try_from(i).unwrap(), key(t)))
+        .collect();
+    let got: Vec<(u64, String)> = pd.removed().unwrap().map(|(i, t)| (i, key(&t))).collect();
+    assert_eq!(got, want, "removed, ascending old index");
+    assert_eq!(pd.removed_count(), u64::try_from(want.len()).unwrap());
+}
+
+#[test]
+fn appended_and_removed_follow_the_documented_order() {
+    // Appended: box 0 (F = 3, any new G), then box 1 (kept F, G = c). The new
+    // space iterates (1,c) before (3,b); the host order puts it after.
+    let d = check(
+        &space(vec![("F", ints("1-2")), ("G", strs(&["a", "b"]))], None),
+        &space(vec![("F", ints("1-3")), ("G", strs(&["b", "c"]))], None),
+    );
+    let TaskDelta::Product(pd) = d else {
+        panic!("expected Product");
+    };
+    let appended: Vec<String> = pd.appended().unwrap().map(|t| key(&t)).collect();
+    assert_eq!(
+        appended,
+        vec![
+            r#"F={"Int":3},G={"String":"b"}"#,
+            r#"F={"Int":3},G={"String":"c"}"#,
+            r#"F={"Int":1},G={"String":"c"}"#,
+            r#"F={"Int":2},G={"String":"c"}"#,
+        ]
+    );
+    // Removed: box 0 (F = 2) holds old indices 2 and 3, box 1 (F = 1,
+    // G = a) holds 0; the merge returns them ascending.
+    let d = check(
+        &space(vec![("F", ints("1-2")), ("G", strs(&["a", "b"]))], None),
+        &space(vec![("F", ints("1,3")), ("G", strs(&["b"]))], None),
+    );
+    let TaskDelta::Product(pd) = d else {
+        panic!("expected Product");
+    };
+    let removed: Vec<(u64, String)> = pd.removed().unwrap().map(|(i, t)| (i, key(&t))).collect();
+    assert_eq!(
+        removed,
+        vec![
+            (0, r#"F={"Int":1},G={"String":"a"}"#.to_string()),
+            (2, r#"F={"Int":2},G={"String":"a"}"#.to_string()),
+            (3, r#"F={"Int":2},G={"String":"b"}"#.to_string()),
+        ]
+    );
+    assert_eq!(pd.removed.len(), 2, "two boxes, interleaved by index");
+}
+
+#[test]
+fn removed_follows_a_combination_that_reorders_dimensions() {
+    // Iteration order G then F on both sides: old index is G-major.
+    let d = check(
+        &space(
+            vec![("F", ints("1-3")), ("G", strs(&["a", "b"]))],
+            Some("G * F"),
+        ),
+        &space(vec![("F", ints("2-4")), ("G", strs(&["b"]))], Some("G * F")),
+    );
+    let TaskDelta::Product(pd) = d else {
+        panic!("expected Product");
+    };
+    let removed: Vec<u64> = pd.removed().unwrap().map(|(i, _)| i).collect();
+    assert_eq!(removed, vec![0, 1, 2, 3]);
+}
+
+#[test]
+fn a_task_parameter_set_document_is_sorted_text() {
+    let s = space(
+        vec![
+            ("Z", ints("7")),
+            ("A", strs(&["x"])),
+            (
+                "M",
+                TaskParameter::Float {
+                    range: vec![openjd_expr::value::Float64::with_str(1.5, "1.50".into()).unwrap()],
+                },
+            ),
+        ],
+        None,
+    );
+    let t = all(&s).remove(0);
+    assert_eq!(
+        crate::job::task_delta::task_parameter_set_document(&t).to_string(),
+        r#"{"A":{"type":"STRING","value":"x"},"M":{"type":"FLOAT","value":"1.50"},"Z":{"type":"INT","value":"7"}}"#
+    );
 }
 
 #[test]
@@ -434,4 +563,35 @@ fn reordering_values_inside_a_range_falls_back() {
     let d = space(vec![("F", int_list(&[2, 1]))], None);
     let e = space(vec![("F", int_list(&[1, 2]))], None);
     assert!(is_fallback(&task_delta(Some(&d), Some(&e))));
+}
+
+#[test]
+fn removed_indices_use_every_dimensions_stride() {
+    // Three dimensions: F's stride is 2 * 3 = 6, so removing F = 2 removes
+    // old indices 6 to 11. Two dimensions cannot tell `strides[d + 1]` from
+    // `strides[d]`.
+    let rest = || vec![("G", strs(&["a", "b"])), ("H", strs(&["p", "q", "r"]))];
+    let with = |f: &str| {
+        let mut v = vec![("F", ints(f))];
+        v.extend(rest());
+        space(v, None)
+    };
+    let d = check(&with("1-2"), &with("1"));
+    let TaskDelta::Product(pd) = d else {
+        panic!("expected Product");
+    };
+    let removed: Vec<(u64, String)> = pd.removed().unwrap().map(|(i, t)| (i, key(&t))).collect();
+    let task =
+        |g: &str, h: &str| format!(r#"F={{"Int":2}},G={{"String":"{g}"}},H={{"String":"{h}"}}"#);
+    assert_eq!(
+        removed,
+        vec![
+            (6, task("a", "p")),
+            (7, task("a", "q")),
+            (8, task("a", "r")),
+            (9, task("b", "p")),
+            (10, task("b", "q")),
+            (11, task("b", "r")),
+        ]
+    );
 }

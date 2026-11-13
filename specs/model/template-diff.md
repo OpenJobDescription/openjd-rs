@@ -30,32 +30,28 @@ pub fn job_from_str(text: &str) -> Result<Job, ModelError>;
   layer, and every change has origin `Parameters`.
 - `diff_built_jobs` is for callers that already hold two jobs. It has no template layer,
   and every change has origin `Job`, because the cause is not known.
-- `job_from_str` reads a job back from its serde form (JSON when the first
-  non-whitespace character is `{`, YAML otherwise), as `openjd build` prints it. It takes text rather than a
-  `serde_json::Value` because a `Value` object sorts its keys, which would reorder task
-  parameter definitions and so change task order. Unknown fields are rejected at every
+- `job_from_str` reads a job back from its `JobDocument` (JSON when the first
+  non-whitespace character is `{`, YAML otherwise), as `openjd build` prints it. Its
+  `documentVersion` must be `JobDocument::VERSION` (1). It rejects the forms `create_job`
+  never writes ([host-support.md](host-support.md#host-encoding) lists them).
+  Parameters and parameter spaces must be in the
+  [host encoding](host-support.md#host-encoding), which also lists their errors; the rest of
+  the document is the job types' serde form. Unknown fields are rejected at every
   level: after parsing, every key of the input must appear in the parsed job's
   `JobDocument` form, so a key a job type ignored is an error naming its path,
   `steps[0].bogus: unknown field`. Only keys are compared, so `2` for `2.0` passes, and so
   do the `letBindings` and `type` aliases. A `null` passes for a field the document omits
   when unset, but only in the objects that have that field: `resolvedSymTab` in a step or
   an environment, the `onWrap*` actions in an environment's `actions`, and
-  `notifyPeriodInSeconds` in a `cancelation`. An extra key beside the tag of a task
-  parameter definition or of its `range` is reported the same way
-  (`steps[0].parameterSpace.taskParameterDefinitions.F.bogus: unknown field`). Each
+  `notifyPeriodInSeconds` in a `cancelation`. Each
   `resolvedSymTab` entry must have exactly the keys `name`, `type` and `value`, a string
   `name` and `type`, a `type` that parses, and a `value` of that type, as `SymbolTable`
   serializes it (`steps[0].resolvedSymTab[0].zzBogus: unknown field`), and no two entries
   of one table may have the same `name` (`steps[0].resolvedSymTab[1].name: 'Param.Z' is
   repeated`). The name's syntax is not checked. `parameters` may be absent (an empty
   map), but a `null` is rejected like any other unexpected `null`, with serde's message
-  (`invalid type: null, expected a map at line 1 column N`).
-  A parameter must have exactly the keys `name`, `paramType` and `value`, and its `name`
-  must be its key. A parameter whose value does not have its `paramType`'s type is
-  rejected, with `parameters[P]: paramType 'ListInt' cannot hold a 'ListList' value`, and
-  so is a `ListList` element that is not a `ListInt`. A `Path` parameter
-  holds a `String` value and a `ListPath` one a `ListString`, as `create_job` stores them;
-  a `Path` or `ListPath` value is accepted too.
+  (`invalid type: null, expected a map at line 1 column N`). A `PATH` parameter is read
+  as the `String` value `create_job` stores, and a `LIST[PATH]` one as a `ListString`.
 
 ## Inputs
 
@@ -83,6 +79,10 @@ Each side is built exactly as `openjd summary` and `openjd run` build a job:
    URI path values allowed;
 3. `create_job` with `default_validation_context().with_caller_limits(limits)`.
 
+`TemplateInput::preprocessed(values)` skips step 2 and passes stored, already
+preprocessed values to `create_job`; see [host-support.md](host-support.md#building-from-stored-values),
+which also covers the other host support functions in this module.
+
 `TemplateInput::build` runs these for one side. A failure names the input that failed. In
 `diff_templates` it is `old template: …` or `new template: …`. In
 `diff_job_template_with_parameter_sets` the template is shared, so a build failure is `old parameters: …` or `new parameters: …`,
@@ -104,14 +104,13 @@ Every changed node becomes `Change`s:
 A whole node's value is found by following its `DiffTree` segments through the serialized
 job. Every segment is the serialized field name except an action's (`onRun`, `onEnter`,
 …), which the tree hangs on the script but the job holds under `script.actions`. The
-serialized job is the `JobDocument` form as a `serde_json::Value`, except that each step's
-`taskParameterDefinitions` is a list of `{name, definition}` in definition order: a `Value`
-object sorts its keys, and definition order is task order, so a map would hide a reorder.
+serialized job is the `JobDocument` as a `serde_json::Value`; its `taskParameterDefinitions`
+is a list in definition order, and `name[key]` selects the element whose `name` is `key`.
 
 Before diffing, both jobs' `parameters` are sorted by name. `create_job` fills them from a
 `HashMap`, so their order varies between runs, and parameter order is not a change.
-Without the sort, two diffs of the same inputs would build trees with nodes in different
-orders.
+`diff_jobs` compares parameters in name order itself; the sort also fixes the order of the
+`oldJob` and `newJob` maps.
 
 ## The template layer
 
@@ -163,7 +162,8 @@ Template-layer changes are always `Template`. For job-layer changes in `diff_tem
    PATH directories. A `Decoded` source has no document, so it never takes this shortcut;
    step 3 gives the same answer at the cost of one more build.
 3. Otherwise build `mid`, the new template with the old parameters and the new side's
-   limits. A change whose key
+   limits (old stored values are merged as `merge_parameters` merges them with nothing
+   requested; see [host-support.md](host-support.md#building-from-stored-values)). A change whose key
    appears in `diff_jobs(old, mid)` only is `Template`, in `diff_jobs(mid, new)` only is
    `Parameters`, and in both or neither is `Both`. The key of a field change is
    `(path, field)`; the key of a whole-node change is `(path, status)`, the status being
@@ -225,9 +225,12 @@ new-only steps. `status` is the step's status under the caller's options (one
 | step added or removed | `Added { count }` / `Removed { count }` |
 
 Counts are `u64` and count what `StepParameterSpaceIterator` yields (chunks, for a chunked
-step). Sums saturate at `u64::MAX` rather than overflow. When either side's parameter space
-does not iterate (reachable only through an edited built job, for example a `combination`
-naming an unknown parameter), the step's `tasks_unknown` is `Some("cannot count tasks")`,
+step). The task change document of [job-apply.md](job-apply.md#host-adaptors) lists one task
+per `CHUNK[INT]` value instead, because a host creates tasks as CreateJob does, so for
+`1-20` with `defaultTaskCount: 10` this summary says 2 and that document lists 20.
+Sums saturate at `u64::MAX` rather than overflow. When either side's parameter space
+does not iterate (reachable only through an edited built job, for example an association
+whose members have different lengths), the step's `tasks_unknown` is `Some("cannot count tasks")`,
 its counts are 0 (`Replaced` with reason `cannot count tasks` when the space changed),
 `notes` has `steps[S]: cannot count tasks: <the iterator's error>`, and `Display` prints
 `tasks: unknown (cannot count tasks)`; adaptive chunking, below, takes precedence. A `BoxSummary` has each dimension's name and its values: integers as the
@@ -292,20 +295,22 @@ serialize as lowercase camelCase strings (`template`, `parameters`, `both`, `job
 fieldChanges}`.
 
 `JobDocument` serializes a `Job` as its serde form with `parameters` and each
-environment's `variables` sorted by name. `create_job` fills `Job::parameters` from a
+environment's `variables` sorted by name, and parameters and parameter spaces in the
+[host encoding](host-support.md#host-encoding). `create_job` fills `Job::parameters` from a
 `HashMap` and `Environment::variables` is a `HashMap`, so the plain serde form of a job
-with more than one of either differs from run to run. Task parameter definitions keep their
-order, which is task order. Every other map in a `Job` is already ordered: resolved symbol
+with more than one of either differs from run to run. Task parameter definitions are a
+list in definition order, which is also task order unless an explicit `combination` reorders the dimensions. Every other map in a `Job` is already ordered: resolved symbol
 tables are lists sorted by name. `TemplateDiff` writes `oldJob` and `newJob` as
 `JobDocument`s, so its serde form is deterministic. `openjd build` prints the same form,
 and `job_from_str` reads it back.
 
 ### Rendering
 
-`Shown::raw` is the value as the job serializes it (for a job parameter,
-`{"String":"1-200"}`), in full; it is meant for programs. A whole node's `raw` writes task
-parameter definitions as a list of `{name, definition}` in definition order (see [The job
-layer](#the-job-layer)). `Shown::text` is for people:
+`Shown::raw` is the value as the job's document writes it, in the host encoding (for a job
+parameter's value, `"1-200"`; for a task parameter definition,
+`{"type": "INT", "range": "1-200"}`), in full; it is meant for programs. A whole node's
+`raw` is its element of the document, so a whole task parameter definition has its `name`.
+`Shown::text` is for people:
 
 - an integer task parameter range is a range expression's canonical form (`1-100`,
   `1-9:2`, `1,2`, `1,3`: a run needs three values), whether the job holds a range

@@ -95,7 +95,7 @@ render_v1.yaml -> render_v2.yaml
 
 apply plan:
   1. parameter modify Frames  [ParameterValue]
-  2. tasks of Render: keep 100, add 300 at index 100..399, remove 0  [TaskAppend]
+  2. tasks of Render: keep 100, add 300, remove 0  [TaskAppend]
 kinds: ParameterValue, TaskAppend
 ```
 
@@ -141,9 +141,7 @@ what that step and the job level show), then the
 (`{ops: [{action, kinds}], kinds}`, filtered as above with `--step`). `--verbose` adds
 `oldJob`, `newJob` (each a `JobDocument`, so parameters and environment variables are
 sorted) and `job`.
-Each `Shown` keeps `raw`, the serialized job value, next to `text`. The document is
-serialized directly rather than through `serde_json::Value`, so the jobs keep their task
-parameter definition order. `--tasks` and `--stat` affect only human-readable output. Like
+Each `Shown` keeps `raw`, the job value in its document's host encoding, next to `text`. `--tasks` and `--stat` affect only human-readable output. Like
 `build`, the document is data rather than a command result: it has no `status` or
 `message`, and its keys are camelCase (see
 [output-formatting.md](output-formatting.md#status-convention)).

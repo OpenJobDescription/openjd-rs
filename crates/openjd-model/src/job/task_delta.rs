@@ -121,6 +121,177 @@ pub struct ProductDelta {
     pub removed: Vec<TaskBox>,
 }
 
+impl ProductDelta {
+    /// Number of tasks [`appended`](Self::appended) yields. Saturates on
+    /// overflow.
+    #[must_use]
+    pub fn appended_count(&self) -> u64 {
+        self.added
+            .iter()
+            .map(TaskBox::len)
+            .fold(0u64, u64::saturating_add)
+    }
+
+    /// The new tasks, in the order a host creates them: each box of
+    /// [`added`](Self::added) in turn (dimension `k = 0, 1, …`, where box
+    /// `k` holds the tasks whose first value not in the old space is in
+    /// dimension `k`), and each box rightmost parameter fastest. This is not
+    /// the new space's iteration order, and it depends only on the two
+    /// spaces, so every plan of the same pair yields the same sequence. A
+    /// task is named by its parameter set; the host chooses its id.
+    pub fn appended(&self) -> Result<impl Iterator<Item = TaskParameterSet> + '_, ModelError> {
+        let boxes = self
+            .added
+            .iter()
+            .map(TaskBox::tasks)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(boxes.into_iter().flatten())
+    }
+
+    /// Number of tasks [`removed`](Self::removed) yields. Saturates on
+    /// overflow.
+    #[must_use]
+    pub fn removed_count(&self) -> u64 {
+        self.removed
+            .iter()
+            .map(TaskBox::len)
+            .fold(0u64, u64::saturating_add)
+    }
+
+    /// The tasks only in the old space, each with its row-major index in the
+    /// old space ([`TaskBox::index_of`] on [`old`](Self::old)), in ascending
+    /// index order. A host identifies a removed task by its parameter set.
+    /// The index is only a hint: it is the task's index at job creation, so
+    /// it locates the task only while the stored job has never been
+    /// updated. Streams: memory is linear in the number of dimensions, not
+    /// in the number of tasks.
+    pub fn removed(
+        &self,
+    ) -> Result<impl Iterator<Item = (u64, TaskParameterSet)> + '_, ModelError> {
+        let old = &self.old.space.task_parameter_definitions;
+        // Position of each value in its old dimension, and each dimension's
+        // stride in the old space's row-major order.
+        let positions: Vec<std::collections::HashMap<String, u64>> = old
+            .values()
+            .map(|p| {
+                range_keys(p)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, k)| (k, count(i)))
+                    .collect()
+            })
+            .collect();
+        let mut strides = vec![1u64; old.len()];
+        for d in (0..old.len().saturating_sub(1)).rev() {
+            let next = old.get_index(d + 1).map_or(1, |(_, p)| range_len(p));
+            strides[d] = strides[d + 1].saturating_mul(next);
+        }
+        let mut streams = Vec::with_capacity(self.removed.len());
+        for b in &self.removed {
+            let mut dims = Vec::with_capacity(old.len());
+            for (d, (name, p)) in b.space.task_parameter_definitions.iter().enumerate() {
+                let (Some(pos), Some(stride)) = (positions.get(d), strides.get(d)) else {
+                    return Err(not_in_old(name));
+                };
+                let at = range_keys(p)
+                    .iter()
+                    .map(|k| pos.get(k).map(|i| i.saturating_mul(*stride)))
+                    .collect::<Option<Vec<u64>>>()
+                    .ok_or_else(|| not_in_old(name))?;
+                dims.push(at);
+            }
+            streams.push(
+                IndexedBox {
+                    tasks: b.tasks()?,
+                    counter: vec![0; dims.len()],
+                    dims,
+                }
+                .peekable(),
+            );
+        }
+        Ok(MergeAscending(streams))
+    }
+}
+
+fn not_in_old(name: &str) -> ModelError {
+    ModelError::DecodeValidation(format!(
+        "internal error: removed task parameter '{name}' is not in the old space"
+    ))
+}
+
+/// A removed box's tasks with their old-space index. Each box is a
+/// sub-grid of the old space in the old dimension and value order, so its
+/// row-major order is ascending in old index.
+struct IndexedBox {
+    tasks: StepParameterSpaceIterator,
+    /// Per dimension, each value's contribution to the old index.
+    dims: Vec<Vec<u64>>,
+    /// The current value of each dimension, rightmost fastest.
+    counter: Vec<usize>,
+}
+
+impl Iterator for IndexedBox {
+    type Item = (u64, TaskParameterSet);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let task = self.tasks.next()?;
+        let index = self
+            .dims
+            .iter()
+            .zip(&self.counter)
+            .map(|(d, &c)| d.get(c).copied().unwrap_or_default())
+            .fold(0u64, u64::saturating_add);
+        for (c, d) in self.counter.iter_mut().zip(&self.dims).rev() {
+            *c += 1;
+            if *c < d.len() {
+                break;
+            }
+            *c = 0;
+        }
+        Some((index, task))
+    }
+}
+
+/// Merges ascending streams of disjoint indices into one ascending stream.
+struct MergeAscending(Vec<std::iter::Peekable<IndexedBox>>);
+
+impl Iterator for MergeAscending {
+    type Item = (u64, TaskParameterSet);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut best: Option<(usize, u64)> = None;
+        for (i, s) in self.0.iter_mut().enumerate() {
+            if let Some(&(index, _)) = s.peek() {
+                if best.is_none_or(|(_, b)| index < b) {
+                    best = Some((i, index));
+                }
+            }
+        }
+        self.0.get_mut(best?.0)?.next()
+    }
+}
+
+/// A task parameter set as plain data: an object from parameter name to
+/// `{"type": <spec type, e.g. "INT">, "value": <value as text>}`, sorted by
+/// name. Values are text so that a float keeps its literal and a host
+/// stores every type the same way.
+#[must_use]
+pub fn task_parameter_set_document(set: &TaskParameterSet) -> serde_json::Value {
+    let sorted: std::collections::BTreeMap<&String, serde_json::Value> = set
+        .iter()
+        .map(|(name, v)| {
+            (
+                name,
+                serde_json::json!({
+                    "type": v.param_type.as_spec_str(),
+                    "value": v.value.to_display_string(),
+                }),
+            )
+        })
+        .collect();
+    serde_json::json!(sorted)
+}
+
 /// Whether definition order decides task order: no `combination`, or `*`,
 /// which is the plain product in definition order. An explicit combination
 /// decides task order itself.

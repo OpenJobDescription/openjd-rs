@@ -503,7 +503,7 @@ crates/openjd-cli/examples/diff/frames.yaml: old parameters -> new parameters
 
 apply plan:
   1. parameter modify Frames  [ParameterValue]
-  2. tasks of Render: keep 100, add 100 at index 100..199, remove 0  [TaskAppend]
+  2. tasks of Render: keep 100, add 100, remove 0  [TaskAppend]
 kinds: ParameterValue, TaskAppend
 ```
 
@@ -518,15 +518,11 @@ kinds: ParameterValue, TaskAppend
       "path": "parameters[Frames]",
       "field": "value",
       "before": {
-        "raw": {
-          "String": "1-100"
-        },
+        "raw": "1-100",
         "text": "1-100"
       },
       "after": {
-        "raw": {
-          "String": "1-200"
-        },
+        "raw": "1-200",
         "text": "1-200"
       },
       "origin": "parameters",
@@ -539,47 +535,15 @@ kinds: ParameterValue, TaskAppend
       "field": "definition",
       "before": {
         "raw": {
-          "int": {
-            "chunks": null,
-            "range": {
-              "rangeExpr": {
-                "cumulative_lengths": [
-                  100
-                ],
-                "length": 100,
-                "ranges": [
-                  {
-                    "end": 100,
-                    "start": 1,
-                    "step": 1
-                  }
-                ]
-              }
-            }
-          }
+          "range": "1-100",
+          "type": "INT"
         },
         "text": "1-100"
       },
       "after": {
         "raw": {
-          "int": {
-            "chunks": null,
-            "range": {
-              "rangeExpr": {
-                "cumulative_lengths": [
-                  200
-                ],
-                "length": 200,
-                "ranges": [
-                  {
-                    "end": 200,
-                    "start": 1,
-                    "step": 1
-                  }
-                ]
-              }
-            }
-          }
+          "range": "1-200",
+          "type": "INT"
         },
         "text": "1-200"
       },
@@ -1399,7 +1363,7 @@ crates/openjd-model/examples/template_diff/render_v1.yaml -> crates/openjd-model
 1 step changed. Tasks: 100 kept, 100 added, 0 removed.
 
 apply plan:
-  1. tasks of Render: keep 100, add 100 at index 100..199, remove 0  [TaskAppend]
+  1. tasks of Render: keep 100, add 100, remove 0  [TaskAppend]
 kinds: TaskAppend
 ```
 
@@ -1416,22 +1380,20 @@ kinds: TaskAppend
       "field": "definition",
       "before": {
         "raw": {
-          "string": {
-            "range": [
-              "left"
-            ]
-          }
+          "list": [
+            "left"
+          ],
+          "type": "STRING"
         },
         "text": "[left]"
       },
       "after": {
         "raw": {
-          "string": {
-            "range": [
-              "left",
-              "right"
-            ]
-          }
+          "list": [
+            "left",
+            "right"
+          ],
+          "type": "STRING"
         },
         "text": "[left, right]"
       },
@@ -1525,12 +1487,12 @@ kinds: TaskReplace
       "before": null,
       "after": {
         "raw": {
-          "string": {
-            "range": [
-              "left",
-              "right"
-            ]
-          }
+          "list": [
+            "left",
+            "right"
+          ],
+          "name": "Eye",
+          "type": "STRING"
         },
         "text": "[left, right]"
       },

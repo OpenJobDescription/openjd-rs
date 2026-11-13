@@ -30,6 +30,7 @@ use std::fmt;
 use indexmap::IndexMap;
 use serde::Serialize;
 
+use crate::job::document;
 use crate::job::task_delta::definitions_fix_task_order;
 
 use crate::job::{
@@ -83,8 +84,9 @@ pub enum DiffStatus {
 
 /// A changed scalar field on a [`DiffNode`].
 ///
-/// `before` and `after` are the field's JSON serialization; an absent
-/// optional field is `null`.
+/// `before` and `after` are the field's JSON serialization, as the job's
+/// document writes it (a parameter's `type` and `value` and a task parameter
+/// `definition` in the host encoding); an absent optional field is `null`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FieldChange {
     /// Field name, camelCase as serialized. Keyed entries read
@@ -531,6 +533,24 @@ impl<'a> Builder<'a> {
         }
     }
 
+    /// [`field`](Self::field), with each side written by `write`.
+    fn field_as<T: PartialEq + ?Sized>(
+        &mut self,
+        id: DiffNodeId,
+        name: &str,
+        a: &T,
+        b: &T,
+        write: impl Fn(&T) -> serde_json::Value,
+    ) {
+        if a != b {
+            self.nodes[id].field_changes.push(FieldChange {
+                field: name.to_string(),
+                before: write(a),
+                after: write(b),
+            });
+        }
+    }
+
     /// Match two named collections by key and add a child per key. When
     /// `ordered`, a different relative order of the shared keys is recorded
     /// as `<collection>.order`.
@@ -672,8 +692,11 @@ impl<'a> Builder<'a> {
                     value,
                 } = a;
                 self.field(id, "name", name, &b.name);
-                self.field(id, "type", param_type, &b.param_type);
-                self.field(id, "value", value, &b.value);
+                // The type and value as the host encoding writes them.
+                self.field_as(id, "type", param_type, &b.param_type, |t| {
+                    t.as_spec_str().into()
+                });
+                self.field_as(id, "value", value, &b.value, document::parameter_value);
             }
             (Subject::Environment(a), Subject::Environment(b)) => self.expand_env(id, a, b),
             (Subject::Step(a), Subject::Step(b)) => self.expand_step(id, a, b),
@@ -772,7 +795,9 @@ impl<'a> Builder<'a> {
                 );
             }
             (Subject::TaskParameter(a), Subject::TaskParameter(b)) => {
-                self.field(id, "definition", a, b);
+                self.field_as(id, "definition", a, b, |p| {
+                    document::to_value(document::DefinitionDoc::new(None, p))
+                });
             }
             (Subject::HostRequirements(a), Subject::HostRequirements(b)) => {
                 let HostRequirements {
@@ -813,12 +838,21 @@ impl<'a> Builder<'a> {
         self.field(id, "name", name, &b.name);
         self.field(id, "description", description, &b.description);
         self.field(id, "extensions", extensions, &b.extensions);
+        // In name order: parameter order is not a change, and a map filled
+        // from a `HashMap` would otherwise order the nodes differently from
+        // run to run.
+        let sorted = |m: &'a IndexMap<String, JobParameter>| {
+            let mut v: Vec<(&'a str, &'a JobParameter)> =
+                m.iter().map(|(k, v)| (k.as_str(), v)).collect();
+            v.sort_unstable_by_key(|(k, _)| *k);
+            v
+        };
         self.keyed(
             id,
             "parameters",
             false,
-            parameters.iter().map(|(k, v)| (k.as_str(), v)),
-            b.parameters.iter().map(|(k, v)| (k.as_str(), v)),
+            sorted(parameters),
+            sorted(&b.parameters),
             Subject::JobParameter,
         );
         self.environments(id, "jobEnvironments", job_environments, &b.job_environments);

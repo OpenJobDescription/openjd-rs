@@ -1,14 +1,13 @@
 {
+  "documentVersion": 1,
   "name": "Demo",
   "description": null,
   "extensions": null,
   "parameters": {
     "Frames": {
       "name": "Frames",
-      "paramType": "String",
-      "value": {
-        "String": "1-100"
-      }
+      "type": "STRING",
+      "value": "1-100"
     }
   },
   "steps": [
@@ -31,28 +30,13 @@
       },
       "stepEnvironments": null,
       "parameterSpace": {
-        "taskParameterDefinitions": {
-          "Frame": {
-            "int": {
-              "range": {
-                "rangeExpr": {
-                  "ranges": [
-                    {
-                      "start": 1,
-                      "end": 100,
-                      "step": 1
-                    }
-                  ],
-                  "cumulative_lengths": [
-                    100
-                  ],
-                  "length": 100
-                }
-              },
-              "chunks": null
-            }
+        "taskParameterDefinitions": [
+          {
+            "name": "Frame",
+            "type": "INT",
+            "range": "1-100"
           }
-        },
+        ],
         "combination": null
       },
       "hostRequirements": null,

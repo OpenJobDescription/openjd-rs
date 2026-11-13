@@ -25,6 +25,7 @@
 pub mod apply;
 pub mod create_job;
 pub mod diff;
+mod document;
 pub mod step_dependency_graph;
 pub mod step_param_space;
 pub mod task_delta;

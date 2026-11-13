@@ -178,7 +178,7 @@ fn plan() {
             "{V1_V2}{CASE3_OUT}
 apply plan:
   1. parameter modify Frames  [ParameterValue]
-  2. tasks of Render: keep 100, add 300 at index 100..399, remove 0  [TaskAppend]
+  2. tasks of Render: keep 100, add 300, remove 0  [TaskAppend]
 kinds: ParameterValue, TaskAppend
 "
         ),
@@ -438,11 +438,11 @@ fn build_errors_and_bad_jobs() {
     assert_eq!(o.status.code(), Some(1));
     let o = openjd(
         &["diff", "--jobs", "-", "render_v2.yaml"],
-        Some(r#"{"name": "x", "steps": [], "bogus": 1}"#),
+        Some(r#"{"documentVersion": 1, "name": "x", "steps": [], "bogus": 1}"#),
     );
     assert_eq!(
         stderr(&o),
-        format!("{DIFF_WARNING}ERROR: '-': Validation error: not a built job: unknown field `bogus`, expected one of `name`, `description`, `extensions`, `parameters`, `steps`, `jobEnvironments` at line 1 column 34\n")
+        format!("{DIFF_WARNING}ERROR: '-': Validation error: not a built job: unknown field `bogus`, expected one of `documentVersion`, `name`, `description`, `extensions`, `parameters`, `steps`, `jobEnvironments` at line 1 column 56\n")
     );
 }
 
@@ -464,7 +464,10 @@ steps:
     let first = openjd_in(dir.path(), &args, None);
     assert_eq!(first.status.code(), Some(0), "{}", stderr(&first));
     let text = stdout(&first);
-    assert!(text.starts_with("{\n  \"name\": \"Vars\",\n"), "{text}");
+    assert!(
+        text.starts_with("{\n  \"documentVersion\": 1,\n  \"name\": \"Vars\",\n"),
+        "{text}"
+    );
     assert!(text.contains(
         "\"variables\": {\n        \"V0\": \"z\",\n        \"V1\": \"a\",\n        \"V2\": \"b\",\n        \"V3\": \"c\",\n        \"V4\": \"d\",\n        \"V5\": \"e\",\n        \"V6\": \"f\",\n        \"V7\": \"g\",\n        \"V8\": \"h\",\n        \"V9\": \"i\"\n      }"
     ), "{text}");
@@ -533,7 +536,7 @@ fn verbose_human_output_appends_the_job_diff_tree() {
 job diff tree:
 ~ <root>
   ~ parameters[Scene]
-      value: {"String":"//srv/a"} -> {"String":"//srv/b"}
+      value: "//srv/a" -> "//srv/b"
   ~ steps[Render]
       resolvedSymTab: [{"name":"RawParam.Scene","type":"string","value":"//srv/a"}] -> [{"name":"RawParam.Scene","type":"string","value":"//srv/b"}]
 "#,
@@ -670,7 +673,7 @@ kinds: JobMetadata, EnvVariables, StepScript, StepAdd, TaskAppend, TaskRemove
         plan,
         "  1. job modify  [JobMetadata]
   2. job environment modify Tools  [EnvVariables]
-  3. tasks of Shrink: keep 3, add 3 at index 3..5, remove 0  [TaskAppend]
+  3. tasks of Shrink: keep 3, add 3, remove 0  [TaskAppend]
   4. step modify Modify  [StepScript]
   5. step remove Added  [StepRemove]
 kinds: JobMetadata, EnvVariables, StepScript, StepRemove, TaskAppend
@@ -987,17 +990,14 @@ note: steps[Chunked]: cannot count tasks: the chunk size is adaptive (targetRunt
 #[test]
 fn a_step_whose_tasks_cannot_be_counted_gets_a_note() {
     let dir = tempfile::tempdir().unwrap();
-    let t = "specificationVersion: jobtemplate-2023-09\nname: J\nsteps:\n  - name: S\n    parameterSpace:\n      taskParameterDefinitions:\n        - {name: Frame, type: INT, range: \"1-2\"}\n    script: {actions: {onRun: {command: c}}}\n";
+    let t = "specificationVersion: jobtemplate-2023-09\nname: J\nsteps:\n  - name: S\n    parameterSpace:\n      taskParameterDefinitions:\n        - {name: Frame, type: INT, range: \"1-2\"}\n        - {name: Eye, type: STRING, range: [l, r, c]}\n    script: {actions: {onRun: {command: c}}}\n";
     std::fs::write(dir.path().join("t.yaml"), t).unwrap();
     let built = openjd_in(dir.path(), &["build", "t.yaml"], None);
     assert_eq!(built.status.code(), Some(0), "{}", stderr(&built));
     let old = stdout(&built);
-    // `create_job` rejects an unknown name in `combination`; a built job
-    // given to --jobs is not checked.
-    let new = old.replace(
-        "\"combination\": null",
-        "\"combination\": \"Frame * Bogus\"",
-    );
+    // `create_job` rejects an association of members with different
+    // lengths; a built job given to --jobs is not checked for it.
+    let new = old.replace("\"combination\": null", "\"combination\": \"(Frame, Eye)\"");
     assert_ne!(old, new);
     std::fs::write(dir.path().join("old.json"), &old).unwrap();
     std::fs::write(dir.path().join("new.json"), &new).unwrap();
@@ -1011,13 +1011,32 @@ fn a_step_whose_tasks_cannot_be_counted_gets_a_note() {
         "\
 jobs: old.json -> new.json
 ~ step S
-    + parameterSpace.combination: Frame * Bogus  [job]
+    + parameterSpace.combination: (Frame, Eye)  [job]
     tasks: unknown (cannot count tasks)
 
 1 step changed. Tasks: 0 kept, 0 added, 0 removed.
-note: steps[S]: cannot count tasks: Validation error: Unknown parameter 'Bogus' in combination expression
+note: steps[S]: cannot count tasks: Validation error: Associative combination: all members must have the same number of values, got 2 and 3
 ",
     );
+    // An unknown name is not a form `create_job` writes, so --jobs rejects it.
+    let bogus = old.replace(
+        "\"combination\": null",
+        "\"combination\": \"Frame * Bogus\"",
+    );
+    std::fs::write(dir.path().join("bogus.json"), &bogus).unwrap();
+    let o = openjd_in(
+        dir.path(),
+        &["diff", "--jobs", "old.json", "bogus.json"],
+        None,
+    );
+    assert_eq!(
+        stderr(&o),
+        format!(
+            "{DIFF_WARNING}ERROR: 'bogus.json': Validation error: not a built job: \
+             steps[0].parameterSpace.combination: 'Bogus' is not a task parameter of the step\n"
+        )
+    );
+    assert_eq!(o.status.code(), Some(1));
 }
 
 #[test]
@@ -1245,7 +1264,7 @@ fn build_merges_environment_parameters_under_both_spellings() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a.yaml"), PLAIN).unwrap();
     std::fs::write(dir.path().join("env.yaml"), env).unwrap();
-    let expected = "  \"parameters\": {\n    \"E\": {\n      \"name\": \"E\",\n      \"paramType\": \"String\",\n      \"value\": {\n        \"String\": \"fromenv\"\n      }\n    }\n  },\n";
+    let expected = "  \"parameters\": {\n    \"E\": {\n      \"name\": \"E\",\n      \"type\": \"STRING\",\n      \"value\": \"fromenv\"\n    }\n  },\n";
     for flag in ["--environment", "--env"] {
         let o = openjd_in(dir.path(), &["build", "a.yaml", flag, "env.yaml"], None);
         assert_eq!(o.status.code(), Some(0), "{flag}: {}", stderr(&o));
@@ -1262,7 +1281,7 @@ fn build_accepts_parameter_as_an_alias_for_job_param() {
     let o = openjd_in(dir.path(), &["build", "p.yaml", "--parameter", "P=v"], None);
     assert_eq!(o.status.code(), Some(0), "{}", stderr(&o));
     assert!(
-        stdout(&o).contains("\"value\": {\n        \"String\": \"v\"\n      }"),
+        stdout(&o).contains("\"type\": \"STRING\",\n      \"value\": \"v\"\n"),
         "{}",
         stdout(&o)
     );

@@ -18,6 +18,11 @@
 //! at). Every step gets a [`StepSummary`] of its task change, from
 //! [`task_delta`].
 //!
+//! The module also holds the host support functions a job store needs
+//! beside a plan ([`template_step_fragment`], [`build_job_symbol_table`],
+//! [`job_digest`], [`merge_parameters`], [`TemplateInput::preprocessed`]);
+//! see `specs/model/host-support.md`.
+//!
 //! See `specs/model/template-diff.md`.
 
 use std::collections::HashSet;
@@ -29,13 +34,17 @@ use indexmap::IndexMap;
 use openjd_expr::format_string::FormatString;
 use openjd_expr::path_mapping::PathFormat;
 use openjd_expr::value::Float64;
-use openjd_expr::{ExprType, ExprValue, RangeExpr};
+use openjd_expr::{ExprType, ExprValue};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{json, Value};
 
+use crate::create_job::{merge_job_parameter_definitions, preprocess_job_parameters_except};
 use crate::error::ModelError;
 use crate::job::apply::{plan, ApplyPlan};
 use crate::job::diff::{diff_jobs, diff_steps, DiffNode, DiffOptions, DiffStatus, DiffTree};
+use crate::job::document::{
+    definition_from_document, parameter_from_document, space_from_document, ParameterDoc, SpaceDoc,
+};
 use crate::job::task_delta::{task_delta, TaskBox, TaskDelta};
 use crate::job::TaskParameter;
 use crate::job::{Environment, Job, JobParameter, Step, StepParameterSpace, TaskParamRange};
@@ -44,8 +53,14 @@ use crate::template::parse::{
     decode_environment_template, decode_job_template, document_string_to_object, DocumentType,
 };
 use crate::template::{EnvironmentTemplate, JobParameterDefinition, JobTemplate};
-use crate::types::{CallerLimits, JobParameterInputValues, JobParameterType, ModelExtension};
-use crate::{create_job, preprocess_job_parameters, PathParameterOptions};
+use crate::types::{CallerLimits, JobParameterInputValues, JobParameterValues, ModelExtension};
+use crate::{create_job, PathParameterOptions};
+
+mod host;
+pub use host::{
+    build_job_symbol_table, job_digest, merge_parameters, template_job_environment_fragment,
+    template_step_fragment, TemplateStepFragment,
+};
 
 /// Longest [`Shown::text`] in characters before it is cut with `…`.
 const MAX_TEXT_CHARS: usize = 120;
@@ -92,6 +107,7 @@ impl TemplateSource {
 pub struct TemplateInput {
     source: TemplateSource,
     parameters: JobParameterInputValues,
+    preprocessed: Option<JobParameterValues>,
     environments: Vec<TemplateSource>,
     extensions: Vec<String>,
     limits: CallerLimits,
@@ -106,6 +122,7 @@ impl TemplateInput {
         Self {
             source,
             parameters: JobParameterInputValues::new(),
+            preprocessed: None,
             environments: Vec::new(),
             extensions: ModelExtension::ALL
                 .iter()
@@ -177,7 +194,28 @@ impl TemplateInput {
         self
     }
 
-    /// The job parameter values set so far.
+    /// Build from parameter values that were already preprocessed, such as
+    /// the values a host stored when it created the job, without
+    /// preprocessing them again. A second pass resolves PATH values against
+    /// this side's directories and the host's path format, so it can change
+    /// a stored value; these values reach `create_job` as given. When the
+    /// side is built, each is checked as given against every definition that
+    /// declares it, in the job template and its environment templates.
+    ///
+    /// They replace the values set with [`param`](Self::param) and
+    /// [`params`](Self::params), which the build then ignores. They include
+    /// any environment templates' parameters, so the side's
+    /// [`environment`](Self::environment)s supply no defaults, only the
+    /// constraints the values are checked against. Unstable.
+    #[must_use]
+    pub fn preprocessed(mut self, values: JobParameterValues) -> Self {
+        self.preprocessed = Some(values);
+        self
+    }
+
+    /// The job parameter values set so far with [`param`](Self::param) and
+    /// [`params`](Self::params). Values given with
+    /// [`preprocessed`](Self::preprocessed) are not included.
     #[must_use]
     pub fn parameters(&self) -> &JobParameterInputValues {
         &self.parameters
@@ -186,8 +224,36 @@ impl TemplateInput {
     /// Decode the template and build its job with this side's parameters.
     pub fn build(&self) -> Result<Job, ModelError> {
         let loaded = load(self)?;
-        build(&loaded, &self.parameters, &self.limits)
+        build(&loaded, self.values(), &self.limits)
     }
+
+    fn values(&self) -> Values<'_> {
+        match &self.preprocessed {
+            Some(v) => Values::Preprocessed(v),
+            None => Values::Input(&self.parameters),
+        }
+    }
+
+    /// The side's values as inputs: the preprocessed values as their typed
+    /// values when given, else the input values.
+    fn inputs(&self) -> JobParameterInputValues {
+        match &self.preprocessed {
+            Some(v) => v
+                .iter()
+                .map(|(k, pv)| (k.clone(), pv.value.clone()))
+                .collect(),
+            None => self.parameters.clone(),
+        }
+    }
+}
+
+/// The parameter values a side builds with.
+#[derive(Clone, Copy)]
+enum Values<'a> {
+    /// To be preprocessed against the side's template.
+    Input(&'a JobParameterInputValues),
+    /// Already preprocessed: passed to `create_job` as they are.
+    Preprocessed(&'a JobParameterValues),
 }
 
 /// A side after decoding: the templates and the resolved directories.
@@ -309,14 +375,63 @@ fn load(input: &TemplateInput) -> Result<Loaded, ModelError> {
     })
 }
 
-fn build(
+fn build(loaded: &Loaded, values: Values<'_>, limits: &CallerLimits) -> Result<Job, ModelError> {
+    let preprocessed;
+    let values = match values {
+        Values::Preprocessed(v) => {
+            check_preprocessed(loaded, v)?;
+            v
+        }
+        Values::Input(params) => {
+            preprocessed = preprocess(loaded, params)?;
+            &preprocessed
+        }
+    };
+    let ctx = loaded
+        .template
+        .default_validation_context()
+        .with_caller_limits(limits.clone());
+    create_job(&loaded.template, values, &ctx)
+}
+
+/// Check preprocessed values against every definition that declares them,
+/// in the job template and its environment templates (`create_job` checks
+/// only the job template's). Values are checked as given, never
+/// preprocessed again, so a stored Windows PATH is checked as stored.
+fn check_preprocessed(loaded: &Loaded, values: &JobParameterValues) -> Result<(), ModelError> {
+    for def in merge_job_parameter_definitions(&loaded.template, &loaded.environments)? {
+        if let Some(v) = values.get(&def.name) {
+            if v.param_type == def.param_type {
+                def.check_constraints(&v.value)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `preprocess_job_parameters` for a side's template, environments and
+/// directories.
+fn preprocess(
     loaded: &Loaded,
     params: &JobParameterInputValues,
-    limits: &CallerLimits,
-) -> Result<Job, ModelError> {
-    let values = preprocess_job_parameters(
+) -> Result<JobParameterValues, ModelError> {
+    typed_values(loaded, JobParameterValues::new(), params)
+}
+
+/// The values to build `loaded` with: `kept` as given, and `inputs`
+/// preprocessed against the side. A kept value is never preprocessed or
+/// checked here, because a second pass can rewrite it (a Windows PATH is
+/// relative on a POSIX host); `create_job` checks it when the job is built.
+/// Kept parameters count as supplied, so they get no default and are not
+/// missing. `kept` comes from [`keepable`].
+fn typed_values(
+    loaded: &Loaded,
+    kept: JobParameterValues,
+    inputs: &JobParameterInputValues,
+) -> Result<JobParameterValues, ModelError> {
+    let mut values = preprocess_job_parameters_except(
         &loaded.template,
-        params,
+        inputs,
         &loaded.environments,
         &PathParameterOptions {
             job_template_dir: &loaded.template_dir,
@@ -325,12 +440,45 @@ fn build(
             allow_template_dir_walk_up: false,
             allow_uri_path_values: true,
         },
+        &kept,
     )?;
-    let ctx = loaded
-        .template
-        .default_validation_context()
-        .with_caller_limits(limits.clone());
-    create_job(&loaded.template, &values, &ctx)
+    values.extend(kept);
+    Ok(values)
+}
+
+/// The values of `stored` that `loaded` keeps: those its template (with its
+/// environments) declares with the stored type, and `inputs` does not set.
+fn keepable(
+    loaded: &Loaded,
+    stored: &JobParameterValues,
+    inputs: &JobParameterInputValues,
+) -> Result<JobParameterValues, ModelError> {
+    let mut kept = JobParameterValues::new();
+    for def in merge_job_parameter_definitions(&loaded.template, &loaded.environments)? {
+        if inputs.contains_key(&def.name) {
+            continue;
+        }
+        if let Some(value) = stored.get(&def.name) {
+            if value.param_type == def.param_type {
+                kept.insert(def.name, value.clone());
+            }
+        }
+    }
+    Ok(kept)
+}
+
+/// The values of the origin split's middle job: the new template with the
+/// old side's values. Old input values are preprocessed against the new
+/// template. Old stored values are merged as [`host::merge_parameters`]
+/// merges them with nothing requested: those the new template keeps are
+/// used as stored, retyped and undeclared ones are left out, and the rest
+/// take the new template's defaults.
+fn middle_values(old: &TemplateInput, new: &Loaded) -> Result<JobParameterValues, ModelError> {
+    let none = JobParameterInputValues::new();
+    match &old.preprocessed {
+        None => typed_values(new, JobParameterValues::new(), &old.parameters),
+        Some(stored) => typed_values(new, keepable(new, stored, &none)?, &none),
+    }
 }
 
 /// Prefix an error with the input that failed (`old template`, `new
@@ -709,33 +857,35 @@ pub fn diff_templates(
 ) -> Result<TemplateDiff, ModelError> {
     let lo = load(old).map_err(|e| on_side("old template", e))?;
     let ln = load(new).map_err(|e| on_side("new template", e))?;
-    let old_job =
-        build(&lo, &old.parameters, &old.limits).map_err(|e| on_side("old template", e))?;
-    let new_job =
-        build(&ln, &new.parameters, &new.limits).map_err(|e| on_side("new template", e))?;
+    let old_job = build(&lo, old.values(), &old.limits).map_err(|e| on_side("old template", e))?;
+    let new_job = build(&ln, new.values(), &new.limits).map_err(|e| on_side("new template", e))?;
     let template = template_layer(&lo.template, &ln.template);
     let same_template = matches!((&lo.fingerprint, &ln.fingerprint), (Some(a), Some(b)) if a == b);
     let mut notes = Vec::new();
-    let rule = if old.parameters == new.parameters {
-        OriginRule::All(Origin::Template)
-    } else if same_template {
-        OriginRule::All(Origin::Parameters)
-    } else {
-        // `mid` is the new template with the old parameters.
-        match build(&ln, &old.parameters, &new.limits) {
-            Ok(mid) => OriginRule::Split {
-                template: change_keys(&diff_jobs(&old_job, &mid, options)),
-                parameters: change_keys(&diff_jobs(&mid, &new_job, options)),
-            },
-            Err(e) => {
-                notes.push(Note::job(format!(
-                    "origin: the new template does not build with the old parameters, so \
+    let old_inputs = old.inputs();
+    let rule =
+        if old.preprocessed.is_none() == new.preprocessed.is_none() && old_inputs == new.inputs() {
+            OriginRule::All(Origin::Template)
+        } else if same_template {
+            OriginRule::All(Origin::Parameters)
+        } else {
+            // `mid` is the new template with the old parameters.
+            match middle_values(old, &ln)
+                .and_then(|v| build(&ln, Values::Preprocessed(&v), &new.limits))
+            {
+                Ok(mid) => OriginRule::Split {
+                    template: change_keys(&diff_jobs(&old_job, &mid, options)),
+                    parameters: change_keys(&diff_jobs(&mid, &new_job, options)),
+                },
+                Err(e) => {
+                    notes.push(Note::job(format!(
+                        "origin: the new template does not build with the old parameters, so \
                      job-layer changes are marked both: {e}"
-                )));
-                OriginRule::All(Origin::Both)
+                    )));
+                    OriginRule::All(Origin::Both)
+                }
             }
-        }
-    };
+        };
     Ok(assemble(old_job, new_job, template, &rule, notes, options))
 }
 
@@ -755,15 +905,15 @@ pub fn diff_job_template_with_parameter_sets(
 ) -> Result<TemplateDiff, ModelError> {
     let loaded = load(template).map_err(|e| on_side("the template", e))?;
     let overlay = |side: &JobParameterInputValues| {
-        let mut p = template.parameters.clone();
+        let mut p = template.inputs();
         p.extend(side.iter().map(|(k, v)| (k.clone(), v.clone())));
         p
     };
     let (old_params, new_params) = (overlay(old), overlay(new));
-    let old_job =
-        build(&loaded, &old_params, &template.limits).map_err(|e| on_side("old parameters", e))?;
-    let new_job =
-        build(&loaded, &new_params, &template.limits).map_err(|e| on_side("new parameters", e))?;
+    let old_job = build(&loaded, Values::Input(&old_params), &template.limits)
+        .map_err(|e| on_side("old parameters", e))?;
+    let new_job = build(&loaded, Values::Input(&new_params), &template.limits)
+        .map_err(|e| on_side("new parameters", e))?;
     let rule = OriginRule::All(Origin::Parameters);
     Ok(assemble(
         old_job,
@@ -1113,31 +1263,10 @@ fn to_json<T: Serialize + ?Sized>(v: &T) -> Value {
     serde_json::to_value(v).unwrap_or_else(|e| Value::String(format!("<not serializable: {e}>")))
 }
 
-/// A job as a `Value` for whole-node [`Shown::raw`]s: its [`JobDocument`]
-/// form, except that each step's `taskParameterDefinitions` is a list of
-/// `{name, definition}` in definition order. A `Value` object sorts its
-/// keys, and definition order is task order, so a map would lose it.
+/// A job as a `Value` for whole-node [`Shown::raw`]s: its [`JobDocument`],
+/// whose `taskParameterDefinitions` lists keep definition order.
 fn job_value(job: &Job) -> Value {
-    let mut doc = to_json(&JobDocument(job));
-    for (i, step) in job.steps.iter().enumerate() {
-        let Some(space) = &step.parameter_space else {
-            continue;
-        };
-        let defs = space
-            .task_parameter_definitions
-            .iter()
-            .map(|(name, p)| json!({"name": name, "definition": to_json(p)}))
-            .collect();
-        if let Some(slot) = doc
-            .get_mut("steps")
-            .and_then(|s| s.get_mut(i))
-            .and_then(|s| s.get_mut("parameterSpace"))
-            .and_then(|s| s.get_mut("taskParameterDefinitions"))
-        {
-            *slot = Value::Array(defs);
-        }
-    }
-    doc
+    to_json(&JobDocument(job))
 }
 
 /// The key of the step node at or above `id`: the name of the step the
@@ -1169,8 +1298,7 @@ fn segments(tree: &DiffTree, id: usize) -> Vec<String> {
 }
 
 /// Follow diff segments through a [`job_value`]: `name[key]` selects a map
-/// entry, or the element of a list whose `name` is `key` (for a task
-/// parameter definition, that element's `definition`).
+/// entry, or the element of a list whose `name` is `key`.
 ///
 /// Every diff segment is the serialized field name except an action's
 /// (`onRun`, `onEnter`, …), which the diff hangs on the script directly but
@@ -1186,16 +1314,9 @@ fn lookup<'v>(doc: &'v Value, segments: &[String]) -> Option<&'v Value> {
                 let key = rest.strip_suffix(']')?;
                 match v.get(coll)? {
                     Value::Object(m) => m.get(key),
-                    Value::Array(a) => {
-                        let e = a
-                            .iter()
-                            .find(|e| e.get("name").and_then(Value::as_str) == Some(key))?;
-                        if coll == "taskParameterDefinitions" {
-                            e.get("definition")
-                        } else {
-                            Some(e)
-                        }
-                    }
+                    Value::Array(a) => a
+                        .iter()
+                        .find(|e| e.get("name").and_then(Value::as_str) == Some(key)),
                     _ => None,
                 }
             }
@@ -1287,7 +1408,7 @@ fn node_text(node: &DiffNode, field: &str, raw: &Value, job: &Job, def: Definiti
     use crate::job::diff::DiffNodeKind;
     match (node.kind, field) {
         (DiffNodeKind::TaskParameter, "definition" | "") => {
-            TaskParameter::deserialize(raw).map_or_else(|_| render(raw), |p| def(&p))
+            definition(raw).map_or_else(|| render(raw), |p| def(&p))
         }
         (DiffNodeKind::JobParameter, "value" | "") => node
             .key
@@ -1303,6 +1424,14 @@ fn node_text(node: &DiffNode, field: &str, raw: &Value, job: &Job, def: Definiti
         (_, "") => whole_text(&without_label(raw, node.key.as_deref()), def),
         _ => whole_text(&without_label(raw, field_key(field)), def),
     }
+}
+
+/// A task parameter definition from its host-encoding document, with or
+/// without its `name`.
+fn definition(raw: &Value) -> Option<TaskParameter> {
+    definition_from_document(raw, "", raw.get("name").is_some())
+        .ok()
+        .map(|(_, p)| p)
 }
 
 /// A job parameter's value, bare: a `STRING` or `PATH` as [`string_text`]
@@ -1326,15 +1455,13 @@ fn whole_text(v: &Value, def: DefinitionText) -> String {
         {
             return Some(space_text(e, def));
         }
-        let is_parameter = m.len() == 3
-            && ["name", "paramType", "value"]
-                .iter()
-                .all(|k| m.contains_key(*k));
+        let is_parameter =
+            m.len() == 3 && ["name", "type", "value"].iter().all(|k| m.contains_key(*k));
         if !is_parameter {
             return None;
         }
         let name = m.get("name").and_then(Value::as_str)?;
-        let p = parameter_from_value(name, e).ok()?;
+        let p = parameter_from_document(name, e, "").ok()?;
         Some(format!(
             "{} ({})",
             parameter_text(&p),
@@ -1393,13 +1520,7 @@ fn space_text(raw: &Value, def: DefinitionText) -> String {
         .iter()
         .map(|d| {
             let name = d.get("name").map_or_else(String::new, render);
-            let range = d
-                .get("definition")
-                .and_then(|v| TaskParameter::deserialize(v).ok())
-                .map_or_else(
-                    || d.get("definition").map_or_else(String::new, render),
-                    |p| def(&p),
-                );
+            let range = definition(d).map_or_else(|| render(&without_label(d, None)), |p| def(&p));
             format!("{name}: {range}")
         })
         .collect::<Vec<_>>()
@@ -2105,10 +2226,14 @@ fn is_adaptive(step: &Step) -> bool {
 
 // ─── built-job reader ───────────────────────────────────────────────
 
-/// The serde form of a [`Job`], read field by field.
+/// The serde form of a [`Job`] as [`JobDocument`] writes it, read field by
+/// field.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct BuiltJob {
+    /// Checked by [`check_document_version`] before this is read.
+    #[serde(rename = "documentVersion")]
+    _document_version: serde::de::IgnoredAny,
     name: String,
     description: Option<String>,
     extensions: Option<Vec<String>>,
@@ -2116,20 +2241,39 @@ struct BuiltJob {
     // an error like any other unexpected `null`.
     #[serde(default)]
     parameters: IndexMap<String, Value>,
-    steps: Vec<Step>,
+    steps: Vec<BuiltStep>,
     job_environments: Option<Vec<Environment>>,
 }
 
+/// A [`Step`] as [`JobDocument`] writes it: its serde form, except that the
+/// parameter space is in the host encoding, read by hand.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BuiltStep {
+    name: String,
+    description: Option<String>,
+    script: crate::job::StepScript,
+    step_environments: Option<Vec<Environment>>,
+    parameter_space: Option<Value>,
+    host_requirements: Option<crate::job::HostRequirements>,
+    dependencies: Option<Vec<crate::job::StepDependency>>,
+    #[serde(rename = "resolvedSymTab")]
+    resolved_symtab: Option<openjd_expr::symbol_table::SerializedSymbolTable>,
+}
+
 /// Read a [`Job`] back from the JSON or YAML that `openjd build` prints
-/// (the job's serde form). JSON when the first non-whitespace character is
-/// `{`, YAML otherwise. Unknown fields are rejected at every level, and so are a
-/// parameter whose value's type is not its `paramType`'s and a
-/// `resolvedSymTab` entry that is not the `{name, type, value}` a
-/// `SymbolTable` serializes to.
-///
-/// It takes text, not a `serde_json::Value`, because a `Value` object
-/// sorts its keys, which would reorder task parameter definitions and so
-/// change task order.
+/// (its [`JobDocument`]). JSON when the first non-whitespace character is
+/// `{`, YAML otherwise. The document's `documentVersion` must be
+/// [`JobDocument::VERSION`], the one [`JobDocument`] writes. Unknown fields
+/// are rejected at every level, and so are a parameter or task parameter
+/// definition that is not in the host encoding, a value not in the exact
+/// form a built job writes (`"TRUE"` for a BOOL), a `resolvedSymTab` entry
+/// that is not the `{name, type, value}` a `SymbolTable` serializes to, a
+/// number or bool where the document writes a string (or a string where it
+/// writes a bool or a number), and the forms
+/// template validation rejects (empty names, unknown or repeated
+/// dependencies, empty host requirements, ...). `specs/model/host-support.md`,
+/// "Reading a built job", lists every check.
 ///
 /// Unstable: see the module docs.
 pub fn job_from_str(text: &str) -> Result<Job, ModelError> {
@@ -2140,10 +2284,7 @@ pub fn job_from_str(text: &str) -> Result<Job, ModelError> {
     } else {
         serde_saphyr::from_str(text).map_err(|e| err(e.to_string()))?
     };
-    // Serde reports an extra key beside an enum tag without its path.
-    if let Some(path) = extra_tag_key(&input) {
-        return Err(err(format!("{path}: unknown field")));
-    }
+    check_document_version(&input).map_err(err)?;
     let raw: BuiltJob = if json {
         serde_json::from_str(text).map_err(|e| err(e.to_string()))?
     } else {
@@ -2156,38 +2297,31 @@ pub fn job_from_str(text: &str) -> Result<Job, ModelError> {
     if let Some(path) = dropped_key(&input, &output, String::new()) {
         return Err(err(format!("{path}: unknown field")));
     }
+    if let Some((path, kind)) = coerced_scalar(&input, &output, String::new()) {
+        return Err(err(format!("{path}: expected {kind}")));
+    }
     check_symbol_tables(&job).map_err(err)?;
+    check_created_forms(&job).map_err(err)?;
     Ok(job)
 }
 
-/// The variant tags of [`TaskParameter`] and of [`TaskParamRange`], as
-/// serde writes them.
-const TASK_PARAMETER_TAGS: [&str; 5] = ["int", "float", "string", "path", "chunkInt"];
-const RANGE_TAGS: [&str; 2] = ["list", "rangeExpr"];
-
-/// The path of the first key beside the tag of a task parameter
-/// definition or of its `range`, or `None`.
-fn extra_tag_key(input: &Value) -> Option<String> {
-    let extra = |v: &Value, tags: &[&str]| {
-        v.as_object()
-            .and_then(|m| m.keys().find(|k| !tags.contains(&k.as_str())).cloned())
+/// Check the document is an object whose `documentVersion` is
+/// [`JobDocument::VERSION`].
+fn check_document_version(input: &Value) -> Result<(), String> {
+    let Some(m) = input.as_object() else {
+        return Err("expected an object".into());
     };
-    let steps = input.get("steps")?.as_array()?;
-    steps.iter().enumerate().find_map(|(i, step)| {
-        let defs = step
-            .get("parameterSpace")?
-            .get("taskParameterDefinitions")?
-            .as_object()?;
-        defs.iter().find_map(|(name, def)| {
-            let path = format!("steps[{i}].parameterSpace.taskParameterDefinitions.{name}");
-            if let Some(k) = extra(def, &TASK_PARAMETER_TAGS) {
-                return Some(format!("{path}.{k}"));
-            }
-            let (tag, body) = def.as_object()?.iter().next()?;
-            let k = extra(body.get("range")?, &RANGE_TAGS)?;
-            Some(format!("{path}.{tag}.range.{k}"))
-        })
-    })
+    match m.get("documentVersion") {
+        Some(v) if v.as_u64() == Some(JobDocument::VERSION) => Ok(()),
+        Some(v) => Err(format!(
+            "documentVersion: {v} is not supported; the supported version is {}",
+            JobDocument::VERSION
+        )),
+        None => Err(format!(
+            "missing field 'documentVersion'; the supported version is {}",
+            JobDocument::VERSION
+        )),
+    }
 }
 
 /// Check every `resolvedSymTab` has the shape a [`SymbolTable`] serializes
@@ -2249,13 +2383,280 @@ fn check_symbol_table(
             return Err(format!("{at}.name: '{name}' is repeated"));
         }
         let ty = ExprType::parse(string("type")?).map_err(|e| format!("{at}.type: {e}"))?;
-        ExprValue::from_transport_value(&m["value"], &ty, PathFormat::Posix)
+        let value = ExprValue::from_transport_value(&m["value"], &ty, PathFormat::Posix)
             .map_err(|e| format!("{at}.value: {e}"))?;
+        // Only the form a `SymbolTable` writes: `"TRUE"` is not a BOOL here.
+        let written = value.transport_value();
+        if m["value"] != written {
+            return Err(format!(
+                "{at}.value: {} is not in the form a built job writes ({written})",
+                m["value"]
+            ));
+        }
     }
     table
         .to_symtab(PathFormat::Posix)
         .map(drop)
         .map_err(|e| format!("{path}: {e}"))
+}
+
+/// `Err("{path}: must not be empty")` for a list that is present and empty:
+/// template validation rejects one, so `create_job` never writes it.
+fn non_empty<T>(list: &Option<Vec<T>>, path: impl FnOnce() -> String) -> Result<(), String> {
+    match list {
+        Some(v) if v.is_empty() => Err(format!("{}: must not be empty", path())),
+        _ => Ok(()),
+    }
+}
+
+/// A literal `timeout` or `notifyPeriodInSeconds` must be a positive
+/// integer, as template validation requires; a format string is resolved
+/// on the worker and is not checked here.
+fn positive_integer(
+    value: &Option<FormatString>,
+    path: impl FnOnce() -> String,
+) -> Result<(), String> {
+    match value {
+        Some(v) if v.is_literal() && !v.raw().trim().parse::<i64>().is_ok_and(|n| n > 0) => {
+            Err(format!("{}: must be a positive integer", path()))
+        }
+        _ => Ok(()),
+    }
+}
+
+fn check_action(a: &crate::job::Action, path: &str) -> Result<(), String> {
+    use crate::job::CancelationMode;
+    non_empty(&a.args, || format!("{path}.args"))?;
+    positive_integer(&a.timeout, || format!("{path}.timeout"))?;
+    match &a.cancelation {
+        Some(
+            CancelationMode::NotifyThenTerminate {
+                notify_period_in_seconds,
+            }
+            | CancelationMode::DeferredMode {
+                notify_period_in_seconds,
+                ..
+            },
+        ) => positive_integer(notify_period_in_seconds, || {
+            format!("{path}.cancelation.notifyPeriodInSeconds")
+        }),
+        _ => Ok(()),
+    }
+}
+
+fn check_environment(e: &Environment, path: &str, wrap_actions: bool) -> Result<(), String> {
+    if e.variables.as_ref().is_some_and(|v| v.is_empty()) {
+        return Err(format!("{path}.variables: must not be empty"));
+    }
+    if let Some(script) = &e.script {
+        if !script.actions.has_any_action() {
+            return Err(format!(
+                "{path}.script.actions: {}",
+                if wrap_actions {
+                    "must define at least one of onEnter or onExit, or the complete set of wrap \
+                     hooks (onWrapEnvEnter, onWrapTaskRun, and onWrapEnvExit together)"
+                } else {
+                    "must define at least one of onEnter or onExit"
+                }
+            ));
+        }
+        check_embedded_files(&script.embedded_files, &format!("{path}.script"))?;
+        for (name, a) in script.actions.iter_named() {
+            check_action(a, &format!("{path}.script.actions.{name}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// A script's `embeddedFiles`: non-empty, and every file has non-empty
+/// `data`. `path` names the script.
+fn check_embedded_files(
+    files: &Option<Vec<crate::job::EmbeddedFile>>,
+    path: &str,
+) -> Result<(), String> {
+    let at = format!("{path}.embeddedFiles");
+    non_empty(files, || at.clone())?;
+    for (k, f) in files.iter().flatten().enumerate() {
+        match &f.data {
+            None => {
+                return Err(format!(
+                    "{at}[{k}]: embedded file '{}' is missing 'data' field",
+                    f.name
+                ))
+            }
+            Some(d) if d.raw().is_empty() => {
+                return Err(format!("{at}[{k}].data: must not be empty"))
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(())
+}
+
+fn check_environments(
+    envs: &Option<Vec<Environment>>,
+    path: &str,
+    wrap_actions: bool,
+) -> Result<(), String> {
+    non_empty(envs, || path.to_string())?;
+    for (j, e) in envs.iter().flatten().enumerate() {
+        check_environment(e, &format!("{path}[{j}]"), wrap_actions)?;
+    }
+    Ok(())
+}
+
+/// The checks template validation makes on host requirements, with its
+/// messages. `path` names the step's `hostRequirements`.
+fn check_host_requirements(h: &crate::job::HostRequirements, path: &str) -> Result<(), String> {
+    let some = |l: Option<usize>| l.is_some_and(|n| n > 0);
+    if !some(h.amounts.as_ref().map(Vec::len)) && !some(h.attributes.as_ref().map(Vec::len)) {
+        return Err(format!(
+            "{path}: must have at least one of amounts or attributes"
+        ));
+    }
+    for (k, a) in h.amounts.iter().flatten().enumerate() {
+        let at = format!("{path}.amounts[{k}]");
+        match (a.min, a.max) {
+            (None, None) => return Err(format!("{at}: must have at least one of min or max")),
+            (Some(min), _) if min < 0.0 => return Err(format!("{at}.min: must be non-negative")),
+            (_, Some(max)) if max <= 0.0 => return Err(format!("{at}.max: must be positive")),
+            (Some(min), Some(max)) if min > max => {
+                return Err(format!("{at}: min ({min}) > max ({max})"))
+            }
+            _ => {}
+        }
+    }
+    for (k, a) in h.attributes.iter().flatten().enumerate() {
+        let at = format!("{path}.attributes[{k}]");
+        if a.any_of.is_none() && a.all_of.is_none() {
+            return Err(format!("{at}: must have at least one of anyOf or allOf"));
+        }
+        non_empty(&a.any_of, || format!("{at}.anyOf"))?;
+        non_empty(&a.all_of, || format!("{at}.allOf"))?;
+    }
+    Ok(())
+}
+
+/// The job-level checks: a non-empty `name`, and an `extensions` list
+/// that is non-empty with no repeats.
+fn check_job_fields(job: &Job) -> Result<(), String> {
+    if job.name.is_empty() {
+        return Err("name: must not be empty".into());
+    }
+    if let Some(exts) = &job.extensions {
+        if exts.is_empty() {
+            return Err("extensions: if provided, must be a non-empty list".into());
+        }
+        let mut seen = HashSet::new();
+        if let Some(e) = exts.iter().find(|e| !seen.insert(*e)) {
+            return Err(format!(
+                "extensions: Duplicate values for extension name are not allowed. \
+                 Duplicate values: {}",
+                e.as_str()
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Step names are non-empty and unique, and each step's dependencies name
+/// another step of the job, once each.
+fn check_steps_and_dependencies(job: &Job) -> Result<(), String> {
+    let names: HashSet<&str> = job.steps.iter().map(|s| s.name.as_str()).collect();
+    let mut seen = HashSet::new();
+    for (i, s) in job.steps.iter().enumerate() {
+        let at = format!("steps[{i}]");
+        if s.name.is_empty() {
+            return Err(format!("{at}.name: must not be empty"));
+        }
+        if !seen.insert(s.name.as_str()) {
+            return Err(format!("{at}.name: duplicate step name: '{}'", s.name));
+        }
+        non_empty(&s.dependencies, || format!("{at}.dependencies"))?;
+        let mut deps = HashSet::new();
+        for (j, d) in s.dependencies.iter().flatten().enumerate() {
+            let dep = format!("{at}.dependencies[{j}]");
+            let on = d.depends_on.as_str();
+            if on == s.name {
+                return Err(format!("{dep}: cannot depend on itself"));
+            }
+            if !names.contains(on) {
+                return Err(format!("{dep}: dependency '{on}' not found"));
+            }
+            if !deps.insert(on) {
+                return Err(format!("{dep}: duplicate dependency '{on}'"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Reject the forms template validation rules out, so `create_job` never
+/// writes them. Each check, and its message, is listed in
+/// `specs/model/host-support.md`, "Reading a built job".
+fn check_created_forms(job: &Job) -> Result<(), String> {
+    check_job_fields(job)?;
+    if job.steps.is_empty() {
+        return Err("steps: must not be empty".into());
+    }
+    check_steps_and_dependencies(job)?;
+    let wrap_actions = job
+        .extensions
+        .iter()
+        .flatten()
+        .any(|e| *e == ModelExtension::WrapActions);
+    check_environments(&job.job_environments, "jobEnvironments", wrap_actions)?;
+    for (i, s) in job.steps.iter().enumerate() {
+        let at = format!("steps[{i}]");
+        check_environments(
+            &s.step_environments,
+            &format!("{at}.stepEnvironments"),
+            wrap_actions,
+        )?;
+        check_embedded_files(&s.script.embedded_files, &format!("{at}.script"))?;
+        check_action(
+            &s.script.actions.on_run,
+            &format!("{at}.script.actions.onRun"),
+        )?;
+        if let Some(h) = &s.host_requirements {
+            check_host_requirements(h, &format!("{at}.hostRequirements"))?;
+        }
+    }
+    Ok(())
+}
+
+/// The path of the first scalar in `input` whose kind differs from the
+/// one `output` writes there, with the kind `output` writes, or `None`.
+/// The job types read a number or a bool into a string field as its text
+/// (`command: 7` as `"7"`), and the YAML reader reads a quoted scalar into
+/// a bool or number field (`runnable: "TRUE"`, `min: "01"`). `create_job`
+/// writes neither, so both are rejected.
+fn coerced_scalar(input: &Value, output: &Value, path: String) -> Option<(String, &'static str)> {
+    match (input, output) {
+        (Value::Object(i), Value::Object(o)) => i.iter().find_map(|(k, v)| {
+            let written = o.get(k).or_else(|| {
+                ALIASES
+                    .iter()
+                    .find(|(alias, _)| alias == k)
+                    .and_then(|(_, name)| o.get(*name))
+            })?;
+            let key_path = if path.is_empty() {
+                k.clone()
+            } else {
+                format!("{path}.{k}")
+            };
+            coerced_scalar(v, written, key_path)
+        }),
+        (Value::Array(i), Value::Array(o)) => i
+            .iter()
+            .zip(o)
+            .enumerate()
+            .find_map(|(n, (iv, ov))| coerced_scalar(iv, ov, format!("{path}[{n}]"))),
+        (Value::Number(_) | Value::Bool(_), Value::String(_)) => Some((path, "a string")),
+        (Value::String(_), Value::Bool(_)) => Some((path, "a boolean")),
+        (Value::String(_), Value::Number(_)) => Some((path, "a number")),
+        _ => None,
+    }
 }
 
 // Objects in a job document, as paths with each list index written `[]`
@@ -2363,209 +2764,84 @@ fn job_from_built(raw: BuiltJob) -> Result<Job, String> {
         .map_err(|e| format!("extensions: {e}"))?;
     let mut parameters = IndexMap::new();
     for (k, v) in raw.parameters {
-        let p = parameter_from_value(&k, &v).map_err(|e| format!("parameters[{k}]: {e}"))?;
+        let p = parameter_from_document(&k, &v, &format!("parameters[{k}]"))?;
         parameters.insert(k, p);
     }
+    let steps = raw
+        .steps
+        .into_iter()
+        .enumerate()
+        .map(|(i, s)| step_from_built(s, i))
+        .collect::<Result<_, _>>()?;
     Ok(Job {
         name: raw.name,
         description: raw.description,
         extensions,
         parameters,
-        steps: raw.steps,
+        steps,
         job_environments: raw.job_environments,
     })
 }
 
-/// The parameter stored under `key`.
-fn parameter_from_value(key: &str, v: &Value) -> Result<JobParameter, String> {
-    if let Some(extra) = v.as_object().and_then(|m| {
-        m.keys()
-            .find(|k| !["name", "paramType", "value"].contains(&k.as_str()))
-    }) {
-        return Err(format!("unknown field '{extra}'"));
-    }
-    let name = v
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or("'name' must be a string")?
-        .to_string();
-    if name != key {
-        return Err(format!(
-            "'name' is '{name}', but the parameter's key is '{key}'"
-        ));
-    }
-    let type_name = v
-        .get("paramType")
-        .and_then(Value::as_str)
-        .ok_or("'paramType' must be a string")?;
-    let &(_, param_type, tags) = PARAM_TYPES
-        .iter()
-        .find(|(n, _, _)| *n == type_name)
-        .ok_or_else(|| format!("unknown paramType '{type_name}'"))?;
-    let value = v.get("value").ok_or("missing 'value'")?;
-    if let Some(tag) = value_tag(value) {
-        if !tags.contains(&tag) {
-            return Err(format!(
-                "paramType '{type_name}' cannot hold a '{tag}' value"
-            ));
-        }
-    }
-    Ok(JobParameter {
+/// The [`Step`] a [`BuiltStep`] describes; `i` is its index, for errors.
+fn step_from_built(s: BuiltStep, i: usize) -> Result<Step, String> {
+    let BuiltStep {
         name,
-        param_type,
-        value: expr_value(value)?,
+        description,
+        script,
+        step_environments,
+        parameter_space,
+        host_requirements,
+        dependencies,
+        resolved_symtab,
+    } = s;
+    let parameter_space = match parameter_space {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(space_from_document(
+            &v,
+            &format!("steps[{i}].parameterSpace"),
+        )?),
+    };
+    // A struct literal: a new `Step` field fails to compile here until the
+    // reader handles it.
+    Ok(Step {
+        name,
+        description,
+        script,
+        step_environments,
+        parameter_space,
+        host_requirements,
+        dependencies,
+        resolved_symtab,
     })
-}
-
-/// Each `paramType`, and the `ExprValue` tags its value may have.
-/// `create_job` stores a PATH as a `String` and a `LIST[PATH]` as a
-/// `ListString`; a `Path` or `ListPath` value is read as well.
-const PARAM_TYPES: [(&str, JobParameterType, &[&str]); 12] = [
-    ("String", JobParameterType::String, &["String"]),
-    ("Int", JobParameterType::Int, &["Int"]),
-    ("Float", JobParameterType::Float, &["Float"]),
-    ("Path", JobParameterType::Path, &["String", "Path"]),
-    ("Bool", JobParameterType::Bool, &["Bool"]),
-    ("RangeExpr", JobParameterType::RangeExpr, &["RangeExpr"]),
-    ("ListString", JobParameterType::ListString, &["ListString"]),
-    ("ListInt", JobParameterType::ListInt, &["ListInt"]),
-    ("ListFloat", JobParameterType::ListFloat, &["ListFloat"]),
-    (
-        "ListPath",
-        JobParameterType::ListPath,
-        &["ListString", "ListPath"],
-    ),
-    ("ListBool", JobParameterType::ListBool, &["ListBool"]),
-    ("ListListInt", JobParameterType::ListListInt, &["ListList"]),
-];
-
-/// The tag of an `ExprValue`'s serde form (`Null`, or the one key of
-/// `{"Int": 3}`), or `None` when it has no single tag.
-fn value_tag(v: &Value) -> Option<&str> {
-    if v.as_str() == Some("Null") {
-        return Some("Null");
-    }
-    let m = v.as_object().filter(|m| m.len() == 1)?;
-    m.keys().next().map(String::as_str)
-}
-
-/// An `ExprValue` from its derived serde form, e.g. `{"String": "x"}` or
-/// `{"ListString": [["a"], 48]}`. Its type comes from its tag. A
-/// `ListList` is a `LIST[LIST[INT]]`, the only list of lists a job
-/// parameter holds, which an empty one cannot show.
-fn expr_value(v: &Value) -> Result<ExprValue, String> {
-    let bad = || format!("unrecognized value {v}");
-    let Some((tag, inner)) = v
-        .as_object()
-        .filter(|m| m.len() == 1)
-        .and_then(|m| m.iter().next())
-    else {
-        return Err(bad());
-    };
-    // Lists serialize as `[elements, ...cached fields]`.
-    let elements = || -> Result<&Vec<Value>, String> {
-        match inner {
-            Value::Array(a) => match a.first() {
-                Some(Value::Array(e))
-                    if tag != "ListBool" && tag != "ListInt" && tag != "ListFloat" =>
-                {
-                    Ok(e)
-                }
-                _ => Ok(a),
-            },
-            _ => Err(bad()),
-        }
-    };
-    let list = |items: Vec<ExprValue>, elem: ExprType| {
-        ExprValue::make_list(items, elem).map_err(|e| e.to_string())
-    };
-    let float = |x: &Value| Float64::deserialize(x).map_err(|e| e.to_string());
-    let string = |x: &Value| x.as_str().map(str::to_string).ok_or_else(bad);
-    match tag.as_str() {
-        "Bool" => inner.as_bool().map(ExprValue::Bool).ok_or_else(bad),
-        "Int" => inner.as_i64().map(ExprValue::Int).ok_or_else(bad),
-        "Float" => float(inner).map(ExprValue::Float),
-        "String" => string(inner).map(ExprValue::String),
-        "Path" => {
-            let value = inner.get("value").ok_or_else(bad).and_then(string)?;
-            let format = PathFormat::deserialize(inner.get("format").ok_or_else(bad)?)
-                .map_err(|e| e.to_string())?;
-            Ok(ExprValue::new_path(value, format))
-        }
-        "RangeExpr" => RangeExpr::deserialize(inner)
-            .map(ExprValue::RangeExpr)
-            .map_err(|e| e.to_string()),
-        "ListBool" => list(
-            elements()?
-                .iter()
-                .map(|e| e.as_bool().map(ExprValue::Bool).ok_or_else(bad))
-                .collect::<Result<_, _>>()?,
-            ExprType::BOOL,
-        ),
-        "ListInt" => list(
-            elements()?
-                .iter()
-                .map(|e| e.as_i64().map(ExprValue::Int).ok_or_else(bad))
-                .collect::<Result<_, _>>()?,
-            ExprType::INT,
-        ),
-        "ListFloat" => list(
-            elements()?
-                .iter()
-                .map(|e| float(e).map(ExprValue::Float))
-                .collect::<Result<_, _>>()?,
-            ExprType::FLOAT,
-        ),
-        "ListString" => list(
-            elements()?
-                .iter()
-                .map(|e| string(e).map(ExprValue::String))
-                .collect::<Result<_, _>>()?,
-            ExprType::STRING,
-        ),
-        "ListPath" => {
-            let format = match inner.get(1) {
-                Some(f) => PathFormat::deserialize(f).map_err(|e| e.to_string())?,
-                None => return Err(bad()),
-            };
-            list(
-                elements()?
-                    .iter()
-                    .map(|e| string(e).map(|s| ExprValue::new_path(s, format)))
-                    .collect::<Result<_, _>>()?,
-                ExprType::PATH,
-            )
-        }
-        "ListList" => list(
-            elements()?
-                .iter()
-                .map(|e| match value_tag(e) {
-                    Some("ListInt") => expr_value(e),
-                    Some(t) => Err(format!(
-                        "a ListList element must be a 'ListInt' value, not a '{t}' value"
-                    )),
-                    None => Err(format!("unrecognized value {e}")),
-                })
-                .collect::<Result<_, _>>()?,
-            ExprType::list(ExprType::INT),
-        ),
-        _ => Err(bad()),
-    }
 }
 
 // ─── serde helpers ──────────────────────────────────────────────────
 
-/// A [`Job`] serialized as `openjd build` prints it: the job's serde form,
-/// except that `parameters` and each environment's `variables` are written
-/// sorted by name.
+/// A [`Job`] serialized as `openjd build` prints it, and as every host
+/// document writes it: the job's serde form, except that
 ///
-/// `create_job` fills `Job::parameters` from a `HashMap` and
-/// `Environment::variables` is a `HashMap`, so the plain serde form of a job
-/// with more than one of either changes from run to run. This form is
-/// deterministic, and [`job_from_str`] reads it back. Task parameter
-/// definitions keep their order, which is task order.
+/// - it starts with `"documentVersion": 1`, the version of this format;
+/// - `parameters` and each environment's `variables` are sorted by name
+///   (`create_job` fills `Job::parameters` from a `HashMap`, and
+///   `Environment::variables` is one);
+/// - a parameter is `{"name", "type", "value"}` and a parameter space is
+///   `{"taskParameterDefinitions": [{"name", "type", "range" | "list",
+///   "chunks"?}, …], "combination"}`, the host encoding of
+///   `specs/model/host-support.md`, with no cached sizes or Rust variant
+///   names.
+///
+/// The definitions are a list in definition order, which the job keeps, so
+/// the document means the same as a `serde_json::Value`. [`job_from_str`]
+/// reads it back.
 #[derive(Debug, Clone, Copy)]
 pub struct JobDocument<'a>(pub &'a Job);
+
+impl JobDocument<'_> {
+    /// The `documentVersion` every job document writes, and the only one
+    /// [`job_from_str`] reads. Digests compare only within one version.
+    pub const VERSION: u64 = 1;
+}
 
 impl Serialize for JobDocument<'_> {
     fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
@@ -2580,10 +2856,14 @@ impl Serialize for JobDocument<'_> {
             job_environments,
         } = self.0;
         DocJob {
+            document_version: JobDocument::VERSION,
             name,
             description,
             extensions,
-            parameters: parameters.iter().collect(),
+            parameters: parameters
+                .iter()
+                .map(|(k, p)| (k, ParameterDoc::new(p)))
+                .collect(),
             steps: steps.iter().map(DocStep::new).collect(),
             job_environments: job_environments
                 .as_ref()
@@ -2593,14 +2873,16 @@ impl Serialize for JobDocument<'_> {
     }
 }
 
-/// Field names and attributes mirror [`Job`], with `parameters` sorted.
+/// Field names and attributes mirror [`Job`], with `parameters` sorted,
+/// after the format's `documentVersion`.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DocJob<'a> {
+    document_version: u64,
     name: &'a String,
     description: &'a Option<String>,
     extensions: &'a Option<Vec<ModelExtension>>,
-    parameters: std::collections::BTreeMap<&'a String, &'a JobParameter>,
+    parameters: std::collections::BTreeMap<&'a String, ParameterDoc<'a>>,
     steps: Vec<DocStep<'a>>,
     job_environments: Option<Vec<DocEnvironment<'a>>>,
 }
@@ -2608,12 +2890,12 @@ struct DocJob<'a> {
 /// Field names and attributes mirror [`Step`].
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DocStep<'a> {
+pub(crate) struct DocStep<'a> {
     name: &'a String,
     description: &'a Option<String>,
     script: &'a crate::job::StepScript,
     step_environments: Option<Vec<DocEnvironment<'a>>>,
-    parameter_space: &'a Option<StepParameterSpace>,
+    parameter_space: Option<SpaceDoc<'a>>,
     host_requirements: &'a Option<crate::job::HostRequirements>,
     dependencies: &'a Option<Vec<crate::job::StepDependency>>,
     #[serde(rename = "resolvedSymTab", skip_serializing_if = "Option::is_none")]
@@ -2621,7 +2903,7 @@ struct DocStep<'a> {
 }
 
 impl<'a> DocStep<'a> {
-    fn new(step: &'a Step) -> Self {
+    pub(crate) fn new(step: &'a Step) -> Self {
         let Step {
             name,
             description,
@@ -2639,7 +2921,7 @@ impl<'a> DocStep<'a> {
             step_environments: step_environments
                 .as_ref()
                 .map(|v| v.iter().map(DocEnvironment::new).collect()),
-            parameter_space,
+            parameter_space: parameter_space.as_ref().map(SpaceDoc::new),
             host_requirements,
             dependencies,
             resolved_symtab,
@@ -2651,7 +2933,7 @@ impl<'a> DocStep<'a> {
 /// sorted.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DocEnvironment<'a> {
+pub(crate) struct DocEnvironment<'a> {
     name: &'a String,
     description: &'a Option<String>,
     script: &'a Option<crate::job::EnvironmentScript>,
@@ -2661,7 +2943,7 @@ struct DocEnvironment<'a> {
 }
 
 impl<'a> DocEnvironment<'a> {
-    fn new(env: &'a Environment) -> Self {
+    pub(crate) fn new(env: &'a Environment) -> Self {
         let Environment {
             name,
             description,
@@ -3149,6 +3431,7 @@ fn is_type_shown_by_value(c: &Change, job_level: &[&Change]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openjd_expr::RangeExpr;
 
     #[test]
     fn run_time_symbols_need_a_name_boundary() {

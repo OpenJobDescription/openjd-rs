@@ -95,6 +95,7 @@ The crate re-exports a curated public API from `lib.rs`:
 | `indexmap` | Insertion-ordered maps for deterministic output |
 | `thiserror` | Ergonomic error type derivation |
 | `regex` | Capability name validation, let binding self-reference detection |
+| `sha2` | `job_digest` (unstable host support): SHA-256 of a job's document |
 
 ## Design Decisions
 

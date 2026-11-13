@@ -168,11 +168,12 @@ is the serialization format.
 
 `build` and `diff` are exceptions: they serialize their top-level structs (`JobDocument`,
 and the `TemplateDiff` document) directly with `serde_json::to_string_pretty` or
-`serde_saphyr::to_string`, not through one `serde_json::Value`. A `Value` object sorts its
-keys, which would reorder task parameter definitions, and definition order is task order.
+`serde_saphyr::to_string`, not through one `serde_json::Value`, so their fields print in the
+structs' order rather than sorted.
 Inside the `diff` document, each `job` tree node and each change's `raw` is a `Value`, so
-their keys are sorted; a whole node's `raw` writes `taskParameterDefinitions` as a list of
-`{name, definition}` to keep definition order.
+their keys are sorted. Neither depends on key order: `taskParameterDefinitions` is a list
+in definition order in every job document (see `specs/model/host-support.md`, "Host
+encoding").
 
 ### JSON/YAML Construction
 

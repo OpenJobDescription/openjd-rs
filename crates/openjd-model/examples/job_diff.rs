@@ -26,14 +26,14 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use openjd_model::job::apply::{plan, Action, Op, TaskChange};
+use openjd_model::job::apply::{plan, Action, Op, TaskChange, TaskOp};
 use openjd_model::job::diff::{diff_environments, diff_jobs, DiffOptions, DiffTree};
 use openjd_model::job::task_delta::TaskBox;
 use openjd_model::job::TaskParamRange;
-use openjd_model::job::{Job, StepParameterSpace, TaskParameter};
+use openjd_model::job::{Job, TaskParameter};
 use openjd_model::{
     convert_environment, create_job, decode_template, preprocess_job_parameters, CallerLimits,
-    DecodedTemplate, JobParameterInputValues, PathParameterOptions, StepParameterSpaceIterator,
+    DecodedTemplate, JobParameterInputValues, PathParameterOptions,
 };
 
 struct Args {
@@ -225,21 +225,12 @@ fn print_plan(old: &Job, new: &Job) -> Result<(), String> {
             Action::Job(_) => "job        MODIFY".to_string(),
             Action::Parameter(o) => format!("param      {}", name_of(o, |p| &p.name)),
             Action::Environment(i, o) => format!("jobEnv#{i:<2}  {}", name_of(o, |e| &e.name)),
-            Action::Step(i, o) => {
-                let s = match o {
-                    Op::Remove { .. } => &old.steps[*i],
-                    _ => &new.steps[*i],
-                };
-                format!("step#{i:<2}    {} {}", verb(o), s.name)
+            Action::Step(s, o) => {
+                format!("step#{:<2}    {} {}", s.index, verb(o), s.name)
             }
-            Action::Tasks {
-                step,
-                change,
-                space,
-            } => format!(
-                "step#{step:<2}    TASKS  {}",
-                describe_change(change, *space)
-            ),
+            Action::Tasks(step, t) => {
+                format!("step#{:<2}    TASKS  {}", step.index, describe_change(t))
+            }
             _ => "?".into(),
         };
         println!("{:>3}. {what:<60} [{}]", n + 1, kinds.join(", "));
@@ -264,44 +255,23 @@ fn name_of<'a, T>(op: &Op<'a, T>, f: impl Fn(&'a T) -> &'a String) -> String {
     }
 }
 
-fn describe_change(change: &TaskChange, space: Option<&StepParameterSpace>) -> String {
-    match change {
+fn describe_change(t: &TaskOp<'_>) -> String {
+    match &t.change {
         TaskChange::Boxes(d) => {
             let mut parts = vec![format!("keep {} [{}]", d.kept.len(), describe(&d.kept))];
-            let mut next = d.old.len();
             for b in &d.added {
-                parts.push(format!(
-                    "add {} [{}] -> INDEX#{}..{}",
-                    b.len(),
-                    describe(b),
-                    next,
-                    next.saturating_add(b.len()).saturating_sub(1)
-                ));
-                next = next.saturating_add(b.len());
+                parts.push(format!("add {} [{}]", b.len(), describe(b)));
             }
             for b in &d.removed {
-                let first = b
-                    .tasks()
-                    .ok()
-                    .and_then(|mut it| it.next())
-                    .and_then(|t| d.old.index_of(&t));
-                parts.push(format!(
-                    "remove {} [{}] from INDEX#{}",
-                    b.len(),
-                    describe(b),
-                    first.map_or("?".into(), |i| i.to_string())
-                ));
+                parts.push(format!("remove {} [{}]", b.len(), describe(b)));
             }
             parts.join("; ")
         }
-        TaskChange::All => format!(
-            "all {} -> INDEX#0..",
-            space
-                .map_or(Ok(1), |s| StepParameterSpaceIterator::new(s)
-                    .map(|i| i.len()))
-                .unwrap_or(0)
+        TaskChange::All => format!("all {}", t.added_count().unwrap_or(0)),
+        TaskChange::Replace => format!(
+            "replace all with {} (no per-task mapping)",
+            t.added_count().unwrap_or(0)
         ),
-        TaskChange::Replace => "replace all (no per-task mapping)".into(),
     }
 }
 
