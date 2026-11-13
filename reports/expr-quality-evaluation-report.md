@@ -79,7 +79,7 @@ All 25 source files were reviewed. Quality is generally high: pervasive doc comm
 
 - **Error-assertion standard:** the caret/multi-line full-message pattern from `test_error_formatting.rs` is replicated across 17+ files — compliance is the norm. Biggest gap: **29 statement-rejection tests in `test_evaluation.rs`** (lines 180, 401–442, 709–775: `x = 1`, `import os`, `del`, async/match forms) assert only `eval_fails` with no message content. `test_regex_validation.rs` asserts keyword disjunctions instead of exact messages and has zero caret assertions; `test_path_mapping.rs` has four bare `is_err()` checks (lines 909–1005); `test_unresolved_eval.rs:256` accepts either error or unresolved result, pinning neither.
 - **Duplication/brittleness:** `src/types.rs` unit test `basic_types` is byte-identical to one in `test_types.rs`; `test_int64_bounds.rs` has `eval_fails` tests redundant with adjacent full-message twins; eval/assert helpers are copy-pasted into nearly every file with `#[allow(dead_code)]` noise (extract a shared `tests/integration/common.rs`). Exact operation-count assertions (e.g. "count (51) exceeded limit (50)") deliberately pin the cost model and will break on any metering change.
-- **Structural gap:** no property-based or fuzz testing, despite explicit DoS guards (depth/memory/op limits) that would benefit from a never-panic invariant harness — §7 shows exactly the class of bug such a harness would have caught.
+- ~~**Structural gap:** no property-based or fuzz testing, despite explicit DoS guards (depth/memory/op limits) that would benefit from a never-panic invariant harness — §7 shows exactly the class of bug such a harness would have caught.~~ **Resolved** — `fuzz/` (see recommendation 20).
 
 ## 5. Python Comparison
 
@@ -97,7 +97,7 @@ Compared against `openjd-model-for-python` (branch `expr`; 1,366 test functions 
 
 **API design:** Rust's structured `ExpressionErrorKind`, string-DSL `register_sig`, typed list variants, and `EvalBuilder` are supersets/equivalents of the Python API; the spec's "Recommended Library Interface" permits this. Path-format mismatch messages render the format differently (`POSIX` vs Rust `Debug` formatting) — worth normalizing.
 
-**Test parity:** 457 Python test names lack same-named Rust tests, but spot-checks confirm the large majority are renames. Genuine gaps: (1) ~25 Python tests spawn real `pwsh`/`cmd.exe` subprocesses to round-trip-verify `repr_pwsh`/`repr_cmd` escaping — Rust has zero subprocess-based verification (notable because `cmd_quote`'s handling of trailing backslashes before the closing quote is questionable — see §7, X15 note); (2) `test_fuzz.py` parser no-crash tests have no Rust counterpart; (3) one error-formatting case.
+**Test parity:** 457 Python test names lack same-named Rust tests, but spot-checks confirm the large majority are renames. Genuine gaps: (1) ~25 Python tests spawn real `pwsh`/`cmd.exe` subprocesses to round-trip-verify `repr_pwsh`/`repr_cmd` escaping — Rust has zero subprocess-based verification (notable because `cmd_quote`'s handling of trailing backslashes before the closing quote is questionable — see §7, X15 note); (2) ~~`test_fuzz.py` parser no-crash tests have no Rust counterpart~~ **Resolved** — `fuzz/` (`expr_parse`, `expr_eval_text`, and others); (3) one error-formatting case.
 
 ## 6. Build and Test Results
 
@@ -167,6 +167,6 @@ Additional note for spec cross-check: `cmd_quote` does not double backslashes pr
 ### Priority 4 — Tests and robustness
 
 19. **Upgrade the 29 statement-rejection tests in `test_evaluation.rs` to full-message assertions**; tighten `test_regex_validation.rs` and the four bare `is_err()` checks in `test_path_mapping.rs`; pin the behavior in `test_unresolved_eval.rs:256`.
-20. **Add a property-based/fuzz harness** (proptest or cargo-fuzz) asserting the evaluator never panics on arbitrary input — it would have caught X1–X8 mechanically; port the spirit of Python's `test_fuzz.py`.
+20. ~~**Add a property-based/fuzz harness** (proptest or cargo-fuzz) asserting the evaluator never panics on arbitrary input — it would have caught X1–X8 mechanically; port the spirit of Python's `test_fuzz.py`.~~ **Resolved** — `fuzz/` (cargo-fuzz), with type-soundness, round-trip, and allocation-budget oracles beyond never-panic.
 21. **Extract a shared `tests/integration/common.rs`** for the copy-pasted eval/assert helpers; remove the duplicated `basic_types` unit test and redundant `eval_fails` twins.
 22. **Move the format-string segment cap inside the parse loop**; ~~replace `mul_list`'s per-element `count_op` loop with a single `count_ops(n)`~~ **Resolved** — list multiplication now bulk-meters the checked result length; add list-comparison fast paths that avoid per-element `String` clones.

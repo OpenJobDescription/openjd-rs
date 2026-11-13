@@ -1,0 +1,8 @@
+specificationVersion: jobtemplate-2023-09
+name: TestJob
+extensions:
+  - FEATURE_BUNDLE_1
+steps:
+  - name: TestStep
+    bash:  
+    script: echo "Task ran"

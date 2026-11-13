@@ -1,0 +1,5 @@
+# String repetition that gxcee!=sions:
+- EXPR
+name: TestJob
+ste    - -c
+        - "print(r'{{ 'a' * 100000000 }}')"

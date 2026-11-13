@@ -1,0 +1,1 @@
+Param.F or len([1] + ['a']) > 0

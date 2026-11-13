@@ -1,0 +1,7 @@
+{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "J{{ len([x for x in Param.S]) }}",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [{"name": "S", "type": "STRING", "default": "ab"}],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}]
+    }

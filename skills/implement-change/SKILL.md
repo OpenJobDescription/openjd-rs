@@ -124,7 +124,14 @@ Add the following checks when they apply:
 - the relevant slice of the conformance suite (see `AGENTS.md`), when
   template validation or job execution behavior changed;
 - the S3 integration tests, when `openjd-snapshots` changed (see `AGENTS.md`);
-- `scripts/check_copyright_headers.sh`, when files were added.
+- `scripts/check_copyright_headers.sh`, when files were added;
+- the fuzz crate's replay tests (`cargo test --manifest-path fuzz/Cargo.toml
+  --no-default-features`), fmt, and clippy (`--no-default-features --lib
+  --tests --examples`, as `fuzz.yml` runs it), when library behavior, public API,
+  dependencies, or `fuzz/` changed; and
+  `python3 scripts/check_fuzz_api_coverage.py --generate` (Python 3.11+,
+  pinned nightly, cargo-llvm-cov), when public functions were added or
+  removed. See `AGENTS.md` "Fuzzing".
 
 If a check cannot run locally (no Docker, no test user, no S3 bucket), say so
 in the audit inputs and the final summary, and rely on CI for it. Local

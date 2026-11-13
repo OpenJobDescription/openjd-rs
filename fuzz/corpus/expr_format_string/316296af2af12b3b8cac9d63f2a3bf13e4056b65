@@ -1,0 +1,10 @@
+specif: TestJob
+steps:
+- name: Step1
+  script:
+    actions:
+      onRun:
+        comn
+    :
+        - -c
+        - print(r'{{ 1e300 * 1e300 }}')
