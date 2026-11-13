@@ -36,6 +36,7 @@ must contain a dictionary mapping parameter names to values. Each value is conve
 `ExprValue` via `json_val_to_expr()`:
 
 - JSON strings → `ExprValue::String`
+- JSON numbers → see [Value Coercion](#value-coercion)
 - All other JSON types → `ExprValue::String(value.to_string())` (stringified)
 
 ### Format 3: Inline JSON
@@ -68,21 +69,46 @@ the model crate's `CallerLimits::max_template_size`.
 
 ### Value Coercion
 
-`json_val_to_expr()` converts all JSON values to `ExprValue::String`:
+`json_val_to_expr()` converts a JSON or YAML value to an `ExprValue`. The model crate's
+parameter preprocessing then coerces it to the parameter's declared type. The caller passes
+the names of the FLOAT parameters the job and environment templates define
+(`float_parameter_names`), because a number given to a FLOAT is read differently:
 
-```rust
-fn json_val_to_expr(v: &serde_json::Value) -> ExprValue {
-    match v {
-        serde_json::Value::String(s) => ExprValue::String(s.clone()),
-        other => ExprValue::String(other.to_string()),
-    }
-}
-```
+- A string is an `ExprValue::String`.
+- Any number given to a FLOAT parameter is an `ExprValue::Float` with no spelling, so it is
+  written the way a computed float is, CPython's `repr` (Expression Language §1.3.4):
+  `{"F": 2}` is `2.0`, `{"F": 1e20}` is `1e+20`, `{"F": 0.00001}` is `1e-05`, and
+  `{"F": 18446744073709551615}` is `1.8446744073709552e+19`. Zero is `0.0`.
+- For any other parameter, a number serde_json reads as a float is an `ExprValue::String`
+  holding its text as Python writes it (`repr(float)`, which is also `str(float)`):
+  `format_float`'s text, but `-0.0` for negative zero. A STRING gets that text, as Python's
+  `str` gives it. An INT or BOOL reads the text, so `{"I": 3.0}` is refused, as `-p I=3.0`
+  is. serde_json reads `-0` (so an INT refuses it; Python accepts it as `0`), and an
+  integer below `i64::MIN` or above `u64::MAX` (written `-9.223372036854776e+18`, which an
+  INT error quotes), as a float.
+- For any other parameter, an integer is an `ExprValue::String` of its digits, so a STRING
+  keeps them and an INT reads them, or quotes them in an error.
+- Anything else (a boolean, `null`, a list, an object) is a string of its JSON text. A list
+  parameter reads that text as JSON, so a number item of a `LIST[FLOAT]` is a float with
+  no spelling too.
 
-This means numeric JSON values like `{"Frames": 100}` become the string `"100"`. The
-model crate's parameter preprocessing handles parsing this string into the correct type
-based on the parameter definition. This matches the Python CLI's behavior where all
-parameter values pass through as strings initially.
+**Divergence from openjd-cli / openjd-model-for-python.** The Python CLI passes the decoded
+value itself, so the differences include:
+
+- A FLOAT value given as a JSON integer is written as the integer (`{"F": 2}` is `2`, not
+  `2.0`); a float is written as `str(float)`, which is `repr`.
+- A STRING given `true` is `True` in Python and `true` here, and one given an integer below
+  `i64::MIN` or above `u64::MAX` keeps its digits in Python.
+- Python refuses a number given to a BOOL, RANGE_EXPR or PATH parameter, which this CLI reads
+  as its text. It refuses a number item of a `LIST[STRING]` and a float item of a
+  `LIST[INT]`; this CLI passes a list as its JSON text, and the model reads a number item of
+  a `LIST[STRING]` as its text and an integral float item of a `LIST[INT]` (`[3.0]`) as the
+  integer.
+- Python reads a YAML parameter file as YAML 1.1, so `F: 1e20` is the string `1e20` there and
+  the number `1e20` here.
+
+A value given as `Key=Value` is always a string: `-p F=2` is the `<floatstring>` `2`, which
+keeps its spelling (Template Schemas §7.5) and is written `2`.
 
 ## Task Parameters (`-t` / `--task-param`)
 
@@ -213,8 +239,9 @@ The CLI validates extension names against `ModelExtension::ALL` before template 
 
 ## Cross-Module Dependency
 
-`parse_cli_parameters()` lives in `run/params.rs`, is re-exported by the public `run`
-module, and is called by `summary.rs` via `crate::run::parse_cli_parameters()`.
+`parse_cli_parameters()` and `float_parameter_names()` live in `run/params.rs`, are
+re-exported by the public `run` module, and are called by `summary.rs` via
+`crate::run::parse_cli_parameters()` and `crate::run::float_parameter_names()`.
 
 This cross-module dependency exists because both `summary` and `run` need to parse `-p`
 arguments identically. The function could be extracted to a shared module, but with only

@@ -54,7 +54,8 @@ The crate is a binary (`[[bin]] name = "openjd"`), so it has no library API. How
 normalization from the run module.
 
 **Exported from `run/mod.rs` (crate-internal):**
-- `parse_cli_parameters(&[String]) -> Result<HashMap<String, ExprValue>>` — Parses `-p`/`--parameter` arguments
+- `parse_cli_parameters(&[String], &HashSet<String>) -> Result<HashMap<String, ExprValue>>` — Parses `-p`/`--parameter` arguments; the set names the FLOAT parameters (see [parameter-parsing.md](parameter-parsing.md#value-coercion))
+- `float_parameter_names(&JobTemplate, &[EnvironmentTemplate]) -> HashSet<String>` — The FLOAT parameter names for `parse_cli_parameters`
 - `strip_extended_prefix(&Path) -> PathBuf` — Removes Windows extended-length path prefixes
 
 ## Entry Point Flow

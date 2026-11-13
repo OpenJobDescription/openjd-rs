@@ -82,7 +82,10 @@ pub fn execute(args: SummaryArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Parse parameters
-    let input_values = crate::run::parse_cli_parameters(&args.parameters)?;
+    let input_values = crate::run::parse_cli_parameters(
+        &args.parameters,
+        &crate::run::float_parameter_names(&job_template, &env_templates),
+    )?;
     let job_template_dir = crate::run::strip_extended_prefix(
         std::fs::canonicalize(path)?
             .parent()

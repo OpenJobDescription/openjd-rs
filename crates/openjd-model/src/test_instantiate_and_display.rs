@@ -185,7 +185,9 @@ fn flexfloat_display_large_whole_number_overflow() {
     let param = &jt.parameter_definitions.as_ref().unwrap()[0];
     let default_str = param.default_value().unwrap();
 
-    let expected_correct = "10000000000000000000";
+    // A FLOAT default given as a number is written as CPython's `repr` writes
+    // it (Expression Language §1.3.4).
+    let expected_correct = "1e+19";
     let i64_max_str = i64::MAX.to_string();
 
     if default_str == i64_max_str {
@@ -224,4 +226,5 @@ fn flexfloat_display_negative_large_whole_number() {
              -1e19 displayed as i64::MIN ({i64_min_str})"
         );
     }
+    assert_eq!(default_str, "-1e+19");
 }

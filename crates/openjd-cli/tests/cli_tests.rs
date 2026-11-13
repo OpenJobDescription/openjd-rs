@@ -448,6 +448,204 @@ mod common_params {
         assert!(stdout.contains("DoTask FromFile"), "stdout: {stdout}");
     }
 
+    /// A template that echoes FLOAT, STRING, INT and LIST[FLOAT] parameters.
+    fn number_params_template() -> NamedTempFile {
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
+extensions: [EXPR]
+name: test
+parameterDefinitions:
+  - {{name: F, type: FLOAT}}
+  - {{name: S, type: STRING}}
+  - {{name: I, type: INT}}
+  - {{name: L, type: "LIST[FLOAT]"}}
+steps:
+  - name: s1
+    script:
+      actions:
+        onRun:
+          command: echo
+          args: ["F={{{{Param.F}}}} S={{{{Param.S}}}} I={{{{Param.I}}}} L={{{{Param.L}}}}"]
+"#
+        )
+        .unwrap();
+        f
+    }
+
+    #[test]
+    fn test_params_json_numbers_are_numbers() {
+        // A FLOAT given as a JSON or YAML number is written as CPython's `repr`
+        // writes it, as a computed float is (Expression Language §1.3.4); the
+        // Python CLI passes the number itself to job creation, too. A STRING
+        // given a number gets that number's text, `str(1e20)` in Python.
+        let template = number_params_template();
+        let template = template.path().to_str().unwrap();
+        let expected = "F=2.0 S=1e+20 I=3 L=[2.0, 1e-05]";
+        let inline = r#"{"F": 2, "S": 1e20, "I": 3, "L": [2, 0.00001]}"#;
+        let mut json = NamedTempFile::with_suffix(".json").unwrap();
+        write!(json, "{inline}").unwrap();
+        let mut yaml = NamedTempFile::with_suffix(".yaml").unwrap();
+        writeln!(yaml, "{{F: 2, S: 1e20, I: 3, L: [2, 0.00001]}}").unwrap();
+        for arg in [
+            inline.to_string(),
+            format!("file://{}", json.path().display()),
+            format!("file://{}", yaml.path().display()),
+        ] {
+            let (code, stdout, stderr) = run_cli(&["run", template, "-p", &arg]);
+            assert_eq!(code, 0, "{arg}: stderr: {stderr}");
+            assert!(stdout.contains(expected), "{arg}: stdout: {stdout}");
+        }
+        for (number, text) in [
+            ("0.00001", "1e-05"),
+            ("1e-7", "1e-07"),
+            ("1e16", "1e+16"),
+            ("1e15", "1000000000000000.0"),
+            ("-0.0", "0.0"),
+            ("1.4757395258967641e+20", "1.4757395258967641e+20"),
+            // Integers outside the signed 64-bit range: serde_json holds the
+            // first two as a u64 and reads the third as a float.
+            ("9223372036854775808", "9.223372036854776e+18"),
+            ("18446744073709551615", "1.8446744073709552e+19"),
+            ("-9223372036854775809", "-9.223372036854776e+18"),
+        ] {
+            let arg = format!(r#"{{"F": {number}, "S": "s", "I": 1, "L": [{number}]}}"#);
+            let (code, stdout, stderr) = run_cli(&["run", template, "-p", &arg]);
+            assert_eq!(code, 0, "{arg}: stderr: {stderr}");
+            assert!(
+                stdout.contains(&format!("F={text} S=s I=1 L=[{text}]")),
+                "{arg}: stdout: {stdout}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_params_large_integer_reaches_a_float_by_every_route() {
+        // An integer of 2^63 or more is the only number whose text depends on
+        // the CLI knowing the parameter is a FLOAT: a smaller one is an INT
+        // value that a FLOAT widens to the same float. So it checks that the
+        // FLOAT names reach the parser from the job template and from an
+        // environment template, through inline JSON and `file://` JSON and
+        // YAML, for `run` and `summary`.
+        let mut env = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            env,
+            r#"specificationVersion: environment-2023-09
+parameterDefinitions:
+  - {{name: EF, type: FLOAT}}
+environment:
+  name: Env
+  script:
+    actions:
+      onEnter:
+        command: echo
+        args: ["EF={{{{Param.EF}}}}"]
+"#
+        )
+        .unwrap();
+        let template = number_params_template();
+        let template = template.path().to_str().unwrap();
+        let env = env.path().to_str().unwrap();
+        let values =
+            r#"{"F": 18446744073709551615, "EF": 9223372036854775808, "S": "s", "I": 1, "L": []}"#;
+        let mut json = NamedTempFile::with_suffix(".json").unwrap();
+        write!(json, "{values}").unwrap();
+        let mut yaml = NamedTempFile::with_suffix(".yaml").unwrap();
+        writeln!(yaml, "{values}").unwrap();
+        for arg in [
+            values.to_string(),
+            format!("file://{}", json.path().display()),
+            format!("file://{}", yaml.path().display()),
+        ] {
+            let (code, stdout, stderr) =
+                run_cli(&["run", template, "--environment", env, "-p", &arg]);
+            assert_eq!(code, 0, "{arg}: stderr: {stderr}");
+            for want in ["F=1.8446744073709552e+19 S=s", "EF=9.223372036854776e+18"] {
+                assert!(stdout.contains(want), "{arg}: {want}: stdout: {stdout}");
+            }
+            let (code, stdout, stderr) =
+                run_cli(&["summary", template, "--environment", env, "-p", &arg]);
+            assert_eq!(code, 0, "{arg}: stderr: {stderr}");
+            assert!(
+                stdout.contains("F (FLOAT): 1.8446744073709552e+19"),
+                "{arg}: stdout: {stdout}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_params_json_numbers_for_other_types_read_as_their_text() {
+        // Only a FLOAT changes when a number stays a number: every other type
+        // reads a JSON number as it reads the number's text.
+        let template = number_params_template();
+        let template = template.path().to_str().unwrap();
+        for (args, expected) in [
+            // A STRING gets the text Python's `str` gives.
+            (r#"{"F": 1, "S": 2, "I": 3, "L": []}"#, "S=2 I=3"),
+            (r#"{"F": 1, "S": 0.00001, "I": 3, "L": []}"#, "S=1e-05 I=3"),
+            (r#"{"F": 1, "S": -0.0, "I": 3, "L": []}"#, "S=-0.0 I=3"),
+            (
+                r#"{"F": 1, "S": 18446744073709551615, "I": 3, "L": []}"#,
+                "S=18446744073709551615 I=3",
+            ),
+        ] {
+            let (code, stdout, stderr) = run_cli(&["run", template, "-p", args]);
+            assert_eq!(code, 0, "{args}: stderr: {stderr}");
+            assert!(stdout.contains(expected), "{args}: stdout: {stdout}");
+        }
+        // An INT given a float, or an integer outside the signed 64-bit range,
+        // is refused, and the error quotes the number as written.
+        for (number, quoted) in [
+            ("3.0", "3.0"),
+            ("1e2", "100.0"),
+            ("9223372036854775808", "9223372036854775808"),
+            ("-9223372036854775809", "-9.223372036854776e+18"),
+        ] {
+            let args = format!(r#"{{"F": 1, "S": "s", "I": {number}, "L": []}}"#);
+            let (code, stdout, stderr) = run_cli(&["run", template, "-p", &args]);
+            assert_ne!(code, 0, "{args}: stdout: {stdout}");
+            let want = format!("Value '{quoted}' is not a valid integer or integer string.");
+            assert!(
+                stdout.contains(&want) || stderr.contains(&want),
+                "{args}: stdout: {stdout} stderr: {stderr}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_params_string_values_keep_their_spelling() {
+        // A FLOAT given as a string keeps its spelling (Template Schemas §7.5),
+        // from Key=Value or as a JSON string.
+        let template = number_params_template();
+        let template = template.path().to_str().unwrap();
+        for args in [
+            vec![
+                "-p",
+                "F=2",
+                "-p",
+                "S=1e20",
+                "-p",
+                "I=3",
+                "-p",
+                "L=[2, \"1e20\"]",
+            ],
+            vec![
+                "-p",
+                r#"{"F": "2", "S": "1e20", "I": "3", "L": [2, "1e20"]}"#,
+            ],
+        ] {
+            let mut cli_args = vec!["run", template];
+            cli_args.extend(&args);
+            let (code, stdout, stderr) = run_cli(&cli_args);
+            assert_eq!(code, 0, "{args:?}: stderr: {stderr}");
+            assert!(
+                stdout.contains("F=2 S=1e20 I=3 L=[2.0, 1e20]"),
+                "{args:?}: stdout: {stdout}"
+            );
+        }
+    }
+
     #[test]
     fn test_params_value_with_equals() {
         // Create a template that accepts a STRING param and echoes it
@@ -2281,6 +2479,37 @@ mod context_aware_help {
     }
 
     #[test]
+    fn test_help_writes_float_numbers_as_repr() {
+        // A FLOAT default and range given as numbers are written as a float
+        // value is, CPython's `repr`; a default given as a string keeps its
+        // spelling.
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
+name: FloatHelp
+parameterDefinitions:
+  - {{name: A, type: FLOAT, default: 2, minValue: 0, maxValue: 1e20}}
+  - {{name: B, type: FLOAT, default: "2.50", minValue: 0.00001}}
+  - {{name: C, type: FLOAT, maxValue: 1}}
+steps:
+  - name: s
+    script: {{actions: {{onRun: {{command: echo}}}}}}
+"#
+        )
+        .unwrap();
+        let (code, stdout, _stderr) = run_cli(&["run", f.path().to_str().unwrap(), "--help"]);
+        assert_eq!(code, 0);
+        for want in [
+            "A (FLOAT) [default: 2.0] (range: 0.0 to 1e+20)",
+            "B (FLOAT) [default: 2.50] (minimum: 1e-05)",
+            "C (FLOAT) [required] (maximum: 1.0)",
+        ] {
+            assert!(stdout.contains(want), "{want}: stdout: {stdout}");
+        }
+    }
+
+    #[test]
     fn test_help_includes_standard_options() {
         let tdir = templates_dir();
         let (code, stdout, _stderr) =
@@ -2389,7 +2618,8 @@ mod context_aware_help {
             stdout.contains("Ratio (FLOAT) [default: 0.5]"),
             "stdout: {stdout}"
         );
-        assert!(stdout.contains("range: 0 to 1"), "stdout: {stdout}");
+        // Written as a float value is (specs/cli/help.md).
+        assert!(stdout.contains("range: 0.0 to 1.0"), "stdout: {stdout}");
         assert!(
             stdout.contains("Username (STRING) [default: 'user']"),
             "stdout: {stdout}"

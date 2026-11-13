@@ -27,6 +27,8 @@ mod test_evaluation;
 mod test_expr_value;
 #[path = "integration/test_expression_depth.rs"]
 mod test_expression_depth;
+#[path = "integration/test_float_repr_cpython.rs"]
+mod test_float_repr_cpython;
 #[path = "integration/test_format_strings.rs"]
 mod test_format_strings;
 #[path = "integration/test_function_context.rs"]

@@ -6,14 +6,17 @@
 
 use crate::common::{read_input_file_with, MAX_FILE_INPUT_SIZE};
 use openjd_sessions::path_mapping::PathMappingRule;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 /// Parse job parameters from CLI `--job-param` / `-p` arguments.
 ///
 /// Supports `Key=Value`, `file://path` (JSON/YAML), and inline JSON `{...}`.
+/// `float_params` names the FLOAT parameters the templates define, so that a
+/// number given to one is a float value (see `json_val_to_expr`).
 pub fn parse_cli_parameters(
     args: &[String],
+    float_params: &HashSet<String>,
 ) -> Result<HashMap<String, openjd_expr::ExprValue>, Box<dyn std::error::Error>> {
     let mut params = HashMap::new();
     for arg in args {
@@ -38,14 +41,14 @@ pub fn parse_cli_parameters(
             )
             .map_err(|_| format!("Job parameter file '{}' should contain a dictionary.", arg))?;
             for (k, v) in value.as_object().unwrap() {
-                params.insert(k.clone(), json_val_to_expr(v));
+                params.insert(k.clone(), json_val_to_expr(v, float_params.contains(k)));
             }
         } else if arg.starts_with('{') && arg.ends_with('}') {
             let value: serde_json::Value = serde_json::from_str(arg)
                 .map_err(|_| format!("Job parameter string ('{arg}') not formatted correctly. It must be key=value pairs, inline JSON, or a path to a JSON or YAML document prefixed with 'file://'."))?;
             if let Some(obj) = value.as_object() {
                 for (k, v) in obj {
-                    params.insert(k.clone(), json_val_to_expr(v));
+                    params.insert(k.clone(), json_val_to_expr(v, float_params.contains(k)));
                 }
             } else {
                 return Err(format!("Job parameter ('{arg}') must contain a dictionary mapping job parameters to their value.").into());
@@ -62,10 +65,69 @@ pub fn parse_cli_parameters(
     Ok(params)
 }
 
-fn json_val_to_expr(v: &serde_json::Value) -> openjd_expr::ExprValue {
+/// The names of the FLOAT job parameters `job_template` and
+/// `environment_templates` define, for [`parse_cli_parameters`].
+pub fn float_parameter_names(
+    job_template: &openjd_model::template::JobTemplate,
+    environment_templates: &[openjd_model::template::EnvironmentTemplate],
+) -> HashSet<String> {
+    let env_params = environment_templates
+        .iter()
+        .filter_map(|et| et.parameter_definitions.as_deref())
+        .flatten();
+    job_template
+        .parameter_definitions_list()
+        .iter()
+        .chain(env_params)
+        .filter(|p| p.job_param_type() == openjd_model::types::JobParameterType::Float)
+        .map(|p| p.name().to_string())
+        .collect()
+}
+
+/// A parameter value from a JSON or YAML document. `float_param` says the
+/// parameter is a FLOAT.
+///
+/// A FLOAT given as a number has no spelling, so it is written the way a
+/// computed float is, as CPython's `repr` writes it (Expression Language
+/// §1.3.4): the number `2` is `2.0`. Here:
+///
+/// - Any number given to a FLOAT is a float value with no spelling, whatever
+///   its size.
+/// - Otherwise, a number serde_json reads as a float is its text as Python
+///   writes it (`repr(float)`, which is also `str(float)`): `format_float`'s
+///   text, but `-0.0` for negative zero. An INT or BOOL reads that text, so
+///   `3.0` is refused as it was when every number was text. serde_json reads
+///   `-0`, and an integer below `i64::MIN` or above `u64::MAX`, as a float.
+/// - Otherwise, an integer is its digits, so a STRING keeps them and an INT
+///   reads or quotes them.
+///
+/// Anything else is passed as its JSON text.
+fn json_val_to_expr(v: &serde_json::Value, float_param: bool) -> openjd_expr::ExprValue {
+    use openjd_expr::ExprValue;
     match v {
-        serde_json::Value::String(s) => openjd_expr::ExprValue::String(s.clone()),
-        other => openjd_expr::ExprValue::String(other.to_string()),
+        serde_json::Value::String(s) => ExprValue::String(s.clone()),
+        serde_json::Value::Number(n) => {
+            let float = n
+                .as_f64()
+                .and_then(|f| openjd_expr::value::Float64::new(f).ok());
+            match float {
+                Some(f) if float_param => ExprValue::Float(f),
+                Some(f) if n.is_f64() => ExprValue::String(python_float_text(f.value(), n)),
+                _ => ExprValue::String(n.to_string()),
+            }
+        }
+        other => ExprValue::String(other.to_string()),
+    }
+}
+
+/// `f`, read from the JSON number `n`, as Python's `repr(float)` writes it.
+/// `f` has passed `Float64::new`, which drops the sign of zero, so the sign
+/// is read from `n`.
+fn python_float_text(f: f64, n: &serde_json::Number) -> String {
+    if f == 0.0 && n.as_f64().is_some_and(f64::is_sign_negative) {
+        "-0.0".to_string()
+    } else {
+        openjd_expr::value::format_float(f)
     }
 }
 

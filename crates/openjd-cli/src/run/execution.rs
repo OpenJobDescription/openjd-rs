@@ -98,7 +98,10 @@ fn prepare_run(args: &RunArgs) -> Result<PreparedRun, RunError> {
         )?);
     }
 
-    let input_values = parse_cli_parameters(&args.parameters)?;
+    let input_values = parse_cli_parameters(
+        &args.parameters,
+        &crate::run::float_parameter_names(&job_template, &env_templates),
+    )?;
     let path_rules = load_path_mapping_rules(&args.path_mapping_rules)?;
     let canonical_path = std::fs::canonicalize(path)?;
     let job_template_dir = strip_extended_prefix(

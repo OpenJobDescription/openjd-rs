@@ -164,6 +164,10 @@ fn format_parameter(param: &JobParameterDefinition) -> String {
     let max_f = param.max_value_f64();
 
     if type_name == "FLOAT" {
+        // Written as a float value is, CPython's `repr` (`0.0 to 1.0`), the
+        // same as the FLOAT default beside it.
+        let min_f = min_f.map(openjd_expr::value::format_float);
+        let max_f = max_f.map(openjd_expr::value::format_float);
         match (min_f, max_f) {
             (Some(lo), Some(hi)) => constraints.push(format!("range: {lo} to {hi}")),
             (Some(lo), None) => constraints.push(format!("minimum: {lo}")),
