@@ -1,0 +1,11 @@
+# `openjd diff` example (combination): old side, against combination_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    parameterSpace:
+      taskParameterDefinitions:
+        - {name: Frame, type: INT, range: "1-2"}
+        - {name: Eye, type: STRING, range: [left, right]}
+      combination: "Frame * Eye"
+    script: {actions: {onRun: {command: render, args: ["{{Task.Param.Frame}}", "{{Task.Param.Eye}}"]}}}

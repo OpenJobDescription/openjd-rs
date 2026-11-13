@@ -1,0 +1,8 @@
+# `openjd diff` example (step let that nothing reads): old side, against let_step_unused_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: Demo
+steps:
+  - name: Render
+    let: ["unused = 1"]
+    script: {actions: {onRun: {command: render}}}

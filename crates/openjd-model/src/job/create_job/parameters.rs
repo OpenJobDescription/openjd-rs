@@ -878,6 +878,25 @@ pub fn preprocess_job_parameters(
     environment_templates: &[EnvironmentTemplate],
     path_options: &PathParameterOptions<'_>,
 ) -> Result<JobParameterValues, ModelError> {
+    preprocess_job_parameters_except(
+        job_template,
+        input_values,
+        environment_templates,
+        path_options,
+        &JobParameterValues::new(),
+    )
+}
+
+/// [`preprocess_job_parameters`] for the parameters `supplied` does not
+/// name. A parameter it names counts as given: it gets no default and is
+/// not missing, and its value is neither checked nor returned.
+pub(crate) fn preprocess_job_parameters_except(
+    job_template: &JobTemplate,
+    input_values: &JobParameterInputValues,
+    environment_templates: &[EnvironmentTemplate],
+    path_options: &PathParameterOptions<'_>,
+    supplied: &JobParameterValues,
+) -> Result<JobParameterValues, ModelError> {
     let job_template_dir = path_options.job_template_dir;
     let current_working_dir = path_options.current_working_dir;
     let path_format = path_options.path_format;
@@ -918,7 +937,7 @@ pub fn preprocess_job_parameters(
         has_expr,
     };
 
-    for param in &merged {
+    for param in merged.iter().filter(|p| !supplied.contains_key(&p.name)) {
         let param_type = param.param_type;
         if let Some(input_val) = input_values.get(&param.name) {
             let coerced_opt: Option<openjd_expr::ExprValue> =

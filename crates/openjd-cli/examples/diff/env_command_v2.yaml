@@ -1,0 +1,9 @@
+# `openjd diff` example (environment onEnter command): new side, against env_command_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+jobEnvironments:
+  - name: Tools
+    script: {actions: {onEnter: {command: setup-v2}}}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

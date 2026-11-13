@@ -1,0 +1,8 @@
+# `openjd diff` example (minValue and maxValue): new side, against min_max_value_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+parameterDefinitions:
+  - {name: Samples, type: INT, default: 4, minValue: 2, maxValue: 64}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

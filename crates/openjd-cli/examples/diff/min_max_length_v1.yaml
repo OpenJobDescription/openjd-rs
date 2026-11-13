@@ -1,0 +1,8 @@
+# `openjd diff` example (minLength and maxLength): old side, against min_max_length_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+parameterDefinitions:
+  - {name: Label, type: STRING, default: shot, minLength: 1, maxLength: 16}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

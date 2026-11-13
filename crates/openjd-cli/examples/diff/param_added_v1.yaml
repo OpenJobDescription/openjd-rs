@@ -1,0 +1,6 @@
+# `openjd diff` example (parameter definition): old side, against param_added_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

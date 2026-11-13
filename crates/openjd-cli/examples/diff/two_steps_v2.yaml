@@ -1,0 +1,8 @@
+# `openjd diff` example (two steps changed): new side, against two_steps_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render2}}}
+  - name: Composite
+    script: {actions: {onRun: {command: comp2}}}

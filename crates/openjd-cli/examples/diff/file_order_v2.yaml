@@ -1,0 +1,10 @@
+# `openjd diff` example (embedded file order): new side, against file_order_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    script:
+      actions: {onRun: {command: bash, args: ["{{Task.File.Run}}", "{{Task.File.Config}}"]}}
+      embeddedFiles:
+        - {name: Config, type: TEXT, data: "quality=high"}
+        - {name: Run, type: TEXT, data: render}

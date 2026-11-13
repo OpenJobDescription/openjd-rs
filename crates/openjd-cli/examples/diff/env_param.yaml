@@ -1,0 +1,11 @@
+# `openjd diff` example: a job environment that reads a parameter.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+parameterDefinitions:
+  - {name: Tool, type: STRING, default: v1}
+jobEnvironments:
+  - name: Tools
+    variables: {TOOL: "{{Param.Tool}}"}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

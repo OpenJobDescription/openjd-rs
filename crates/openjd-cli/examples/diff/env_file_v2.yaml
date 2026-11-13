@@ -1,0 +1,12 @@
+# `openjd diff` example (environment embedded file): new side, against env_file_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+jobEnvironments:
+  - name: Tools
+    script:
+      actions: {onEnter: {command: bash, args: ["{{Env.File.Setup}}"]}}
+      embeddedFiles:
+        - {name: Setup, type: TEXT, data: "echo v2"}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

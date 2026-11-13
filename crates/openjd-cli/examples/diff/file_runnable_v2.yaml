@@ -1,0 +1,9 @@
+# `openjd diff` example (embedded file runnable): new side, against file_runnable_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    script:
+      actions: {onRun: {command: "{{Task.File.Run}}"}}
+      embeddedFiles:
+        - {name: Run, type: TEXT, runnable: true, data: render}

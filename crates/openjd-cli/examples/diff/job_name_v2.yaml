@@ -1,0 +1,6 @@
+# `openjd diff` example (job name): new side, against job_name_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo v2
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

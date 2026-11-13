@@ -1,0 +1,9 @@
+# `openjd diff` example (environment variables): old side, against env_variables_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+jobEnvironments:
+  - name: Tools
+    variables: {TOOL: v1}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

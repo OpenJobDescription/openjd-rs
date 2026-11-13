@@ -6,11 +6,15 @@ The CLI accepts parameters in several formats across multiple arguments. This do
 covers all parameter parsing functions in the CLI, their input formats, error handling,
 and the rationale for supporting each format.
 
-## Job Parameters (`-p` / `--parameter`)
+## Job Parameters (`-p`, `--job-param`, `--parameter`)
 
-`parse_cli_parameters()` in `run/params.rs` handles the `-p`/`--parameter` argument, which is
-used by both the `summary` and `run` commands. It accepts three input formats and returns
-a `HashMap<String, ExprValue>`.
+`parse_cli_parameters()` in `run/params.rs` parses job parameters for `run`, `summary` and
+`diff`. The short flag is `-p` in all three. The long flag is `--job-param` for `run` and
+`summary`, with `--parameter` as a hidden alias. The long flag is `--parameter` for `diff`,
+with `--job-param` as a hidden alias. `diff` also parses `--old-parameter` and
+`--new-parameter` with it (see [diff.md](diff.md)). The values of each call are applied in
+order, so a later value wins. It accepts three input formats and returns a
+`HashMap<String, ExprValue>`.
 
 ### Format 1: Key=Value Pairs
 
@@ -55,6 +59,9 @@ Error messages match the Python CLI's format for consistency:
 - Bad format: `"Job parameter string ('<arg>') not formatted correctly. It must be key=value pairs, inline JSON, or a path to a JSON or YAML document prefixed with 'file://'."`
 - Non-dict file: `"Job parameter file '<arg>' should contain a dictionary."`
 - Non-dict JSON: `"Job parameter ('<arg>') must contain a dictionary mapping job parameters to their value."`
+  This is unreachable through the CLI today. Inline JSON is only tried when the argument
+  starts with `{` and ends with `}`, so any text that parses is an object; anything else
+  gets the bad-format message.
 - Oversized file: `"File '<path>' exceeds maximum size of <N> bytes."`
 
 ### File Size Limit
@@ -83,6 +90,30 @@ This means numeric JSON values like `{"Frames": 100}` become the string `"100"`.
 model crate's parameter preprocessing handles parsing this string into the correct type
 based on the parameter definition. This matches the Python CLI's behavior where all
 parameter values pass through as strings initially.
+
+### Known defects (shared by run, summary and diff)
+
+Known bugs in the shared parser. Each was run with `openjd diff t.yaml
+--old-parameter A=x --new-parameter <input>`, where `A` is a STRING.
+
+- JSON `null` becomes the text `null`: `{"A": null}` gives `~ parameter A: x -> null`.
+- The parse location is dropped. A malformed file (`{"A": ` in `bad.json`, or
+  `A: [unclosed` in `bad.yaml`) reports `Job parameter file 'file://bad.json' should
+  contain a dictionary.`. Malformed inline JSON (`{"A": }`) reports the generic
+  `Job parameter string ('{"A": }') not formatted correctly. ...`.
+- A duplicate key in a YAML file (`A: a` then `A: b`) reports `Job parameter file
+  'file://dup.yaml' should contain a dictionary.`.
+- The `.json` extension is compared case-sensitively, so a `.JSON` file is read as YAML.
+  `{"A": "a", "A": "b"}` gives `b` from `dupj.json` and `should contain a dictionary` from
+  `dupj.JSON`.
+- `file://file://x.json` strips the prefix twice and reads `x.json`.
+- An integer too large for 64 bits loses digits: `{"A": 123456789012345678901234567890}`
+  gives `1.2345678901234568e+29`, from inline JSON, a JSON file or a YAML file.
+- A YAML file reads `007` and `010` as floats: `A: 007` gives `7.0`, and `A: 010` gives
+  `10.0`.
+- `--new-parameter =v` names no parameter in its error. It reports `Validation error: new
+  parameters: Job parameter values provided for parameters that are not defined in the
+  template: ` with an empty name, then `Values missing for required job parameters: A`.
 
 ## Task Parameters (`-t` / `--task-param`)
 
@@ -214,8 +245,8 @@ The CLI validates extension names against `ModelExtension::ALL` before template 
 ## Cross-Module Dependency
 
 `parse_cli_parameters()` lives in `run/params.rs`, is re-exported by the public `run`
-module, and is called by `summary.rs` via `crate::run::parse_cli_parameters()`.
+module, and is called by `summary.rs` and `diff.rs` via
+`crate::run::parse_cli_parameters()`.
 
-This cross-module dependency exists because both `summary` and `run` need to parse `-p`
-arguments identically. The function could be extracted to a shared module, but with only
-two callers the current arrangement is simpler.
+This cross-module dependency exists because `summary`, `run` and `diff` need to
+parse `-p` arguments identically. The function could be extracted to a shared module.

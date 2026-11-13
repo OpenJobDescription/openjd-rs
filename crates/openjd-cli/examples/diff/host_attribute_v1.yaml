@@ -1,0 +1,8 @@
+# `openjd diff` example (host requirement attribute): old side, against host_attribute_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    hostRequirements:
+      attributes: [{name: attr.worker.os.family, anyOf: [linux]}]
+    script: {actions: {onRun: {command: render}}}

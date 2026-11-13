@@ -1,0 +1,8 @@
+# `openjd diff` example (step order): new side, against step_order_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Composite
+    script: {actions: {onRun: {command: comp}}}
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

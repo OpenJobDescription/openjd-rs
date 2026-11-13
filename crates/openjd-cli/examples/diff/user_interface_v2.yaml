@@ -1,0 +1,11 @@
+# `openjd diff` example (userInterface): new side, against user_interface_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+parameterDefinitions:
+  - name: Quality
+    type: STRING
+    default: low
+    userInterface: {control: LINE_EDIT, label: Render quality, groupLabel: Output}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

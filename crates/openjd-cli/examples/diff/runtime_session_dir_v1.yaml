@@ -1,0 +1,6 @@
+# `openjd diff` example (a Session.WorkingDirectory reference): old side, against runtime_session_dir_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render, args: ["{{Session.WorkingDirectory}}/out"]}}}

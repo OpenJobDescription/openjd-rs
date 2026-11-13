@@ -144,6 +144,282 @@ pub fn openjd_model::error::ValidationErrors::fmt(&self, &mut core::fmt::Formatt
 pub fn openjd_model::error::path_field(&[openjd_model::error::PathElement], &str) -> alloc::vec::Vec<openjd_model::error::PathElement>
 pub fn openjd_model::error::path_index(&[openjd_model::error::PathElement], usize) -> alloc::vec::Vec<openjd_model::error::PathElement>
 pub mod openjd_model::job
+pub mod openjd_model::job::apply
+#[non_exhaustive] pub enum openjd_model::job::apply::Action<'a>
+pub openjd_model::job::apply::Action::Environment(usize, openjd_model::job::apply::Op<'a, openjd_model::job::Environment>)
+pub openjd_model::job::apply::Action::Job(openjd_model::job::apply::Op<'a, openjd_model::job::Job>)
+pub openjd_model::job::apply::Action::Parameter(openjd_model::job::apply::Op<'a, openjd_model::job::JobParameter>)
+pub openjd_model::job::apply::Action::Step(openjd_model::job::apply::StepRef<'a>, openjd_model::job::apply::Op<'a, openjd_model::job::Step>)
+pub openjd_model::job::apply::Action::Tasks(openjd_model::job::apply::StepRef<'a>, openjd_model::job::apply::TaskOp<'a>)
+impl<'a> core::clone::Clone for openjd_model::job::apply::Action<'a>
+pub fn openjd_model::job::apply::Action<'a>::clone(&self) -> openjd_model::job::apply::Action<'a>
+impl<'a> core::cmp::PartialEq for openjd_model::job::apply::Action<'a>
+pub fn openjd_model::job::apply::Action<'a>::eq(&self, &openjd_model::job::apply::Action<'a>) -> bool
+impl<'a> core::fmt::Debug for openjd_model::job::apply::Action<'a>
+pub fn openjd_model::job::apply::Action<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::StructuralPartialEq for openjd_model::job::apply::Action<'a>
+#[non_exhaustive] pub enum openjd_model::job::apply::ApplyError<E>
+pub openjd_model::job::apply::ApplyError::Model(openjd_model::error::ModelError)
+pub openjd_model::job::apply::ApplyError::Refused
+pub openjd_model::job::apply::ApplyError::Refused::op: usize
+pub openjd_model::job::apply::ApplyError::Refused::refusal: openjd_model::job::apply::Refusal
+pub openjd_model::job::apply::ApplyError::Store
+pub openjd_model::job::apply::ApplyError::Store::error: E
+pub openjd_model::job::apply::ApplyError::Store::op: usize
+pub openjd_model::job::apply::ApplyError::Vetoed
+pub openjd_model::job::apply::ApplyError::Vetoed::error: E
+pub openjd_model::job::apply::ApplyError::Vetoed::op: usize
+pub openjd_model::job::apply::ApplyError::Vetoed::target: openjd_model::job::apply::OpTarget
+impl<E: core::fmt::Debug + core::fmt::Display> core::error::Error for openjd_model::job::apply::ApplyError<E>
+pub fn openjd_model::job::apply::ApplyError<E>::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl<E: core::fmt::Debug> core::fmt::Debug for openjd_model::job::apply::ApplyError<E>
+pub fn openjd_model::job::apply::ApplyError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<E: core::fmt::Display> core::fmt::Display for openjd_model::job::apply::ApplyError<E>
+pub fn openjd_model::job::apply::ApplyError<E>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub enum openjd_model::job::apply::MutationKind
+pub openjd_model::job::apply::MutationKind::EnvAdd
+pub openjd_model::job::apply::MutationKind::EnvMetadata
+pub openjd_model::job::apply::MutationKind::EnvRemove
+pub openjd_model::job::apply::MutationKind::EnvReorder
+pub openjd_model::job::apply::MutationKind::EnvScript
+pub openjd_model::job::apply::MutationKind::EnvSymbols
+pub openjd_model::job::apply::MutationKind::EnvVariables
+pub openjd_model::job::apply::MutationKind::JobExtensions
+pub openjd_model::job::apply::MutationKind::JobMetadata
+pub openjd_model::job::apply::MutationKind::ParameterAdd
+pub openjd_model::job::apply::MutationKind::ParameterRemove
+pub openjd_model::job::apply::MutationKind::ParameterValue
+pub openjd_model::job::apply::MutationKind::StepAdd
+pub openjd_model::job::apply::MutationKind::StepDependencies
+pub openjd_model::job::apply::MutationKind::StepHostRequirements
+pub openjd_model::job::apply::MutationKind::StepMetadata
+pub openjd_model::job::apply::MutationKind::StepParameterSpace
+pub openjd_model::job::apply::MutationKind::StepRemove
+pub openjd_model::job::apply::MutationKind::StepReorder
+pub openjd_model::job::apply::MutationKind::StepScript
+pub openjd_model::job::apply::MutationKind::StepSymbols
+pub openjd_model::job::apply::MutationKind::TaskAppend
+pub openjd_model::job::apply::MutationKind::TaskRemove
+pub openjd_model::job::apply::MutationKind::TaskReplace
+impl openjd_model::job::apply::MutationKind
+pub const openjd_model::job::apply::MutationKind::ALL: &'static [openjd_model::job::apply::MutationKind]
+pub fn openjd_model::job::apply::MutationKind::name(self) -> &'static str
+impl core::clone::Clone for openjd_model::job::apply::MutationKind
+pub fn openjd_model::job::apply::MutationKind::clone(&self) -> openjd_model::job::apply::MutationKind
+impl core::cmp::Eq for openjd_model::job::apply::MutationKind
+impl core::cmp::Ord for openjd_model::job::apply::MutationKind
+pub fn openjd_model::job::apply::MutationKind::cmp(&self, &openjd_model::job::apply::MutationKind) -> core::cmp::Ordering
+impl core::cmp::PartialEq for openjd_model::job::apply::MutationKind
+pub fn openjd_model::job::apply::MutationKind::eq(&self, &openjd_model::job::apply::MutationKind) -> bool
+impl core::cmp::PartialOrd for openjd_model::job::apply::MutationKind
+pub fn openjd_model::job::apply::MutationKind::partial_cmp(&self, &openjd_model::job::apply::MutationKind) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for openjd_model::job::apply::MutationKind
+pub fn openjd_model::job::apply::MutationKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::apply::MutationKind
+pub fn openjd_model::job::apply::MutationKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_model::job::apply::MutationKind
+pub fn openjd_model::job::apply::MutationKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_model::job::apply::MutationKind
+impl core::marker::StructuralPartialEq for openjd_model::job::apply::MutationKind
+impl core::str::traits::FromStr for openjd_model::job::apply::MutationKind
+pub type openjd_model::job::apply::MutationKind::Err = openjd_model::job::apply::UnknownMutationKind
+pub fn openjd_model::job::apply::MutationKind::from_str(&str) -> core::result::Result<Self, Self::Err>
+pub enum openjd_model::job::apply::Op<'a, T>
+pub openjd_model::job::apply::Op::Add
+pub openjd_model::job::apply::Op::Add::new: &'a T
+pub openjd_model::job::apply::Op::Modify
+pub openjd_model::job::apply::Op::Modify::new: &'a T
+pub openjd_model::job::apply::Op::Modify::node: openjd_model::job::diff::DiffNodeId
+pub openjd_model::job::apply::Op::Modify::old: &'a T
+pub openjd_model::job::apply::Op::Remove
+pub openjd_model::job::apply::Op::Remove::old: &'a T
+impl<T: openjd_model::job::apply::ToDocument> openjd_model::job::apply::Op<'_, T>
+pub fn openjd_model::job::apply::Op<'_, T>::as_document(&self) -> impl serde_core::ser::Serialize + '_
+pub fn openjd_model::job::apply::Op<'_, T>::to_value(&self) -> core::result::Result<serde_json::value::Value, openjd_model::error::ModelError>
+impl<T> openjd_model::job::apply::Op<'_, T>
+pub fn openjd_model::job::apply::Op<'_, T>::verb(&self) -> &'static str
+impl<'a, T: core::cmp::PartialEq> core::cmp::PartialEq for openjd_model::job::apply::Op<'a, T>
+pub fn openjd_model::job::apply::Op<'a, T>::eq(&self, &openjd_model::job::apply::Op<'a, T>) -> bool
+impl<'a, T: core::cmp::PartialEq> core::marker::StructuralPartialEq for openjd_model::job::apply::Op<'a, T>
+impl<'a, T: core::fmt::Debug> core::fmt::Debug for openjd_model::job::apply::Op<'a, T>
+pub fn openjd_model::job::apply::Op<'a, T>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<T> core::clone::Clone for openjd_model::job::apply::Op<'_, T>
+pub fn openjd_model::job::apply::Op<'_, T>::clone(&self) -> Self
+impl<T> core::marker::Copy for openjd_model::job::apply::Op<'_, T>
+#[non_exhaustive] pub enum openjd_model::job::apply::OpTarget
+pub openjd_model::job::apply::OpTarget::Environment(alloc::string::String)
+pub openjd_model::job::apply::OpTarget::Job
+pub openjd_model::job::apply::OpTarget::Parameter(alloc::string::String)
+pub openjd_model::job::apply::OpTarget::Step
+pub openjd_model::job::apply::OpTarget::Step::index: openjd_model::job::apply::StepIndex
+pub openjd_model::job::apply::OpTarget::Step::name: alloc::string::String
+impl core::clone::Clone for openjd_model::job::apply::OpTarget
+pub fn openjd_model::job::apply::OpTarget::clone(&self) -> openjd_model::job::apply::OpTarget
+impl core::cmp::Eq for openjd_model::job::apply::OpTarget
+impl core::cmp::PartialEq for openjd_model::job::apply::OpTarget
+pub fn openjd_model::job::apply::OpTarget::eq(&self, &openjd_model::job::apply::OpTarget) -> bool
+impl core::fmt::Debug for openjd_model::job::apply::OpTarget
+pub fn openjd_model::job::apply::OpTarget::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::apply::OpTarget
+pub fn openjd_model::job::apply::OpTarget::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_model::job::apply::OpTarget
+pub fn openjd_model::job::apply::OpTarget::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for openjd_model::job::apply::OpTarget
+pub enum openjd_model::job::apply::TaskChange
+pub openjd_model::job::apply::TaskChange::All
+pub openjd_model::job::apply::TaskChange::Boxes(alloc::boxed::Box<openjd_model::job::task_delta::ProductDelta>)
+pub openjd_model::job::apply::TaskChange::Replace
+impl core::clone::Clone for openjd_model::job::apply::TaskChange
+pub fn openjd_model::job::apply::TaskChange::clone(&self) -> openjd_model::job::apply::TaskChange
+impl core::cmp::PartialEq for openjd_model::job::apply::TaskChange
+pub fn openjd_model::job::apply::TaskChange::eq(&self, &openjd_model::job::apply::TaskChange) -> bool
+impl core::fmt::Debug for openjd_model::job::apply::TaskChange
+pub fn openjd_model::job::apply::TaskChange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::apply::TaskChange
+pub struct openjd_model::job::apply::AllowList(pub std::collections::hash::set::HashSet<openjd_model::job::apply::MutationKind>)
+impl openjd_model::job::apply::AllowList
+pub fn openjd_model::job::apply::AllowList::from_names<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a str>) -> core::result::Result<Self, openjd_model::job::apply::UnknownMutationKind>
+pub fn openjd_model::job::apply::AllowList::of(impl core::iter::traits::collect::IntoIterator<Item = openjd_model::job::apply::MutationKind>) -> Self
+impl core::clone::Clone for openjd_model::job::apply::AllowList
+pub fn openjd_model::job::apply::AllowList::clone(&self) -> openjd_model::job::apply::AllowList
+impl core::cmp::Eq for openjd_model::job::apply::AllowList
+impl core::cmp::PartialEq for openjd_model::job::apply::AllowList
+pub fn openjd_model::job::apply::AllowList::eq(&self, &openjd_model::job::apply::AllowList) -> bool
+impl core::default::Default for openjd_model::job::apply::AllowList
+pub fn openjd_model::job::apply::AllowList::default() -> openjd_model::job::apply::AllowList
+impl core::fmt::Debug for openjd_model::job::apply::AllowList
+pub fn openjd_model::job::apply::AllowList::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::apply::AllowList
+impl openjd_model::job::apply::MutationPolicy for openjd_model::job::apply::AllowList
+pub fn openjd_model::job::apply::AllowList::allows(&self, &openjd_model::job::apply::PlannedOp<'_>) -> core::result::Result<(), openjd_model::job::apply::Refusal>
+pub struct openjd_model::job::apply::ApplyPlan<'a>
+pub openjd_model::job::apply::ApplyPlan::diff: openjd_model::job::diff::DiffTree
+pub openjd_model::job::apply::ApplyPlan::ops: alloc::vec::Vec<openjd_model::job::apply::PlannedOp<'a>>
+impl openjd_model::job::apply::ApplyPlan<'_>
+pub fn openjd_model::job::apply::ApplyPlan<'_>::kinds(&self) -> alloc::collections::btree::set::BTreeSet<openjd_model::job::apply::MutationKind>
+impl<'a> core::clone::Clone for openjd_model::job::apply::ApplyPlan<'a>
+pub fn openjd_model::job::apply::ApplyPlan<'a>::clone(&self) -> openjd_model::job::apply::ApplyPlan<'a>
+impl<'a> core::cmp::PartialEq for openjd_model::job::apply::ApplyPlan<'a>
+pub fn openjd_model::job::apply::ApplyPlan<'a>::eq(&self, &openjd_model::job::apply::ApplyPlan<'a>) -> bool
+impl<'a> core::fmt::Debug for openjd_model::job::apply::ApplyPlan<'a>
+pub fn openjd_model::job::apply::ApplyPlan<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::StructuralPartialEq for openjd_model::job::apply::ApplyPlan<'a>
+pub struct openjd_model::job::apply::ApplyReport
+pub openjd_model::job::apply::ApplyReport::applied: usize
+impl core::clone::Clone for openjd_model::job::apply::ApplyReport
+pub fn openjd_model::job::apply::ApplyReport::clone(&self) -> openjd_model::job::apply::ApplyReport
+impl core::cmp::Eq for openjd_model::job::apply::ApplyReport
+impl core::cmp::PartialEq for openjd_model::job::apply::ApplyReport
+pub fn openjd_model::job::apply::ApplyReport::eq(&self, &openjd_model::job::apply::ApplyReport) -> bool
+impl core::fmt::Debug for openjd_model::job::apply::ApplyReport
+pub fn openjd_model::job::apply::ApplyReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_model::job::apply::ApplyReport
+impl core::marker::StructuralPartialEq for openjd_model::job::apply::ApplyReport
+pub struct openjd_model::job::apply::PlannedOp<'a>
+pub openjd_model::job::apply::PlannedOp::action: openjd_model::job::apply::Action<'a>
+pub openjd_model::job::apply::PlannedOp::kinds: alloc::collections::btree::set::BTreeSet<openjd_model::job::apply::MutationKind>
+impl openjd_model::job::apply::PlannedOp<'_>
+pub fn openjd_model::job::apply::PlannedOp<'_>::as_document(&self) -> impl serde_core::ser::Serialize + '_
+pub fn openjd_model::job::apply::PlannedOp<'_>::target(&self) -> openjd_model::job::apply::OpTarget
+pub fn openjd_model::job::apply::PlannedOp<'_>::to_value(&self) -> core::result::Result<serde_json::value::Value, openjd_model::error::ModelError>
+impl<'a> core::clone::Clone for openjd_model::job::apply::PlannedOp<'a>
+pub fn openjd_model::job::apply::PlannedOp<'a>::clone(&self) -> openjd_model::job::apply::PlannedOp<'a>
+impl<'a> core::cmp::PartialEq for openjd_model::job::apply::PlannedOp<'a>
+pub fn openjd_model::job::apply::PlannedOp<'a>::eq(&self, &openjd_model::job::apply::PlannedOp<'a>) -> bool
+impl<'a> core::fmt::Debug for openjd_model::job::apply::PlannedOp<'a>
+pub fn openjd_model::job::apply::PlannedOp<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::StructuralPartialEq for openjd_model::job::apply::PlannedOp<'a>
+#[non_exhaustive] pub struct openjd_model::job::apply::Refusal
+pub openjd_model::job::apply::Refusal::kind: openjd_model::job::apply::MutationKind
+pub openjd_model::job::apply::Refusal::reason: alloc::string::String
+pub openjd_model::job::apply::Refusal::target: openjd_model::job::apply::OpTarget
+impl openjd_model::job::apply::Refusal
+pub fn openjd_model::job::apply::Refusal::new(&openjd_model::job::apply::PlannedOp<'_>, openjd_model::job::apply::MutationKind, impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for openjd_model::job::apply::Refusal
+pub fn openjd_model::job::apply::Refusal::clone(&self) -> openjd_model::job::apply::Refusal
+impl core::cmp::Eq for openjd_model::job::apply::Refusal
+impl core::cmp::PartialEq for openjd_model::job::apply::Refusal
+pub fn openjd_model::job::apply::Refusal::eq(&self, &openjd_model::job::apply::Refusal) -> bool
+impl core::error::Error for openjd_model::job::apply::Refusal
+impl core::fmt::Debug for openjd_model::job::apply::Refusal
+pub fn openjd_model::job::apply::Refusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::apply::Refusal
+pub fn openjd_model::job::apply::Refusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::apply::Refusal
+pub struct openjd_model::job::apply::StepRef<'a>
+pub openjd_model::job::apply::StepRef::index: openjd_model::job::apply::StepIndex
+pub openjd_model::job::apply::StepRef::name: &'a str
+impl<'a> core::clone::Clone for openjd_model::job::apply::StepRef<'a>
+pub fn openjd_model::job::apply::StepRef<'a>::clone(&self) -> openjd_model::job::apply::StepRef<'a>
+impl<'a> core::cmp::Eq for openjd_model::job::apply::StepRef<'a>
+impl<'a> core::cmp::PartialEq for openjd_model::job::apply::StepRef<'a>
+pub fn openjd_model::job::apply::StepRef<'a>::eq(&self, &openjd_model::job::apply::StepRef<'a>) -> bool
+impl<'a> core::fmt::Debug for openjd_model::job::apply::StepRef<'a>
+pub fn openjd_model::job::apply::StepRef<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::hash::Hash for openjd_model::job::apply::StepRef<'a>
+pub fn openjd_model::job::apply::StepRef<'a>::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl<'a> core::marker::Copy for openjd_model::job::apply::StepRef<'a>
+impl<'a> core::marker::StructuralPartialEq for openjd_model::job::apply::StepRef<'a>
+impl<'a> serde_core::ser::Serialize for openjd_model::job::apply::StepRef<'a>
+pub fn openjd_model::job::apply::StepRef<'a>::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct openjd_model::job::apply::TaskOp<'a>
+pub openjd_model::job::apply::TaskOp::change: openjd_model::job::apply::TaskChange
+pub openjd_model::job::apply::TaskOp::space: core::option::Option<&'a openjd_model::job::StepParameterSpace>
+impl<'a> openjd_model::job::apply::TaskOp<'a>
+pub fn openjd_model::job::apply::TaskOp<'a>::added_count(&self) -> core::result::Result<u64, openjd_model::error::ModelError>
+pub fn openjd_model::job::apply::TaskOp<'a>::added_tasks(&self) -> core::result::Result<impl core::iter::traits::iterator::Iterator<Item = openjd_model::types::TaskParameterSet> + use<'_, 'a>, openjd_model::error::ModelError>
+pub fn openjd_model::job::apply::TaskOp<'a>::as_document(&self) -> impl serde_core::ser::Serialize + '_
+pub fn openjd_model::job::apply::TaskOp<'a>::to_value(&self) -> core::result::Result<serde_json::value::Value, openjd_model::error::ModelError>
+impl<'a> core::clone::Clone for openjd_model::job::apply::TaskOp<'a>
+pub fn openjd_model::job::apply::TaskOp<'a>::clone(&self) -> openjd_model::job::apply::TaskOp<'a>
+impl<'a> core::cmp::PartialEq for openjd_model::job::apply::TaskOp<'a>
+pub fn openjd_model::job::apply::TaskOp<'a>::eq(&self, &openjd_model::job::apply::TaskOp<'a>) -> bool
+impl<'a> core::fmt::Debug for openjd_model::job::apply::TaskOp<'a>
+pub fn openjd_model::job::apply::TaskOp<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::StructuralPartialEq for openjd_model::job::apply::TaskOp<'a>
+pub struct openjd_model::job::apply::UnknownMutationKind(pub alloc::string::String)
+impl core::clone::Clone for openjd_model::job::apply::UnknownMutationKind
+pub fn openjd_model::job::apply::UnknownMutationKind::clone(&self) -> openjd_model::job::apply::UnknownMutationKind
+impl core::cmp::Eq for openjd_model::job::apply::UnknownMutationKind
+impl core::cmp::PartialEq for openjd_model::job::apply::UnknownMutationKind
+pub fn openjd_model::job::apply::UnknownMutationKind::eq(&self, &openjd_model::job::apply::UnknownMutationKind) -> bool
+impl core::error::Error for openjd_model::job::apply::UnknownMutationKind
+impl core::fmt::Debug for openjd_model::job::apply::UnknownMutationKind
+pub fn openjd_model::job::apply::UnknownMutationKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::apply::UnknownMutationKind
+pub fn openjd_model::job::apply::UnknownMutationKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::apply::UnknownMutationKind
+pub trait openjd_model::job::apply::JobApplier
+pub type openjd_model::job::apply::JobApplier::Error
+pub fn openjd_model::job::apply::JobApplier::begin(&mut self) -> core::result::Result<(), Self::Error>
+pub fn openjd_model::job::apply::JobApplier::check(&mut self, &openjd_model::job::apply::PlannedOp<'_>) -> core::result::Result<(), Self::Error>
+pub fn openjd_model::job::apply::JobApplier::commit(&mut self) -> core::result::Result<(), Self::Error>
+pub fn openjd_model::job::apply::JobApplier::environment(&mut self, usize, openjd_model::job::apply::Op<'_, openjd_model::job::Environment>) -> core::result::Result<(), Self::Error>
+pub fn openjd_model::job::apply::JobApplier::job(&mut self, openjd_model::job::apply::Op<'_, openjd_model::job::Job>) -> core::result::Result<(), Self::Error>
+pub fn openjd_model::job::apply::JobApplier::parameter(&mut self, openjd_model::job::apply::Op<'_, openjd_model::job::JobParameter>) -> core::result::Result<(), Self::Error>
+pub fn openjd_model::job::apply::JobApplier::step(&mut self, openjd_model::job::apply::StepRef<'_>, openjd_model::job::apply::Op<'_, openjd_model::job::Step>) -> core::result::Result<(), Self::Error>
+pub fn openjd_model::job::apply::JobApplier::tasks(&mut self, openjd_model::job::apply::StepRef<'_>, &openjd_model::job::apply::TaskOp<'_>) -> core::result::Result<(), Self::Error>
+pub trait openjd_model::job::apply::MutationPolicy
+pub fn openjd_model::job::apply::MutationPolicy::allows(&self, &openjd_model::job::apply::PlannedOp<'_>) -> core::result::Result<(), openjd_model::job::apply::Refusal>
+impl openjd_model::job::apply::MutationPolicy for openjd_model::job::apply::AllowList
+pub fn openjd_model::job::apply::AllowList::allows(&self, &openjd_model::job::apply::PlannedOp<'_>) -> core::result::Result<(), openjd_model::job::apply::Refusal>
+pub trait openjd_model::job::apply::ToDocument
+pub fn openjd_model::job::apply::ToDocument::as_document(&self) -> impl serde_core::ser::Serialize + '_
+impl openjd_model::job::apply::ToDocument for openjd_model::job::Environment
+pub fn openjd_model::job::Environment::as_document(&self) -> impl serde_core::ser::Serialize + '_
+impl openjd_model::job::apply::ToDocument for openjd_model::job::Job
+pub fn openjd_model::job::Job::as_document(&self) -> impl serde_core::ser::Serialize + '_
+impl openjd_model::job::apply::ToDocument for openjd_model::job::JobParameter
+pub fn openjd_model::job::JobParameter::as_document(&self) -> impl serde_core::ser::Serialize + '_
+impl openjd_model::job::apply::ToDocument for openjd_model::job::Step
+pub fn openjd_model::job::Step::as_document(&self) -> impl serde_core::ser::Serialize + '_
+impl openjd_model::job::apply::ToDocument for openjd_model::job::StepParameterSpace
+pub fn openjd_model::job::StepParameterSpace::as_document(&self) -> impl serde_core::ser::Serialize + '_
+pub fn openjd_model::job::apply::apply<A: openjd_model::job::apply::JobApplier + ?core::marker::Sized>(&openjd_model::job::Job, &openjd_model::job::Job, &dyn openjd_model::job::apply::MutationPolicy, &mut A) -> core::result::Result<openjd_model::job::apply::ApplyReport, openjd_model::job::apply::ApplyError<<A as openjd_model::job::apply::JobApplier>::Error>>
+pub fn openjd_model::job::apply::execute<A: openjd_model::job::apply::JobApplier + ?core::marker::Sized>(&openjd_model::job::apply::ApplyPlan<'_>, &mut A, usize) -> core::result::Result<openjd_model::job::apply::ApplyReport, openjd_model::job::apply::ApplyError<<A as openjd_model::job::apply::JobApplier>::Error>>
+pub fn openjd_model::job::apply::plan<'a>(&'a openjd_model::job::Job, &'a openjd_model::job::Job) -> core::result::Result<openjd_model::job::apply::ApplyPlan<'a>, openjd_model::error::ModelError>
+pub fn openjd_model::job::apply::validate<A: openjd_model::job::apply::JobApplier + ?core::marker::Sized>(&openjd_model::job::apply::ApplyPlan<'_>, &dyn openjd_model::job::apply::MutationPolicy, &mut A) -> core::result::Result<(), openjd_model::job::apply::ApplyError<<A as openjd_model::job::apply::JobApplier>::Error>>
+pub type openjd_model::job::apply::StepIndex = usize
 pub mod openjd_model::job::create_job
 pub mod openjd_model::job::create_job::parameters
 pub struct openjd_model::job::create_job::parameters::MergedParameterDefinition
@@ -200,6 +476,112 @@ pub fn openjd_model::job::create_job::create_job(&openjd_model::template::JobTem
 pub fn openjd_model::job::create_job::evaluate_let_bindings(&[alloc::string::String], &openjd_expr::symbol_table::SymbolTable, core::option::Option<&openjd_expr::function_library::FunctionLibrary>, openjd_expr::path_mapping::PathFormat, core::option::Option<usize>, core::option::Option<usize>) -> core::result::Result<openjd_expr::symbol_table::SymbolTable, openjd_model::error::ModelError>
 pub fn openjd_model::job::create_job::merge_job_parameter_definitions(&openjd_model::template::JobTemplate, &[openjd_model::template::EnvironmentTemplate]) -> core::result::Result<alloc::vec::Vec<openjd_model::job::create_job::parameters::MergedParameterDefinition>, openjd_model::error::ModelError>
 pub fn openjd_model::job::create_job::preprocess_job_parameters(&openjd_model::template::JobTemplate, &openjd_model::types::JobParameterInputValues, &[openjd_model::template::EnvironmentTemplate], &openjd_model::job::create_job::parameters::PathParameterOptions<'_>) -> core::result::Result<openjd_model::types::JobParameterValues, openjd_model::error::ModelError>
+pub mod openjd_model::job::diff
+#[non_exhaustive] pub enum openjd_model::job::diff::DiffNodeKind
+pub openjd_model::job::diff::DiffNodeKind::Action
+pub openjd_model::job::diff::DiffNodeKind::EmbeddedFile
+pub openjd_model::job::diff::DiffNodeKind::Environment
+pub openjd_model::job::diff::DiffNodeKind::EnvironmentScript
+pub openjd_model::job::diff::DiffNodeKind::HostRequirements
+pub openjd_model::job::diff::DiffNodeKind::Job
+pub openjd_model::job::diff::DiffNodeKind::JobParameter
+pub openjd_model::job::diff::DiffNodeKind::ParameterSpace
+pub openjd_model::job::diff::DiffNodeKind::Step
+pub openjd_model::job::diff::DiffNodeKind::StepScript
+pub openjd_model::job::diff::DiffNodeKind::TaskParameter
+impl core::clone::Clone for openjd_model::job::diff::DiffNodeKind
+pub fn openjd_model::job::diff::DiffNodeKind::clone(&self) -> openjd_model::job::diff::DiffNodeKind
+impl core::cmp::Eq for openjd_model::job::diff::DiffNodeKind
+impl core::cmp::PartialEq for openjd_model::job::diff::DiffNodeKind
+pub fn openjd_model::job::diff::DiffNodeKind::eq(&self, &openjd_model::job::diff::DiffNodeKind) -> bool
+impl core::fmt::Debug for openjd_model::job::diff::DiffNodeKind
+pub fn openjd_model::job::diff::DiffNodeKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_model::job::diff::DiffNodeKind
+pub fn openjd_model::job::diff::DiffNodeKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_model::job::diff::DiffNodeKind
+impl core::marker::StructuralPartialEq for openjd_model::job::diff::DiffNodeKind
+pub enum openjd_model::job::diff::DiffStatus
+pub openjd_model::job::diff::DiffStatus::Added
+pub openjd_model::job::diff::DiffStatus::Modified
+pub openjd_model::job::diff::DiffStatus::Removed
+pub openjd_model::job::diff::DiffStatus::Unchanged
+impl core::clone::Clone for openjd_model::job::diff::DiffStatus
+pub fn openjd_model::job::diff::DiffStatus::clone(&self) -> openjd_model::job::diff::DiffStatus
+impl core::cmp::Eq for openjd_model::job::diff::DiffStatus
+impl core::cmp::PartialEq for openjd_model::job::diff::DiffStatus
+pub fn openjd_model::job::diff::DiffStatus::eq(&self, &openjd_model::job::diff::DiffStatus) -> bool
+impl core::fmt::Debug for openjd_model::job::diff::DiffStatus
+pub fn openjd_model::job::diff::DiffStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_model::job::diff::DiffStatus
+pub fn openjd_model::job::diff::DiffStatus::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_model::job::diff::DiffStatus
+impl core::marker::StructuralPartialEq for openjd_model::job::diff::DiffStatus
+#[non_exhaustive] pub struct openjd_model::job::diff::DiffNode
+pub openjd_model::job::diff::DiffNode::children: alloc::vec::Vec<openjd_model::job::diff::DiffNodeId>
+pub openjd_model::job::diff::DiffNode::depth: usize
+pub openjd_model::job::diff::DiffNode::expanded: bool
+pub openjd_model::job::diff::DiffNode::field_changes: alloc::vec::Vec<openjd_model::job::diff::FieldChange>
+pub openjd_model::job::diff::DiffNode::key: core::option::Option<alloc::string::String>
+pub openjd_model::job::diff::DiffNode::kind: openjd_model::job::diff::DiffNodeKind
+pub openjd_model::job::diff::DiffNode::new_index: core::option::Option<usize>
+pub openjd_model::job::diff::DiffNode::old_index: core::option::Option<usize>
+pub openjd_model::job::diff::DiffNode::parent: core::option::Option<openjd_model::job::diff::DiffNodeId>
+pub openjd_model::job::diff::DiffNode::segment: alloc::string::String
+pub openjd_model::job::diff::DiffNode::status: openjd_model::job::diff::DiffStatus
+pub openjd_model::job::diff::DiffNode::step_index: core::option::Option<usize>
+impl openjd_model::job::diff::DiffNode
+pub fn openjd_model::job::diff::DiffNode::is_changed(&self) -> bool
+impl core::clone::Clone for openjd_model::job::diff::DiffNode
+pub fn openjd_model::job::diff::DiffNode::clone(&self) -> openjd_model::job::diff::DiffNode
+impl core::cmp::PartialEq for openjd_model::job::diff::DiffNode
+pub fn openjd_model::job::diff::DiffNode::eq(&self, &openjd_model::job::diff::DiffNode) -> bool
+impl core::fmt::Debug for openjd_model::job::diff::DiffNode
+pub fn openjd_model::job::diff::DiffNode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::diff::DiffNode
+#[non_exhaustive] pub struct openjd_model::job::diff::DiffOptions
+impl openjd_model::job::diff::DiffOptions
+pub fn openjd_model::job::diff::DiffOptions::with_max_depth(self, usize) -> Self
+pub fn openjd_model::job::diff::DiffOptions::with_resolved_symtab(self, bool) -> Self
+impl core::clone::Clone for openjd_model::job::diff::DiffOptions
+pub fn openjd_model::job::diff::DiffOptions::clone(&self) -> openjd_model::job::diff::DiffOptions
+impl core::default::Default for openjd_model::job::diff::DiffOptions
+pub fn openjd_model::job::diff::DiffOptions::default() -> Self
+impl core::fmt::Debug for openjd_model::job::diff::DiffOptions
+pub fn openjd_model::job::diff::DiffOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_model::job::diff::DiffTree
+impl openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::DiffTree::changed(&self) -> impl core::iter::traits::iterator::Iterator<Item = (openjd_model::job::diff::DiffNodeId, &openjd_model::job::diff::DiffNode)>
+pub fn openjd_model::job::diff::DiffTree::child(&self, openjd_model::job::diff::DiffNodeId, &str) -> core::option::Option<openjd_model::job::diff::DiffNodeId>
+pub fn openjd_model::job::diff::DiffTree::find(&self, &str) -> core::option::Option<openjd_model::job::diff::DiffNodeId>
+pub fn openjd_model::job::diff::DiffTree::is_changed(&self) -> bool
+pub fn openjd_model::job::diff::DiffTree::node(&self, openjd_model::job::diff::DiffNodeId) -> core::option::Option<&openjd_model::job::diff::DiffNode>
+pub fn openjd_model::job::diff::DiffTree::nodes(&self) -> &[openjd_model::job::diff::DiffNode]
+pub fn openjd_model::job::diff::DiffTree::path(&self, openjd_model::job::diff::DiffNodeId) -> alloc::string::String
+pub fn openjd_model::job::diff::DiffTree::root(&self) -> &openjd_model::job::diff::DiffNode
+impl core::clone::Clone for openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::DiffTree::clone(&self) -> openjd_model::job::diff::DiffTree
+impl core::cmp::PartialEq for openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::DiffTree::eq(&self, &openjd_model::job::diff::DiffTree) -> bool
+impl core::fmt::Debug for openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::DiffTree::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::DiffTree::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::diff::DiffTree
+pub struct openjd_model::job::diff::FieldChange
+pub openjd_model::job::diff::FieldChange::after: serde_json::value::Value
+pub openjd_model::job::diff::FieldChange::before: serde_json::value::Value
+pub openjd_model::job::diff::FieldChange::field: alloc::string::String
+impl core::clone::Clone for openjd_model::job::diff::FieldChange
+pub fn openjd_model::job::diff::FieldChange::clone(&self) -> openjd_model::job::diff::FieldChange
+impl core::cmp::PartialEq for openjd_model::job::diff::FieldChange
+pub fn openjd_model::job::diff::FieldChange::eq(&self, &openjd_model::job::diff::FieldChange) -> bool
+impl core::fmt::Debug for openjd_model::job::diff::FieldChange
+pub fn openjd_model::job::diff::FieldChange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::diff::FieldChange
+pub fn openjd_model::job::diff::diff_environments(&openjd_model::job::Environment, &openjd_model::job::Environment, &openjd_model::job::diff::DiffOptions) -> openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::diff_jobs(&openjd_model::job::Job, &openjd_model::job::Job, &openjd_model::job::diff::DiffOptions) -> openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::diff_steps(&openjd_model::job::Step, &openjd_model::job::Step, &openjd_model::job::diff::DiffOptions) -> openjd_model::job::diff::DiffTree
+pub type openjd_model::job::diff::DiffNodeId = usize
 pub mod openjd_model::job::step_dependency_graph
 pub struct openjd_model::job::step_dependency_graph::StepDependencyEdge
 pub openjd_model::job::step_dependency_graph::StepDependencyEdge::dependent: usize
@@ -246,6 +628,335 @@ impl core::iter::traits::iterator::Iterator for openjd_model::job::step_param_sp
 pub type openjd_model::job::step_param_space::StepParameterSpaceIterator::Item = indexmap::map::IndexMap<alloc::string::String, openjd_model::types::TaskParameterValue>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::next(&mut self) -> core::option::Option<openjd_model::types::TaskParameterSet>
 pub fn openjd_model::job::step_param_space::StepParameterSpaceIterator::size_hint(&self) -> (usize, core::option::Option<usize>)
+pub mod openjd_model::job::task_delta
+pub enum openjd_model::job::task_delta::TaskDelta
+pub openjd_model::job::task_delta::TaskDelta::Fallback
+pub openjd_model::job::task_delta::TaskDelta::Fallback::reason: alloc::string::String
+pub openjd_model::job::task_delta::TaskDelta::Product(alloc::boxed::Box<openjd_model::job::task_delta::ProductDelta>)
+pub openjd_model::job::task_delta::TaskDelta::Unchanged
+impl core::clone::Clone for openjd_model::job::task_delta::TaskDelta
+pub fn openjd_model::job::task_delta::TaskDelta::clone(&self) -> openjd_model::job::task_delta::TaskDelta
+impl core::cmp::PartialEq for openjd_model::job::task_delta::TaskDelta
+pub fn openjd_model::job::task_delta::TaskDelta::eq(&self, &openjd_model::job::task_delta::TaskDelta) -> bool
+impl core::fmt::Debug for openjd_model::job::task_delta::TaskDelta
+pub fn openjd_model::job::task_delta::TaskDelta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::task_delta::TaskDelta
+pub struct openjd_model::job::task_delta::ProductDelta
+pub openjd_model::job::task_delta::ProductDelta::added: alloc::vec::Vec<openjd_model::job::task_delta::TaskBox>
+pub openjd_model::job::task_delta::ProductDelta::kept: openjd_model::job::task_delta::TaskBox
+pub openjd_model::job::task_delta::ProductDelta::old: openjd_model::job::task_delta::TaskBox
+pub openjd_model::job::task_delta::ProductDelta::removed: alloc::vec::Vec<openjd_model::job::task_delta::TaskBox>
+impl openjd_model::job::task_delta::ProductDelta
+pub fn openjd_model::job::task_delta::ProductDelta::appended(&self) -> core::result::Result<impl core::iter::traits::iterator::Iterator<Item = openjd_model::types::TaskParameterSet> + '_, openjd_model::error::ModelError>
+pub fn openjd_model::job::task_delta::ProductDelta::appended_count(&self) -> u64
+pub fn openjd_model::job::task_delta::ProductDelta::removed(&self) -> core::result::Result<impl core::iter::traits::iterator::Iterator<Item = (u64, openjd_model::types::TaskParameterSet)> + '_, openjd_model::error::ModelError>
+pub fn openjd_model::job::task_delta::ProductDelta::removed_count(&self) -> u64
+impl core::clone::Clone for openjd_model::job::task_delta::ProductDelta
+pub fn openjd_model::job::task_delta::ProductDelta::clone(&self) -> openjd_model::job::task_delta::ProductDelta
+impl core::cmp::PartialEq for openjd_model::job::task_delta::ProductDelta
+pub fn openjd_model::job::task_delta::ProductDelta::eq(&self, &openjd_model::job::task_delta::ProductDelta) -> bool
+impl core::fmt::Debug for openjd_model::job::task_delta::ProductDelta
+pub fn openjd_model::job::task_delta::ProductDelta::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::task_delta::ProductDelta
+pub struct openjd_model::job::task_delta::TaskBox
+impl openjd_model::job::task_delta::TaskBox
+pub fn openjd_model::job::task_delta::TaskBox::index_of(&self, &openjd_model::types::TaskParameterSet) -> core::option::Option<u64>
+pub fn openjd_model::job::task_delta::TaskBox::is_empty(&self) -> bool
+pub fn openjd_model::job::task_delta::TaskBox::len(&self) -> u64
+pub fn openjd_model::job::task_delta::TaskBox::space(&self) -> &openjd_model::job::StepParameterSpace
+pub fn openjd_model::job::task_delta::TaskBox::tasks(&self) -> core::result::Result<openjd_model::job::step_param_space::StepParameterSpaceIterator, openjd_model::error::ModelError>
+impl core::clone::Clone for openjd_model::job::task_delta::TaskBox
+pub fn openjd_model::job::task_delta::TaskBox::clone(&self) -> openjd_model::job::task_delta::TaskBox
+impl core::cmp::PartialEq for openjd_model::job::task_delta::TaskBox
+pub fn openjd_model::job::task_delta::TaskBox::eq(&self, &openjd_model::job::task_delta::TaskBox) -> bool
+impl core::fmt::Debug for openjd_model::job::task_delta::TaskBox
+pub fn openjd_model::job::task_delta::TaskBox::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::task_delta::TaskBox
+pub fn openjd_model::job::task_delta::task_delta(core::option::Option<&openjd_model::job::StepParameterSpace>, core::option::Option<&openjd_model::job::StepParameterSpace>) -> openjd_model::job::task_delta::TaskDelta
+pub fn openjd_model::job::task_delta::task_parameter_set_document(&openjd_model::types::TaskParameterSet) -> serde_json::value::Value
+pub mod openjd_model::job::template_diff
+pub enum openjd_model::job::template_diff::Layer
+pub openjd_model::job::template_diff::Layer::Job
+pub openjd_model::job::template_diff::Layer::Template
+impl core::clone::Clone for openjd_model::job::template_diff::Layer
+pub fn openjd_model::job::template_diff::Layer::clone(&self) -> openjd_model::job::template_diff::Layer
+impl core::cmp::Eq for openjd_model::job::template_diff::Layer
+impl core::cmp::Ord for openjd_model::job::template_diff::Layer
+pub fn openjd_model::job::template_diff::Layer::cmp(&self, &openjd_model::job::template_diff::Layer) -> core::cmp::Ordering
+impl core::cmp::PartialEq for openjd_model::job::template_diff::Layer
+pub fn openjd_model::job::template_diff::Layer::eq(&self, &openjd_model::job::template_diff::Layer) -> bool
+impl core::cmp::PartialOrd for openjd_model::job::template_diff::Layer
+pub fn openjd_model::job::template_diff::Layer::partial_cmp(&self, &openjd_model::job::template_diff::Layer) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for openjd_model::job::template_diff::Layer
+pub fn openjd_model::job::template_diff::Layer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::template_diff::Layer
+pub fn openjd_model::job::template_diff::Layer::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_model::job::template_diff::Layer
+pub fn openjd_model::job::template_diff::Layer::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_model::job::template_diff::Layer
+impl core::marker::StructuralPartialEq for openjd_model::job::template_diff::Layer
+impl serde_core::ser::Serialize for openjd_model::job::template_diff::Layer
+pub fn openjd_model::job::template_diff::Layer::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub enum openjd_model::job::template_diff::Origin
+pub openjd_model::job::template_diff::Origin::Both
+pub openjd_model::job::template_diff::Origin::Job
+pub openjd_model::job::template_diff::Origin::Parameters
+pub openjd_model::job::template_diff::Origin::Template
+impl core::clone::Clone for openjd_model::job::template_diff::Origin
+pub fn openjd_model::job::template_diff::Origin::clone(&self) -> openjd_model::job::template_diff::Origin
+impl core::cmp::Eq for openjd_model::job::template_diff::Origin
+impl core::cmp::PartialEq for openjd_model::job::template_diff::Origin
+pub fn openjd_model::job::template_diff::Origin::eq(&self, &openjd_model::job::template_diff::Origin) -> bool
+impl core::fmt::Debug for openjd_model::job::template_diff::Origin
+pub fn openjd_model::job::template_diff::Origin::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::template_diff::Origin
+pub fn openjd_model::job::template_diff::Origin::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_model::job::template_diff::Origin
+pub fn openjd_model::job::template_diff::Origin::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_model::job::template_diff::Origin
+impl core::marker::StructuralPartialEq for openjd_model::job::template_diff::Origin
+impl serde_core::ser::Serialize for openjd_model::job::template_diff::Origin
+pub fn openjd_model::job::template_diff::Origin::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub enum openjd_model::job::template_diff::Stage
+pub openjd_model::job::template_diff::Stage::Job
+pub openjd_model::job::template_diff::Stage::Parameters
+pub openjd_model::job::template_diff::Stage::RunTime
+pub openjd_model::job::template_diff::Stage::Template
+impl core::clone::Clone for openjd_model::job::template_diff::Stage
+pub fn openjd_model::job::template_diff::Stage::clone(&self) -> openjd_model::job::template_diff::Stage
+impl core::cmp::Eq for openjd_model::job::template_diff::Stage
+impl core::cmp::PartialEq for openjd_model::job::template_diff::Stage
+pub fn openjd_model::job::template_diff::Stage::eq(&self, &openjd_model::job::template_diff::Stage) -> bool
+impl core::fmt::Debug for openjd_model::job::template_diff::Stage
+pub fn openjd_model::job::template_diff::Stage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::template_diff::Stage
+pub fn openjd_model::job::template_diff::Stage::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_model::job::template_diff::Stage
+pub fn openjd_model::job::template_diff::Stage::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_model::job::template_diff::Stage
+impl core::marker::StructuralPartialEq for openjd_model::job::template_diff::Stage
+impl serde_core::ser::Serialize for openjd_model::job::template_diff::Stage
+pub fn openjd_model::job::template_diff::Stage::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub enum openjd_model::job::template_diff::TaskSummary
+pub openjd_model::job::template_diff::TaskSummary::Added
+pub openjd_model::job::template_diff::TaskSummary::Added::count: u64
+pub openjd_model::job::template_diff::TaskSummary::Product
+pub openjd_model::job::template_diff::TaskSummary::Product::added: alloc::vec::Vec<openjd_model::job::template_diff::BoxSummary>
+pub openjd_model::job::template_diff::TaskSummary::Product::kept: openjd_model::job::template_diff::BoxSummary
+pub openjd_model::job::template_diff::TaskSummary::Product::removed: alloc::vec::Vec<openjd_model::job::template_diff::BoxSummary>
+pub openjd_model::job::template_diff::TaskSummary::Removed
+pub openjd_model::job::template_diff::TaskSummary::Removed::count: u64
+pub openjd_model::job::template_diff::TaskSummary::Replaced
+pub openjd_model::job::template_diff::TaskSummary::Replaced::new_count: u64
+pub openjd_model::job::template_diff::TaskSummary::Replaced::old_count: u64
+pub openjd_model::job::template_diff::TaskSummary::Replaced::reason: alloc::string::String
+pub openjd_model::job::template_diff::TaskSummary::Unchanged
+pub openjd_model::job::template_diff::TaskSummary::Unchanged::count: u64
+impl core::clone::Clone for openjd_model::job::template_diff::TaskSummary
+pub fn openjd_model::job::template_diff::TaskSummary::clone(&self) -> openjd_model::job::template_diff::TaskSummary
+impl core::cmp::Eq for openjd_model::job::template_diff::TaskSummary
+impl core::cmp::PartialEq for openjd_model::job::template_diff::TaskSummary
+pub fn openjd_model::job::template_diff::TaskSummary::eq(&self, &openjd_model::job::template_diff::TaskSummary) -> bool
+impl core::fmt::Debug for openjd_model::job::template_diff::TaskSummary
+pub fn openjd_model::job::template_diff::TaskSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::template_diff::TaskSummary
+pub fn openjd_model::job::template_diff::TaskSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::template_diff::TaskSummary
+impl serde_core::ser::Serialize for openjd_model::job::template_diff::TaskSummary
+pub fn openjd_model::job::template_diff::TaskSummary::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub enum openjd_model::job::template_diff::TemplateSource
+pub openjd_model::job::template_diff::TemplateSource::Decoded(alloc::boxed::Box<openjd_model::template::JobTemplate>)
+pub openjd_model::job::template_diff::TemplateSource::Path(std::path::PathBuf)
+pub openjd_model::job::template_diff::TemplateSource::Text(alloc::string::String)
+pub openjd_model::job::template_diff::TemplateSource::Value(serde_json::value::Value)
+impl openjd_model::job::template_diff::TemplateSource
+pub fn openjd_model::job::template_diff::TemplateSource::guess(&str) -> Self
+impl core::clone::Clone for openjd_model::job::template_diff::TemplateSource
+pub fn openjd_model::job::template_diff::TemplateSource::clone(&self) -> openjd_model::job::template_diff::TemplateSource
+impl core::fmt::Debug for openjd_model::job::template_diff::TemplateSource
+pub fn openjd_model::job::template_diff::TemplateSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_model::job::template_diff::BoxSummary
+pub openjd_model::job::template_diff::BoxSummary::count: u64
+pub openjd_model::job::template_diff::BoxSummary::dims: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+impl core::clone::Clone for openjd_model::job::template_diff::BoxSummary
+pub fn openjd_model::job::template_diff::BoxSummary::clone(&self) -> openjd_model::job::template_diff::BoxSummary
+impl core::cmp::Eq for openjd_model::job::template_diff::BoxSummary
+impl core::cmp::PartialEq for openjd_model::job::template_diff::BoxSummary
+pub fn openjd_model::job::template_diff::BoxSummary::eq(&self, &openjd_model::job::template_diff::BoxSummary) -> bool
+impl core::fmt::Debug for openjd_model::job::template_diff::BoxSummary
+pub fn openjd_model::job::template_diff::BoxSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::template_diff::BoxSummary
+pub fn openjd_model::job::template_diff::BoxSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::template_diff::BoxSummary
+impl serde_core::ser::Serialize for openjd_model::job::template_diff::BoxSummary
+pub fn openjd_model::job::template_diff::BoxSummary::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct openjd_model::job::template_diff::Change
+pub openjd_model::job::template_diff::Change::after: core::option::Option<openjd_model::job::template_diff::Shown>
+pub openjd_model::job::template_diff::Change::before: core::option::Option<openjd_model::job::template_diff::Shown>
+pub openjd_model::job::template_diff::Change::field: alloc::string::String
+pub openjd_model::job::template_diff::Change::layer: openjd_model::job::template_diff::Layer
+pub openjd_model::job::template_diff::Change::origin: openjd_model::job::template_diff::Origin
+pub openjd_model::job::template_diff::Change::path: alloc::string::String
+pub openjd_model::job::template_diff::Change::stage: openjd_model::job::template_diff::Stage
+pub openjd_model::job::template_diff::Change::step: core::option::Option<alloc::string::String>
+impl core::clone::Clone for openjd_model::job::template_diff::Change
+pub fn openjd_model::job::template_diff::Change::clone(&self) -> openjd_model::job::template_diff::Change
+impl core::cmp::Eq for openjd_model::job::template_diff::Change
+impl core::cmp::PartialEq for openjd_model::job::template_diff::Change
+pub fn openjd_model::job::template_diff::Change::eq(&self, &openjd_model::job::template_diff::Change) -> bool
+impl core::fmt::Debug for openjd_model::job::template_diff::Change
+pub fn openjd_model::job::template_diff::Change::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::template_diff::Change
+pub fn openjd_model::job::template_diff::Change::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::template_diff::Change
+impl serde_core::ser::Serialize for openjd_model::job::template_diff::Change
+pub fn openjd_model::job::template_diff::Change::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct openjd_model::job::template_diff::DiffStat
+pub openjd_model::job::template_diff::DiffStat::steps_added: u64
+pub openjd_model::job::template_diff::DiffStat::steps_changed: u64
+pub openjd_model::job::template_diff::DiffStat::steps_removed: u64
+pub openjd_model::job::template_diff::DiffStat::tasks_added: u64
+pub openjd_model::job::template_diff::DiffStat::tasks_kept: u64
+pub openjd_model::job::template_diff::DiffStat::tasks_removed: u64
+pub openjd_model::job::template_diff::DiffStat::tasks_replaced: u64
+impl core::clone::Clone for openjd_model::job::template_diff::DiffStat
+pub fn openjd_model::job::template_diff::DiffStat::clone(&self) -> openjd_model::job::template_diff::DiffStat
+impl core::cmp::Eq for openjd_model::job::template_diff::DiffStat
+impl core::cmp::PartialEq for openjd_model::job::template_diff::DiffStat
+pub fn openjd_model::job::template_diff::DiffStat::eq(&self, &openjd_model::job::template_diff::DiffStat) -> bool
+impl core::default::Default for openjd_model::job::template_diff::DiffStat
+pub fn openjd_model::job::template_diff::DiffStat::default() -> openjd_model::job::template_diff::DiffStat
+impl core::fmt::Debug for openjd_model::job::template_diff::DiffStat
+pub fn openjd_model::job::template_diff::DiffStat::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::template_diff::DiffStat
+pub fn openjd_model::job::template_diff::DiffStat::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_model::job::template_diff::DiffStat
+impl core::marker::StructuralPartialEq for openjd_model::job::template_diff::DiffStat
+impl serde_core::ser::Serialize for openjd_model::job::template_diff::DiffStat
+pub fn openjd_model::job::template_diff::DiffStat::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct openjd_model::job::template_diff::JobDocument<'a>(pub &'a openjd_model::job::Job)
+impl openjd_model::job::template_diff::JobDocument<'_>
+pub const openjd_model::job::template_diff::JobDocument<'_>::VERSION: u64
+impl serde_core::ser::Serialize for openjd_model::job::template_diff::JobDocument<'_>
+pub fn openjd_model::job::template_diff::JobDocument<'_>::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+impl<'a> core::clone::Clone for openjd_model::job::template_diff::JobDocument<'a>
+pub fn openjd_model::job::template_diff::JobDocument<'a>::clone(&self) -> openjd_model::job::template_diff::JobDocument<'a>
+impl<'a> core::fmt::Debug for openjd_model::job::template_diff::JobDocument<'a>
+pub fn openjd_model::job::template_diff::JobDocument<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for openjd_model::job::template_diff::JobDocument<'a>
+pub struct openjd_model::job::template_diff::Note
+pub openjd_model::job::template_diff::Note::step: core::option::Option<alloc::string::String>
+pub openjd_model::job::template_diff::Note::text: alloc::string::String
+impl core::clone::Clone for openjd_model::job::template_diff::Note
+pub fn openjd_model::job::template_diff::Note::clone(&self) -> openjd_model::job::template_diff::Note
+impl core::cmp::Eq for openjd_model::job::template_diff::Note
+impl core::cmp::PartialEq for openjd_model::job::template_diff::Note
+pub fn openjd_model::job::template_diff::Note::eq(&self, &openjd_model::job::template_diff::Note) -> bool
+impl core::fmt::Debug for openjd_model::job::template_diff::Note
+pub fn openjd_model::job::template_diff::Note::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::template_diff::Note
+pub fn openjd_model::job::template_diff::Note::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::template_diff::Note
+impl serde_core::ser::Serialize for openjd_model::job::template_diff::Note
+pub fn openjd_model::job::template_diff::Note::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
+pub struct openjd_model::job::template_diff::Shown
+pub openjd_model::job::template_diff::Shown::raw: serde_json::value::Value
+pub openjd_model::job::template_diff::Shown::text: alloc::string::String
+impl core::clone::Clone for openjd_model::job::template_diff::Shown
+pub fn openjd_model::job::template_diff::Shown::clone(&self) -> openjd_model::job::template_diff::Shown
+impl core::cmp::Eq for openjd_model::job::template_diff::Shown
+impl core::cmp::PartialEq for openjd_model::job::template_diff::Shown
+pub fn openjd_model::job::template_diff::Shown::eq(&self, &openjd_model::job::template_diff::Shown) -> bool
+impl core::fmt::Debug for openjd_model::job::template_diff::Shown
+pub fn openjd_model::job::template_diff::Shown::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::template_diff::Shown
+pub fn openjd_model::job::template_diff::Shown::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::template_diff::Shown
+impl serde_core::ser::Serialize for openjd_model::job::template_diff::Shown
+pub fn openjd_model::job::template_diff::Shown::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct openjd_model::job::template_diff::StepSummary
+pub openjd_model::job::template_diff::StepSummary::name: alloc::string::String
+pub openjd_model::job::template_diff::StepSummary::new_index: core::option::Option<usize>
+pub openjd_model::job::template_diff::StepSummary::old_index: core::option::Option<usize>
+pub openjd_model::job::template_diff::StepSummary::status: openjd_model::job::diff::DiffStatus
+pub openjd_model::job::template_diff::StepSummary::tasks: openjd_model::job::template_diff::TaskSummary
+pub openjd_model::job::template_diff::StepSummary::tasks_unknown: core::option::Option<alloc::string::String>
+impl openjd_model::job::template_diff::StepSummary
+pub fn openjd_model::job::template_diff::StepSummary::stat_line(&self) -> alloc::string::String
+impl core::clone::Clone for openjd_model::job::template_diff::StepSummary
+pub fn openjd_model::job::template_diff::StepSummary::clone(&self) -> openjd_model::job::template_diff::StepSummary
+impl core::cmp::Eq for openjd_model::job::template_diff::StepSummary
+impl core::cmp::PartialEq for openjd_model::job::template_diff::StepSummary
+pub fn openjd_model::job::template_diff::StepSummary::eq(&self, &openjd_model::job::template_diff::StepSummary) -> bool
+impl core::fmt::Debug for openjd_model::job::template_diff::StepSummary
+pub fn openjd_model::job::template_diff::StepSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::template_diff::StepSummary
+pub fn openjd_model::job::template_diff::StepSummary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::template_diff::StepSummary
+impl serde_core::ser::Serialize for openjd_model::job::template_diff::StepSummary
+pub fn openjd_model::job::template_diff::StepSummary::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct openjd_model::job::template_diff::TemplateDiff
+pub openjd_model::job::template_diff::TemplateDiff::changes: alloc::vec::Vec<openjd_model::job::template_diff::Change>
+pub openjd_model::job::template_diff::TemplateDiff::job: openjd_model::job::diff::DiffTree
+pub openjd_model::job::template_diff::TemplateDiff::new_job: openjd_model::job::Job
+pub openjd_model::job::template_diff::TemplateDiff::notes: alloc::vec::Vec<openjd_model::job::template_diff::Note>
+pub openjd_model::job::template_diff::TemplateDiff::old_job: openjd_model::job::Job
+pub openjd_model::job::template_diff::TemplateDiff::steps: alloc::vec::Vec<openjd_model::job::template_diff::StepSummary>
+impl openjd_model::job::template_diff::TemplateDiff
+pub fn openjd_model::job::template_diff::TemplateDiff::changes_at<'a>(&'a self, &'a str) -> impl core::iter::traits::iterator::Iterator<Item = &'a openjd_model::job::template_diff::Change> + 'a
+pub fn openjd_model::job::template_diff::TemplateDiff::changes_in_step<'a>(&'a self, &'a str) -> impl core::iter::traits::iterator::Iterator<Item = &'a openjd_model::job::template_diff::Change> + 'a
+pub fn openjd_model::job::template_diff::TemplateDiff::is_changed(&self) -> bool
+pub fn openjd_model::job::template_diff::TemplateDiff::plan(&self) -> core::result::Result<openjd_model::job::apply::ApplyPlan<'_>, openjd_model::error::ModelError>
+pub fn openjd_model::job::template_diff::TemplateDiff::stat(&self) -> openjd_model::job::template_diff::DiffStat
+pub fn openjd_model::job::template_diff::TemplateDiff::step(&self, &str) -> core::option::Option<&openjd_model::job::template_diff::StepSummary>
+impl core::clone::Clone for openjd_model::job::template_diff::TemplateDiff
+pub fn openjd_model::job::template_diff::TemplateDiff::clone(&self) -> openjd_model::job::template_diff::TemplateDiff
+impl core::cmp::PartialEq for openjd_model::job::template_diff::TemplateDiff
+pub fn openjd_model::job::template_diff::TemplateDiff::eq(&self, &openjd_model::job::template_diff::TemplateDiff) -> bool
+impl core::fmt::Debug for openjd_model::job::template_diff::TemplateDiff
+pub fn openjd_model::job::template_diff::TemplateDiff::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::template_diff::TemplateDiff
+pub fn openjd_model::job::template_diff::TemplateDiff::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::template_diff::TemplateDiff
+impl serde_core::ser::Serialize for openjd_model::job::template_diff::TemplateDiff
+pub fn openjd_model::job::template_diff::TemplateDiff::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub struct openjd_model::job::template_diff::TemplateInput
+impl openjd_model::job::template_diff::TemplateInput
+pub fn openjd_model::job::template_diff::TemplateInput::build(&self) -> core::result::Result<openjd_model::job::Job, openjd_model::error::ModelError>
+pub fn openjd_model::job::template_diff::TemplateInput::cwd(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn openjd_model::job::template_diff::TemplateInput::environment(self, openjd_model::job::template_diff::TemplateSource) -> Self
+pub fn openjd_model::job::template_diff::TemplateInput::extensions(self, &[&str]) -> Self
+pub fn openjd_model::job::template_diff::TemplateInput::limits(self, openjd_model::types::CallerLimits) -> Self
+pub fn openjd_model::job::template_diff::TemplateInput::new(openjd_model::job::template_diff::TemplateSource) -> Self
+pub fn openjd_model::job::template_diff::TemplateInput::no_extensions(self) -> Self
+pub fn openjd_model::job::template_diff::TemplateInput::param(self, impl core::convert::Into<alloc::string::String>, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn openjd_model::job::template_diff::TemplateInput::parameters(&self) -> &openjd_model::types::JobParameterInputValues
+pub fn openjd_model::job::template_diff::TemplateInput::params(self, impl core::iter::traits::collect::IntoIterator<Item = (alloc::string::String, openjd_expr::value::ExprValue)>) -> Self
+pub fn openjd_model::job::template_diff::TemplateInput::preprocessed(self, openjd_model::types::JobParameterValues) -> Self
+pub fn openjd_model::job::template_diff::TemplateInput::template_dir(self, impl core::convert::Into<std::path::PathBuf>) -> Self
+impl core::clone::Clone for openjd_model::job::template_diff::TemplateInput
+pub fn openjd_model::job::template_diff::TemplateInput::clone(&self) -> openjd_model::job::template_diff::TemplateInput
+impl core::fmt::Debug for openjd_model::job::template_diff::TemplateInput
+pub fn openjd_model::job::template_diff::TemplateInput::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub struct openjd_model::job::template_diff::TemplateStepFragment
+pub openjd_model::job::template_diff::TemplateStepFragment::step: serde_json::value::Value
+pub openjd_model::job::template_diff::TemplateStepFragment::step_environments: alloc::vec::Vec<serde_json::value::Value>
+impl core::clone::Clone for openjd_model::job::template_diff::TemplateStepFragment
+pub fn openjd_model::job::template_diff::TemplateStepFragment::clone(&self) -> openjd_model::job::template_diff::TemplateStepFragment
+impl core::cmp::PartialEq for openjd_model::job::template_diff::TemplateStepFragment
+pub fn openjd_model::job::template_diff::TemplateStepFragment::eq(&self, &openjd_model::job::template_diff::TemplateStepFragment) -> bool
+impl core::fmt::Debug for openjd_model::job::template_diff::TemplateStepFragment
+pub fn openjd_model::job::template_diff::TemplateStepFragment::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::template_diff::TemplateStepFragment
+pub fn openjd_model::job::template_diff::build_job_symbol_table(&openjd_model::job::Job) -> core::result::Result<openjd_expr::symbol_table::SerializedSymbolTable, openjd_model::error::ModelError>
+pub fn openjd_model::job::template_diff::diff_built_jobs(openjd_model::job::Job, openjd_model::job::Job, &openjd_model::job::diff::DiffOptions) -> openjd_model::job::template_diff::TemplateDiff
+pub fn openjd_model::job::template_diff::diff_job_template_with_parameter_sets(&openjd_model::job::template_diff::TemplateInput, &openjd_model::types::JobParameterInputValues, &openjd_model::types::JobParameterInputValues, &openjd_model::job::diff::DiffOptions) -> core::result::Result<openjd_model::job::template_diff::TemplateDiff, openjd_model::error::ModelError>
+pub fn openjd_model::job::template_diff::diff_templates(&openjd_model::job::template_diff::TemplateInput, &openjd_model::job::template_diff::TemplateInput, &openjd_model::job::diff::DiffOptions) -> core::result::Result<openjd_model::job::template_diff::TemplateDiff, openjd_model::error::ModelError>
+pub fn openjd_model::job::template_diff::job_digest(&openjd_model::job::Job) -> core::result::Result<alloc::string::String, openjd_model::error::ModelError>
+pub fn openjd_model::job::template_diff::job_from_str(&str) -> core::result::Result<openjd_model::job::Job, openjd_model::error::ModelError>
+pub fn openjd_model::job::template_diff::merge_parameters(&openjd_model::types::JobParameterValues, &openjd_model::types::JobParameterInputValues, &openjd_model::job::template_diff::TemplateInput) -> core::result::Result<openjd_model::types::JobParameterValues, openjd_model::error::ModelError>
+pub fn openjd_model::job::template_diff::template_job_environment_fragment(&serde_json::value::Value, &str) -> core::result::Result<serde_json::value::Value, openjd_model::error::ModelError>
+pub fn openjd_model::job::template_diff::template_step_fragment(&serde_json::value::Value, &str) -> core::result::Result<openjd_model::job::template_diff::TemplateStepFragment, openjd_model::error::ModelError>
 pub enum openjd_model::job::CancelationMode
 pub openjd_model::job::CancelationMode::DeferredMode
 pub openjd_model::job::CancelationMode::DeferredMode::mode: openjd_expr::format_string::FormatString
@@ -401,6 +1112,8 @@ pub fn openjd_model::job::Environment::fmt(&self, &mut core::fmt::Formatter<'_>)
 impl core::hash::Hash for openjd_model::job::Environment
 pub fn openjd_model::job::Environment::hash<H: core::hash::Hasher>(&self, &mut H)
 impl core::marker::StructuralPartialEq for openjd_model::job::Environment
+impl openjd_model::job::apply::ToDocument for openjd_model::job::Environment
+pub fn openjd_model::job::Environment::as_document(&self) -> impl serde_core::ser::Serialize + '_
 impl serde_core::ser::Serialize for openjd_model::job::Environment
 pub fn openjd_model::job::Environment::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for openjd_model::job::Environment
@@ -482,6 +1195,8 @@ pub fn openjd_model::job::Job::fmt(&self, &mut core::fmt::Formatter<'_>) -> core
 impl core::hash::Hash for openjd_model::job::Job
 pub fn openjd_model::job::Job::hash<H: core::hash::Hasher>(&self, &mut H)
 impl core::marker::StructuralPartialEq for openjd_model::job::Job
+impl openjd_model::job::apply::ToDocument for openjd_model::job::Job
+pub fn openjd_model::job::Job::as_document(&self) -> impl serde_core::ser::Serialize + '_
 impl serde_core::ser::Serialize for openjd_model::job::Job
 pub fn openjd_model::job::Job::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 pub struct openjd_model::job::JobParameter
@@ -498,6 +1213,8 @@ pub fn openjd_model::job::JobParameter::fmt(&self, &mut core::fmt::Formatter<'_>
 impl core::hash::Hash for openjd_model::job::JobParameter
 pub fn openjd_model::job::JobParameter::hash<__H: core::hash::Hasher>(&self, &mut __H)
 impl core::marker::StructuralPartialEq for openjd_model::job::JobParameter
+impl openjd_model::job::apply::ToDocument for openjd_model::job::JobParameter
+pub fn openjd_model::job::JobParameter::as_document(&self) -> impl serde_core::ser::Serialize + '_
 impl serde_core::ser::Serialize for openjd_model::job::JobParameter
 pub fn openjd_model::job::JobParameter::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 pub struct openjd_model::job::ResolvedChunks
@@ -536,6 +1253,8 @@ pub fn openjd_model::job::Step::fmt(&self, &mut core::fmt::Formatter<'_>) -> cor
 impl core::hash::Hash for openjd_model::job::Step
 pub fn openjd_model::job::Step::hash<__H: core::hash::Hasher>(&self, &mut __H)
 impl core::marker::StructuralPartialEq for openjd_model::job::Step
+impl openjd_model::job::apply::ToDocument for openjd_model::job::Step
+pub fn openjd_model::job::Step::as_document(&self) -> impl serde_core::ser::Serialize + '_
 impl serde_core::ser::Serialize for openjd_model::job::Step
 pub fn openjd_model::job::Step::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for openjd_model::job::Step
@@ -584,6 +1303,8 @@ pub fn openjd_model::job::StepParameterSpace::fmt(&self, &mut core::fmt::Formatt
 impl core::hash::Hash for openjd_model::job::StepParameterSpace
 pub fn openjd_model::job::StepParameterSpace::hash<H: core::hash::Hasher>(&self, &mut H)
 impl core::marker::StructuralPartialEq for openjd_model::job::StepParameterSpace
+impl openjd_model::job::apply::ToDocument for openjd_model::job::StepParameterSpace
+pub fn openjd_model::job::StepParameterSpace::as_document(&self) -> impl serde_core::ser::Serialize + '_
 impl serde_core::ser::Serialize for openjd_model::job::StepParameterSpace
 pub fn openjd_model::job::StepParameterSpace::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
 impl<'de> serde_core::de::Deserialize<'de> for openjd_model::job::StepParameterSpace
