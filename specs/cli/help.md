@@ -173,7 +173,8 @@ template, so a parse error is the correct response.
 | Fallback | Falls back to standard argparse help on parse error | Exits with error on parse error |
 | Integration | Integrated into argparse's help system | Completely separate from clap |
 | FLOAT numbers | `Decimal` text: `[default: 2]`, `range: 0 to 1E+20` | `format_float` (CPython `repr`): `[default: 2.0]`, `range: 0.0 to 1e+20` |
+| FLOAT `minValue`/`maxValue` given as a string | Keeps the spelling: `maximum: 3.50` | Written by `format_float`: `maximum: 3.5` |
 
 The Python approach is more elegant because it's integrated into the argument parser's
 help system. The Rust approach is a workaround for clap's lack of custom help actions,
-but it produces equivalent output, apart from how a FLOAT given as a number is written.
+but it produces equivalent output, apart from how FLOAT values are written (see the table).

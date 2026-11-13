@@ -93,17 +93,13 @@ pub fn float_parameter_names(
 ///
 /// - Any number given to a FLOAT is a float value with no spelling, whatever
 ///   its size.
-/// - Otherwise, an integer serde_json holds as an `i64` is an `Int`, which
-///   every type reads as it reads the integer's text. serde_json reads `-0`
-///   as a float, so that one is the text `-0.0`.
-/// - Otherwise, a float is its text as Python writes it (`repr(float)`, which
-///   is also `str(float)`): `format_float`'s text, but `-0.0` for negative
-///   zero. An INT or BOOL reads that text, so `3.0` is refused as it was when
-///   every number was text.
-/// - Otherwise, an integer from `i64::MAX + 1` to `u64::MAX`, which serde_json
-///   holds as a `u64`, is its digits, so a STRING keeps them and an INT error
-///   quotes them. serde_json reads an integer below `i64::MIN` or above
-///   `u64::MAX` as a float, so that one is written as a float is.
+/// - Otherwise, a number serde_json reads as a float is its text as Python
+///   writes it (`repr(float)`, which is also `str(float)`): `format_float`'s
+///   text, but `-0.0` for negative zero. An INT or BOOL reads that text, so
+///   `3.0` is refused as it was when every number was text. serde_json reads
+///   `-0`, and an integer below `i64::MIN` or above `u64::MAX`, as a float.
+/// - Otherwise, an integer is its digits, so a STRING keeps them and an INT
+///   reads or quotes them.
 ///
 /// Anything else is passed as its JSON text.
 fn json_val_to_expr(v: &serde_json::Value, float_param: bool) -> openjd_expr::ExprValue {
@@ -114,10 +110,9 @@ fn json_val_to_expr(v: &serde_json::Value, float_param: bool) -> openjd_expr::Ex
             let float = n
                 .as_f64()
                 .and_then(|f| openjd_expr::value::Float64::new(f).ok());
-            match (n.as_i64(), float) {
-                (_, Some(f)) if float_param => ExprValue::Float(f),
-                (Some(i), _) => ExprValue::Int(i),
-                (None, Some(f)) if n.is_f64() => ExprValue::String(python_float_text(f.value(), n)),
+            match float {
+                Some(f) if float_param => ExprValue::Float(f),
+                Some(f) if n.is_f64() => ExprValue::String(python_float_text(f.value(), n)),
                 _ => ExprValue::String(n.to_string()),
             }
         }

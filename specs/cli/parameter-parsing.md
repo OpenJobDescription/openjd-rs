@@ -79,17 +79,15 @@ the names of the FLOAT parameters the job and environment templates define
   written the way a computed float is, CPython's `repr` (Expression Language §1.3.4):
   `{"F": 2}` is `2.0`, `{"F": 1e20}` is `1e+20`, `{"F": 0.00001}` is `1e-05`, and
   `{"F": 18446744073709551615}` is `1.8446744073709552e+19`. Zero is `0.0`.
-- For any other parameter, an integer in the 64-bit signed range is an `ExprValue::Int`,
-  which every type reads as it reads the integer's text. serde_json reads `-0` as a float,
-  so it is the text `-0.0` (an INT refuses it; Python accepts it as `0`).
-- For any other parameter, a float is an `ExprValue::String` holding its text as Python
-  writes it (`repr(float)`, which is also `str(float)`): `format_float`'s text, but `-0.0`
-  for negative zero. A STRING gets that text, as Python's `str` gives it. An INT or BOOL
-  reads the text, so `{"I": 3.0}` is refused, as `-p I=3.0` is.
-- For any other parameter, an integer from `i64::MAX + 1` to `u64::MAX` (serde_json holds
-  it as a `u64`) is a string of its digits, so a STRING keeps them and an INT error quotes
-  them. serde_json reads an integer below `i64::MIN` or above `u64::MAX` as a float, so it
-  is written as one (`-9.223372036854776e+18`) and an INT error quotes that text.
+- For any other parameter, a number serde_json reads as a float is an `ExprValue::String`
+  holding its text as Python writes it (`repr(float)`, which is also `str(float)`):
+  `format_float`'s text, but `-0.0` for negative zero. A STRING gets that text, as Python's
+  `str` gives it. An INT or BOOL reads the text, so `{"I": 3.0}` is refused, as `-p I=3.0`
+  is. serde_json reads `-0` (so an INT refuses it; Python accepts it as `0`), and an
+  integer below `i64::MIN` or above `u64::MAX` (written `-9.223372036854776e+18`, which an
+  INT error quotes), as a float.
+- For any other parameter, an integer is an `ExprValue::String` of its digits, so a STRING
+  keeps them and an INT reads them, or quotes them in an error.
 - Anything else (a boolean, `null`, a list, an object) is a string of its JSON text. A list
   parameter reads that text as JSON, so a number item of a `LIST[FLOAT]` is a float with
   no spelling too.
@@ -101,8 +99,11 @@ value itself, so the differences include:
   `2.0`); a float is written as `str(float)`, which is `repr`.
 - A STRING given `true` is `True` in Python and `true` here, and one given an integer below
   `i64::MIN` or above `u64::MAX` keeps its digits in Python.
-- Python refuses a number given to a BOOL, RANGE_EXPR or PATH parameter, a number item of a
-  `LIST[STRING]`, and a float item of a `LIST[INT]`; this CLI reads each as its text.
+- Python refuses a number given to a BOOL, RANGE_EXPR or PATH parameter, which this CLI reads
+  as its text. It refuses a number item of a `LIST[STRING]` and a float item of a
+  `LIST[INT]`; this CLI passes a list as its JSON text, and the model reads a number item of
+  a `LIST[STRING]` as its text and an integral float item of a `LIST[INT]` (`[3.0]`) as the
+  integer.
 - Python reads a YAML parameter file as YAML 1.1, so `F: 1e20` is the string `1e20` there and
   the number `1e20` here.
 

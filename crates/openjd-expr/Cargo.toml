@@ -25,7 +25,7 @@ serde_json = { workspace = true }
 # Shortest round-trip digits for `format_float`. Rust's own `{}` shortest form
 # breaks a tie between two shortest candidates upward (1000000000000000.3 for
 # 1000000000000000.25), where CPython's `repr` rounds half to even (.2); ryu
-# picks the same digits as `repr`. Already in the tree through serde_json.
+# picks the same digits as `repr`. Already in the tree (through ruff_python_ast).
 ryu = { workspace = true }
 
 # Ruff Python parser for EXPR extension expression parsing.
