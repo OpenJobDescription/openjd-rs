@@ -22,7 +22,6 @@ src/
 ├── main.rs       # Entry point: Cli/Commands structs, SessionLogger, tokio::main
 ├── check.rs      # CheckArgs + execute(): template validation
 ├── summary.rs    # SummaryArgs + execute(): job/step summary output
-├── build.rs      # BuildArgs + execute(): print the built job
 ├── diff.rs       # DiffArgs + execute(): template diff, returns the exit code
 ├── run/
 │   ├── mod.rs    # RunArgs, RunContext, lifecycle primitives
@@ -122,7 +121,7 @@ is async (it awaits session actions), but the runtime is created unconditionally
 tokio's runtime initialization is cheap and having a consistent async context simplifies
 future additions.
 
-`check`, `summary`, `build` and `diff` are synchronous functions called from the async main — tokio handles
+`check`, `summary` and `diff` are synchronous functions called from the async main — tokio handles
 this transparently.
 
 ### Global State for Logging

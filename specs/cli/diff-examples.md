@@ -97,7 +97,6 @@ changes, and `plan kinds` the mutation kinds of `--plan`.
 | `{{Session.WorkingDirectory}}` reference | [runtime_session_dir](#runtime_session_dir) | `~ steps[Render].script.onRun.args: [{{Session.WorkingDirectory}}/out] -> [{{Session.WorkingDirectory}}/render]  [template]` | template | runTime | StepScript |
 | origin `both` | [origin_both](#origin_both) | `~ steps[Render].parameterSpace.taskParameterDefinitions[Frame].definition: 1-10 -> 1-20,50  [both]` | both, parameters | job, parameters | ParameterValue, TaskAppend |
 | origin `both`, with a note | [origin_mid_fails](#origin_mid_fails) | `+ parameter Quality: 3, defined as {type: INT}  [both]` | both, template | parameters, template | ParameterAdd |
-| built jobs (`--jobs`) | [jobs](#jobs) | `~ parameter Frames: 1-100 -> 1-200  [job]` | job | job, parameters | ParameterValue, TaskAppend |
 | `--step` | [step_filter](#step_filter) | `~ steps[Composite].script.onRun.command: comp -> comp2  [template]` | template | job | StepScript |
 | `--stat` | [stat](#stat) | `~ Render  tasks 100 -> 200  (+100 -0)` | template | job | TaskAppend |
 
@@ -107,8 +106,8 @@ Not shown:
 |---|---|
 | `specificationVersion` | `jobtemplate-2023-09` is the only job template version, so it cannot change. |
 | parameter, environment or embedded file `name` | Entries are matched by name, so a rename is a remove and an add, as `step_renamed` shows. |
-| `<collection>.duplicates` | Template validation rejects repeated names; only a hand-edited built job has them, and `--plan` rejects them. |
-| an empty list versus none, other than `hostRequirements.amounts` and `attributes` | Template validation rejects an empty `parameterDefinitions`, `jobEnvironments`, `stepEnvironments`, `dependencies`, `taskParameterDefinitions`, `embeddedFiles` or `args`, so only a hand-edited built job has one. An empty `amounts` or `attributes` is accepted beside the other, as `host_amounts_empty` shows. |
+| `<collection>.duplicates` | Template validation rejects repeated names, so a template diff never has them; only a hand-edited built job given to the library's `diff_built_jobs` does, and `plan` rejects it. |
+| an empty list versus none, other than `hostRequirements.amounts` and `attributes` | Template validation rejects an empty `parameterDefinitions`, `jobEnvironments`, `stepEnvironments`, `dependencies`, `taskParameterDefinitions`, `embeddedFiles` or `args`, so only a hand-edited built job given to `diff_built_jobs` has one. An empty `amounts` or `attributes` is accepted beside the other, as `host_amounts_empty` shows. |
 | embedded file `type` | `TEXT` is the only embedded file type, so it cannot change. |
 | embedded file `endOfLine`; other actions (`onExit`, `onWrap*`) | Shown like the fields above: one line per field, under the same path. |
 
@@ -477,7 +476,7 @@ crates/openjd-cli/examples/diff/list_list_item_v1.yaml -> crates/openjd-cli/exam
 One template, `Frames` 1-100 on the old side and 1-200 on the new.
 
 ```console
-$ openjd diff crates/openjd-cli/examples/diff/frames.yaml --old-param Frames=1-100 --new-param Frames=1-200
+$ openjd diff crates/openjd-cli/examples/diff/frames.yaml --old-parameter Frames=1-100 --new-parameter Frames=1-200
 crates/openjd-cli/examples/diff/frames.yaml: old parameters -> new parameters
 ~ parameter Frames: 1-100 -> 1-200  [parameters]
 ~ step Render
@@ -490,7 +489,7 @@ crates/openjd-cli/examples/diff/frames.yaml: old parameters -> new parameters
 ```
 
 ```console
-$ openjd diff crates/openjd-cli/examples/diff/frames.yaml --old-param Frames=1-100 --new-param Frames=1-200 --plan
+$ openjd diff crates/openjd-cli/examples/diff/frames.yaml --old-parameter Frames=1-100 --new-parameter Frames=1-200 --plan
 crates/openjd-cli/examples/diff/frames.yaml: old parameters -> new parameters
 ~ parameter Frames: 1-100 -> 1-200  [parameters]
 ~ step Render
@@ -507,7 +506,7 @@ apply plan:
 kinds: ParameterValue, TaskAppend
 ```
 
-`openjd diff crates/openjd-cli/examples/diff/frames.yaml --old-param Frames=1-100 --new-param Frames=1-200 --output json`:
+`openjd diff crates/openjd-cli/examples/diff/frames.yaml --old-parameter Frames=1-100 --new-parameter Frames=1-200 --output json`:
 
 ```json
 {
@@ -592,7 +591,7 @@ kinds: ParameterValue, TaskAppend
 A `PATH` parameter changes; the step sees it as `RawParam.Scene` in its resolved symbol table.
 
 ```console
-$ openjd diff crates/openjd-model/examples/template_diff/render_v1.yaml --old-param Scene=//srv/a --new-param Scene=//srv/b
+$ openjd diff crates/openjd-model/examples/template_diff/render_v1.yaml --old-parameter Scene=//srv/a --new-parameter Scene=//srv/b
 crates/openjd-model/examples/template_diff/render_v1.yaml: old parameters -> new parameters
 ~ parameter Scene: //srv/a -> //srv/b  [parameters]
 ~ step Render
@@ -607,7 +606,7 @@ crates/openjd-model/examples/template_diff/render_v1.yaml: old parameters -> new
 A job environment's variable reads the parameter, so the environment's symbol table changes.
 
 ```console
-$ openjd diff crates/openjd-cli/examples/diff/env_param.yaml --old-param Tool=v1 --new-param Tool=v2
+$ openjd diff crates/openjd-cli/examples/diff/env_param.yaml --old-parameter Tool=v1 --new-parameter Tool=v2
 crates/openjd-cli/examples/diff/env_param.yaml: old parameters -> new parameters
 ~ jobEnvironments[Tools].resolvedSymTab: Param.Tool=v1 -> Param.Tool=v2  [parameters]
 ~ parameter Tool: v1 -> v2  [parameters]
@@ -1669,7 +1668,7 @@ crates/openjd-cli/examples/diff/runtime_session_dir_v1.yaml -> crates/openjd-cli
 The template appends frame 50 to the range and the new parameters extend `Frames`, so the range change has both causes.
 
 ```console
-$ openjd diff crates/openjd-cli/examples/diff/origin_both_v1.yaml crates/openjd-cli/examples/diff/origin_both_v2.yaml --new-param Frames=1-20
+$ openjd diff crates/openjd-cli/examples/diff/origin_both_v1.yaml crates/openjd-cli/examples/diff/origin_both_v2.yaml --new-parameter Frames=1-20
 crates/openjd-cli/examples/diff/origin_both_v1.yaml -> crates/openjd-cli/examples/diff/origin_both_v2.yaml
 ~ parameter Frames: 1-10 -> 1-20  [parameters]
 ~ step Render
@@ -1686,7 +1685,7 @@ crates/openjd-cli/examples/diff/origin_both_v1.yaml -> crates/openjd-cli/example
 The new template needs a parameter the old side does not supply, so the split cannot be computed.
 
 ```console
-$ openjd diff crates/openjd-cli/examples/diff/origin_mid_fails_v1.yaml crates/openjd-cli/examples/diff/origin_mid_fails_v2.yaml --new-param Quality=3
+$ openjd diff crates/openjd-cli/examples/diff/origin_mid_fails_v1.yaml crates/openjd-cli/examples/diff/origin_mid_fails_v2.yaml --new-parameter Quality=3
 crates/openjd-cli/examples/diff/origin_mid_fails_v1.yaml -> crates/openjd-cli/examples/diff/origin_mid_fails_v2.yaml
 + parameter Quality: 3, defined as {type: INT}  [both]
 
@@ -1695,23 +1694,6 @@ note: origin: the new template does not build with the old parameters, so job-la
 ```
 
 ## Other inputs and filters
-
-### jobs
-
-Two jobs that `openjd build` printed from `frames.yaml` with `Frames=1-100` and `Frames=1-200`. Every origin is `job`.
-
-```console
-$ openjd diff --jobs crates/openjd-cli/examples/diff/frames_1_100.json crates/openjd-cli/examples/diff/frames_1_200.json
-jobs: crates/openjd-cli/examples/diff/frames_1_100.json -> crates/openjd-cli/examples/diff/frames_1_200.json
-~ parameter Frames: 1-100 -> 1-200  [job]
-~ step Render
-    ~ Frame: 1-100 -> 1-200  [job]
-    tasks: 100 -> 200
-      keep   100   Frame 1-100
-      add    100   Frame 101-200
-
-1 step changed. Tasks: 100 kept, 100 added, 0 removed.
-```
 
 ### step_filter
 

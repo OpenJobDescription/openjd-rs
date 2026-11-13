@@ -1,5 +1,4 @@
-# `openjd diff` example: one template under two parameter sets, and the input of
-# `openjd build` for the `--jobs` example.
+# `openjd diff` example: one template under two parameter sets.
 specificationVersion: jobtemplate-2023-09
 name: Demo
 parameterDefinitions:

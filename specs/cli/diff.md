@@ -9,28 +9,32 @@ line with ` (unstable)`.
 ## Purpose
 
 `openjd diff` reports what changes between two jobs and where each change came from. It
-compares two job templates, one template under two parameter sets, or two jobs that
-`openjd build` printed. It is the command-line form of `openjd_model::job::template_diff`
+is the one diff command: it compares one template under two parameter sets, or two job
+templates, each side with its own parameters. It is the command-line form of `openjd_model::job::template_diff`
 ([model/template-diff.md](../model/template-diff.md)), which builds both jobs the same way
 `summary` and `run` do and diffs them with `job::diff`.
 
 ## Interface
 
 ```
-openjd diff <OLD> [NEW] [-p <PARAM>]... [--old-param <PARAM>]... [--new-param <PARAM>]...
-            [--environment <FILE>]... [--extensions <EXT>] [--jobs]
+openjd diff [OPTIONS] <TEMPLATE> [NEW_TEMPLATE]
+
+openjd diff <TEMPLATE> [NEW_TEMPLATE] [-p <PARAM>]... [--old-parameter <PARAM>]...
+            [--new-parameter <PARAM>]... [--environment <FILE>]... [--extensions <EXT>]
             [--step <NAME>] [--tasks | --stat] [--plan] [--depth <N>] [--ignore-symbols]
             [--output human-readable|json|yaml] [--verbose] [--exit-code]
 ```
 
+With one template, the old and new sides are that template and differ only by their
+parameters. With two, `TEMPLATE` is the old side and `NEW_TEMPLATE` the new one.
+
 | Argument | Description |
 |----------|-------------|
-| `OLD`, `NEW` | Template files, or `-` for stdin (at most one input of the command, counting `--environment`). With only `OLD`, both sides use that template and differ in `--old-param` / `--new-param` |
-| `-p`, `--job-param`, `--parameter` | Job parameter for both sides. Same parser as `run` ([parameter-parsing.md](parameter-parsing.md)): `Key=Value`, `file://path`, inline JSON; repeatable, later wins |
-| `--old-param`, `--new-param` | Job parameter for one side, same parser; applied after `-p`, so it wins |
+| `TEMPLATE`, `NEW_TEMPLATE` | Template files, or `-` for stdin (at most one input of the command, counting `--environment`). With only `TEMPLATE`, both sides use that template and differ in `--old-parameter` / `--new-parameter` |
+| `-p`, `--parameter` | Job parameter for both sides. Hidden alias `--job-param` |
+| `--old-parameter`, `--new-parameter` | Job parameter for one side; applied after `-p`, so it wins. Hidden aliases `--old-param`, `--new-param` |
 | `--environment`, `--env` | Environment template file for both sides, or `-` for stdin; repeatable. Each is read once and used by both sides |
 | `--extensions` | Extension allowlist, parsed as for `check` and `summary`; default every supported extension |
-| `--jobs` | `OLD` and `NEW` are built jobs (JSON or YAML from `openjd build`). Requires `NEW` (a usage error without it). Conflicts with `-p`, `--old-param`, `--new-param`, `--environment` and `--extensions` (exit 2) |
 | `--step` | Keep only this step and the job-level changes, and with `--plan` only this step's ops and the job-level ops (job fields, parameters, job environments). A change and a note belong to the step their `step` field names (`Change::step`, `Note::step`), so the name is matched exactly and never as a path prefix: `--step A` keeps neither the step `A][B` nor the step `A].x`. The step's own unexpanded change (`~ (not expanded)`, at `--depth 1`) is kept. Notes about other steps are dropped; job-level notes are kept. A step in neither job is an error. `--step` with `--depth 0` is a usage error (exit 2): at depth 0 the only change is the unexpanded job root, which cannot be split by step. `--exit-code` and `changed` see only what is kept, so a change in another step alone gives exit 0 and `"changed": false`. `--verbose` is not filtered: the job diff tree, and `oldJob` and `newJob`, are the whole jobs |
 | `--tasks` | Print only each shown step's task summary. Conflicts with `--stat` (exit 2) |
 | `--stat` | Print one line per shown step, then the totals |
@@ -41,13 +45,57 @@ openjd diff <OLD> [NEW] [-p <PARAM>]... [--old-param <PARAM>]... [--new-param <P
 | `--verbose` | Human-readable: also print the job diff tree (`DiffTree`'s `Display`) after the summary. `json` or `yaml`: also include `oldJob`, `newJob` and the `job` tree |
 | `--exit-code` | Exit 0 with no differences, 4 with differences. With `--step`, only the differences it keeps count |
 
+### Parameters
+
+`openjd diff` parses parameters exactly as `openjd run -p` does. The rules live in one
+place, [parameter-parsing.md](parameter-parsing.md). A parameter takes one of three forms:
+
+| form | example |
+|---|---|
+| `Key=Value` | `-p Frames=1-200` |
+| a JSON or YAML file of `{Key: Value}`, as `file://path` | `-p file://params.json` |
+| inline JSON | `-p '{"Frames": "1-200"}'` |
+
+Each flag is repeatable, and a later value wins. A side's parameters are its `-p` values
+followed by its `--old-parameter` or `--new-parameter` values. So the side flag wins over
+`-p`, wherever it appears on the command line.
+
+`--job-param` is a hidden alias of `-p`, because it is the long name `run` and `summary`
+use. `--old-param` and `--new-param` are hidden aliases of the side flags, because they
+are the earlier spellings. `--help` lists only `--parameter`, `--old-parameter` and
+`--new-parameter`. The `-p` help names the three forms with one example each. The
+`--old-parameter` and `--new-parameter` help says `in the same forms as -p` and gives one
+`Key=Value` example.
+
+The syntax follows `deadline bundle submit -p`, but the values it produces are not
+guaranteed to be identical.
+
+#### Known differences
+
+This list is not exhaustive. Each entry was run against `openjd diff` with a template
+whose parameter `A` is a STRING.
+
+- `file://~/p.json` does not expand `~`: `Provided parameter file '~/p.json' does not exist.`
+- JSON `null` becomes the text `null`: `{"A": null}` gives `~ parameter A: x -> null`, the
+  same as `A=null`.
+- Every value is passed as text. JSON `{"A": true}` gives `true`.
+- For an INT parameter `N`, a YAML file with `N: 007` fails with `Parameter 'N': Value
+  '7.0' is not a valid integer or integer string.`, where `deadline` gives 7.
+- A malformed parameter file reports `Job parameter file 'file://bad.yaml' should contain
+  a dictionary.`, without the parse location.
+- The parser accepts `-p =v`; building the job then fails with an error that names no
+  parameter: `Job parameter values provided for parameters that are not defined in the
+  template: `.
+
 Which library call runs:
 
 | inputs | call |
 |---|---|
-| `OLD` only | `diff_job_template_with_parameter_sets(OLD, -p + --old-param, -p + --new-param)` |
-| `OLD NEW` | `diff_templates(OLD with -p + --old-param, NEW with -p + --new-param)` |
-| `--jobs OLD NEW` | `diff_built_jobs(job_from_str(OLD), job_from_str(NEW))` |
+| `TEMPLATE` only | `diff_job_template_with_parameter_sets(TEMPLATE, -p + --old-parameter, -p + --new-parameter)` |
+| `TEMPLATE NEW_TEMPLATE` | `diff_templates(TEMPLATE with -p + --old-parameter, NEW_TEMPLATE with -p + --new-parameter)` |
+
+To diff two jobs that are already built, call the library's `diff_built_jobs` on two
+`job_from_str` results; the CLI has no form for it.
 
 Each template side gets the CLI's caller limits (`common::caller_limits`), as `summary`
 and `run` do. A template is read as a file (the format from its extension) and its
@@ -63,11 +111,11 @@ line pointing to the full gallery, [diff-examples.md](diff-examples.md).
 
 Human-readable output starts with a header naming the two sides, then `TemplateDiff`'s
 `Display` ([model/template-diff.md](../model/template-diff.md#rendering)). The header is
-`OLD -> NEW` for two templates, `OLD: old parameters -> new parameters` for one template,
-and `jobs: OLD -> NEW` with `--jobs`, each argument as given (`-` for stdin).
+`TEMPLATE -> NEW_TEMPLATE` for two templates and `TEMPLATE: old parameters -> new parameters`
+for one, each argument as given (`-` for stdin).
 
 ```
-$ openjd diff render_v1.yaml render_v2.yaml --new-param Frames=1-200 -p Scene=/proj/shot010.blend
+$ openjd diff render_v1.yaml render_v2.yaml --new-parameter Frames=1-200 -p Scene=/proj/shot010.blend
 render_v1.yaml -> render_v2.yaml
 ~ parameter Frames: 1-100 -> 1-200  [parameters]
 ~ step Render
@@ -121,12 +169,14 @@ listing, or `no changes`.
 
 Every human-readable form ends its diff with one `note: …` line per entry of
 `TemplateDiff::notes`: after the totals line, after the `--tasks` lines, or after
-`no changes`. A note says why job-layer origins are `[both]` (the new template does not
-build with the old parameters) or why a step's tasks are unknown (adaptive chunking, or a parameter space that does not
-iterate):
+`no changes`. A note says why job-layer origins are `[both]`: the new template does not
+build with the old parameters. A note also says why a step's tasks are unknown. Through
+the CLI that happens only with adaptive chunking. The other cause, a parameter space that
+does not iterate, needs an edited built job, which only the library's `diff_built_jobs`
+takes ([model/template-diff.md](../model/template-diff.md#steps-and-tasks)).
 
 ```
-$ openjd diff render_v1.yaml quality.yaml -p Scene=/s --new-param Quality=3
+$ openjd diff render_v1.yaml quality.yaml -p Scene=/s --new-parameter Quality=3
 render_v1.yaml -> quality.yaml
 + parameter Quality: 3, defined as {type: INT}  [both]
 
@@ -141,8 +191,8 @@ what that step and the job level show), then the
 (`{ops: [{action, kinds}], kinds}`, filtered as above with `--step`). `--verbose` adds
 `oldJob`, `newJob` (each a `JobDocument`, so parameters and environment variables are
 sorted) and `job`.
-Each `Shown` keeps `raw`, the job value in its document's host encoding, next to `text`. `--tasks` and `--stat` affect only human-readable output. Like
-`build`, the document is data rather than a command result: it has no `status` or
+Each `Shown` keeps `raw`, the job value in its document's host encoding, next to `text`. `--tasks` and `--stat` affect only human-readable output. The
+document is data rather than a command result: it has no `status` or
 `message`, and its keys are camelCase (see
 [output-formatting.md](output-formatting.md#status-convention)).
 
@@ -154,7 +204,7 @@ Each `Shown` keeps `raw`, the job value in its document's host encoding, next to
 | `--exit-code`, no differences | 0 |
 | `--exit-code`, differences | 4 |
 | any error (missing file, bad parameter, a template that does not build) | 1, with `ERROR: …` on stderr |
-| usage error (clap), including `--jobs` without `NEW` | 2 |
+| usage error (clap), including an unknown flag | 2 |
 
 4 keeps "the inputs differ" apart from 1, which `openjd` already uses for every error,
 and from clap's 2. Errors name the path (`'nope.yaml' does not exist.`) or the input that
@@ -174,6 +224,6 @@ See [model/template-diff.md](../model/template-diff.md#the-template-layer).
 command, its output, and for some cases its `--plan` output and JSON document. The test
 `crates/openjd-cli/tests/diff_examples.rs` runs every case and fails when the file is out
 of date; `UPDATE_DIFF_EXAMPLES=1 cargo test -p openjd-cli --test diff_examples` rewrites
-it, and the two built jobs its `--jobs` case reads.
+it.
 
 Tests: `crates/openjd-cli/tests/diff_tests.rs` and `diff_examples.rs`.

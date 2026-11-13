@@ -31,7 +31,7 @@ pub fn job_from_str(text: &str) -> Result<Job, ModelError>;
 - `diff_built_jobs` is for callers that already hold two jobs. It has no template layer,
   and every change has origin `Job`, because the cause is not known.
 - `job_from_str` reads a job back from its `JobDocument` (JSON when the first
-  non-whitespace character is `{`, YAML otherwise), as `openjd build` prints it. Its
+  non-whitespace character is `{`, YAML otherwise), as `JobDocument` writes it. Its
   `documentVersion` must be `JobDocument::VERSION` (1). It rejects the forms `create_job`
   never writes ([host-support.md](host-support.md#host-encoding) lists them).
   Parameters and parameter spaces must be in the
@@ -301,8 +301,8 @@ environment's `variables` sorted by name, and parameters and parameter spaces in
 with more than one of either differs from run to run. Task parameter definitions are a
 list in definition order, which is also task order unless an explicit `combination` reorders the dimensions. Every other map in a `Job` is already ordered: resolved symbol
 tables are lists sorted by name. `TemplateDiff` writes `oldJob` and `newJob` as
-`JobDocument`s, so its serde form is deterministic. `openjd build` prints the same form,
-and `job_from_str` reads it back.
+`JobDocument`s, so its serde form is deterministic, and `job_from_str` reads either job
+back.
 
 ### Rendering
 
@@ -355,7 +355,7 @@ parameter's value, `"1-200"`; for a task parameter definition,
   the job, shows how its range is written: an integer range as `range expression 1,2` or
   `list [1, 2]`, any other type as its type and list (`FLOAT [1.5, 2.5] -> STRING
   [1.5, 2.5]`), then its chunk settings. A chunked range names its type, so a hand-made
-  `--jobs` pair with an `INT` with `chunks` against the `CHUNK[INT]` it mirrors shows
+  `diff_built_jobs` pair with an `INT` with `chunks` against the `CHUNK[INT]` it mirrors shows
   `CHUNK[INT] range expression 1-20 chunks of 5 -> INT range expression 1-20 chunks of 5`.
   The built job keeps only a range expression's canonical form, so `"1-2"` shows as
   `range expression 1,2`, and at `--depth 2` a step's parameter space shows as

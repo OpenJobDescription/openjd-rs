@@ -2,8 +2,8 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-//! `openjd diff` command — diff two templates, one template under two
-//! parameter sets, or two built jobs.
+//! `openjd diff` command — diff two templates, or one template under two
+//! parameter sets.
 
 use std::collections::BTreeSet;
 use std::io::Read;
@@ -13,10 +13,9 @@ use clap::Args;
 use openjd_model::job::apply::{Action, ApplyPlan, Op, TaskChange};
 use openjd_model::job::diff::DiffOptions;
 use openjd_model::job::template_diff::{
-    diff_built_jobs, diff_job_template_with_parameter_sets, diff_templates, job_from_str, Change,
-    Note, StepSummary, TemplateDiff, TemplateInput, TemplateSource,
+    diff_job_template_with_parameter_sets, diff_templates, Change, Note, StepSummary, TemplateDiff,
+    TemplateInput, TemplateSource,
 };
-use openjd_model::job::Job;
 use serde::Serialize;
 
 /// Exit code of `--exit-code` when the inputs differ.
@@ -29,37 +28,47 @@ const UNSTABLE_WARNING: &str =
 const EXAMPLES: &str = "\
 Examples, from the openjd-rs repository root with E=crates/openjd-cli/examples/diff
 and M=crates/openjd-model/examples/template_diff:
-  openjd diff $E/frames.yaml --old-param Frames=1-100 --new-param Frames=1-200
+  openjd diff $E/frames.yaml --old-parameter Frames=1-100 --new-parameter Frames=1-200
   openjd diff $M/render_v1.yaml $M/render_v2.yaml -p Scene=//srv/s
   openjd diff $E/let_script_v1.yaml $E/let_script_v2.yaml
   openjd diff $E/extensions_v1.yaml $E/extensions_v2.yaml --plan
-  openjd build $E/frames.yaml -p Frames=1-100 > old.json
-  openjd diff --jobs old.json $E/frames_1_200.json --plan
   openjd diff $M/render_v1.yaml $M/render_v2.yaml -p Scene=//srv/s --stat
-  openjd diff old.yaml - --output json --exit-code < new.yaml
+  openjd diff $E/frames.yaml -p file://$E/frames_params.json --new-parameter '{\"Frames\": \"1-200\"}'
+  openjd diff $E/let_script_v1.yaml - --output json --exit-code < $E/let_script_v2.yaml
 
 Every field the diff reports, with its output: specs/cli/diff-examples.md";
 
 #[derive(Args)]
 #[command(after_help = EXAMPLES)]
 pub struct DiffArgs {
-    /// Old template file, or `-` for stdin
+    /// Template file, or `-` for stdin. With only this template, the old and
+    /// new sides differ only by --old-parameter and --new-parameter
+    #[arg(value_name = "TEMPLATE")]
     pub old: String,
 
-    /// New template file, or `-` for stdin. Omit to diff OLD against itself
-    /// under --old-param and --new-param
+    /// New template file, or `-` for stdin; TEMPLATE is then the old side
+    #[arg(value_name = "NEW_TEMPLATE")]
     pub new: Option<String>,
 
-    /// Job parameter for both sides (Key=Value, file://path, or inline JSON)
-    #[arg(short = 'p', long = "job-param", alias = "parameter")]
+    /// Job parameter for both sides: Key=Value, a JSON or YAML file as
+    /// file://path, or inline JSON. Repeatable; a later value wins. Examples:
+    /// -p Frames=1-200, -p file://params.json, -p '{"Frames": "1-200"}'
+    #[arg(
+        short = 'p',
+        long = "parameter",
+        alias = "job-param",
+        value_name = "PARAM"
+    )]
     pub parameters: Vec<String>,
 
-    /// Job parameter for the old side only; wins over --job-param
-    #[arg(long = "old-param")]
+    /// Job parameter for the old side only, in the same forms as -p; wins
+    /// over -p. Example: --old-parameter Frames=1-100
+    #[arg(long = "old-parameter", alias = "old-param", value_name = "PARAM")]
     pub old_params: Vec<String>,
 
-    /// Job parameter for the new side only; wins over --job-param
-    #[arg(long = "new-param")]
+    /// Job parameter for the new side only, in the same forms as -p; wins
+    /// over -p. Example: --new-parameter Frames=1-200
+    #[arg(long = "new-parameter", alias = "new-param", value_name = "PARAM")]
     pub new_params: Vec<String>,
 
     /// Environment template file, for both sides
@@ -69,10 +78,6 @@ pub struct DiffArgs {
     /// Extensions to support (comma-separated). Empty string disables all
     #[arg(long = "extensions")]
     pub extensions: Option<String>,
-
-    /// OLD and NEW are built jobs (the output of `openjd build`), not templates
-    #[arg(long, requires = "new", conflicts_with_all = ["parameters", "old_params", "new_params", "environments", "extensions"])]
-    pub jobs: bool,
 
     /// Show only this step and the job-level changes
     #[arg(long)]
@@ -138,60 +143,47 @@ pub fn execute(args: DiffArgs) -> Result<i32, Box<dyn std::error::Error>> {
         options = options.with_max_depth(n);
     }
     let mut stdin_used = false;
-    let (header, mut diff) = if args.jobs {
-        // clap requires NEW with --jobs.
-        let new = args
-            .new
-            .as_deref()
-            .ok_or("--jobs needs both OLD and NEW.")?;
-        let old_job = read_job(&args.old, &mut stdin_used)?;
-        let new_job = read_job(new, &mut stdin_used)?;
-        (
-            format!("jobs: {} -> {new}", args.old),
-            diff_built_jobs(old_job, new_job, &options),
-        )
-    } else {
-        let side = |extra: &[String]| {
-            let all: Vec<String> = args.parameters.iter().chain(extra).cloned().collect();
-            crate::run::parse_cli_parameters(&all)
-        };
-        let (old_params, new_params) = (side(&args.old_params)?, side(&args.new_params)?);
-        let exts = crate::common::parse_extensions(&args.extensions)?;
-        let exts: Vec<&str> = exts.iter().map(String::as_str).collect();
-        // Each environment is read once and shared by both sides, so one of
-        // them can come from stdin.
-        let environments = args
-            .environments
-            .iter()
-            .map(|env| read_template(env, &mut stdin_used))
-            .collect::<Result<Vec<_>, _>>()?;
-        let mut base = |arg: &str| -> Result<TemplateInput, Box<dyn std::error::Error>> {
-            let mut input = TemplateInput::new(read_template(arg, &mut stdin_used)?)
-                .extensions(&exts)
-                .limits(crate::common::caller_limits());
-            for env in &environments {
-                input = input.environment(env.clone());
-            }
-            Ok(input)
-        };
-        match args.new.as_deref() {
-            None => (
-                format!("{}: old parameters -> new parameters", args.old),
-                diff_job_template_with_parameter_sets(
-                    &base(&args.old)?,
-                    &old_params,
-                    &new_params,
-                    &options,
-                )?,
-            ),
-            Some(new) => {
-                let old_input = base(&args.old)?.params(old_params);
-                let new_input = base(new)?.params(new_params);
-                (
-                    format!("{} -> {new}", args.old),
-                    diff_templates(&old_input, &new_input, &options)?,
-                )
-            }
+    // `-p` first, so a later side-specific value wins over it.
+    let side = |extra: &[String]| {
+        let all: Vec<String> = args.parameters.iter().chain(extra).cloned().collect();
+        crate::run::parse_cli_parameters(&all)
+    };
+    let (old_params, new_params) = (side(&args.old_params)?, side(&args.new_params)?);
+    let exts = crate::common::parse_extensions(&args.extensions)?;
+    let exts: Vec<&str> = exts.iter().map(String::as_str).collect();
+    // Each environment is read once and shared by both sides, so one of
+    // them can come from stdin.
+    let environments = args
+        .environments
+        .iter()
+        .map(|env| read_template(env, &mut stdin_used))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut base = |arg: &str| -> Result<TemplateInput, Box<dyn std::error::Error>> {
+        let mut input = TemplateInput::new(read_template(arg, &mut stdin_used)?)
+            .extensions(&exts)
+            .limits(crate::common::caller_limits());
+        for env in &environments {
+            input = input.environment(env.clone());
+        }
+        Ok(input)
+    };
+    let (header, mut diff) = match args.new.as_deref() {
+        None => (
+            format!("{}: old parameters -> new parameters", args.old),
+            diff_job_template_with_parameter_sets(
+                &base(&args.old)?,
+                &old_params,
+                &new_params,
+                &options,
+            )?,
+        ),
+        Some(new) => {
+            let old_input = base(&args.old)?.params(old_params);
+            let new_input = base(new)?.params(new_params);
+            (
+                format!("{} -> {new}", args.old),
+                diff_templates(&old_input, &new_input, &options)?,
+            )
         }
     };
     if let Some(step) = &args.step {
@@ -232,15 +224,6 @@ fn read_template(
     // library reads the file again so its directory sets relative PATH defaults.
     crate::common::read_input_file(Path::new(arg))?;
     Ok(TemplateSource::Path(arg.into()))
-}
-
-fn read_job(arg: &str, stdin_used: &mut bool) -> Result<Job, Box<dyn std::error::Error>> {
-    let text = if arg == "-" {
-        read_stdin(stdin_used)?
-    } else {
-        crate::common::read_input_file(Path::new(arg))?
-    };
-    job_from_str(&text).map_err(|e| format!("'{arg}': {e}").into())
 }
 
 /// Keep the changes, summary and notes of one step, and the job-level ones.

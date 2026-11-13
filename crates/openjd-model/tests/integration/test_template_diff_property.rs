@@ -206,7 +206,7 @@ impl Side {
     }
 }
 
-/// Hand edits a `--jobs` document can make that no template produces.
+/// Hand edits a `job_from_str` document can make that no template produces.
 const EDITS: [(&str, &str); 3] = [
     ("\"chunkInt\"", "\"int\""),
     ("\"description\":\"d\"", "\"description\":null"),

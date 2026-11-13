@@ -33,11 +33,10 @@ This places an `openjd` binary on your `PATH`.
 | `openjd check FILE [--extensions EXT...]` | Validate a job or environment template. Exit code 0 on success, non-zero on validation error, with per-field error paths. |
 | `openjd summary FILE [-p NAME=VALUE...]` | Print a human-readable summary of a job: steps, parameters, dependency graph, estimated task count. |
 | `openjd run FILE [-p NAME=VALUE...] [--step NAME] [--task-params ...]` | Instantiate and run a job template locally, streaming action output with timestamps. |
-| `openjd build FILE [-p NAME=VALUE...] [--output json\|yaml]` | Print the job a template builds into. Unstable. |
-| `openjd diff OLD [NEW] [-p ...] [--old-param ...] [--new-param ...]` | Diff two templates, one template under two parameter sets, or two built jobs (`--jobs`). Unstable. |
+| `openjd diff TEMPLATE [NEW_TEMPLATE] [-p ...] [--old-parameter ...] [--new-parameter ...]` | Diff two templates, or one template under two parameter sets. A parameter is `Key=Value`, inline JSON, or a JSON or YAML file as `file://path`. Unstable. |
 
-`build` and `diff` are unstable: their flags and output may change in any release, and
-each prints a warning saying so to stderr. The
+`diff` is unstable: its flags and output may change in any release, and it prints a
+warning saying so to stderr. The
 [diff example gallery](https://github.com/OpenJobDescription/openjd-rs/blob/main/specs/cli/diff-examples.md)
 shows the output for every field the diff reports.
 

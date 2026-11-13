@@ -2237,7 +2237,7 @@ struct BuiltJob {
     name: String,
     description: Option<String>,
     extensions: Option<Vec<String>>,
-    // Not an `Option`: `openjd build` always writes the map, so a `null` is
+    // Not an `Option`: `JobDocument` always writes the map, so a `null` is
     // an error like any other unexpected `null`.
     #[serde(default)]
     parameters: IndexMap<String, Value>,
@@ -2261,9 +2261,9 @@ struct BuiltStep {
     resolved_symtab: Option<openjd_expr::symbol_table::SerializedSymbolTable>,
 }
 
-/// Read a [`Job`] back from the JSON or YAML that `openjd build` prints
-/// (its [`JobDocument`]). JSON when the first non-whitespace character is
-/// `{`, YAML otherwise. The document's `documentVersion` must be
+/// Read a [`Job`] back from the JSON or YAML of its [`JobDocument`]. JSON
+/// when the first non-whitespace character is `{`, YAML otherwise. The
+/// document's `documentVersion` must be
 /// [`JobDocument::VERSION`], the one [`JobDocument`] writes. Unknown fields
 /// are rejected at every level, and so are a parameter or task parameter
 /// definition that is not in the host encoding, a value not in the exact
@@ -2818,8 +2818,9 @@ fn step_from_built(s: BuiltStep, i: usize) -> Result<Step, String> {
 
 // ─── serde helpers ──────────────────────────────────────────────────
 
-/// A [`Job`] serialized as `openjd build` prints it, and as every host
-/// document writes it: the job's serde form, except that
+/// A [`Job`] serialized as every host document writes it, and as
+/// `TemplateDiff` writes `oldJob` and `newJob`: the job's serde form,
+/// except that
 ///
 /// - it starts with `"documentVersion": 1`, the version of this format;
 /// - `parameters` and each environment's `variables` are sorted by name

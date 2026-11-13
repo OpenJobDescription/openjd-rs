@@ -2,9 +2,8 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-//! OpenJD CLI — validate, summarize, run, build and diff job templates.
+//! OpenJD CLI — validate, summarize, run and diff job templates.
 
-mod build;
 mod check;
 mod common;
 mod diff;
@@ -111,9 +110,7 @@ enum Commands {
     Summary(summary::SummaryArgs),
     /// Run a job template locally
     Run(run::RunArgs),
-    /// Print the job a template builds into, as JSON or YAML (unstable)
-    Build(build::BuildArgs),
-    /// Diff two templates, one template under two parameter sets, or two built jobs (unstable)
+    /// Diff two templates, or one template under two parameter sets (unstable)
     Diff(diff::DiffArgs),
 }
 
@@ -145,7 +142,6 @@ async fn main() {
         Commands::Check(args) => check::execute(args).map(|()| 0),
         Commands::Summary(args) => summary::execute(args).map(|()| 0),
         Commands::Run(args) => run::execute(args).await.map(|()| 0),
-        Commands::Build(args) => build::execute(args).map(|()| 0),
         Commands::Diff(args) => diff::execute(args),
     };
     match result {

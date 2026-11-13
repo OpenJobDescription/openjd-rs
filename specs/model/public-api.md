@@ -887,8 +887,8 @@ text. `TemplateDiff`'s listing ends with one `note: …` line per note. `Layer`,
 and `Stage` are also `Copy`, `Eq` and `Hash`, and `Layer` is `Ord`
 (changes sort by it). Inputs that fail to build return `ModelError` naming the input
 (`old template`, `new parameters`, `the template`). `TemplateDiff` serializes `oldJob`
-and `newJob` as `JobDocument`s, so its serde form is deterministic; `openjd build` prints
-the same form, and `job_from_str` reads it back. Task counts saturate at `u64::MAX`.
+and `newJob` as `JobDocument`s, so its serde form is deterministic, and `job_from_str`
+reads either job back. Task counts saturate at `u64::MAX`.
 
 ### Job Apply (unstable)
 
