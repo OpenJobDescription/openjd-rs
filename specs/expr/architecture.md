@@ -155,6 +155,7 @@ pub const DEFAULT_OPERATION_LIMIT: usize = 10_000_000;  // 10M ops
 |-------|---------|--------|
 | `ruff_python_parser` | Python expression parsing | crates.io (Astral's `ruff_python_parser` =0.0.21 with the `stacker` feature, exact pin — see [parser.md](parser.md)) |
 | `ruff_python_ast` | Python AST types | crates.io (Astral's `ruff_python_ast` =0.0.21, exact pin) |
+| `unicode-normalization` | NFKC-normalizes non-ASCII names to match the parser when choosing keyword placeholders | crates.io (requirement `0.1.23`, `std` feature only). Already a transitive dependency through `ruff_python_parser`, which uses it for the same NFKC step; the direct entry uses the same requirement and features and adds no package to `Cargo.lock` |
 | `regex` | Regular expression evaluation | crates.io |
 | `xxhash-rust` | Fast hashing (internal) | crates.io |
 | `serde` | Serialization (FormatString, PathMappingRule) | crates.io |
