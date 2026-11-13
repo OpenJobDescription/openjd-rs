@@ -364,6 +364,10 @@ impl JobParameterDefinition {
     pub fn description(&self) -> Option<&str>;
     pub fn type_name(&self) -> &str;
     pub fn path_properties(&self) -> (Option<ObjectType>, Option<DataFlow>);
+    /// The default as text job creation parses: the value for a scalar, JSON for a list.
+    /// A LIST[FLOAT] item written as a numeric string is a JSON string holding its
+    /// spelling (`[1.5,"2.50"]`), a number item a JSON number. Also what
+    /// `MergedParameterDefinition::default` holds.
     pub fn default_value(&self) -> Option<String>;
 
     // Numeric constraints — None if not set on this definition or not
