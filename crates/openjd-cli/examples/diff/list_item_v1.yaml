@@ -1,0 +1,9 @@
+# `openjd diff` example (LIST item): old side, against list_item_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: Demo
+parameterDefinitions:
+  - {name: Layers, type: "LIST[STRING]", default: [beauty], item: {allowedValues: [beauty, depth]}}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

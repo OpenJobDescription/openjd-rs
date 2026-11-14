@@ -1,0 +1,8 @@
+# `openjd diff` example (PATH objectType and dataFlow): new side, against path_kind_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+parameterDefinitions:
+  - {name: Output, type: PATH, default: out, objectType: DIRECTORY, dataFlow: OUT}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

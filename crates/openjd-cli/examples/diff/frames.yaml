@@ -1,0 +1,11 @@
+# `openjd diff` example: one template under two parameter sets.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+parameterDefinitions:
+  - {name: Frames, type: STRING, default: "1-100"}
+steps:
+  - name: Render
+    parameterSpace:
+      taskParameterDefinitions:
+        - {name: Frame, type: INT, range: "{{Param.Frames}}"}
+    script: {actions: {onRun: {command: render, args: ["{{Task.Param.Frame}}"]}}}

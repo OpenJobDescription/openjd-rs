@@ -1,0 +1,8 @@
+# `openjd diff` example (a new required parameter): new side, against origin_mid_fails_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+parameterDefinitions:
+  - {name: Quality, type: INT}
+steps:
+  - name: Render
+    script: {actions: {onRun: {command: render}}}

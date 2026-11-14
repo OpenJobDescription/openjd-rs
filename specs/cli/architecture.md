@@ -22,6 +22,7 @@ src/
 ├── main.rs       # Entry point: Cli/Commands structs, SessionLogger, tokio::main
 ├── check.rs      # CheckArgs + execute(): template validation
 ├── summary.rs    # SummaryArgs + execute(): job/step summary output
+├── diff.rs       # DiffArgs + execute(): template diff, returns the exit code
 ├── run/
 │   ├── mod.rs    # RunArgs, RunContext, lifecycle primitives
 │   ├── execution.rs # Preflight, step/task execution, reporting phases
@@ -73,7 +74,9 @@ main()
   └── match cli.command
       ├── Commands::Check(args)   → check::execute(args)
       ├── Commands::Summary(args) → summary::execute(args)
-      └── Commands::Run(args)     → run::execute(args).await
+      ├── Commands::Run(args)     → run::execute(args).await
+      ├── Commands::Build(args)   → build::execute(args)
+      └── Commands::Diff(args)    → diff::execute(args)   // Ok(4) with --exit-code and differences
 ```
 
 The help interception happens before clap parsing because clap would consume `-h`/`--help`
@@ -118,7 +121,7 @@ is async (it awaits session actions), but the runtime is created unconditionally
 tokio's runtime initialization is cheap and having a consistent async context simplifies
 future additions.
 
-`check` and `summary` are synchronous functions called from the async main — tokio handles
+`check`, `summary` and `diff` are synchronous functions called from the async main — tokio handles
 this transparently.
 
 ### Global State for Logging

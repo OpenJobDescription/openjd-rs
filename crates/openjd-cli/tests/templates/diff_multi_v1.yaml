@@ -1,0 +1,21 @@
+# `openjd diff` fixture: every kind of step change, against diff_multi_v2.yaml.
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: Multi
+description: first
+jobEnvironments:
+  - name: Tools
+    variables: {TOOL: v1}
+steps:
+  - name: Shrink
+    parameterSpace:
+      taskParameterDefinitions:
+        - {name: N, type: INT, range: "1-6"}
+    script: {actions: {onRun: {command: shrink, args: ["{{Task.Param.N}}"]}}}
+  - name: Modify
+    script: {actions: {onRun: {command: old}}}
+  - name: LetOnly
+    let: ["unused = 1"]
+    script: {actions: {onRun: {command: l}}}
+  - name: Same
+    script: {actions: {onRun: {command: same}}}

@@ -854,7 +854,7 @@ fn validate_step_param_space(
     }
 }
 
-fn validate_combination_expr(
+pub(super) fn validate_combination_expr(
     expr: &str,
     param_names: &HashSet<String>,
     path: &[PathElement],

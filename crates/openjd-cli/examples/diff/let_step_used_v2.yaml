@@ -1,0 +1,8 @@
+# `openjd diff` example (step let read by an arg): new side, against let_step_used_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: Demo
+steps:
+  - name: Render
+    let: ["mode = '--denoise'"]
+    script: {actions: {onRun: {command: render, args: ["{{mode}}"]}}}

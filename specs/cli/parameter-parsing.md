@@ -6,11 +6,37 @@ The CLI accepts parameters in several formats across multiple arguments. This do
 covers all parameter parsing functions in the CLI, their input formats, error handling,
 and the rationale for supporting each format.
 
-## Job Parameters (`-p` / `--parameter`)
+## Job Parameters (`-p`, `--job-param`, `--parameter`)
 
-`parse_cli_parameters()` in `run/params.rs` handles the `-p`/`--parameter` argument, which is
-used by both the `summary` and `run` commands. It accepts three input formats and returns
-a `HashMap<String, ExprValue>`.
+`parse_cli_parameters()` in `run/params.rs` parses job parameters for `run`, `summary` and
+`diff`. The short flag is `-p` in all three. The long flag is `--job-param` for `run` and
+`summary`, with `--parameter` as a hidden alias. The long flag is `--parameter` for `diff`,
+with `--job-param` as a hidden alias. `diff` also parses `--old-parameter` and
+`--new-parameter` with it (see [diff.md](diff.md)). The values of each call are applied in
+order, so a later value wins. It accepts three input formats and returns a
+`HashMap<String, ExprValue>`.
+
+A JSON or YAML null means the value is not given. That covers a null value, such as
+`{"A": null}` inline or in a JSON file, and any YAML null (`null`, `Null`, `NULL`, `~`, or an
+empty value) in a YAML file. A file
+that is only `null` is rejected with `Job parameter file 'file://p.json' should contain a
+dictionary.` This matches deadline-cloud's job bundle parameter handling
+(`apply_job_parameters` in `job_bundle/parameters.py`), which skips a None value so the
+template default applies. It does not match `deadline bundle submit -p`, which rejects a null
+value with `Parameter A has no value.` (deadline-cloud mainline; release 0.60.11 accepts only
+Key=Value). The null removes the parameter from the map, and it
+still takes part in "later wins": `-p A=1 -p '{"A": null}'` leaves `A` unset, so the template
+default applies. With no default, building the job fails with `Values missing for required
+job parameters: A`. A null for a parameter the template does not define is ignored, with no
+error. A non-null value for one fails with `Job parameter values provided for parameters that
+are not defined in the template: Z`. In `openjd diff`, a null in `--new-parameter` or
+`--old-parameter` overrides a `-p` value for that side. `A=null` is a Key=Value string, so it
+stays the text `null`, as in `deadline`.
+
+openjd-rs differs from the Python `openjd` CLI on purpose: that CLI keeps the None
+(openjd-cli `_job_from_template.py`) and openjd-model turns it into the text `None`
+(`_create_job.py`, `str(value)`), so `{"A": null}` runs with `A=None` even when `A` has
+no default.
 
 ### Format 1: Key=Value Pairs
 
@@ -32,10 +58,12 @@ openjd run template.yaml -p file://params.yaml
 ```
 
 The file is read and parsed as JSON (if `.json` extension) or YAML (otherwise). The file
-must contain a dictionary mapping parameter names to values. Each value is converted to
-`ExprValue` via `json_val_to_expr()`:
+must contain a dictionary mapping parameter names to values. Each value goes through
+`set_json_param()`, which removes the parameter for a null and converts any other value to
+`ExprValue` with `json_val_to_expr()`:
 
 - JSON strings → `ExprValue::String`
+- null → not given (the parameter is removed, see above)
 - All other JSON types → `ExprValue::String(value.to_string())` (stringified)
 
 ### Format 3: Inline JSON
@@ -55,6 +83,9 @@ Error messages match the Python CLI's format for consistency:
 - Bad format: `"Job parameter string ('<arg>') not formatted correctly. It must be key=value pairs, inline JSON, or a path to a JSON or YAML document prefixed with 'file://'."`
 - Non-dict file: `"Job parameter file '<arg>' should contain a dictionary."`
 - Non-dict JSON: `"Job parameter ('<arg>') must contain a dictionary mapping job parameters to their value."`
+  This is unreachable through the CLI today. Inline JSON is only tried when the argument
+  starts with `{` and ends with `}`, so any text that parses is an object; anything else
+  gets the bad-format message.
 - Oversized file: `"File '<path>' exceeds maximum size of <N> bytes."`
 
 ### File Size Limit
@@ -68,7 +99,7 @@ the model crate's `CallerLimits::max_template_size`.
 
 ### Value Coercion
 
-`json_val_to_expr()` converts all JSON values to `ExprValue::String`:
+`json_val_to_expr()` converts every non-null JSON value to `ExprValue::String`:
 
 ```rust
 fn json_val_to_expr(v: &serde_json::Value) -> ExprValue {
@@ -81,8 +112,36 @@ fn json_val_to_expr(v: &serde_json::Value) -> ExprValue {
 
 This means numeric JSON values like `{"Frames": 100}` become the string `"100"`. The
 model crate's parameter preprocessing handles parsing this string into the correct type
-based on the parameter definition. This matches the Python CLI's behavior where all
-parameter values pass through as strings initially.
+based on the parameter definition. The Python openjd CLI instead keeps typed values and
+turns them into text later (`openjd-model _create_job.py str(value)`), so it gives `True`
+and `None` where openjd-rs gives `true` and treats null as not given.
+
+### Known type coercion bugs (shared by run, summary and diff)
+
+Known bugs in the shared parser. Each was run with `openjd diff t.yaml
+--old-parameter A=x --new-parameter <input>`, where `A` is a STRING.
+
+- A JSON or YAML `true` or `false` gives the text `true` or `false`: `{"A": true}`, or
+  `A: true` in a YAML file, gives `~ parameter A: x -> true`. The Python openjd CLI gives
+  `True` and `False` (`openjd-model _create_job.py str(value)`).
+- The parse location is dropped. A malformed file (`{"A": ` in `bad.json`, or
+  `A: [unclosed` in `bad.yaml`) reports `Job parameter file 'file://bad.json' should
+  contain a dictionary.`. Malformed inline JSON (`{"A": }`) reports the generic
+  `Job parameter string ('{"A": }') not formatted correctly. ...`.
+- A duplicate key in a YAML file (`A: a` then `A: b`) reports `Job parameter file
+  'file://dup.yaml' should contain a dictionary.`.
+- The `.json` extension is compared case-sensitively, so a `.JSON` file is read as YAML.
+  `{"A": "a", "A": "b"}` gives `b` from `dupj.json` and `should contain a dictionary` from
+  `dupj.JSON`.
+- `file://file://x.json` strips the prefix twice and reads `x.json`.
+- An integer too large for 64 bits loses digits: `{"A": 123456789012345678901234567890}`
+  gives `1.2345678901234568e+29`, from inline JSON, a JSON file or a YAML file.
+- A YAML file reads `007` and `010` as floats: `A: 007` gives `7.0`, and `A: 010` gives
+  `10.0`. Python openjd and `deadline` read them as 7 and 8 (YAML 1.1).
+- `--new-parameter =v` names no parameter in its error. It reports `Validation error: new
+  parameters: Job parameter values provided for parameters that are not defined in the
+  template: ` with an empty name. When `A` has no default, a second line follows:
+  `Values missing for required job parameters: A`.
 
 ## Task Parameters (`-t` / `--task-param`)
 
@@ -214,8 +273,8 @@ The CLI validates extension names against `ModelExtension::ALL` before template 
 ## Cross-Module Dependency
 
 `parse_cli_parameters()` lives in `run/params.rs`, is re-exported by the public `run`
-module, and is called by `summary.rs` via `crate::run::parse_cli_parameters()`.
+module, and is called by `summary.rs` and `diff.rs` via
+`crate::run::parse_cli_parameters()`.
 
-This cross-module dependency exists because both `summary` and `run` need to parse `-p`
-arguments identically. The function could be extracted to a shared module, but with only
-two callers the current arrangement is simpler.
+This cross-module dependency exists because `summary`, `run` and `diff` need to
+parse `-p` arguments identically. The function could be extracted to a shared module.

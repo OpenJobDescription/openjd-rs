@@ -264,3 +264,17 @@ pub fn validate_environment_template(
 
     errors.into_result("EnvironmentTemplate")
 }
+
+/// The first error template validation reports for a step's `combination`
+/// over the task parameters `names`, without its final period, or `None`.
+pub(crate) fn combination_error(
+    expr: &str,
+    names: &std::collections::HashSet<String>,
+) -> Option<String> {
+    let mut errors = ValidationErrors::default();
+    structure::validate_combination_expr(expr, names, &[], &mut errors);
+    errors
+        .errors
+        .first()
+        .map(|e| e.message.trim_end_matches('.').to_string())
+}

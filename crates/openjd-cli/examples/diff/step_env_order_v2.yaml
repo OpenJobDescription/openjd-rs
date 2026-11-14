@@ -1,0 +1,11 @@
+# `openjd diff` example (step environment order): new side, against step_env_order_v1.yaml.
+specificationVersion: jobtemplate-2023-09
+name: Demo
+steps:
+  - name: Render
+    stepEnvironments:
+      - name: License
+        variables: {LICENSE: lic}
+      - name: Cache
+        variables: {CACHE: /tmp/a}
+    script: {actions: {onRun: {command: render}}}
