@@ -17,6 +17,9 @@
 use super::job_object::JobObject;
 use super::protocol::{send, CancelMethod, Response, RunCommand};
 use crate::framer::{fit_out_payload, LineFramer};
+// The helper can't log, so it ignores the returned kill outcomes. See
+// specs/sessions/subprocess.md § Logging skipped kills.
+use crate::process_tree_win::kill_process_tree;
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -108,7 +111,7 @@ pub fn run_command(
         // If a soft signal was sent and the grace window expired, escalate.
         if let Some(deadline) = escalation_deadline {
             if std::time::Instant::now() >= deadline {
-                kill_process_tree(child_pid);
+                kill_process_tree(child_pid, None);
                 escalation_deadline = None;
             }
         }
@@ -202,7 +205,7 @@ fn to_payload(line: &str) -> String {
 fn handle_cancel(child_pid: u32, method: &CancelMethod) -> Option<std::time::Instant> {
     match method {
         CancelMethod::Terminate => {
-            kill_process_tree(child_pid);
+            kill_process_tree(child_pid, None);
             None
         }
         CancelMethod::NotifyThenTerminate {
@@ -211,7 +214,7 @@ fn handle_cancel(child_pid: u32, method: &CancelMethod) -> Option<std::time::Ins
             // Platform-appropriate soft signal
             if !send_ctrl_break(child_pid) {
                 // Couldn't even deliver the signal; kill immediately.
-                kill_process_tree(child_pid);
+                kill_process_tree(child_pid, None);
                 None
             } else {
                 // Signal delivered — give the child the notify period to exit.
@@ -276,90 +279,11 @@ fn send_ctrl_break(pid: u32) -> bool {
     unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid).is_ok() }
 }
 
-/// Kill a single process by PID.
-fn kill_process(pid: u32) -> bool {
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
-    unsafe {
-        let handle = OpenProcess(PROCESS_TERMINATE, false, pid);
-        if let Ok(h) = handle {
-            let ok = TerminateProcess(h, 1).is_ok();
-            let _ = CloseHandle(h);
-            ok
-        } else {
-            false
-        }
-    }
-}
-
-/// Snapshot all `(pid, parent_pid)` pairs in one toolhelp pass.
-fn snapshot_process_parents() -> Vec<(u32, u32)> {
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
-    };
-    let mut pairs = Vec::new();
-    unsafe {
-        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if let Ok(snap) = snap {
-            let mut entry = PROCESSENTRY32W {
-                dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
-                ..Default::default()
-            };
-            if Process32FirstW(snap, &mut entry).is_ok() {
-                loop {
-                    pairs.push((entry.th32ProcessID, entry.th32ParentProcessID));
-                    if Process32NextW(snap, &mut entry).is_err() {
-                        break;
-                    }
-                }
-            }
-            let _ = CloseHandle(snap);
-        }
-    }
-    pairs
-}
-
-/// Kill a process tree: collect all descendants, then kill leaf-to-root.
-fn kill_process_tree(root_pid: u32) {
-    // Breadth-first order lists every parent before its children, so the
-    // reverse kills leaves before their ancestors.
-    let to_kill = collect_tree(root_pid);
-    for &pid in to_kill.iter().rev() {
-        kill_process(pid);
-    }
-}
-
-/// Collect the process tree rooted at `root_pid` in breadth-first order.
-///
-/// Walks a single toolhelp snapshot with a visited set instead of recursing
-/// with a fresh snapshot per level: `th32ParentProcessID` is recorded at
-/// child creation time, so PID reuse can make the recorded parent graph
-/// cyclic, and the previous recursive implementation had no cycle guard and
-/// overflowed the thread's stack (0xc00000fd) when it hit such a cycle.
-fn collect_tree(root_pid: u32) -> Vec<u32> {
-    use std::collections::HashSet;
-    let parents = snapshot_process_parents();
-    let mut result = vec![root_pid];
-    let mut seen: HashSet<u32> = HashSet::from([root_pid]);
-    let mut i = 0;
-    while i < result.len() {
-        let pid = result[i];
-        i += 1;
-        for &(child, ppid) in &parents {
-            if ppid == pid && seen.insert(child) {
-                result.push(child);
-            }
-        }
-    }
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::framer::MAX_LINE_BYTES;
+    use crate::process_tree_win::KillOutcome;
 
     /// Mirror the runner's per-line transform: frame `chunks` through a fresh
     /// `LineFramer` and apply `to_payload` to every emitted line, flushing the
@@ -436,6 +360,130 @@ mod tests {
         let out = frame_reader(&input);
         assert_eq!(out.len(), 1, "over-cap line must emit exactly one Out");
         assert!(out[0].len() <= MAX_LINE_BYTES);
+    }
+
+    /// Guards that the root itself is killed. `ping` run directly is the
+    /// root with no children; it exits 0 if it runs to completion, so exit
+    /// code 1 shows `TerminateProcess` reached it. (In the cmd -> ping test
+    /// below, cmd would also exit 1 if only ping were killed.)
+    #[test]
+    fn kill_process_tree_kills_root() {
+        let mut child = Command::new("ping")
+            .args(["-n", "60", "127.0.0.1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn ping");
+        let pid = child.id();
+        let outcomes = kill_process_tree(pid, None);
+        let status = child.wait().expect("wait ping");
+        // The root is killed last; a console host child, if any, comes first.
+        assert_eq!(outcomes.last(), Some(&(pid, KillOutcome::Terminated)));
+        assert_eq!(status.code(), Some(1), "ping must be terminated");
+    }
+
+    /// The PIDs of `parent`'s children in a fresh snapshot whose image name is
+    /// `exe` (case-insensitive).
+    fn children_named(parent: u32, exe: &str) -> Vec<u32> {
+        use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+            TH32CS_SNAPPROCESS,
+        };
+        let mut found = Vec::new();
+        // SAFETY: the snapshot handle is ours and closed below; `entry` is a
+        // correctly sized PROCESSENTRY32W on this frame.
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).expect("snapshot");
+            let mut entry = PROCESSENTRY32W {
+                dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+                ..Default::default()
+            };
+            let mut more = Process32FirstW(snap, &mut entry).is_ok();
+            while more {
+                let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(260);
+                let name = String::from_utf16_lossy(&entry.szExeFile[..len]);
+                if entry.th32ParentProcessID == parent && name.eq_ignore_ascii_case(exe) {
+                    found.push(entry.th32ProcessID);
+                }
+                more = Process32NextW(snap, &mut entry).is_ok();
+            }
+            let _ = CloseHandle(snap);
+        }
+        found
+    }
+
+    /// Guards the real tree kill after the PID-reuse validation: the creation
+    /// times, the snapshot stamp and the walk must agree on a genuine child
+    /// and grandchild, or the validation would prune them and leak the tree.
+    /// `cmd /c ping` gives cmd.exe as the child and PING.EXE as the
+    /// grandchild; both must end with `TerminateProcess`'s exit code 1.
+    #[test]
+    fn kill_process_tree_kills_child_and_grandchild() {
+        use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+        use windows::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, WaitForSingleObject,
+            PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+        };
+        let mut child = Command::new("cmd")
+            .args(["/c", "ping -n 60 127.0.0.1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn cmd");
+        let root = child.id();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let grandchild = loop {
+            if let Some(&pid) = children_named(root, "PING.EXE").first() {
+                break pid;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                panic!("ping never started under cmd (pid {root})");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        // Holding this handle keeps the grandchild's PID from being reused
+        // before its exit code is read.
+        // SAFETY: the handle is ours and closed below.
+        let gc = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                false,
+                grandchild,
+            )
+        }
+        .expect("open ping");
+
+        let outcomes = kill_process_tree(root, None);
+
+        let status = child.wait().expect("wait cmd");
+        // SAFETY: `gc` is a live handle with SYNCHRONIZE and query rights.
+        let (waited, gc_code) = unsafe {
+            let waited = WaitForSingleObject(gc, 10_000);
+            let mut code = 0u32;
+            let _ = GetExitCodeProcess(gc, &mut code);
+            let _ = CloseHandle(gc);
+            (waited, code)
+        };
+        assert_eq!(status.code(), Some(1), "cmd must end with exit code 1");
+        assert_eq!(waited, WAIT_OBJECT_0, "ping must have exited");
+        assert_eq!(gc_code, 1, "ping must be terminated");
+        // Leaves are killed first, so the root is last. cmd exits on its own
+        // once ping dies, so its terminate may find it already gone.
+        assert!(
+            outcomes.contains(&(grandchild, KillOutcome::Terminated)),
+            "ping must be reported terminated: {outcomes:?}"
+        );
+        assert!(
+            matches!(
+                outcomes.last(),
+                Some(&(pid, KillOutcome::Terminated | KillOutcome::TerminateFailed)) if pid == root
+            ),
+            "cmd must be killed last: {outcomes:?}"
+        );
     }
 
     /// Guards stdout/stderr symmetry: both threads route through this one
