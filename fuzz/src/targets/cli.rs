@@ -27,9 +27,6 @@ pub fn args(data: &[u8]) {
     let Some((text, ctl)) = text_and_control(data) else {
         return;
     };
-    if crate::known::skip_deep_interpolations(text) {
-        return;
-    }
     if text.contains("file://") {
         return;
     }

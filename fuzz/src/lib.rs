@@ -83,15 +83,6 @@ pub mod known {
     /// `(id, summary)` for every open known issue.
     pub const KNOWN_ISSUES: &[(&str, &str)] = &[
         (
-            "expr-parser-exponential-recovery",
-            "Parsing doubles in time per level of unclosed bracket nesting inside \
-             ruff_python_parser's error recovery: `\"[i f(\" * 20 + \"x\"` (101 bytes) takes \
-             0.8 s in release, so a ~150-byte template field stalls `openjd check` for minutes; 363 bytes \
-             of mostly `.` takes 1.6 s \
-             (denial of service). Text targets skip such inputs (see \
-             `skip_deep_unclosed_brackets`).",
-        ),
-        (
             "model-param-type-serde-spelling",
             "`JobParameterType` serializes with serde's variant names (`\"Int\"`, \
              `\"ListListInt\"`) while its `Display` and the template spelling are `\"INT\"`, \
@@ -115,7 +106,7 @@ pub mod known {
         ),
         (
             "expr-listcomp-non-iterable-runtime-check",
-            "An unresolved iterable whose type cannot be iterated binds `any` (#462, \
+            "An unresolved iterable whose type cannot be iterated binds `any` (\
              specs/expr/evaluator.md: a type from an operation on unknown values may be \
              imprecise), so `[x for x in Task.Param.I]` with an INT task parameter validates \
              and then fails every run with `Cannot iterate over int`, even though a declared \
@@ -147,10 +138,10 @@ pub mod known {
         ),
         (
             "expr-boolop-static-type",
-            "(The result typing of `a or b` after an unresolved operand was fixed in #435, and \
-             name errors there in #462.) Type errors in operands after an unresolved one are \
-             still absorbed as if value-dependent: `Param.F or len([1] + ['a']) > 0` passes \
-             validation, though `[1] + ['a']` alone is refused, and fails at run time with \
+            "Speculative evaluation of `and` / `or` absorbs type errors in the operands after an \
+             unresolved one as if they were value-dependent: \
+             `Param.F or len([1] + ['a']) > 0` passes validation, though `[1] + ['a']` alone is \
+             refused, and fails at run time with \
              `Cannot concatenate list[int] and list[string]`.",
         ),
         (
@@ -164,10 +155,9 @@ pub mod known {
         (
             "expr-union-arg-overload",
             "With a union-typed argument (from a conditional or a union-returning function) \
-             static dispatch can pick one overload's return type. The original examples \
-             (`(a if c else re_findall(..)) * 28`, `L[::z]` on a `range_expr`) were fixed in \
-             #462. What remains: a conditional with branches of different types passed to a \
-             function that takes one of them validates and finds no run-time signature: \
+             static dispatch can pick one overload's return type. A conditional with branches of \
+             different types passed to a function that takes one of them validates and finds \
+             no run-time signature: \
              `upper(1 if Param.B else 'a')` is `string` statically and fails with `No \
              matching signature for upper(int)` when `Param.B` is true. Operators too: `L * (n ** \
              Param.N)` is typed with the `int` member of `int | float`, and fails with \
@@ -204,8 +194,8 @@ pub mod known {
         ),
         (
             "model-preprocess-path-idempotence",
-            "`preprocess_job_parameters` is not idempotent for PATH / LIST[PATH] values (related \
-             to #388): without the EXPR extension, a URI default such as `s3://bucket/x` \
+            "`preprocess_job_parameters` is not idempotent for PATH / LIST[PATH] values: \
+             without the EXPR extension, a URI default such as `s3://bucket/x` \
              under template-dir walk-up is normalized to `s3:\\bucket\\x` (Windows) or \
              `s3:/bucket/x` (POSIX) without being joined; a second pass treats it as a submitted \
              relative path and joins it to the working directory.",
@@ -251,69 +241,6 @@ pub mod known {
              the combined diff loses the change.",
         ),
     ];
-
-    /// Known issue `expr-parser-exponential-recovery`: should a text target
-    /// skip this expression text? On malformed input ruff's error recovery
-    /// grows exponentially with the number of brackets left open, so the
-    /// fuzzer would otherwise spend its time rediscovering the slowdown. A
-    /// timeout cannot be gated like an oracle, so the input is skipped
-    /// instead; `OPENJD_FUZZ_KNOWN=1` disables the skip.
-    ///
-    /// Measured (release build) over the corpus: every parse over 50 ms had
-    /// at least 6 brackets still open and over 200 bytes, or nesting deeper
-    /// than 12; length alone is not the cause (a 450-byte balanced input
-    /// parses in microseconds), but with a few open brackets parse time still
-    /// grows with length (~1.4 s at 4 KiB, opt-level 3, no sanitizer), so
-    /// inputs over 1 KiB are skipped too.
-    pub fn skip_deep_unclosed_brackets(text: &str) -> bool {
-        if std::env::var_os("OPENJD_FUZZ_KNOWN").is_some_and(|v| v == "1") {
-            return false;
-        }
-        // A closer only closes its own kind of opener: `[ ... )` leaves the
-        // `[` open for the parser, so it stays open here too.
-        let mut stack: Vec<char> = Vec::new();
-        let mut max_depth = 0usize;
-        for c in text.chars() {
-            let opener = match c {
-                '(' | '[' | '{' => {
-                    stack.push(c);
-                    max_depth = max_depth.max(stack.len());
-                    continue;
-                }
-                ')' => '(',
-                ']' => '[',
-                '}' => '{',
-                _ => continue,
-            };
-            if stack.last() == Some(&opener) {
-                stack.pop();
-            }
-        }
-        // Deep nesting is slow even when balanced: error recovery inside it
-        // (`[i f(` ... `)]`) is exponential in depth either way.
-        let depth = stack.len();
-        let skip = max_depth > 12 || (depth >= 6 && text.len() > 200) || text.len() > 1024;
-        if skip {
-            record("expr-parser-exponential-recovery");
-        }
-        skip
-    }
-
-    /// [`skip_deep_unclosed_brackets`] applied to each `{{ ... }}`
-    /// interpolation of a format string or template document only, so deep
-    /// but harmless JSON/YAML nesting is still fuzzed.
-    pub fn skip_deep_interpolations(text: &str) -> bool {
-        let mut rest = text;
-        while let Some(a) = rest.find("{{") {
-            let after = &rest[a + 2..];
-            let end = after.find("}}").unwrap_or(after.len());
-            if skip_deep_unclosed_brackets(&after[..end]) {
-                return true;
-            }
-            rest = &after[end.min(after.len())..];
-        }
-        false
-    }
 
     thread_local! {
         static RECORDED: std::cell::RefCell<std::collections::BTreeSet<String>> =
