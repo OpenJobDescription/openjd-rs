@@ -105,9 +105,10 @@ inside the helper.
 **Cancel handling**:
 - `{"cancel": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": <secs>}` →
   `GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, child_pid)`. If the child doesn't
-  exit within the notify period, escalates to `kill_process_tree(child_pid)`.
+  exit within the notify period, escalates to `kill_process_tree(child_pid, None)`.
   Works because the helper is in the same user/session as the child.
-- `{"cancel": "TERMINATE"}` → `kill_process_tree(child_pid)` using
+- `{"cancel": "TERMINATE"}` → `kill_process_tree(child_pid, None)` (in
+  `helper/src/process_tree_win.rs`) using
   `TerminateProcess` on each process in the tree. Parent/child edges are
   validated by creation time against PID reuse, with the same code as the
   in-process kill (see

@@ -189,8 +189,9 @@ both platforms:
 - Cross-user subprocess execution: implemented end-to-end — `WindowsSessionUser`
   (password and logon-token modes), the embedded helper binary spawned via
   `CreateProcessWithLogonW`/`CreateProcessAsUserW` (`win32.rs`), CTRL_BREAK notify and
-  Job-Object/`CreateToolhelp32Snapshot` process-tree termination inside the helper
-  (`helper/src/runner_win.rs`)
+  a kill-on-close Job Object inside the helper (`helper/src/runner_win.rs`,
+  `job_object.rs`), and `CreateToolhelp32Snapshot` process-tree termination shared
+  with `subprocess.rs` (`helper/src/process_tree_win.rs`)
 - Win32 helpers: `win32.rs` (logon, user lookup, environment blocks),
   `win32_permissions.rs` (ACL management), `win32_remove.rs` (the cleanup removal
   pass, which deletes what it can and reports what it cannot), `win32_file_locks.rs`

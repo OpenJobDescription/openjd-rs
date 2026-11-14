@@ -378,7 +378,8 @@ mod tests {
         let pid = child.id();
         let outcomes = kill_process_tree(pid, None);
         let status = child.wait().expect("wait ping");
-        assert_eq!(outcomes, vec![(pid, KillOutcome::Terminated)]);
+        // The root is killed last; a console host child, if any, comes first.
+        assert_eq!(outcomes.last(), Some(&(pid, KillOutcome::Terminated)));
         assert_eq!(status.code(), Some(1), "ping must be terminated");
     }
 
@@ -470,15 +471,19 @@ mod tests {
         assert_eq!(status.code(), Some(1), "cmd must end with exit code 1");
         assert_eq!(waited, WAIT_OBJECT_0, "ping must have exited");
         assert_eq!(gc_code, 1, "ping must be terminated");
-        // Leaves are killed first, so the root is last.
-        let gc_at = outcomes
-            .iter()
-            .position(|o| *o == (grandchild, KillOutcome::Terminated));
+        // Leaves are killed first, so the root is last. cmd exits on its own
+        // once ping dies, so its terminate may find it already gone.
         assert!(
-            gc_at.is_some(),
+            outcomes.contains(&(grandchild, KillOutcome::Terminated)),
             "ping must be reported terminated: {outcomes:?}"
         );
-        assert_eq!(outcomes.last(), Some(&(root, KillOutcome::Terminated)));
+        assert!(
+            matches!(
+                outcomes.last(),
+                Some(&(pid, KillOutcome::Terminated | KillOutcome::TerminateFailed)) if pid == root
+            ),
+            "cmd must be killed last: {outcomes:?}"
+        );
     }
 
     /// Guards stdout/stderr symmetry: both threads route through this one
