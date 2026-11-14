@@ -1,0 +1,5 @@
+specions:
+      onRun:
+        command: python
+        args:
+        - print(r'{{ max()}} []')

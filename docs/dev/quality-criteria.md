@@ -106,6 +106,15 @@ clippy with `-D warnings`, build, tests, conformance, docs with
 `-D warnings`, `cargo deny`, MSRV, the copyright-header check, the public API
 listings, cross-user tests, and the `openjd-for-js` build. Each of these runs on both the workspace and the
 helper sub-crate at `crates/openjd-sessions/src/helper/` where CI does.
+The fuzz crate at `fuzz/` is its own workspace, which the commands above do
+not build. Its replay tests, fmt, and clippy MUST pass, as
+`.github/workflows/fuzz.yml` runs them, when a change alters library
+behavior, public API, dependencies, or `fuzz/` itself. Every public function
+of openjd-expr, openjd-model, openjd-sessions, and openjd-snapshots MUST be
+executed by the committed fuzz corpus or excluded with a reason in
+`fuzz/api_coverage.toml`, which `scripts/check_fuzz_api_coverage.py` checks.
+A bug found by fuzzing MUST get a unit test in its crate and its input in
+`fuzz/regressions/<target>/`, as described in `AGENTS.md` "Fuzzing".
 New source files covered by `scripts/check_copyright_headers.sh` MUST carry
 the copyright header. Work that resolves a report item MUST strike that item
 through in the same change, as described in `AGENTS.md`.

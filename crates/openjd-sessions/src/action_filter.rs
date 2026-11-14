@@ -13,29 +13,49 @@ use std::sync::LazyLock;
 /// The kind of an openjd directive message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionMessageKind {
+    /// `openjd_progress`: the action's percent complete.
     Progress,
+    /// `openjd_status`: a status message.
     Status,
+    /// `openjd_fail`: a failure message.
     Fail,
+    /// `openjd_env`: set an environment variable.
     Env,
+    /// `openjd_redacted_env`: set an environment variable and redact its value.
     RedactedEnv,
+    /// `openjd_unset_env`: unset an environment variable.
     UnsetEnv,
+    /// `openjd_session_runtime_loglevel`: change the session's log level.
     SessionRuntimeLoglevel,
 }
 
 /// The value associated with a directive callback.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ActionMessageValue {
+    /// A progress percentage.
     Float(f64),
+    /// A message, the name of a variable to unset, or the error that
+    /// canceled a malformed directive.
     String(String),
-    EnvVar { name: String, value: String },
+    /// A variable to set.
+    EnvVar {
+        /// The variable's name.
+        name: String,
+        /// The variable's value.
+        value: String,
+    },
+    /// A log level.
     LogLevel(u32),
 }
 
 /// A parsed callback from the filter.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FilterCallback {
+    /// The directive.
     pub kind: ActionMessageKind,
+    /// The directive's argument.
     pub value: ActionMessageValue,
+    /// Whether the directive was malformed, so the action is canceled.
     pub cancel: bool,
 }
 
@@ -98,6 +118,10 @@ pub struct ActionFilter {
 }
 
 impl ActionFilter {
+    /// A filter for `session_id`'s action output. `echo_openjd_directives`
+    /// keeps directive lines in the log; `redactions_enabled` is whether the
+    /// `REDACTED_ENV_VARS` extension is enabled (a malformed
+    /// `openjd_redacted_env` then warns instead of canceling the action).
     pub fn new(session_id: &str, echo_openjd_directives: bool, redactions_enabled: bool) -> Self {
         Self {
             session_id: session_id.to_string(),

@@ -1,0 +1,21 @@
+# Companion to wrap_env_failing_enter.yaml: a job with one inner environment
+# whose onEnter gets intercepted (and failed) by the wrap layer.
+specificationVersion: "jobtemplate-2023-09"
+name: WrapJobWithInnerEnv
+jobEnvironments:
+  - name: InnerEnv
+    script:
+      actions:
+        onEnter:
+          command: python
+          args: ["-c", "print('Inner Enter Body')"]
+        onExit:
+          command: python
+          args: ["-c", "print('Inner Exit Body')"]
+steps:
+  - name: OnlyStep
+    script:
+      actions:
+        onRun:
+          command: python
+          args: ["-c", "print('TaskBody Ran')"]

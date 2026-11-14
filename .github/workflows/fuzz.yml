@@ -1,0 +1,280 @@
+name: Fuzz
+
+# Fuzzing for the library crates. See fuzz/README.md.
+#
+# - replay:       every committed corpus and regression input, through every
+#                 oracle, on Linux, macOS, and Windows (stable Rust, overflow
+#                 checks on). Fast and deterministic: a PR that breaks a
+#                 previously found bug or an oracle fails here.
+# - fuzz:         libFuzzer under AddressSanitizer, every target in turn in
+#                 one job. Each target grows a corpus that is cached across
+#                 runs (saved from main and the nightly schedule), so coverage
+#                 accumulates instead of restarting from the seeds every time.
+#                 PRs fuzz each target for FUZZ_SECONDS_PR; the nightly run
+#                 for FUZZ_SECONDS_NIGHTLY.
+# - fuzz-build:   on macOS and Windows, the libFuzzer/ASan build and a replay
+#                 of one target through scripts/fuzz.sh (no fuzzing), so the
+#                 platform-specific build steps stay working.
+# - api-coverage: every public function of openjd-expr / -model / -sessions /
+#                 -snapshots must be executed by the committed corpus (llvm
+#                 source coverage of the replay), or be excluded with a reason
+#                 in fuzz/api_coverage.toml.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, release, "patch_*"]
+  schedule:
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds to fuzz each target
+        default: "60"
+      targets:
+        description: Targets to fuzz, space-separated (empty means every target)
+        default: ""
+
+# One group per event type, so a long nightly run never queues main's push
+# run (or the reverse).
+concurrency:
+  group: fuzz-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  RUST_BACKTRACE: 1
+  # Pinned so a broken nightly cannot randomly fail the job; bump deliberately
+  # (and keep scripts/fuzz.sh and scripts/check_fuzz_api_coverage.py in step).
+  FUZZ_TOOLCHAIN: nightly-2026-10-07
+  # Per target, run one after another (22 targets: ~5 min on a PR, ~66 min
+  # nightly). The committed corpus is a good start and the grown corpus is
+  # cached across runs, so short runs keep accumulating coverage. Only the
+  # nightly (and main/manual) runs save it, so the nightly budget sets how
+  # fast coverage grows: the text targets need tens of minutes of fuzzing to
+  # regain the coverage of a full edge-minimized corpus.
+  FUZZ_SECONDS_PR: 15
+  FUZZ_SECONDS_NIGHTLY: 180
+
+jobs:
+  replay:
+    name: Fuzz corpus replay (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install rust stable
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Restore cargo cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            fuzz/target
+          key: fuzz-replay-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+          restore-keys: fuzz-replay-${{ runner.os }}-
+      - name: Sync fuzz/Cargo.lock to the workspace lock
+        # Dependabot bumps only the workspace lock; build against the
+        # versions the crates ship with either way, and say when the
+        # committed fuzz lock lags (the lock test fails locally until then).
+        shell: bash
+        run: |
+          scripts/fuzz.sh sync-lock
+          git diff --quiet -- fuzz/Cargo.lock ||
+            echo "::warning file=fuzz/Cargo.lock::fuzz/Cargo.lock lags the workspace lock; run scripts/fuzz.sh sync-lock and commit it"
+      - name: Replay corpus and regressions
+        run: cargo test --manifest-path fuzz/Cargo.toml --no-default-features
+      # The fuzz crate is its own workspace, so the main CI's fmt/clippy jobs
+      # do not see it. `--lib --tests --examples` (not `--all-targets`): the
+      # lib `#[path]`-includes CLI sources whose own cfg(test) modules need
+      # the CLI's dev-dependencies.
+      - name: Clippy (fuzz crate)
+        # Lint even when the replay fails.
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        run: |
+          rustup component add clippy
+          cargo clippy --manifest-path fuzz/Cargo.toml --no-default-features --lib --tests --examples -- -D warnings
+      - name: Rustfmt (fuzz crate)
+        # Lint even when the replay fails.
+        if: ${{ !cancelled() && runner.os == 'Linux' }}
+        run: |
+          rustup toolchain install nightly --profile minimal --component rustfmt
+          cargo +nightly fmt --manifest-path fuzz/Cargo.toml --all -- --check
+
+  # The libFuzzer/ASan build is platform-specific (on Windows, scripts/fuzz.sh
+  # passes --no-include-main-msvc and puts MSVC's ASan runtime on PATH), but
+  # only Linux fuzzes. Build and replay one target through scripts/fuzz.sh on
+  # the other platforms, so a broken build there fails here without adding
+  # fuzzing time. Runs alongside the other jobs.
+  fuzz-build:
+    name: Fuzz build check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install rust nightly
+        shell: bash
+        run: rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal
+      - name: Restore cargo-fuzz
+        id: cargo-fuzz-cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/bin/cargo-fuzz
+            ~/.cargo/bin/cargo-fuzz.exe
+          key: cargo-fuzz-${{ runner.os }}-0.13.2
+      - name: Install cargo-fuzz
+        if: steps.cargo-fuzz-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-fuzz --locked --version 0.13.2
+      - name: Restore build cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            fuzz/target
+          key: fuzz-build-${{ runner.os }}-${{ env.FUZZ_TOOLCHAIN }}-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+          restore-keys: fuzz-build-${{ runner.os }}-${{ env.FUZZ_TOOLCHAIN }}-
+      - name: Sync fuzz/Cargo.lock to the workspace lock
+        shell: bash
+        run: scripts/fuzz.sh sync-lock
+      # snapshots_decode_text links openjd-snapshots, whose crc-fast
+      # dependency is what --no-include-main-msvc exists for.
+      - name: Build and replay one target under ASan
+        shell: bash
+        run: scripts/fuzz.sh replay snapshots_decode_text
+
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+    # Nightly: FUZZ_SECONDS_NIGHTLY for each target (~66 min), plus the
+    # build (~10 min cold) and the corpus minimization. A manual run gets the
+    # 6 h maximum, since it picks its own seconds and targets: keep
+    # seconds x targets well inside it. PRs and pushes to main fuzz
+    # FUZZ_SECONDS_PR per target.
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && 360 || github.event_name == 'schedule' && 100 || 60 }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install rust nightly
+        run: |
+          rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal
+      - name: Restore cargo-fuzz
+        id: cargo-fuzz-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-${{ runner.os }}-0.13.2
+      - name: Install cargo-fuzz
+        if: steps.cargo-fuzz-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-fuzz --locked --version 0.13.2
+      - name: Restore build cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            fuzz/target
+          key: fuzz-build-${{ env.FUZZ_TOOLCHAIN }}-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+          restore-keys: fuzz-build-${{ env.FUZZ_TOOLCHAIN }}-
+      # The grown corpus: restored from the newest run on main / the schedule.
+      # Saved below only from those runs, never from a PR.
+      - name: Restore grown corpus
+        uses: actions/cache/restore@v6
+        with:
+          path: fuzz/work
+          key: fuzz-corpus-all-${{ github.run_id }}
+          restore-keys: fuzz-corpus-all-
+      - name: Sync fuzz/Cargo.lock to the workspace lock
+        # Dependabot bumps only the workspace lock; build against the
+        # versions the crates ship with either way.
+        shell: bash
+        run: scripts/fuzz.sh sync-lock
+      - name: Fuzz
+        env:
+          FUZZ_SECONDS: ${{ github.event_name == 'schedule' && env.FUZZ_SECONDS_NIGHTLY || github.event_name == 'workflow_dispatch' && inputs.seconds || env.FUZZ_SECONDS_PR }}
+          # Two libFuzzer workers per target on the 4-core runner.
+          FUZZ_JOBS: 2
+          # Empty except on a manual run that names targets. Empty runs every
+          # target `cargo fuzz list` knows (which tests/replay.rs keeps equal
+          # to targets::TARGETS).
+          FUZZ_TARGETS: ${{ inputs.targets }}
+        run: |
+          # Unquoted on purpose: split the space-separated target list.
+          # shellcheck disable=SC2086
+          scripts/fuzz.sh run $FUZZ_TARGETS
+      # Keep the cached corpus small: minimize it before saving, so it does
+      # not grow without bound across runs.
+      - name: Minimize grown corpus
+        if: always() && github.event_name != 'pull_request'
+        env:
+          FUZZ_TARGETS: ${{ inputs.targets }}
+        run: |
+          # Unquoted on purpose: split the space-separated target list.
+          # shellcheck disable=SC2086
+          scripts/fuzz.sh cmin-work $FUZZ_TARGETS
+      # The grown corpus as an artifact, to fold into fuzz/corpus with
+      # `FUZZ_WORK_DIR=<download> scripts/fuzz.sh cmin`.
+      - name: Upload grown corpus
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-corpus
+          path: fuzz/work
+          retention-days: 14
+          if-no-files-found: ignore
+      - name: Save grown corpus
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/cache/save@v6
+        with:
+          path: fuzz/work
+          key: fuzz-corpus-all-${{ github.run_id }}
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts
+          if-no-files-found: ignore
+
+  api-coverage:
+    name: Fuzz API coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install rust stable + nightly
+        run: |
+          rustup toolchain install stable --profile minimal --component llvm-tools-preview
+          rustup default stable
+          rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal
+      - name: Restore cargo-llvm-cov
+        id: llvm-cov-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-llvm-cov
+          key: cargo-llvm-cov-${{ runner.os }}-0.9.1
+      - name: Install cargo-llvm-cov
+        if: steps.llvm-cov-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-llvm-cov --locked --version 0.9.1
+      - name: Sync fuzz/Cargo.lock to the workspace lock
+        # Dependabot bumps only the workspace lock; build against the
+        # versions the crates ship with either way.
+        shell: bash
+        run: scripts/fuzz.sh sync-lock
+      - name: Check every public function is fuzzed
+        run: python3 scripts/check_fuzz_api_coverage.py --generate

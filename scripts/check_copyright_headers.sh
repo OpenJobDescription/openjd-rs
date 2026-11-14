@@ -27,6 +27,7 @@ cd "$REPO_ROOT"
 # may drop into the workspace root.
 TOP_LEVEL_DIRS=(
     "crates"
+    "fuzz"
     "scripts"
     "testing_containers"
     ".github"
