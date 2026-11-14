@@ -157,7 +157,11 @@ variant: only the rejection variants above leave the session unchanged.
 A failed `enter_environment` leaves the environment on `environments_entered`, as in
 Python, and the caller must still exit it. When the caller didn't pass an `identifier`,
 the environment is `environments_entered().last()`. A failed `exit_environment` has
-already removed the environment, so it still counts as an exit.
+already removed the environment, so it still counts as an exit. When it failed before
+its action started, its `onExit` has not run. `exit_environment` doesn't fail when the
+symbol table can't be built from its exit-time input (its `resolved_symtab`, or the
+from-scratch table when none is given) while the table the environment was entered with
+still builds; it runs the `onExit` with that one (see [Exit](#exit) step 5).
 
 Which callbacks a pre-start failure fires depends on when it happens relative to the
 `Running` notification. `enter_environment` and `exit_environment` report only a `Failed`
@@ -366,8 +370,21 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 4. Pops the environment from `environments_entered` and removes it, so its variable
    changes no longer apply. This happens before anything that can fail, so a failed exit
    still counts as an exit
-5. Builds the symbol table. A failure here, or anywhere before the `onExit` starts,
-   fails the action (see [Failures before an action starts](#failures-before-an-action-starts))
+5. Builds the symbol table from the `resolved_symtab` argument (or from scratch when it
+   is absent). If that fails, for example because the table can't be deserialized, it
+   builds the table from the one stored on the environment at enter (§ Enter step 2, or
+   from scratch when none was stored) and logs the exit-time error as a warning after
+   the "Exiting Environment" banner. The `onExit` then runs with the enter-time table,
+   so whatever the `onEnter` started is still stopped: How Jobs Are Run says a Session
+   exits every Environment it entered. The action and the call's result are the
+   `onExit`'s own; the warning is the only trace of the bad input. The stored table is
+   not tried when it is the same input as the one that failed. If it also fails, the
+   exit-time error fails the action. That error, or any later failure before the
+   `onExit` starts (writing the path mapping rules file, or seeding an outer
+   environment's `onWrapEnvExit`), fails the action and the `onExit` does not run (see
+   [Failures before an action starts](#failures-before-an-action-starts)), so
+   anything the `onEnter` started keeps running. Python's `exit_environment` has no
+   fallback: it fails the action on an undeserializable table
 6. Runs the `onExit` action (or an outer environment's `onWrapEnvExit` in its place) via
    `EnvironmentScriptRunner::exit()`, if there is one
 7. On completion: state → `Ready` or `ReadyEnding` as for any other action. With

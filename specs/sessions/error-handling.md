@@ -184,7 +184,11 @@ one of two kinds:
   raising. For an `onEnter`/`onExit` that runs and ends non-`Success`, the error is
   `EnvironmentScriptFailed` and the action status is the script's own terminal state
   (`Failed`, `Canceled` or `Timeout`); `run_task` instead returns `Ok` with that state.
-  Either way the session is ending-only.
+  Either way the session is ending-only. One exception: `exit_environment` doesn't fail
+  when only its exit-time input (its `resolved_symtab`, or the from-scratch table when
+  none is given) can't build the symbol table. It falls back to the table the
+  environment was entered with, logs a warning, and runs the `onExit`
+  ([session.md § Exit](session.md#exit) step 5).
 
 The table in
 [session.md § Failures before an action starts](session.md#failures-before-an-action-starts)

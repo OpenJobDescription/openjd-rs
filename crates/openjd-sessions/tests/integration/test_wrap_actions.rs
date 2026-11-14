@@ -2531,3 +2531,60 @@ async fn wrap_env_file_does_not_leak_into_wrapped_inner_exit_scope() {
         "error must name the undefined symbol; got: {err_msg}"
     );
 }
+
+/// A failure while seeding an outer environment's onWrapEnvExit fails the
+/// inner exit before the hook starts, so the hook doesn't run and whatever
+/// the wrapped onEnter started keeps running. Here the inner onExit names a
+/// symbol that doesn't exist; resolving it as `WrappedAction.*` fails.
+/// specs/sessions/session.md § Exit documents this; the symbol-table fallback
+/// does not cover it.
+#[tokio::test]
+async fn wrap_env_exit_seeding_failure_skips_the_hook() {
+    let tmp = TempDir::new().unwrap();
+    let marker = tmp.path().join("wrapped-enter-started-this");
+    let mut session = Session::new_for_test(tmp.path().to_path_buf());
+
+    let m = marker.display().to_string();
+    let outer = wrap_env(
+        "Outer",
+        action_with_command("true", vec![]),
+        Some(action_with_command("touch", vec![&m])),
+        None,
+        Some(action_with_command("rm", vec![&m])),
+    );
+    let outer_id = session
+        .enter_environment(&outer, None, None, None)
+        .await
+        .unwrap();
+    let inner = plain_env(
+        "Inner",
+        Some(action_with_command("true", vec![])),
+        Some(action_with_command("echo", vec!["{{Param.Missing}}"])),
+    );
+    let inner_id = session
+        .enter_environment(&inner, None, None, None)
+        .await
+        .unwrap();
+    assert!(
+        marker.exists(),
+        "the wrapped onEnter must create the marker"
+    );
+
+    let err = session
+        .exit_environment(&inner_id, None, true, None)
+        .await
+        .expect_err("seeding the onWrapEnvExit must fail");
+    assert_eq!(
+        err.to_string(),
+        "Failed to resolve wrapped onExit command: Failed to resolve argument: \
+         Undefined variable: 'Param.Missing'.\n  Param.Missing\n  ~~~~~~^~~~~~~"
+    );
+    let status = session.action_status().unwrap();
+    assert_eq!(status.state, ActionState::Failed);
+    assert_eq!(
+        status.fail_message.as_deref(),
+        Some(err.to_string().as_str())
+    );
+    assert!(marker.exists(), "onWrapEnvExit must not have run");
+    assert_eq!(session.environments_entered(), [outer_id]);
+}
