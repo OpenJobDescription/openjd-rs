@@ -4,6 +4,19 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.16.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.15.0...openjd-model-v0.16.0) - 2026-11-14
+
+### Bug fixes
+
+- Keep each float's spelling in a whole-field FLOAT range expression ([#540](https://github.com/OpenJobDescription/openjd-rs/pull/540)) ([#540](https://github.com/OpenJobDescription/openjd-rs/pull/540))
+
+- [**breaking**] Write a FLOAT given as a number the way Python's repr writes it ([#539](https://github.com/OpenJobDescription/openjd-rs/pull/539)) ([#539](https://github.com/OpenJobDescription/openjd-rs/pull/539))
+
+- Numeric strings in list parameter defaults and native list values ([#538](https://github.com/OpenJobDescription/openjd-rs/pull/538)) ([#538](https://github.com/OpenJobDescription/openjd-rs/pull/538))
+
+- Ignore white space around numeric strings everywhere they are parsed ([#530](https://github.com/OpenJobDescription/openjd-rs/pull/530)) ([#530](https://github.com/OpenJobDescription/openjd-rs/pull/530))
+
+
 ## [0.15.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.14.0...openjd-model-v0.15.0) - 2026-11-09
 
 ### Bug fixes

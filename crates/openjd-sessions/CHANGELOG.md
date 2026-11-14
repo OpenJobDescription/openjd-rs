@@ -5,6 +5,32 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.9.0...openjd-sessions-v0.10.0) - 2026-11-14
+
+### Bug fixes
+
+- Run onExit with the enter-time table when the exit-time one fails ([#536](https://github.com/OpenJobDescription/openjd-rs/pull/536)) ([#536](https://github.com/OpenJobDescription/openjd-rs/pull/536))
+
+- [**breaking**] Fail the action when a session call fails before it starts ([#532](https://github.com/OpenJobDescription/openjd-rs/pull/532)) ([#532](https://github.com/OpenJobDescription/openjd-rs/pull/532))
+
+- Ignore white space around numeric strings everywhere they are parsed ([#530](https://github.com/OpenJobDescription/openjd-rs/pull/530)) ([#530](https://github.com/OpenJobDescription/openjd-rs/pull/530))
+
+- [**breaking**] Keep a session ending-only after a failed action, and add clear_ending_only()  ([#524](https://github.com/OpenJobDescription/openjd-rs/pull/524)) ([#524](https://github.com/OpenJobDescription/openjd-rs/pull/524))
+
+- Retry TempDir cleanup on Windows and log cleanup failures ([#485](https://github.com/OpenJobDescription/openjd-rs/pull/485)) ([#485](https://github.com/OpenJobDescription/openjd-rs/pull/485))
+
+- Stop rebuilding openjd-sessions on every cargo invocation ([#529](https://github.com/OpenJobDescription/openjd-rs/pull/529)) ([#529](https://github.com/OpenJobDescription/openjd-rs/pull/529))
+
+
+### Testing
+
+- Property-oracle fuzzing for every library crate ([#442](https://github.com/OpenJobDescription/openjd-rs/pull/442)) ([#442](https://github.com/OpenJobDescription/openjd-rs/pull/442))
+
+- Find the helper binary through CARGO_BIN_EXE_openjd_helper ([#537](https://github.com/OpenJobDescription/openjd-rs/pull/537)) ([#537](https://github.com/OpenJobDescription/openjd-rs/pull/537))
+
+- Report helper EOF in the Windows cross-user tests ([#526](https://github.com/OpenJobDescription/openjd-rs/pull/526)) ([#526](https://github.com/OpenJobDescription/openjd-rs/pull/526))
+
+
 ## [0.9.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.8.2...openjd-sessions-v0.9.0) - 2026-11-09
 
 ### Bug fixes

@@ -4,6 +4,21 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.15.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.14.0...openjd-expr-v0.15.0) - 2026-11-14
+
+### Bug fixes
+
+- Parse expressions over 200 bytes on wasm32, with a 512-byte cap there ([#535](https://github.com/OpenJobDescription/openjd-rs/pull/535)) ([#535](https://github.com/OpenJobDescription/openjd-rs/pull/535))
+
+- [**breaking**] Write a FLOAT given as a number the way Python's repr writes it ([#539](https://github.com/OpenJobDescription/openjd-rs/pull/539)) ([#539](https://github.com/OpenJobDescription/openjd-rs/pull/539))
+
+- Choose keyword placeholders that no parsed name can equal ([#534](https://github.com/OpenJobDescription/openjd-rs/pull/534)) ([#534](https://github.com/OpenJobDescription/openjd-rs/pull/534))
+
+- [**breaking**] Parse with Astral's ruff_python_parser to bound parse time ([#489](https://github.com/OpenJobDescription/openjd-rs/pull/489)) ([#531](https://github.com/OpenJobDescription/openjd-rs/pull/531)) ([#531](https://github.com/OpenJobDescription/openjd-rs/pull/531))
+
+- Ignore white space around numeric strings everywhere they are parsed ([#530](https://github.com/OpenJobDescription/openjd-rs/pull/530)) ([#530](https://github.com/OpenJobDescription/openjd-rs/pull/530))
+
+
 ## [0.14.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.13.0...openjd-expr-v0.14.0) - 2026-11-09
 
 ### Bug fixes
