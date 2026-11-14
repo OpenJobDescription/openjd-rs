@@ -1111,18 +1111,27 @@ fn parse_and_create(template_json: &str, params: &[(&str, &str)]) -> job::Job {
 }
 
 fn parse_and_create_err(template_json: &str, params: &[(&str, &str)]) -> String {
+    let input = params
+        .iter()
+        .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
+        .collect();
+    create_job_err_from_values(template_json, &input)
+}
+
+/// Like `parse_and_create_err`, with the job parameter values given as
+/// `ExprValue`s, as an API caller passes them.
+fn create_job_err_from_values(
+    template_json: &str,
+    input: &std::collections::HashMap<String, openjd_expr::ExprValue>,
+) -> String {
     let td = TestDirs::new();
     let v: serde_json::Value = serde_saphyr::from_str(template_json).unwrap();
     let supported = ["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
     let supported_refs: Vec<&str> = supported.to_vec();
     let jt = decode_job_template(v, Some(&supported_refs), &CallerLimits::default()).unwrap();
-    let input: std::collections::HashMap<String, openjd_expr::ExprValue> = params
-        .iter()
-        .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
-        .collect();
     let processed = match preprocess_job_parameters(
         &jt,
-        &input,
+        input,
         &[],
         &openjd_model::PathParameterOptions {
             job_template_dir: td.cwd(),
@@ -1577,6 +1586,109 @@ fn test_create_job_float_range_list_null_drops_and_list_flattens() {
     assert_eq!(
         serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
         r#"{"float":{"range":["1.0e2"]}}"#
+    );
+}
+
+/// Expression Language §1.3.4: a float copied unchanged keeps its spelling, so
+/// a whole-field range expression keeps each float member's spelling, as the
+/// same value does as a range list element (§1.3.12). The members of a
+/// `list[int]` are converted to float and computed floats have no spelling, as
+/// in a list item.
+#[test]
+fn test_create_job_float_range_expression_keeps_spelling() {
+    let renderings = |range_json: &str, params: &[(&str, &str)]| {
+        frame_float_renderings(&parse_and_create(
+            &expr_range_list_template("FLOAT", range_json),
+            params,
+        ))
+    };
+    let floats = [("Floats", r#"[" 1.00 ", "2.50"]"#)];
+    assert_eq!(
+        renderings(r#""{{ Param.Floats }}""#, &floats),
+        ["1.00", "2.50"]
+    );
+    assert_eq!(
+        renderings(r#""{{ Param.Floats }}""#, &floats),
+        renderings(r#"["{{ Param.Floats }}"]"#, &floats),
+        "the whole-field and list-element forms agree"
+    );
+    // The members of a `list[int]` are converted to float, in both forms.
+    for range_json in [r#""{{ Param.Ints }}""#, r#""{{ range(3, 5) }}""#] {
+        assert_eq!(renderings(range_json, &[]), ["3.0", "4.0"], "{range_json}");
+    }
+    assert_eq!(
+        renderings(r#""{{ Param.Ints }}""#, &[]),
+        renderings(r#"["{{ Param.Ints }}"]"#, &[])
+    );
+    let job = parse_and_create(
+        &expr_range_list_template(
+            "FLOAT",
+            r#""{{ [Param.Ratio, Param.Floats[1], 1.50, 1e3, 2.5, Param.Value, Param.Ratio * 2] }}""#,
+        ),
+        &[("Ratio", " 2.50 "), ("Floats", r#"[1, "07.250"]"#)],
+    );
+    // `Param.Value` is an int in a list with floats, so the list is a
+    // `list[float]` and its member a float with no spelling.
+    assert_eq!(
+        frame_float_renderings(&job),
+        ["2.50", "7.250", "1.50", "1e3", "2.5", "10.0", "5.0"]
+    );
+    // A spelling equal to what `format_float` gives is not stored, as for a
+    // range list element.
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        r#"{"float":{"range":["2.50","7.250","1.50","1e3",2.5,10.0,5.0]}}"#
+    );
+}
+
+/// A whole-field range expression keeps a float member's spelling up to
+/// `max_task_param_string_len` characters, and only its value past that, as a
+/// range list element does.
+#[test]
+fn test_create_job_float_range_expression_spelling_length_cap() {
+    let at_cap = format!("1.{}", "0".repeat(1022));
+    let over_cap = format!("1.{}", "0".repeat(1023));
+    let job = parse_and_create(
+        &expr_range_list_template("FLOAT", r#""{{ Param.Floats }}""#),
+        &[("Floats", &format!(r#"["{at_cap}", "{over_cap}"]"#))],
+    );
+    let ps = job.steps[0].parameter_space.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_string(&ps.task_parameter_definitions["Frame"]).unwrap(),
+        format!(r#"{{"float":{{"range":["{at_cap}",1.0]}}}}"#)
+    );
+}
+
+/// An API caller can pass a float whose spelling is not a number. A
+/// whole-field range expression rejects it as a range list element does, and
+/// the error names the member's index in the evaluated list.
+#[test]
+fn test_create_job_float_range_expression_rejects_a_spelling_that_is_not_a_number() {
+    use openjd_expr::{value::Float64, ExprValue};
+    let bad = || Float64::with_str(2.5, "abc".into()).unwrap();
+    let ok = || Float64::new(1.5).unwrap();
+    let input = std::collections::HashMap::from([
+        (
+            "Floats".to_string(),
+            ExprValue::ListFloat(vec![ok(), bad()]),
+        ),
+        ("Ratio".to_string(), ExprValue::Float(bad())),
+    ]);
+    let err = |range_json: &str| {
+        create_job_err_from_values(&expr_range_list_template("FLOAT", range_json), &input)
+    };
+    assert_eq!(
+        err(r#""{{ Param.Floats }}""#),
+        "Expression error: Task parameter 'Frame' range expression element 1: value 'abc' is not a number"
+    );
+    assert_eq!(
+        err(r#""{{ [1.0, Param.Ratio] }}""#),
+        "Expression error: Task parameter 'Frame' range expression element 1: value 'abc' is not a number"
+    );
+    assert_eq!(
+        err(r#"["{{ Param.Floats }}"]"#),
+        "Expression error: Task parameter 'Frame' range[0]: value 'abc' is not a number"
     );
 }
 

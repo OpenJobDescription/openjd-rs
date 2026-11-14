@@ -602,7 +602,8 @@ pub(crate) fn strip_redundant_leading_zeros(text: &str) -> Cow<'_, str> {
 }
 
 /// One value a FLOAT range list's format string element contributed, or why
-/// it is not a valid one.
+/// it is not a valid one. A float member of a whole-field range expression's
+/// list goes through the same rule, so the two forms keep the same spellings.
 ///
 /// A float that carries a spelling different from what `format_float` gives,
 /// alone or as a member of a list, and an integer render as written: the
@@ -704,14 +705,29 @@ fn resolve_float_range(
             // if evaluation fails.
             match expr.resolve_with(symtab, &budgets.fs_options()) {
                 Ok(val) if val.is_list() => {
+                    let member_error = |k: usize, detail: String| {
+                        ModelError::Expression(ExpressionError::new(format!(
+                            "Task parameter '{param_name}' range expression element {k}: {detail}"
+                        )))
+                    };
                     let elements = val.list_elements().unwrap();
                     elements
-                        .iter()
-                        .map(|e| match e {
-                            // No text: an expression element came from a literal
-                            // or an int, so `{{ [2.50] }}` is 2.5 (§7.5).
-                            ExprValue::Float(f) => float64(f.value(), param_name),
-                            ExprValue::Int(i) => float64(*i as f64, param_name),
+                        .into_iter()
+                        .enumerate()
+                        .map(|(k, e)| match e {
+                            // A float copied unchanged keeps its spelling
+                            // (Expression Language §1.3.4), by the same rule as
+                            // a range list element, so `{{ Param.LF }}` and
+                            // `["{{ Param.LF }}"]` give the same tasks. A
+                            // template cannot give a float a spelling that is
+                            // not a number, but an API caller's value can, and
+                            // is rejected as in the list form. `k` indexes the
+                            // evaluated list, as there is no list as written.
+                            ExprValue::Float(_) => float_range_value(e, limits)
+                                .map_err(|detail| member_error(k, detail)),
+                            // A member of a `list[int]`, converted to float
+                            // (§1.3.12), so it has no spelling.
+                            ExprValue::Int(i) => float64(i as f64, param_name),
                             other => Err(ModelError::Expression(ExpressionError::new(format!(
                                 "Expected float in range, got {}",
                                 other.type_name()
