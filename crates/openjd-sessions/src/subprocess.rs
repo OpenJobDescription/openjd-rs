@@ -273,14 +273,8 @@ mod platform {
     }
 
     /// The current system wall clock as FILETIME ticks (100-ns intervals since
-    /// 1601-01-01 UTC) — the same epoch `GetProcessTimes` reports process
-    /// creation times in, so a value from here is directly comparable to a
-    /// process creation time.
-    ///
-    /// Derived from the standard-library system clock rather than
-    /// `GetSystemTimeAsFileTime` so no additional `windows` crate feature (and
-    /// thus no Cargo.toml change) is required; both read the same UTC system
-    /// clock, so the value and wall-clock base are equivalent.
+    /// 1601-01-01 UTC), the epoch `GetProcessTimes` reports creation times in.
+    /// See specs/sessions/subprocess.md § Snapshot and stamp.
     fn system_time_as_filetime_ticks() -> u64 {
         // 11_644_473_600 seconds separate the FILETIME epoch (1601) from the
         // Unix epoch (1970); 10_000_000 FILETIME ticks make one second.
@@ -294,37 +288,21 @@ mod platform {
             .saturating_add((now.subsec_nanos() / 100) as u64)
     }
 
-    /// Snapshot all `(pid, parent_pid)` pairs in one toolhelp pass, together
-    /// with a wall-clock stamp captured immediately AFTER
-    /// `CreateToolhelp32Snapshot` succeeds (before the enumeration walk).
-    ///
-    /// `TH32CS_SNAPPROCESS` copies the process list at call time;
-    /// `Process32First`/`Next` iterate that frozen copy, so nothing created
-    /// after the call can appear in the pairs. A stamp taken right after the
-    /// call therefore upper-bounds the creation time of every listed process
-    /// AND keeps the reuse-acceptance window at its smallest sound value.
-    /// `collect_tree_validated` uses it to reject a candidate whose freshly
-    /// read creation time is newer than the stamp: the signature of a PID
-    /// reused after the snapshot was taken. Taking the stamp after the walk
-    /// (as an earlier version did) only widened that window by the walk's
-    /// duration for no benefit, since the walk cannot observe any process the
-    /// frozen copy did not already contain.
+    /// Snapshot all `(pid, parent_pid)` pairs in one toolhelp pass, with a
+    /// wall-clock stamp taken right after `CreateToolhelp32Snapshot` returns.
+    /// See specs/sessions/subprocess.md § Snapshot and stamp.
     fn snapshot_process_parents() -> (u64, Vec<(u32, u32)>) {
         use windows::Win32::System::Diagnostics::ToolHelp::{
             CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
             TH32CS_SNAPPROCESS,
         };
         let mut pairs = Vec::new();
-        // Stamp is captured immediately after the snapshot is created (below);
-        // this 0 is only the unreachable no-snapshot fallback.
+        // Only the no-snapshot fallback keeps this 0 (and `pairs` is then empty).
         let mut stamp: u64 = 0;
         unsafe {
             let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
             if let Ok(snap) = snap {
-                // Point-in-time: CreateToolhelp32Snapshot froze the process
-                // list on the line above, so a stamp taken here upper-bounds
-                // every listed process while keeping the reuse-acceptance
-                // window at its smallest sound value.
+                // Before the enumeration, so the stamp bounds the frozen list.
                 stamp = system_time_as_filetime_ticks();
                 let mut entry = PROCESSENTRY32W {
                     dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
@@ -371,10 +349,7 @@ mod platform {
     /// Read the creation time of the process currently at `pid`.
     ///
     /// Fail closed: any failure to open the process or read its times
-    /// returns `None`, and callers treat `None` as "cannot validate, do not
-    /// kill". `PROCESS_QUERY_LIMITED_INFORMATION` can be denied on protected
-    /// (PPL) processes, in which case the candidate is skipped: a
-    /// fail-closed under-kill by design.
+    /// returns `None`.
     fn process_creation_time(pid: u32) -> Option<u64> {
         unsafe {
             // SAFETY: OpenProcess is called with a valid access mask and
@@ -388,15 +363,10 @@ mod platform {
         }
     }
 
-    /// Terminate `target` only if the process currently at its PID still has
-    /// the creation time recorded at collection, closing the collect-to-kill
-    /// TOCTOU window: a collected PID could be reused by an unrelated process
-    /// before we terminate it. A single handle is opened with both query and
-    /// terminate rights, and BOTH the identity read and the `TerminateProcess`
-    /// use that SAME handle, so no reuse can slip between the check and the
-    /// kill. On mismatch or unreadable identity the kill is skipped and the
-    /// reason logged so field misfires are diagnosable. Returns whether a
-    /// terminate was issued.
+    /// Terminate `target` only if the process now at its PID still has the
+    /// creation time it was collected with, checked and killed through one
+    /// handle; a skipped kill is logged. Returns whether a terminate was
+    /// issued. See specs/sessions/subprocess.md § Kill-time revalidation.
     fn kill_process_checked(target: &ValidatedProcess) -> bool {
         unsafe {
             // SAFETY: OpenProcess returns a handle we own, granting both
@@ -433,16 +403,9 @@ mod platform {
 
     /// Kill a process tree: collect all descendants (validating every
     /// creation-time edge), then kill leaf-to-root. Mirrors Python's
-    /// `_windows_process_killer.py`.
-    ///
-    /// `th32ParentProcessID` is recorded at child creation time, so PID
-    /// reuse can make the recorded parent graph cyclic (a dead ancestor's
-    /// PID reused by a descendant). The previous recursive implementation
-    /// had no cycle guard and overflowed the thread's stack (0xc00000fd)
-    /// when it hit such a cycle. Edge validation now lives in
-    /// `process_tree::collect_tree_validated` (shared with the cross-user
-    /// helper's `runner_win.rs`); this history is kept here because
-    /// this is the platform entry point that walks that graph.
+    /// `_windows_process_killer.py`. `expected_root_ct` is the pinned root
+    /// identity, if any. See specs/sessions/subprocess.md § Process Tree
+    /// Killing.
     fn kill_process_tree(root_pid: u32, expected_root_ct: Option<u64>) {
         let (snapshot_time, parents) = snapshot_process_parents();
         let tree = super::collect_tree_validated(
@@ -453,23 +416,12 @@ mod platform {
             &mut |pid| process_creation_time(pid),
         );
         if tree.is_empty() {
-            // The root's identity could not be established: no pinned identity
-            // and an unreadable fresh read, or a pinned identity that no longer
-            // matches the fresh read. A raw-PID kill here would risk
-            // terminating a reused PID, and it would not even reliably widen
-            // coverage: kill_process_checked opens
-            // PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE as a single
-            // all-or-nothing OpenProcess, so a DACL granting terminate but not
-            // query now fails to open where an old TERMINATE-only kill would
-            // have succeeded. That narrowing is a deliberate trade: the
-            // same-handle identity read is what closes the check-to-kill
-            // window, and giving it up reopens the TOCTOU this code exists to
-            // eliminate. Fail closed: log and return without killing.
+            // The root's identity couldn't be established: fail closed. See
+            // specs/sessions/subprocess.md § Kill-time revalidation.
             log::info!(target: "openjd.sessions", "Not terminating tree for pid {root_pid}: root identity could not be established (process exited or protected), skipping kill");
             return;
         }
-        // collect_tree_validated returns breadth-first order (every parent
-        // before its children), so the reverse kills leaves before ancestors.
+        // Reverse breadth-first order kills leaves first.
         for target in tree.iter().rev() {
             kill_process_checked(target);
         }
@@ -477,10 +429,7 @@ mod platform {
 
     /// Terminate: kill the entire process tree.
     pub fn send_terminate(pid: i32) {
-        // Immediate path: the caller still holds the live `Child` handle, so
-        // the kernel pins this root PID and it cannot be reused out from under
-        // us. There is no separate schedule-time identity to thread, so pass
-        // `None` and let collect_tree_validated read the root fresh.
+        // The caller's live `Child` pins the root's PID, so pass no identity.
         kill_process_tree(pid as u32, None);
     }
 
@@ -494,39 +443,23 @@ mod platform {
 
     /// Delayed terminate: kill the process tree after a grace period.
     ///
-    /// Captures the root's creation time NOW, synchronously, while the caller
-    /// still holds the live `Child` handle so the kernel pins this PID and it
-    /// cannot be reused out from under us. That schedule-time identity is then
-    /// threaded into the kill: `kill_process_tree` re-reads the root after the
-    /// delay and fails closed unless it still reports exactly this creation
-    /// time, so a PID recycled while the task was sleeping is never killed.
+    /// Reads the root's creation time now, while the caller's live `Child`
+    /// pins the PID, and passes it to the kill as the pinned identity. See
+    /// specs/sessions/subprocess.md § Root identity.
     pub fn spawn_delayed_terminate(pid: i32, delay: Duration) {
         let root_identity = process_creation_time(pid as u32);
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             match root_identity {
                 Some(ct) => {
-                    // Thread the schedule-time identity into the kill. This
-                    // replaces the old separate gate (read identity, then call
-                    // an unpinned kill): collect_tree_validated now re-reads
-                    // the root and returns empty unless it still reports `ct`,
-                    // so reuse between the check and the walk cannot slip
-                    // through. Each node is revalidated again at kill time
-                    // inside kill_process_checked.
+                    // collect_tree_validated re-reads the root and walks
+                    // nothing unless it still reports `ct`.
                     kill_process_tree(pid as u32, Some(ct));
                 }
                 None => {
-                    // Root creation time could not be queried at schedule
-                    // time. This does NOT mean the process had exited: the
-                    // caller still held the live `Child` handle here, which
-                    // keeps the kernel process object (and its PID) valid even
-                    // for an already-terminated process, and a dead-but-held
-                    // process still reports its creation time. So a `None` read
-                    // means the open/query was DENIED (e.g. a protected
-                    // process), not that the process is gone. Either way there
-                    // is no pinned identity to validate against, so the safe
-                    // action is not to walk the tree at all rather than risk a
-                    // fresh unpinned read matching a reused PID.
+                    // The held `Child` keeps the creation time readable, so
+                    // `None` means the query was denied. With nothing to pin,
+                    // don't walk the tree.
                     log::warn!(target: "openjd.sessions", "Delayed terminate for pid {pid}: root creation time could not be queried at schedule time (access denied?); no identity to validate against, so the tree will not be walked after the grace period");
                 }
             }
@@ -611,12 +544,8 @@ mod platform {
 
 use platform::*;
 
-// The PID-reuse-safe tree walk lives in the helper's source tree and compiles
-// into both Windows tree kills: this crate's (`platform::kill_process_tree`)
-// and the cross-user helper's (`runner_win.rs`). `#[path]` inclusion, as in
-// win32_locate.rs, because the helper is a nested crate that cannot depend on
-// this one. Under `test` it also compiles on other platforms for its unit
-// tests.
+// The PID-reuse-safe tree walk, shared with the cross-user helper. See
+// specs/sessions/subprocess.md § Shared implementation.
 #[cfg(any(windows, test))]
 #[path = "helper/src/process_tree.rs"]
 mod process_tree;

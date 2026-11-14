@@ -279,10 +279,7 @@ fn send_ctrl_break(pid: u32) -> bool {
 
 /// The current system wall clock as FILETIME ticks (100-ns intervals since
 /// 1601-01-01 UTC), the epoch `GetProcessTimes` reports creation times in.
-///
-/// Same as `subprocess.rs`: derived from the standard-library system clock,
-/// which reads the same UTC clock as `GetSystemTimeAsFileTime`, so no extra
-/// `windows` feature is needed.
+/// See specs/sessions/subprocess.md § Snapshot and stamp.
 fn system_time_as_filetime_ticks() -> u64 {
     // 11_644_473_600 seconds separate the FILETIME epoch (1601) from the
     // Unix epoch (1970); 10_000_000 FILETIME ticks make one second.
@@ -298,11 +295,7 @@ fn system_time_as_filetime_ticks() -> u64 {
 
 /// Snapshot all `(pid, parent_pid)` pairs in one toolhelp pass, with a
 /// wall-clock stamp taken right after `CreateToolhelp32Snapshot` returns.
-///
-/// The snapshot freezes the process list when it is created, so the stamp
-/// upper-bounds the creation time of every listed process.
-/// `collect_tree_validated` rejects a descendant that reads newer than the
-/// stamp: the mark of a PID reused after the snapshot.
+/// See specs/sessions/subprocess.md § Snapshot and stamp.
 fn snapshot_process_parents() -> (u64, Vec<(u32, u32)>) {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -372,12 +365,10 @@ fn process_creation_time(pid: u32) -> Option<u64> {
 }
 
 /// Terminate `target` only if the process now at its PID still has the
-/// creation time it was collected with. The identity read and the
-/// `TerminateProcess` use one handle, so the PID can't be reused between the
-/// check and the kill. Returns whether a terminate was issued.
-///
-/// Unlike `subprocess.rs`, a skipped kill isn't logged: the helper's stderr
-/// shares the JSON response pipe, so a log line would break the protocol.
+/// creation time it was collected with, checked and killed through one
+/// handle. Returns whether a terminate was issued. It logs nothing; see
+/// specs/sessions/subprocess.md § Kill-time revalidation and § Logging
+/// skipped kills.
 fn kill_process_checked(target: &ValidatedProcess) -> bool {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
@@ -403,15 +394,9 @@ fn kill_process_checked(target: &ValidatedProcess) -> bool {
 }
 
 /// Kill a process tree: collect the descendants of `root_pid`, validating
-/// every edge against creation times, then kill leaf-to-root.
-///
-/// Every caller holds the workload's live `Child`, whose handle keeps the
-/// root's PID from being reused, so the root needs no pinned identity
-/// (`expected_root_ct = None`), as for `subprocess.rs`'s immediate
-/// `send_terminate`. `th32ParentProcessID` is never updated when a parent
-/// exits and Windows reuses PIDs, so without the validation a live,
-/// unrelated process whose dead creator's PID is now in the tree would be
-/// killed.
+/// every edge against creation times, then kill leaf-to-root. The caller's
+/// live `Child` pins the root's PID, so no root identity is passed. See
+/// specs/sessions/subprocess.md § Process Tree Killing.
 fn kill_process_tree(root_pid: u32) {
     let (snapshot_time, parents) = snapshot_process_parents();
     let tree = collect_tree_validated(
@@ -421,10 +406,8 @@ fn kill_process_tree(root_pid: u32) {
         None,
         &mut process_creation_time,
     );
-    // Breadth-first order lists every parent before its children, so the
-    // reverse kills leaves before their ancestors. An empty tree means the
-    // root's identity couldn't be read: kill nothing rather than risk a
-    // reused PID.
+    // Reverse breadth-first order kills leaves first. An empty tree kills
+    // nothing.
     for target in tree.iter().rev() {
         kill_process_checked(target);
     }

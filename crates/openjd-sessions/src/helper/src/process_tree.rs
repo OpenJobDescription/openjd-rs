@@ -2,20 +2,13 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-//! PID-reuse-safe process tree collection for Windows tree kills.
+//! PID-reuse-safe process tree collection for both Windows tree kills
+//! (`openjd-sessions`' `subprocess.rs` and the helper's `runner_win.rs`).
 //!
-//! Both Windows tree kills use this: the in-process one in `openjd-sessions`'
-//! `subprocess.rs` and the cross-user helper's in `runner_win.rs`. Each one
-//! takes a toolhelp snapshot of `(pid, th32ParentProcessID)` pairs, reads
-//! process creation times, and terminates what this module accepts. Keeping
-//! the edge validation in one file means a fix to it reaches both kills;
-//! when each crate had its own copy, the PID-reuse fix reached only one.
-//!
-//! Deliberately `std` only and free of Windows calls: the caller supplies the
-//! snapshot and a creation-time callback, so the logic is unit-tested on
-//! every platform. It compiles into the standalone helper binary (a nested
-//! crate that cannot depend on `openjd-sessions`) and is `#[path]`-included
-//! into `openjd-sessions`, so it references nothing from either crate.
+//! `std` only, with no Windows calls, because it is `#[path]`-included into
+//! `openjd-sessions` and must reference nothing from either crate. See
+//! specs/sessions/subprocess.md § Process Tree Killing and § Shared
+//! implementation.
 
 /// A process node whose creation time was successfully read and validated
 /// against its parent during tree collection.
@@ -28,119 +21,14 @@ pub struct ValidatedProcess {
 }
 
 /// Collect the process tree rooted at `root_pid` in breadth-first order,
-/// validating every parent->child edge against process creation times.
+/// validating every parent->child edge in `parents` (`(pid, ppid)` pairs)
+/// against creation times.
 ///
-/// Walks the `parents` snapshot (a list of `(pid, ppid)` pairs) with a
-/// visited set instead of recursing. Both details matter:
-/// `th32ParentProcessID` is recorded at child creation time, so PID reuse
-/// can make the recorded parent graph cyclic (a dead ancestor's PID reused
-/// by a descendant). The previous recursive implementation had no cycle
-/// guard and overflowed the thread's stack (0xc00000fd) when it hit such a
-/// cycle.
-///
-/// On top of the cycle guard this mirrors psutil's `Process.children()`
-/// PID-reuse guard, which the original Python->Rust port dropped: under a
-/// forward-moving system clock, a true child is never older than its
-/// parent, so an edge (child, ppid) is accepted only when `ppid` is an
-/// already-accepted node AND the child's creation time is `>=` that
-/// parent's. A stale edge (the parent PID was reused after the real parent
-/// exited) has a child older than the recorded parent and always fails the
-/// check. We fail closed on stale edges (a child older than its recorded
-/// parent, the mark of a reused parent PID). A child whose creation time is
-/// unreadable is NOT skipped: it is recorded as a traversable node carrying
-/// the parent's creation time as its bound (see the later paragraph), so a
-/// live subtree under a dead intermediate is still reached. If the ROOT's
-/// creation time is unreadable we return an empty `Vec` ONLY when no
-/// schedule-time identity is pinned; with `Some(exp)` the walk is seeded from
-/// that pinned identity and proceeds.
-///
-/// Because `FILETIME` creation times are wall-clock rather than monotonic,
-/// this invariant is only exact under a forward-moving clock. An NTP
-/// step-back or manual clock change between a parent's and its child's
-/// creation can make a TRUE child's recorded creation time earlier than its
-/// parent's, failing the `>=` edge check and pruning that child's whole
-/// subtree. The failure mode is a leaked (skipped) descendant, never
-/// terminating an unrelated process, so this stays on the safe under-kill
-/// side.
-///
-/// `snapshot_time` closes a second PID-reuse direction: the one where a
-/// genuine edge (child, parent) is captured in the snapshot, the child then
-/// exits, and its PID is reused by an unrelated process U before this function
-/// reads the child's creation time. U's creation time is newer than the
-/// parent's, so the `>=` edge check passes and U would be recorded as a
-/// validated node. Because every process the snapshot lists was created before
-/// the snapshot was taken (the caller captures the stamp right after
-/// `CreateToolhelp32Snapshot` returns), we reject any DESCENDANT candidate whose freshly read creation time is greater
-/// than `snapshot_time`. The stamp and process creation times share the same
-/// wall-clock base (FILETIME ticks since 1601 UTC), so the comparison is exact.
-///
-/// The root is exempt from the `snapshot_time` bound in every arm. The root's
-/// identity is never established by fossil-edge attribution (the reuse the
-/// stamp guards): it is either pinned by a live `Child` handle
-/// (`expected_root_ct = None`: `subprocess.rs`'s immediate `send_terminate`
-/// and every kill in the cross-user helper), matched against a
-/// schedule-time identity (`Some(exp)` with `read == exp`), or seeded from that
-/// pinned identity when the root has already exited (`Some(exp)` with `None`).
-/// A stamp comparison on the root could therefore never catch a reused PID; it
-/// could only false-positive under a backward wall-clock adjustment (an NTP
-/// step-back or a VM resume, where the root's FILETIME creation was recorded
-/// before the step and the stamp read after it), return empty, and turn a
-/// legitimate cancel into a complete no-op — nothing killed, the session left
-/// waiting on a live tree. Accepted degradation: under such a backward step the
-/// root is still killed, but descendants whose recorded creation times exceed
-/// the post-step stamp may be skipped. That is an under-kill (a leaked
-/// descendant), which stays on the safe side.
-///
-/// `expected_root_ct` pins the root's identity to a value established before
-/// this call (a schedule-time read from `subprocess.rs`'s delayed-terminate
-/// path). When
-/// `Some(exp)`:
-/// - a fresh root read of `Some(rc)` must equal `exp`, otherwise this returns
-///   empty (fail closed) — closing the reuse window between an earlier identity
-///   read and this walk;
-/// - a fresh root read of `None` (the root exited during the grace period, its
-///   PID currently unassigned) SEEDS the walk with `ValidatedProcess { pid:
-///   root_pid, creation_time: exp }` and proceeds. This is the common
-///   delayed-path case, whose whole purpose is reaping orphaned grandchildren:
-///   `kill_process_checked` no-ops on the dead root, but its orphaned
-///   descendants are still enumerated and validated against `>= exp` and
-///   `<= snapshot_time`.
-///
-/// The recorded root node then carries `exp`, the pinned identity, not any
-/// re-read value. When `expected_root_ct` is `None`, an unreadable fresh root
-/// read returns empty (fail closed) and a readable one is accepted as-is (the
-/// live `Child` handle already pins the PID; see the root-exemption note
-/// above).
-///
-/// A child whose creation time is unreadable under an already-validated parent
-/// is kept TRAVERSABLE rather than pruned: it is recorded carrying the parent's
-/// creation time (a sound lower bound for ITS children) so that a live subtree
-/// under a dead intermediate (cmd -> sh -> renderer, sh exits first) is still
-/// reached. `kill_process_checked` cannot open the dead PID, so nothing is
-/// terminated for the node itself; only its readable, validated descendants
-/// are. Stale (`< parent`) and post-snapshot (`> snapshot_time`) rejections
-/// still apply to READABLE children exactly as before.
-///
-/// Residual: seeding a dead root and traversing dead intermediates reopens a
-/// bounded window. A freed PID's fossil edges (recorded `th32ParentProcessID`
-/// values) can include children of an INTERIM holder of that PID whose creation
-/// times happen to land in `[exp, snapshot_time]`; those pass validation and
-/// may be terminated. The window is bounded and no worse than the
-/// pre-validation walk, and is structurally eliminated only by the Job Object
-/// rework (issue #347).
-///
-/// Separate residual (distinct from the dead-root/interim-holder case above):
-/// an unreadable-but-ALIVE fossil child. If a recorded `th32ParentProcessID`
-/// was freed and reassigned to OUR root, an access-denied process carrying
-/// that stale parent value becomes a child edge of the root. Because it is
-/// unreadable it bypasses the `>=` staleness check by construction (that check
-/// only applies to READABLE children) and is recorded as a traversable node
-/// carrying the parent's bound, so its own live children can fall inside
-/// `[parent_ct, snapshot_time]` and be terminated. Distinguishing genuinely
-/// dead PIDs (`OpenProcess` -> `ERROR_INVALID_PARAMETER`) from merely denied
-/// ones (`ERROR_ACCESS_DENIED`) would close this, but that changes the
-/// creation-time callback contract, so it is deferred with the Job Object
-/// rework (issue #347).
+/// `snapshot_time` is the stamp taken when `parents` was captured, and
+/// `expected_root_ct` an optional pinned root identity. Returns empty when the
+/// root's identity can't be established. The rules are in
+/// specs/sessions/subprocess.md § Root identity, § Edge validation and
+/// § Unreadable children.
 pub fn collect_tree_validated(
     root_pid: u32,
     parents: &[(u32, u32)],
@@ -150,40 +38,21 @@ pub fn collect_tree_validated(
 ) -> Vec<ValidatedProcess> {
     use std::collections::HashSet;
 
-    // Resolve the root's identity. The four cases below implement the pinned
-    // vs. unpinned, readable vs. exited matrix documented above.
+    // The four cases are the table in specs/sessions/subprocess.md § Root
+    // identity. The root is exempt from `snapshot_time` in every case.
     let root_ct = match (expected_root_ct, creation_time(root_pid)) {
-        // Pinned identity, root still readable: the fresh read must match the
-        // pin exactly (else reuse/exit). No snapshot_time bound — the identity
-        // match already proves this is the pinned process, so a stamp
-        // comparison here could only false-positive under a backward clock
-        // step-back and turn a legitimate cancel into a no-op.
-        //
-        // On mismatch we deliberately ABORT (return empty) rather than seed the
-        // walk. If `rc != exp` the PID has been REASSIGNED: the new occupant is
-        // alive, and its children are guaranteed-live unrelated processes whose
-        // creation times necessarily land in `[exp, snapshot_time]`, so they
-        // would pass the `>=`/`<=` edge checks. Seeding a root here would
-        // therefore deterministically kill those unrelated processes. Aborting
-        // instead only leaks our own orphans (under-kill), which is the safe
-        // direction.
+        // A mismatch means the PID was reassigned. Abort rather than seed:
+        // the new occupant's children would pass every edge check.
         (Some(exp), Some(rc)) => {
             if rc != exp {
                 return Vec::new();
             }
             exp
         }
-        // Pinned identity, root exited during the grace period: seed with the
-        // pinned identity so orphaned descendants are still reaped.
+        // The pinned root exited: seed with the pin to reap its orphans.
         (Some(exp), None) => exp,
-        // No pinned identity and no fresh read: nothing to validate against.
         (None, None) => return Vec::new(),
-        // No pinned identity, root readable: every caller passing None (the
-        // immediate send_terminate path and the cross-user helper) holds the
-        // workload's live Child handle, which pins the PID, so rc cannot
-        // belong to a reused PID. No snapshot_time bound — a
-        // stamp comparison here can only false-positive under a backward clock
-        // adjustment and would turn a legitimate cancel into a no-op.
+        // The caller's live `Child` handle pins the PID.
         (None, Some(rc)) => rc,
     };
 
@@ -198,18 +67,14 @@ pub fn collect_tree_validated(
         let parent = result[i];
         i += 1;
         for &(child, ppid) in parents {
-            // Only descend from the node we are currently processing, and
-            // visit each child once (this is the cycle/duplicate guard).
+            // `visited` is the cycle and duplicate guard.
             if ppid != parent.pid || !visited.insert(child) {
                 continue;
             }
             match creation_time(child) {
                 Some(child_ct) => {
-                    // A true child is never older than its parent, and — like
-                    // every genuine snapshot member — was created before the
-                    // snapshot. A creation time newer than the snapshot marks a
-                    // PID reused after the snapshot (fail closed); an
-                    // older-than-parent one marks a stale reused-parent edge.
+                    // Older than the parent: stale edge. Newer than the
+                    // snapshot: PID reused after it. Either way, prune.
                     if child_ct >= parent.creation_time && child_ct <= snapshot_time {
                         result.push(ValidatedProcess {
                             pid: child,
@@ -218,12 +83,8 @@ pub fn collect_tree_validated(
                     }
                 }
                 None => {
-                    // Unreadable child under a validated parent: the node
-                    // itself cannot be opened (kill_process_checked no-ops on
-                    // it), but it may still have live descendants. Keep it
-                    // traversable carrying the parent's creation time — a sound
-                    // lower bound for ITS children — instead of pruning the
-                    // whole subtree. See the interim-holder residual note above.
+                    // Keep it traversable with the parent's time as the bound
+                    // for its children; the kill-time check skips it itself.
                     result.push(ValidatedProcess {
                         pid: child,
                         creation_time: parent.creation_time,
@@ -235,11 +96,9 @@ pub fn collect_tree_validated(
     result
 }
 
-/// Kill-time revalidation predicate guarding the TOCTOU window between tree
-/// collection and `TerminateProcess`: a PID collected earlier could be
-/// reused by an unrelated process before we terminate it. Returns `true`
-/// only when the process currently at that PID reports exactly the creation
-/// time recorded at collection.
+/// Whether the process now at a collected PID is the one collected: `true`
+/// only when its `current` creation time equals the recorded one. See
+/// specs/sessions/subprocess.md § Kill-time revalidation.
 pub fn process_identity_matches(expected_creation_time: u64, current: Option<u64>) -> bool {
     current == Some(expected_creation_time)
 }

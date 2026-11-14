@@ -347,15 +347,188 @@ Windows doesn't have process groups like POSIX. Termination uses
 PID, and kill them leaf-to-root via `TerminateProcess`. This mirrors Python's
 `_windows_process_killer.py`.
 
-The recorded parent PID (`th32ParentProcessID`) is never updated when a parent
-exits, and Windows reuses PIDs, so the walk validates every edge with process
-creation times, as psutil's `Process.children()` does: a child is accepted only
-if it was created no earlier than its parent and no later than the snapshot.
-Each kill re-reads the creation time on the same handle it terminates through,
-and skips the process if it changed. The validation is
-`collect_tree_validated` in `src/helper/src/process_tree.rs`, which is
-`#[path]`-included here and also compiled into the cross-user helper, so both
-Windows tree kills use the same rules.
+Two Windows tree kills follow the rules below: the in-process one
+(`platform::kill_process_tree` in `subprocess.rs`) and the cross-user helper's
+(`kill_process_tree` in `src/helper/src/runner_win.rs`, see
+[windows-cross-user-helper.md](../windows-cross-user-helper.md)). In the helper
+the Job Object is the backstop for anything the walk misses.
+
+#### Why the walk validates against PID reuse
+
+`th32ParentProcessID` is recorded when a child is created and is never updated
+when the parent exits, and Windows reuses PIDs. Without validation, a live
+process whose dead creator's PID now belongs to a process in the tree looks like
+a descendant and would be killed. Reuse can also make the recorded parent graph
+cyclic, when a dead ancestor's PID is reused by one of its descendants. An
+earlier recursive walk had no cycle guard and overflowed its thread's stack
+(`0xc00000fd`) on such a cycle.
+
+The validation mirrors the PID-reuse guard in psutil's `Process.children()`,
+which the Python implementation relies on and the first Rust port dropped.
+
+Every rule here **fails closed**: when a process's identity can't be
+established, it is not killed. The failure mode the rules accept is an
+under-kill (a descendant left running), never terminating an unrelated process.
+
+#### Snapshot and stamp
+
+The walk reads one `CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS)` as a list of
+`(pid, ppid)` pairs, and takes a wall-clock stamp right after the call returns,
+before enumerating it. The snapshot copies the process list at call time and
+`Process32FirstW`/`Process32NextW` iterate that frozen copy, so every listed
+process was created before the stamp. Taking the stamp before the enumeration,
+not after, keeps the window in which a reused PID can pass the
+[edge check](#edge-validation) as small as it can soundly be. A failed snapshot
+yields no pairs and a stamp of 0.
+
+The stamp is in `FILETIME` ticks (100 ns since 1601-01-01 UTC), the base
+`GetProcessTimes` reports creation times in, so the two compare directly. It is
+computed from `std::time::SystemTime` rather than `GetSystemTimeAsFileTime`,
+which reads the same UTC clock and needs no extra `windows` crate feature.
+
+#### Root identity
+
+`collect_tree_validated(root_pid, parents, snapshot_time, expected_root_ct,
+creation_time)` first settles the root's creation time. `expected_root_ct` is a
+pinned identity read before the call; `None` means the caller pins the PID
+another way.
+
+| `expected_root_ct` | Fresh root read | Result |
+|---|---|---|
+| `Some(exp)` | `Some(exp)` | Walk from the root, recorded with `exp`. |
+| `Some(exp)` | `Some(other)` | Empty: the PID was reassigned. |
+| `Some(exp)` | `None` | Walk from the root, recorded with `exp`. |
+| `None` | `Some(rc)` | Walk from the root, recorded with `rc`. |
+| `None` | `None` | Empty: nothing to validate against. |
+
+- **Mismatch aborts instead of seeding.** When the fresh read differs from the
+  pin, the PID belongs to a new live process. Its children were created after
+  `exp` and before the snapshot, so they would pass every edge check, and
+  seeding the walk would kill them. Aborting only leaks our own orphans.
+- **Exited root seeds the walk.** A pinned root that has exited reads `None`.
+  Reaping its orphaned descendants is the point of the delayed kill, so the
+  walk is seeded with `exp`. The kill itself no-ops on the dead root.
+- **The root is exempt from the stamp.** Its identity never comes from a
+  recorded parent edge, which is what the stamp guards: it is pinned by a live
+  `Child` handle or matched against `exp`. A stamp check on the root couldn't
+  catch reuse, and under a backward clock step it would reject the root and turn
+  a legitimate cancel into a no-op that leaves the session waiting on a live
+  tree. Descendants still obey the stamp.
+
+Callers:
+
+- `send_terminate` (immediate) and every kill in the cross-user helper pass
+  `None`. Each holds the workload's live `Child`, whose handle keeps its PID
+  from being reused.
+- `spawn_delayed_terminate` reads the root's creation time when it is called,
+  while the caller still holds the `Child`, and passes it as `Some(ct)` after
+  the delay, so a PID recycled during the grace period is never walked. The
+  held handle keeps even an exited process's object, and its creation time,
+  readable, so a `None` at that point means the query was denied (for example a
+  protected process), not that the process is gone. With nothing to pin, the
+  delayed kill doesn't walk the tree at all; it logs a warning and returns.
+
+#### Edge validation
+
+The walk is breadth-first from the root, with a visited set that is its cycle
+and duplicate guard: each PID is considered once. A pair `(child, ppid)` is
+considered only when `ppid` is a node already accepted. A child whose creation
+time can be read is accepted when
+
+    parent.creation_time <= child_ct <= snapshot_time
+
+and recorded with `child_ct`.
+
+- A true child is never older than its parent, so a child older than its
+  recorded parent marks a stale edge whose parent PID was reused. Equal times
+  are accepted.
+- A child newer than the stamp marks a PID that was reused after the snapshot:
+  the edge was genuine when captured, the child exited, and an unrelated process
+  took its PID before its creation time was read.
+- A rejected child is not traversed, so its whole subtree is pruned.
+
+Breadth-first order lists every parent before its children, so killing in
+reverse order kills leaves before their ancestors.
+
+#### Unreadable children
+
+A child under an accepted parent whose creation time can't be read is kept as a
+traversable node, recorded with its parent's creation time, which is a sound
+lower bound for its own children. This keeps a live subtree under a dead
+intermediate reachable (`cmd` → `sh` → renderer, where `sh` exits first). The
+node itself is never terminated, because the [kill-time
+check](#kill-time-revalidation) can't open or match it. Its readable children
+are validated against the inherited bound like any other.
+
+#### Kill-time revalidation
+
+Between collecting the tree and terminating it, a collected PID could be reused.
+`kill_process_checked` opens each process with
+`PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE`, re-reads its creation
+time on that handle, and calls `TerminateProcess` on the same handle only when
+the time equals the recorded one (`process_identity_matches`). Because the check
+and the kill share a handle, the PID can't change between them. If the open
+fails or the times differ, the process is skipped.
+
+Requesting both rights in one `OpenProcess` is all-or-nothing: a process whose
+DACL grants terminate but not query can no longer be killed, where a
+terminate-only open would have succeeded. That is deliberate, because giving up
+the same-handle read reopens the gap it closes. Protected (PPL) processes can
+also refuse the query and are skipped.
+
+When `collect_tree_validated` returns empty, nothing is killed. A raw-PID kill
+of the root would risk a reused PID, and wouldn't reliably widen coverage, for
+the reason above.
+
+#### Logging skipped kills
+
+The in-process kill logs each skipped process, and an empty tree, at `info` on
+`openjd.sessions`, so misfires in the field can be diagnosed. The cross-user
+helper logs nothing for them: on Windows its stderr is merged into the stdout
+pipe that carries JSON responses, and the session's reader treats any line that
+isn't JSON as a protocol error.
+
+#### Clock adjustments
+
+Creation times and the stamp are wall-clock, not monotonic, so the rules are
+exact only while the clock moves forward. An NTP step-back, a manual change or
+a VM resume between two creations can make a true child read older than its
+parent, or newer than the stamp, and prune its subtree. Both outcomes are
+under-kills. The root's [stamp exemption](#root-identity) means a backward step
+never stops the root itself from being killed.
+
+#### Residual windows
+
+Two narrow cases can still terminate a process that isn't ours. Both are left
+for a rework that tracks the workload with a Job Object instead of walking PIDs,
+which removes them structurally.
+
+- **Interim holder of a dead PID.** Seeding an exited root and traversing
+  unreadable intermediates follows recorded edges of PIDs that have been freed.
+  Children of a process that held such a PID in the meantime pass validation if
+  their creation times fall in `[exp, snapshot_time]`. The window is bounded and
+  no wider than the walk without validation.
+- **Unreadable but alive child of a reused parent PID.** If a recorded parent
+  PID was freed and reassigned to our root, a process that denies the query and
+  carries that stale parent becomes a child of the root. Because it is
+  unreadable it skips the age check, and its own children can fall inside the
+  window. Telling a dead PID (`OpenProcess` fails with
+  `ERROR_INVALID_PARAMETER`) from a denied one (`ERROR_ACCESS_DENIED`) would
+  close this, but needs a richer `creation_time` callback.
+
+#### Shared implementation
+
+The rules above live in one function, `collect_tree_validated` in
+`src/helper/src/process_tree.rs`, with `process_identity_matches` beside it.
+When each crate had its own walk, the PID-reuse fix reached only one of them.
+
+The module uses only `std` and makes no Windows calls: callers supply the
+snapshot and a creation-time callback. That lets its unit tests run on every
+platform, and lets two crates compile it. The helper builds it as a normal
+module. `openjd-sessions` includes it with `#[path]`, as `win32_locate.rs`
+includes `win32_which.rs`, because the helper is a separate crate that can't
+depend on `openjd-sessions`. Both include it under `cfg(any(windows, test))`.
+Each crate keeps its own snapshot, creation-time read and `kill_process_checked`.
 
 ## Windows Cross-User Execution
 
