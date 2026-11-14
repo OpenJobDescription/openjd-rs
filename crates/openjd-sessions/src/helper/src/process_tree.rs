@@ -5,10 +5,10 @@
 //! PID-reuse-safe process tree collection for both Windows tree kills
 //! (`openjd-sessions`' `subprocess.rs` and the helper's `runner_win.rs`).
 //!
-//! `std` only, with no Windows calls, because it is `#[path]`-included into
-//! `openjd-sessions` and must reference nothing from either crate. See
-//! specs/sessions/subprocess.md § Process Tree Killing and § Shared
-//! implementation.
+//! `std` only and free of Windows calls, so its unit tests run everywhere,
+//! and it references nothing from either crate, because `openjd-sessions`
+//! `#[path]`-includes it. See specs/sessions/subprocess.md § Process Tree
+//! Killing and § Shared implementation.
 
 /// A process node whose creation time was successfully read and validated
 /// against its parent during tree collection.

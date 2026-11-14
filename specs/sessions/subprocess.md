@@ -492,9 +492,10 @@ isn't JSON as a protocol error.
 
 Creation times and the stamp are wall-clock, not monotonic, so the rules are
 exact only while the clock moves forward. An NTP step-back, a manual change or
-a VM resume between two creations can make a true child read older than its
-parent, or newer than the stamp, and prune its subtree. Both outcomes are
-under-kills. The root's [stamp exemption](#root-identity) means a backward step
+a VM resume between a parent's and its child's creation can make a true child
+read older than its parent. One between a child's creation and the stamp can
+make it read newer than the stamp. Either prunes the child's subtree, which is
+an under-kill. The root's [stamp exemption](#root-identity) means a backward step
 never stops the root itself from being killed.
 
 #### Residual windows
