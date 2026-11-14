@@ -690,10 +690,13 @@ pub(crate) async fn run_via_helper(
                         .is_some_and(|rx| rx.has_changed().unwrap_or(false))
                         || cancel_token.is_cancelled();
 
-                    let state = if canceled {
-                        ActionState::Canceled
-                    } else if timed_out {
+                    // Timeout before Canceled, matching the same-user loop
+                    // (`subprocess.rs`): a cancel that lands while a
+                    // timed-out action is still exiting doesn't relabel it.
+                    let state = if timed_out {
                         ActionState::Timeout
+                    } else if canceled {
+                        ActionState::Canceled
                     } else if saw_fail {
                         ActionState::Failed
                     } else if exit_code == 0 {

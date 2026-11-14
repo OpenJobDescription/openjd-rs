@@ -490,14 +490,17 @@ to the helper's stdin via the `cancel_writer`. No OS thread needed.
 ### External cancel token
 
 A cross-user action can also be canceled through the session-wide
-`SessionConfig.cancel_token` (or the per-action token that is its child) with
-a bare `token.cancel()`, rather than through `cancel_action` /
-`SessionCancelHandle`. `run_via_helper` takes the per-action
+`SessionConfig.cancel_token` with a bare `token.cancel()`, rather than through
+`cancel_action` / `SessionCancelHandle`. Each action's token is a child of it.
+`run_via_helper` takes the per-action
 `CancellationToken` and awaits it in a third `select!` branch, mirroring the
-same-user loop. When that branch fires it writes the same tokenized cancel
-command to the helper (using the action's configured cancel method) that the
-timeout branch and `cancel_action` write, and the exit is classified
-`Canceled` whenever the watch channel fired **or** the token is cancelled.
+same-user loop. When that branch fires it writes a tokenized cancel command to
+the helper built from the action's configured cancel method, as the timeout
+branch does: `TERMINATE` for a `TERMINATE` action, `NOTIFY_THEN_TERMINATE`
+with the declared grace period otherwise, which is what the same-user loop
+applies for a token cancel. The exit is classified `Timeout` if the timeout
+fired, otherwise `Canceled` when the watch channel fired **or** the token is
+cancelled.
 
 `cancel_action` / `SessionCancelHandle` fire the watch channel and write the
 pipe command themselves before canceling the token, so the token branch
@@ -593,8 +596,8 @@ async fn run_via_helper(
         tokio::select! {
             resp = helper.async_reader().next_response() => {
                 // process pid/out/exited/error, feed through ActionFilter;
-                // classify Canceled when the watch channel fired OR the
-                // token is cancelled
+                // classify Timeout if the timeout fired, else Canceled when
+                // the watch channel fired OR the token is cancelled
             }
             _ = cancel_token.cancelled(), if !token_seen => {
                 // bare external token cancel: write cancel to helper via

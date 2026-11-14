@@ -583,6 +583,185 @@ async fn test_cross_user_external_token_cancels_helper_task() {
     session.cleanup();
 }
 
+/// A task that traps SIGTERM: on TERM it prints `GOT_TERM`, sleeps
+/// `trap_sleep` seconds, then exits 0. With `ntt = Some(n)` its cancelation
+/// is NOTIFY_THEN_TERMINATE with an `n`-second grace period.
+fn trap_task(
+    trap_sleep: u32,
+    ntt: Option<u32>,
+    timeout: Option<u32>,
+) -> openjd_model::job::StepScript {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::{Action, CancelationMode, StepActions, StepScript};
+    let script = format!(
+        "trap 'echo GOT_TERM; sleep {trap_sleep}; exit 0' TERM; echo STARTED; sleep 60 & wait"
+    );
+    StepScript {
+        let_bindings: None,
+        actions: StepActions {
+            on_run: Action {
+                command: FormatString::new("bash").unwrap(),
+                args: Some(vec![
+                    FormatString::new("-c").unwrap(),
+                    FormatString::new(&script).unwrap(),
+                ]),
+                timeout: timeout.map(|t| FormatString::new(&t.to_string()).unwrap()),
+                cancelation: ntt.map(|n| CancelationMode::NotifyThenTerminate {
+                    notify_period_in_seconds: Some(FormatString::new(&n.to_string()).unwrap()),
+                }),
+            },
+        },
+        embedded_files: None,
+    }
+}
+
+/// A bare token cancel on a NOTIFY_THEN_TERMINATE task notifies first and
+/// honours the grace period, as the same-user loop does: the TERM trap runs
+/// (`GOT_TERM`) and finishes its 3s sleep inside the 10s grace.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_external_token_notify_then_terminate() {
+    use openjd_sessions::session::SessionState;
+
+    let user = require_target_user();
+    let (mut session, token) = make_session_with_token(user);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        token.cancel();
+    });
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &trap_task(3, Some(10), None), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(
+        r.stdout.contains("GOT_TERM"),
+        "a NOTIFY_THEN_TERMINATE token cancel must send the notify signal first; stdout: {}",
+        r.stdout
+    );
+    assert!(
+        elapsed >= Duration::from_secs(4) && elapsed < Duration::from_secs(12),
+        "the TERM trap's 3s must run inside the 10s grace, took {elapsed:?}"
+    );
+    assert_eq!(session.state(), SessionState::ReadyEnding);
+    assert!(matches!(
+        session.clear_ending_only(),
+        Err(openjd_sessions::SessionError::SessionCanceled)
+    ));
+    session.cleanup();
+}
+
+/// A `SessionCancelHandle` cancel with a 2s time limit on a
+/// NOTIFY_THEN_TERMINATE(30s) task must stay bounded by the 2s limit: the
+/// handle writes the pipe command itself, so `run_via_helper`'s token branch
+/// must not send a second command with the declared 30s grace (which would
+/// reset the helper's escalation deadline).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_time_limit_not_extended_by_token_branch() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    let handle = session.cancel_handle();
+    let canceller = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        handle.cancel(Some(Duration::from_secs(2)), false)
+    });
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &trap_task(20, Some(30), None), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+
+    assert!(
+        canceller.await.unwrap(),
+        "the handle must find the running task"
+    );
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(
+        elapsed < Duration::from_secs(8),
+        "the 2s time limit must bound the cancel, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// A bare token cancel during `onEnter` cancels the helper-run action.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_external_token_cancels_on_enter() {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::{Action, Environment, EnvironmentActions, EnvironmentScript};
+
+    let user = require_target_user();
+    let (mut session, token) = make_session_with_token(user);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        token.cancel();
+    });
+    let env = Environment {
+        name: "Env".into(),
+        description: None,
+        variables: None,
+        resolved_symtab: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            embedded_files: None,
+            actions: EnvironmentActions {
+                on_enter: Some(Action {
+                    command: FormatString::new("sleep").unwrap(),
+                    args: Some(vec![FormatString::new("60").unwrap()]),
+                    timeout: None,
+                    cancelation: None,
+                }),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
+                on_exit: None,
+            },
+        }),
+    };
+
+    let started = std::time::Instant::now();
+    let _ = session.enter_environment(&env, None, None, None).await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        session.action_status().map(|a| a.state),
+        Some(ActionState::Canceled)
+    );
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "the token cancel must interrupt the 60s onEnter, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// An action that timed out stays `Timeout` when the session token fires
+/// while it is still exiting, matching the same-user loop, which checks the
+/// timeout before the cancel.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_timeout_then_token_stays_timeout() {
+    let user = require_target_user();
+    let (mut session, token) = make_session_with_token(user);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+        token.cancel();
+    });
+
+    let r = session
+        .run_task("t", &trap_task(4, Some(10), Some(1)), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    assert_eq!(r.state, ActionState::Timeout, "stdout: {}", r.stdout);
+    session.cleanup();
+}
+
 // === Cross-user brittle-session tests ===
 
 /// A subprocess that fails through the cross-user helper makes the session
