@@ -200,7 +200,7 @@ Callers who want non-throwing validation use `try { decodeJobTemplate(...) } cat
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `evaluateExpression` | `(expr: string, symbols: SymbolTable, lib?: FunctionLibrary, options?: EvalOptions) → ExprValue` | Evaluate an EXPR extension expression. `lib` is borrowed: the caller keeps it, can pass it to later calls, and frees it. `options` lets the host cap memory and operation use per call; omit to use the built-in defaults. |
-| `parseExpression` | `(expr: string) → ParsedExpression` | Parse an expression for repeated evaluation. |
+| `parseExpression` | `(expr: string) → ParsedExpression` | Parse an expression for repeated evaluation. Throws for an expression over 512 bytes after trimming white space (see [Expression Length](#expression-length)). |
 | `getDefaultLibrary` | `() → FunctionLibrary` | Get the default function library (includes builtins like `len`, `str`, `int`, etc.). |
 | `getDefaultMemoryLimit` | `() → number` | Report the built-in memory budget (bytes) used when `EvalOptions.memoryLimit` is omitted. Informational only. |
 | `getDefaultOperationLimit` | `() → number` | Report the built-in operation budget used when `EvalOptions.operationLimit` is omitted. Informational only. |
@@ -517,6 +517,30 @@ which shares its engine. Only Node.js is tested, in CI on Node 26.
 In Node.js, pass the `.wasm` bytes to `init({ module_or_path: bytes })` or `initSync`.
 A bare `init()` fetches the `.wasm` next to the glue by URL, and Node's `fetch` does not
 read `file:` URLs. `js-tests/helpers.js` reads the file and passes the bytes.
+
+### Expression Length
+
+An expression's source may be at most **512 bytes** after trimming white space, against
+64 KB in native builds and the Python bindings. For a longer expression, `parseExpression`,
+`evaluateExpression`, `FormatString`, and template decoding alike throw an error whose
+message contains `Expression source length (N bytes) exceeds maximum allowed (512 bytes in
+WebAssembly builds)` (template decoding wraps it in its validation error). The
+cap applies to each `{{ }}` interpolation of a format string separately, not to the whole
+string, so a template that is valid elsewhere fails here only if one of its expressions is
+over 512 bytes.
+
+wasm32 can't spawn the worker thread that native builds parse long expressions on, so the
+parser runs on the caller's stack. Each level of its recursion takes a frame on the
+WebAssembly engine's call stack, which the module can't grow, and overflowing it throws a
+`RangeError` that leaks memory and leaves the module in an inconsistent state. With the cap,
+the worst input needs up to about 600 KB of engine stack in Node.js 24 once the module is
+warmed up (Node.js 22 and 26 need less), which fits Node's default of 984 KB with about
+1.6 times to spare. This holds for
+the release build that `npm run build` makes; a debug build needs about twice the stack.
+See `specs/expr/parser.md` (Depth Limit, "wasm32") for the measurements. Browsers' own stack
+limits, and those of Web Workers, were not measured. `js-tests/expression-length.test.js`
+checks the deepest shapes at the cap, at the default stack and, after a warm-up, in a child
+process with `--stack-size=720`.
 
 ## Usage Example
 
