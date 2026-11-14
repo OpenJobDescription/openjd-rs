@@ -349,9 +349,11 @@ PID, and kill them leaf-to-root via `TerminateProcess`. This mirrors Python's
 
 Two Windows tree kills follow the rules below: the in-process one
 (`platform::kill_process_tree` in `subprocess.rs`) and the cross-user helper's
-(`kill_process_tree` in `src/helper/src/runner_win.rs`, see
-[windows-cross-user-helper.md](../windows-cross-user-helper.md)). In the helper
-the Job Object is the backstop for anything the walk misses.
+(`runner_win.rs`, see
+[windows-cross-user-helper.md](../windows-cross-user-helper.md)). Both call the
+same `kill_process_tree` in `src/helper/src/process_tree_win.rs` (see
+[Shared implementation](#shared-implementation)). In the helper the Job Object
+is the backstop for anything the walk misses.
 
 #### Why the walk validates against PID reuse
 
@@ -482,9 +484,13 @@ the reason above.
 
 #### Logging skipped kills
 
-The in-process kill logs each skipped process, and an empty tree, at `info` on
-`openjd.sessions`, so misfires in the field can be diagnosed. The cross-user
-helper logs nothing for them: on Windows its stderr is merged into the stdout
+The shared kill logs nothing. It returns each collected PID with a
+`KillOutcome` (`Terminated`, `OpenFailed`, `Mismatch`, `Unreadable` or
+`TerminateFailed`), in kill order, and returns nothing at all when the root's
+identity couldn't be established. The in-process kill turns each skipped
+process (`OpenFailed`, `Mismatch`, `Unreadable`), and an empty result, into a
+line at `info` on `openjd.sessions` after the kill pass, so misfires in the
+field can be diagnosed. The cross-user helper ignores the outcomes: on Windows its stderr is merged into the stdout
 pipe that carries JSON responses, and the session's reader treats any line that
 isn't JSON as a protocol error.
 
@@ -519,17 +525,28 @@ which removes them structurally.
 
 #### Shared implementation
 
-The rules above live in one function, `collect_tree_validated` in
-`src/helper/src/process_tree.rs`, with `process_identity_matches` beside it.
-When each crate had its own walk, the PID-reuse fix reached only one of them.
+The rules above live in two files under `src/helper/src/`, both compiled by the
+helper and by `openjd-sessions`:
 
-The module uses only `std` and makes no Windows calls: callers supply the
-snapshot and a creation-time callback. That lets its unit tests run on every
-platform, and lets two crates compile it. The helper builds it as a normal
-module. `openjd-sessions` includes it with `#[path]`, as `win32_locate.rs`
-includes `win32_which.rs`, because the helper is a separate crate that can't
-depend on `openjd-sessions`. Both include it under `cfg(any(windows, test))`.
-Each crate keeps its own snapshot, creation-time read and `kill_process_checked`.
+- `process_tree.rs` holds the walk, `collect_tree_validated`, and
+  `process_identity_matches`. It uses only `std` and makes no Windows calls:
+  callers supply the snapshot and a creation-time callback. So its unit tests
+  run on every platform, and both crates include it under
+  `cfg(any(windows, test))`.
+- `process_tree_win.rs` holds the Windows calls around it: the snapshot and
+  stamp, the creation-time read, `kill_process_checked` and `kill_process_tree`.
+  Both crates include it under `cfg(windows)`. It reaches the walk as
+  `super::process_tree`, so each crate declares the two modules side by side.
+
+When each crate had its own copy, the PID-reuse fix reached only one of them.
+The helper is a separate Cargo workspace (`Cargo.bundled.toml`) that `build.rs`
+builds on its own, so neither crate can depend on the other. Like
+`win32_locate.rs` with `win32_which.rs`, `openjd-sessions` includes the files
+with `#[path]`, and the helper builds them as ordinary modules. This only works
+while both manifests enable the `windows` crate features the files use
+(`Win32_Foundation`, `Win32_System_Threading` and
+`Win32_System_Diagnostics_ToolHelp`) on the same `windows` version, and while
+the files reference nothing else from either crate.
 
 ## Windows Cross-User Execution
 

@@ -17,7 +17,9 @@
 use super::job_object::JobObject;
 use super::protocol::{send, CancelMethod, Response, RunCommand};
 use crate::framer::{fit_out_payload, LineFramer};
-use crate::process_tree::{collect_tree_validated, process_identity_matches, ValidatedProcess};
+// The helper can't log, so it ignores the returned kill outcomes. See
+// specs/sessions/subprocess.md § Logging skipped kills.
+use crate::process_tree_win::kill_process_tree;
 use std::io::Read;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -109,7 +111,7 @@ pub fn run_command(
         // If a soft signal was sent and the grace window expired, escalate.
         if let Some(deadline) = escalation_deadline {
             if std::time::Instant::now() >= deadline {
-                kill_process_tree(child_pid);
+                kill_process_tree(child_pid, None);
                 escalation_deadline = None;
             }
         }
@@ -203,7 +205,7 @@ fn to_payload(line: &str) -> String {
 fn handle_cancel(child_pid: u32, method: &CancelMethod) -> Option<std::time::Instant> {
     match method {
         CancelMethod::Terminate => {
-            kill_process_tree(child_pid);
+            kill_process_tree(child_pid, None);
             None
         }
         CancelMethod::NotifyThenTerminate {
@@ -212,7 +214,7 @@ fn handle_cancel(child_pid: u32, method: &CancelMethod) -> Option<std::time::Ins
             // Platform-appropriate soft signal
             if !send_ctrl_break(child_pid) {
                 // Couldn't even deliver the signal; kill immediately.
-                kill_process_tree(child_pid);
+                kill_process_tree(child_pid, None);
                 None
             } else {
                 // Signal delivered — give the child the notify period to exit.
@@ -277,146 +279,11 @@ fn send_ctrl_break(pid: u32) -> bool {
     unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid).is_ok() }
 }
 
-/// The current system wall clock as FILETIME ticks (100-ns intervals since
-/// 1601-01-01 UTC), the epoch `GetProcessTimes` reports creation times in.
-/// See specs/sessions/subprocess.md § Snapshot and stamp.
-fn system_time_as_filetime_ticks() -> u64 {
-    // 11_644_473_600 seconds separate the FILETIME epoch (1601) from the
-    // Unix epoch (1970); 10_000_000 FILETIME ticks make one second.
-    const SECS_1601_TO_1970: u64 = 11_644_473_600;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    now.as_secs()
-        .saturating_add(SECS_1601_TO_1970)
-        .saturating_mul(10_000_000)
-        .saturating_add((now.subsec_nanos() / 100) as u64)
-}
-
-/// Snapshot all `(pid, parent_pid)` pairs in one toolhelp pass, with a
-/// wall-clock stamp taken right after `CreateToolhelp32Snapshot` returns.
-/// See specs/sessions/subprocess.md § Snapshot and stamp.
-fn snapshot_process_parents() -> (u64, Vec<(u32, u32)>) {
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
-    };
-    let mut pairs = Vec::new();
-    // Only the no-snapshot fallback keeps this 0 (and `pairs` is then empty).
-    let mut stamp: u64 = 0;
-    unsafe {
-        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if let Ok(snap) = snap {
-            stamp = system_time_as_filetime_ticks();
-            let mut entry = PROCESSENTRY32W {
-                dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
-                ..Default::default()
-            };
-            if Process32FirstW(snap, &mut entry).is_ok() {
-                loop {
-                    pairs.push((entry.th32ProcessID, entry.th32ParentProcessID));
-                    if Process32NextW(snap, &mut entry).is_err() {
-                        break;
-                    }
-                }
-            }
-            let _ = CloseHandle(snap);
-        }
-    }
-    (stamp, pairs)
-}
-
-/// Read a process's creation time, as FILETIME ticks, from an open handle
-/// granting at least `PROCESS_QUERY_LIMITED_INFORMATION`. `None` if
-/// `GetProcessTimes` fails.
-fn creation_time_from_handle(handle: windows::Win32::Foundation::HANDLE) -> Option<u64> {
-    use windows::Win32::Foundation::FILETIME;
-    use windows::Win32::System::Threading::GetProcessTimes;
-    let mut creation = FILETIME::default();
-    let mut exit = FILETIME::default();
-    let mut kernel = FILETIME::default();
-    let mut user = FILETIME::default();
-    // SAFETY: `handle` is a live process handle from a successful
-    // OpenProcess with query rights; the four out-params are writable
-    // FILETIMEs on this frame, and only `creation` is read.
-    let ok = unsafe {
-        GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user).is_ok()
-    };
-    if !ok {
-        return None;
-    }
-    Some(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
-}
-
-/// Read the creation time of the process currently at `pid`. Fail closed:
-/// any failure to open it or read its times returns `None`.
-fn process_creation_time(pid: u32) -> Option<u64> {
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-    // SAFETY: OpenProcess returns a handle we own; it is closed on the only
-    // path that has one. On failure `?` returns before a handle exists.
-    unsafe {
-        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
-        let ct = creation_time_from_handle(handle);
-        let _ = CloseHandle(handle);
-        ct
-    }
-}
-
-/// Terminate `target` only if the process now at its PID still has the
-/// creation time it was collected with, checked and killed through one
-/// handle. Returns whether a terminate was issued. It logs nothing; see
-/// specs/sessions/subprocess.md § Kill-time revalidation and § Logging
-/// skipped kills.
-fn kill_process_checked(target: &ValidatedProcess) -> bool {
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Threading::{
-        OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
-    };
-    // SAFETY: OpenProcess returns a handle we own, with query and terminate
-    // rights; it is closed on every path after a successful open.
-    unsafe {
-        let Ok(handle) = OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
-            false,
-            target.pid,
-        ) else {
-            // Can't open, so can't validate: fail closed.
-            return false;
-        };
-        let current = creation_time_from_handle(handle);
-        let issued = process_identity_matches(target.creation_time, current)
-            && TerminateProcess(handle, 1).is_ok();
-        let _ = CloseHandle(handle);
-        issued
-    }
-}
-
-/// Kill a process tree: collect the descendants of `root_pid`, validating
-/// every edge against creation times, then kill leaf-to-root. The caller's
-/// live `Child` pins the root's PID, so no root identity is passed. See
-/// specs/sessions/subprocess.md § Process Tree Killing.
-fn kill_process_tree(root_pid: u32) {
-    let (snapshot_time, parents) = snapshot_process_parents();
-    let tree = collect_tree_validated(
-        root_pid,
-        &parents,
-        snapshot_time,
-        None,
-        &mut process_creation_time,
-    );
-    // Reverse breadth-first order kills leaves first. An empty tree kills
-    // nothing.
-    for target in tree.iter().rev() {
-        kill_process_checked(target);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::framer::MAX_LINE_BYTES;
+    use crate::process_tree_win::KillOutcome;
 
     /// Mirror the runner's per-line transform: frame `chunks` through a fresh
     /// `LineFramer` and apply `to_payload` to every emitted line, flushing the
@@ -508,8 +375,10 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn ping");
-        kill_process_tree(child.id());
+        let pid = child.id();
+        let outcomes = kill_process_tree(pid, None);
         let status = child.wait().expect("wait ping");
+        assert_eq!(outcomes, vec![(pid, KillOutcome::Terminated)]);
         assert_eq!(status.code(), Some(1), "ping must be terminated");
     }
 
@@ -587,7 +456,7 @@ mod tests {
         }
         .expect("open ping");
 
-        kill_process_tree(root);
+        let outcomes = kill_process_tree(root, None);
 
         let status = child.wait().expect("wait cmd");
         // SAFETY: `gc` is a live handle with SYNCHRONIZE and query rights.
@@ -601,6 +470,15 @@ mod tests {
         assert_eq!(status.code(), Some(1), "cmd must end with exit code 1");
         assert_eq!(waited, WAIT_OBJECT_0, "ping must have exited");
         assert_eq!(gc_code, 1, "ping must be terminated");
+        // Leaves are killed first, so the root is last.
+        let gc_at = outcomes
+            .iter()
+            .position(|o| *o == (grandchild, KillOutcome::Terminated));
+        assert!(
+            gc_at.is_some(),
+            "ping must be reported terminated: {outcomes:?}"
+        );
+        assert_eq!(outcomes.last(), Some(&(root, KillOutcome::Terminated)));
     }
 
     /// Guards stdout/stderr symmetry: both threads route through this one

@@ -56,8 +56,9 @@ helper/                     # Standalone helper binary crate
     ├── protocol.rs         # Command/Response JSON serde types
     ├── framer.rs           # Bounded line framer for child output (both runners)
     ├── runner.rs           # poll(2) loop, child management, cancel handling
-    ├── runner_win.rs       # Windows runner: spawn, output threads, cancel, tree kill
+    ├── runner_win.rs       # Windows runner: spawn, output threads, cancel
     ├── process_tree.rs     # PID-reuse-safe tree walk, shared with subprocess.rs
+    ├── process_tree_win.rs # Windows snapshot and checked tree kill, shared with subprocess.rs
     ├── job_object.rs       # Windows kill-on-close Job Object guard
     └── win32_which.rs      # Windows executable search, shared with win32_locate.rs
 ```

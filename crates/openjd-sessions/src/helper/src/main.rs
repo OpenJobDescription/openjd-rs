@@ -10,6 +10,9 @@ mod job_object;
 // Under `test` it also compiles on Unix for its unit tests.
 #[cfg(any(windows, test))]
 mod process_tree;
+// Its Windows calls, also shared with subprocess.rs.
+#[cfg(windows)]
+mod process_tree_win;
 mod protocol;
 #[cfg(unix)]
 mod runner;

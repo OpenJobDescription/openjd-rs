@@ -212,11 +212,9 @@ mod platform {
 mod platform {
     use super::*;
 
-    use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, STILL_ACTIVE};
+    use windows::Win32::Foundation::{CloseHandle, HANDLE, STILL_ACTIVE};
     use windows::Win32::System::Threading::{
-        GetExitCodeProcess, GetProcessTimes, OpenProcess, TerminateProcess,
-        CREATE_NEW_PROCESS_GROUP, PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION,
-        PROCESS_TERMINATE,
+        GetExitCodeProcess, OpenProcess, CREATE_NEW_PROCESS_GROUP, PROCESS_QUERY_INFORMATION,
     };
 
     /// Send CTRL_BREAK_EVENT to a process group for graceful cancellation.
@@ -272,158 +270,24 @@ mod platform {
         }
     }
 
-    /// The current system wall clock as FILETIME ticks (100-ns intervals since
-    /// 1601-01-01 UTC), the epoch `GetProcessTimes` reports creation times in.
-    /// See specs/sessions/subprocess.md § Snapshot and stamp.
-    fn system_time_as_filetime_ticks() -> u64 {
-        // 11_644_473_600 seconds separate the FILETIME epoch (1601) from the
-        // Unix epoch (1970); 10_000_000 FILETIME ticks make one second.
-        const SECS_1601_TO_1970: u64 = 11_644_473_600;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default();
-        now.as_secs()
-            .saturating_add(SECS_1601_TO_1970)
-            .saturating_mul(10_000_000)
-            .saturating_add((now.subsec_nanos() / 100) as u64)
-    }
-
-    /// Snapshot all `(pid, parent_pid)` pairs in one toolhelp pass, with a
-    /// wall-clock stamp taken right after `CreateToolhelp32Snapshot` returns.
-    /// See specs/sessions/subprocess.md § Snapshot and stamp.
-    fn snapshot_process_parents() -> (u64, Vec<(u32, u32)>) {
-        use windows::Win32::System::Diagnostics::ToolHelp::{
-            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-            TH32CS_SNAPPROCESS,
-        };
-        let mut pairs = Vec::new();
-        // Only the no-snapshot fallback keeps this 0 (and `pairs` is then empty).
-        let mut stamp: u64 = 0;
-        unsafe {
-            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-            if let Ok(snap) = snap {
-                // Before the enumeration, so the stamp bounds the frozen list.
-                stamp = system_time_as_filetime_ticks();
-                let mut entry = PROCESSENTRY32W {
-                    dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
-                    ..Default::default()
-                };
-                if Process32FirstW(snap, &mut entry).is_ok() {
-                    loop {
-                        pairs.push((entry.th32ProcessID, entry.th32ParentProcessID));
-                        if Process32NextW(snap, &mut entry).is_err() {
-                            break;
-                        }
-                    }
-                }
-                let _ = CloseHandle(snap);
-            }
-        }
-        (stamp, pairs)
-    }
-
-    /// Read a process's creation time from an already-open handle.
-    ///
-    /// The handle must grant at least `PROCESS_QUERY_LIMITED_INFORMATION`.
-    /// Packs the creation `FILETIME` into a single `u64` tick count
-    /// (`high << 32 | low`). Returns `None` if `GetProcessTimes` fails.
-    fn creation_time_from_handle(handle: HANDLE) -> Option<u64> {
-        let mut creation = FILETIME::default();
-        let mut exit = FILETIME::default();
-        let mut kernel = FILETIME::default();
-        let mut user = FILETIME::default();
-        let ok = unsafe {
-            // SAFETY: `handle` is a live process handle supplied by the
-            // caller (opened via a successful OpenProcess) granting at least
-            // PROCESS_QUERY_LIMITED_INFORMATION. All four out-params are
-            // valid, writable FILETIME slots on this stack frame; we only
-            // consume `creation`.
-            GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user).is_ok()
-        };
-        if !ok {
-            return None;
-        }
-        Some(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
-    }
-
-    /// Read the creation time of the process currently at `pid`.
-    ///
-    /// Fail closed: any failure to open the process or read its times
-    /// returns `None`.
-    fn process_creation_time(pid: u32) -> Option<u64> {
-        unsafe {
-            // SAFETY: OpenProcess is called with a valid access mask and
-            // returns a handle we own; on success we read its times and
-            // CloseHandle it on every path out of this block. On failure the
-            // `?` short-circuits before any handle exists to leak.
-            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
-            let ct = creation_time_from_handle(handle);
-            let _ = CloseHandle(handle);
-            ct
-        }
-    }
-
-    /// Terminate `target` only if the process now at its PID still has the
-    /// creation time it was collected with, checked and killed through one
-    /// handle; a skipped kill is logged. Returns whether a terminate was
-    /// issued. See specs/sessions/subprocess.md § Kill-time revalidation.
-    fn kill_process_checked(target: &ValidatedProcess) -> bool {
-        unsafe {
-            // SAFETY: OpenProcess returns a handle we own, granting both
-            // query and terminate rights; it is CloseHandle'd on every
-            // return path below (open-failure returns before a handle
-            // exists). The same handle backs both the identity read and the
-            // TerminateProcess, so no PID reuse can slip between check and
-            // kill.
-            let Ok(handle) = OpenProcess(
-                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
-                false,
-                target.pid,
-            ) else {
-                // Cannot open => cannot validate => fail closed.
-                log::info!(target: "openjd.sessions", "Not terminating pid {}: could not read creation time (open failed), PID likely reused or process exited", target.pid);
-                return false;
-            };
-            let current = creation_time_from_handle(handle);
-            if !process_identity_matches(target.creation_time, current) {
-                let reason = if current.is_some() {
-                    "creation time mismatch, PID likely reused"
-                } else {
-                    "could not read creation time"
-                };
-                log::info!(target: "openjd.sessions", "Not terminating pid {}: {reason}", target.pid);
-                let _ = CloseHandle(handle);
-                return false;
-            }
-            let issued = TerminateProcess(handle, 1).is_ok();
-            let _ = CloseHandle(handle);
-            issued
-        }
-    }
-
-    /// Kill a process tree: collect all descendants (validating every
-    /// creation-time edge), then kill leaf-to-root. Mirrors Python's
-    /// `_windows_process_killer.py`. `expected_root_ct` is the pinned root
+    /// Kill a process tree with the shared PID-reuse-safe kill, logging each
+    /// skipped kill and an empty tree. `expected_root_ct` is the pinned root
     /// identity, if any. See specs/sessions/subprocess.md § Process Tree
-    /// Killing.
+    /// Killing and § Logging skipped kills.
     fn kill_process_tree(root_pid: u32, expected_root_ct: Option<u64>) {
-        let (snapshot_time, parents) = snapshot_process_parents();
-        let tree = super::collect_tree_validated(
-            root_pid,
-            &parents,
-            snapshot_time,
-            expected_root_ct,
-            &mut |pid| process_creation_time(pid),
-        );
-        if tree.is_empty() {
-            // The root's identity couldn't be established: fail closed. See
-            // specs/sessions/subprocess.md § Kill-time revalidation.
+        let outcomes = super::process_tree_win::kill_process_tree(root_pid, expected_root_ct);
+        if outcomes.is_empty() {
             log::info!(target: "openjd.sessions", "Not terminating tree for pid {root_pid}: root identity could not be established (process exited or protected), skipping kill");
             return;
         }
-        // Reverse breadth-first order kills leaves first.
-        for target in tree.iter().rev() {
-            kill_process_checked(target);
+        for (pid, outcome) in outcomes {
+            let reason = match outcome {
+                KillOutcome::Terminated | KillOutcome::TerminateFailed => continue,
+                KillOutcome::OpenFailed => "could not read creation time (open failed), PID likely reused or process exited",
+                KillOutcome::Mismatch => "creation time mismatch, PID likely reused",
+                KillOutcome::Unreadable => "could not read creation time",
+            };
+            log::info!(target: "openjd.sessions", "Not terminating pid {pid}: {reason}");
         }
     }
 
@@ -447,7 +311,7 @@ mod platform {
     /// pins the PID, and passes it to the kill as the pinned identity. See
     /// specs/sessions/subprocess.md § Root identity.
     pub fn spawn_delayed_terminate(pid: i32, delay: Duration) {
-        let root_identity = process_creation_time(pid as u32);
+        let root_identity = super::process_tree_win::process_creation_time(pid as u32);
         tokio::spawn(async move {
             tokio::time::sleep(delay).await;
             match root_identity {
@@ -549,8 +413,12 @@ use platform::*;
 #[cfg(any(windows, test))]
 #[path = "helper/src/process_tree.rs"]
 mod process_tree;
+// Its Windows calls, also shared with the helper.
 #[cfg(windows)]
-use process_tree::{collect_tree_validated, process_identity_matches, ValidatedProcess};
+#[path = "helper/src/process_tree_win.rs"]
+mod process_tree_win;
+#[cfg(windows)]
+use process_tree_win::KillOutcome;
 
 /// Write cancel_info.json to the working directory as required by the OpenJD spec
 /// for NotifyThenTerminate cancelation.
