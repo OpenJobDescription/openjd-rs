@@ -190,11 +190,6 @@ pub mod known {
              and `-> list[list[string]]`) derive the first but may return the second.",
         ),
         (
-            "expr-float64-serde-precision",
-            "`Float64` serializes as a JSON number, and serde_json without its `float_roundtrip` \
-             feature can reparse it a few ULPs off (2 seen), so a job's floats do not round-trip through JSON.",
-        ),
-        (
             "expr-empty-range-transport",
             "An empty `range_expr` (e.g. `range_expr('1-3')[5:9]`) transports as \"\", which \
              does not decode, so it cannot cross the template → session boundary.",

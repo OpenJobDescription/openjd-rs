@@ -1680,10 +1680,12 @@ dependencies = [
  "ruff_python_ast",
  "ruff_python_parser",
  "ruff_text_size",
+ "ryu",
  "serde",
  "serde_json",
  "shlex",
  "thiserror",
+ "unicode-normalization",
 ]
 
 [[package]]

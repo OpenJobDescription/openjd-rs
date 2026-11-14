@@ -1860,22 +1860,10 @@ pub fn values(data: &[u8]) {
         let json = serde_json::to_string(f).unwrap_or_default();
         match serde_json::from_str::<Float64>(&json) {
             Ok(back) => {
+                // Exact: serde_json reads with `float_roundtrip`.
                 let same =
                     back.value() == f.value() && back.to_display_string() == f.to_display_string();
-                // The known shape: the reparsed value is a few ULPs off
-                // (serde_json's parser without `float_roundtrip`; 2 seen).
-                let (x, y) = (f.value(), back.value());
-                let one_ulp = x.is_finite()
-                    && y.is_finite()
-                    && x.is_sign_positive() == y.is_sign_positive()
-                    && x.to_bits().abs_diff(y.to_bits()) <= 4;
-                if !same && one_ulp {
-                    crate::known::hit("expr-float64-serde-precision", || {
-                        format!("Float64 serde changed {f:?} -> {json} -> {back:?}")
-                    });
-                } else {
-                    oracle!(same, "Float64 serde changed {f:?} -> {json} -> {back:?}");
-                }
+                oracle!(same, "Float64 serde changed {f:?} -> {json} -> {back:?}");
             }
             Err(e) => oracle!(
                 false,
