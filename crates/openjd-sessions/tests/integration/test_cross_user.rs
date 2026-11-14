@@ -743,23 +743,82 @@ async fn test_cross_user_external_token_cancels_on_enter() {
 
 /// An action that timed out stays `Timeout` when the session token fires
 /// while it is still exiting, matching the same-user loop, which checks the
-/// timeout before the cancel.
+/// timeout before the cancel. The token branch must also not send a second
+/// NOTIFY_THEN_TERMINATE: that would reset the helper's escalation deadline,
+/// so the TERM-ignoring task would be killed at 3 + 4 = 7s instead of 1 + 4 =
+/// 5s.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_timeout_then_token_stays_timeout() {
     let user = require_target_user();
     let (mut session, token) = make_session_with_token(user);
     tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(2500)).await;
+        tokio::time::sleep(Duration::from_secs(3)).await;
         token.cancel();
     });
 
+    let started = std::time::Instant::now();
     let r = session
-        .run_task("t", &trap_task(4, Some(10), Some(1)), None, None, None)
+        .run_task("t", &trap_task(20, Some(4), Some(1)), None, None, None)
         .await
         .expect("run_task must return a result");
+    let elapsed = started.elapsed();
     assert_eq!(r.state, ActionState::Timeout, "stdout: {}", r.stdout);
+    assert!(
+        elapsed >= Duration::from_millis(4500) && elapsed < Duration::from_millis(6500),
+        "the timeout's 4s grace must end the task at about 5s, took {elapsed:?}"
+    );
     session.cleanup();
+}
+
+/// Run a NOTIFY_THEN_TERMINATE(4s) task with a 3s timeout whose TERM trap
+/// never exits, cancel it at 1s with `cancel`, and check it ends `Canceled`
+/// at about 1 + 4 = 5s: once a cancel is delivered the timeout must neither
+/// relabel the action `Timeout` nor send a second command that resets the
+/// escalation deadline (which would end it at 3 + 4 = 7s), as in the
+/// same-user loop.
+async fn check_cancel_then_timeout_stays_canceled(
+    mut session: Session,
+    cancel: impl FnOnce() + Send + 'static,
+) {
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        cancel();
+    });
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &trap_task(20, Some(4), Some(3)), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(
+        elapsed >= Duration::from_millis(4500) && elapsed < Duration::from_millis(6500),
+        "the cancel's 4s grace must end the task at about 5s, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_token_then_timeout_stays_canceled() {
+    let (session, token) = make_session_with_token(require_target_user());
+    check_cancel_then_timeout_stays_canceled(session, move || token.cancel()).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_then_timeout_stays_canceled() {
+    let session = make_session(require_target_user());
+    let handle = session.cancel_handle();
+    check_cancel_then_timeout_stays_canceled(session, move || {
+        assert!(
+            handle.cancel(None, false),
+            "the handle must find the running task"
+        );
+    })
+    .await;
 }
 
 // === Cross-user brittle-session tests ===

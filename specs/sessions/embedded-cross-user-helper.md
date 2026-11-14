@@ -502,6 +502,12 @@ applies for a token cancel. The exit is classified `Timeout` if the timeout
 fired, otherwise `Canceled` when the watch channel fired **or** the token is
 cancelled.
 
+Only one cancel command reaches the helper per action, whichever comes first.
+As in the same-user loop, the timeout branch is disabled once a cancel has
+been delivered, so a cancel whose grace period outlasts the timeout still ends
+`Canceled`, and a later token cancel doesn't follow a timeout with a second
+command (which would reset the helper's escalation deadline).
+
 `cancel_action` / `SessionCancelHandle` fire the watch channel and write the
 pipe command themselves before canceling the token, so the token branch
 checks `cancel_request_rx.has_changed()` and skips a second write when the
@@ -603,7 +609,7 @@ async fn run_via_helper(
                 // bare external token cancel: write cancel to helper via
                 // cancel_writer (unless the watch channel already did)
             }
-            _ = &mut timeout_fut, if !timed_out => {
+            _ = &mut timeout_fut, if !timed_out && !cancel_delivered => {
                 // write cancel to helper via cancel_writer
             }
         }

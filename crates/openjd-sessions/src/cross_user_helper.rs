@@ -743,14 +743,16 @@ pub(crate) async fn run_via_helper(
                 }
                 cancel_delivered = true;
             }
-            _ = &mut timeout_fut, if !timed_out => {
+            // After a cancel has been delivered the timeout can't fire, as in
+            // the same-user loop (`if !cancel_requested && !timed_out`), so a
+            // cancel whose grace period outlasts the timeout stays Canceled
+            // and the helper's escalation deadline isn't reset.
+            _ = &mut timeout_fut, if !timed_out && !cancel_delivered => {
                 timed_out = true;
+                cancel_delivered = true;
                 // Send cancel to helper via the cancel_writer
-                if !cancel_delivered {
-                    if let Some(writer) = cancel_writer {
-                        write_helper_cancel(writer, &auth_token, &config.cancel_method)?;
-                    }
-                    cancel_delivered = true;
+                if let Some(writer) = cancel_writer {
+                    write_helper_cancel(writer, &auth_token, &config.cancel_method)?;
                 }
             }
         }
