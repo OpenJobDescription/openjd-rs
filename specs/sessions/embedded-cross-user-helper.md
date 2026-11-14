@@ -487,6 +487,24 @@ Action timeouts use `tokio::time::sleep` in a `select!` branch within the
 async `run_via_helper`. When the timeout fires, a cancel command is written
 to the helper's stdin via the `cancel_writer`. No OS thread needed.
 
+### External cancel token
+
+A cross-user action can also be canceled through the session-wide
+`SessionConfig.cancel_token` (or the per-action token that is its child) with
+a bare `token.cancel()`, rather than through `cancel_action` /
+`SessionCancelHandle`. `run_via_helper` takes the per-action
+`CancellationToken` and awaits it in a third `select!` branch, mirroring the
+same-user loop. When that branch fires it writes the same tokenized cancel
+command to the helper (using the action's configured cancel method) that the
+timeout branch and `cancel_action` write, and the exit is classified
+`Canceled` whenever the watch channel fired **or** the token is cancelled.
+
+`cancel_action` / `SessionCancelHandle` fire the watch channel and write the
+pipe command themselves before canceling the token, so the token branch
+checks `cancel_request_rx.has_changed()` and skips a second write when the
+watch channel already delivered — only a bare token cancel reaches the helper
+through this branch.
+
 ### Helper ownership during actions
 
 The helper struct is moved to runners via a take/give-back pattern to avoid
@@ -561,6 +579,7 @@ async fn run_via_helper(
     session_id: &str,
     message_tx: UnboundedSender<ActionMessage>,
     cancel_writer: Option<&File>,
+    cancel_token: &CancellationToken,
 ) -> Result<SubprocessResult, SessionError> {
     helper.send_command(&cmd)?;
 
@@ -573,7 +592,13 @@ async fn run_via_helper(
     loop {
         tokio::select! {
             resp = helper.async_reader().next_response() => {
-                // process pid/out/exited/error, feed through ActionFilter
+                // process pid/out/exited/error, feed through ActionFilter;
+                // classify Canceled when the watch channel fired OR the
+                // token is cancelled
+            }
+            _ = cancel_token.cancelled(), if !token_seen => {
+                // bare external token cancel: write cancel to helper via
+                // cancel_writer (unless the watch channel already did)
             }
             _ = &mut timeout_fut, if !timed_out => {
                 // write cancel to helper via cancel_writer

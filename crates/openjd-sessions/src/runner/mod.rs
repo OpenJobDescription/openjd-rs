@@ -198,6 +198,7 @@ impl ScriptRunnerBase {
                 &self.session_id,
                 message_tx,
                 self.cancel_writer.as_ref(),
+                &self.cancel_token,
             )
             .await?;
             self.state = state_from_action(result.state);

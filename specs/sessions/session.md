@@ -282,7 +282,11 @@ delivery.
 
 The optional `cancel_token` provides external cancellation support. When provided, all
 action cancel tokens are created as children of this token via `parent.child_token()`.
-Canceling the parent cascades to all current and future actions in the session.
+Canceling the parent cascades to all current and future actions in the session. This
+applies to cross-user sessions too: `run_via_helper` awaits the action's token and
+signals the helper over the cancel pipe when it fires, so a bare
+`cancel_token.cancel()` (not routed through `cancel_action` / `SessionCancelHandle`)
+cancels a helper-run action and reports it `Canceled`.
 
 This enables the worker agent to cancel an entire session from outside the session's
 async context (e.g., when the Deadline service sends a cancel request). Without this,

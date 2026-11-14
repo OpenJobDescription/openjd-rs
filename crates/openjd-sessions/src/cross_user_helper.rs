@@ -560,6 +560,7 @@ pub(crate) async fn run_via_helper(
     session_id: &str,
     message_tx: tokio::sync::mpsc::UnboundedSender<ActionMessage>,
     cancel_writer: Option<&std::fs::File>,
+    cancel_token: &tokio_util::sync::CancellationToken,
 ) -> Result<crate::subprocess::SubprocessResult, SessionError> {
     // Windows note: executable resolution happens inside the helper
     // (helper/src/runner_win.rs::locate_executable), which runs as the
@@ -611,6 +612,18 @@ pub(crate) async fn run_via_helper(
     };
     tokio::pin!(timeout_fut);
     let mut timed_out = false;
+    // Latches so each one-shot cancel source fires once. `CancellationToken`'s
+    // `cancelled()` future stays ready forever after the token is canceled, so
+    // without `token_seen` its `select!` branch would spin.
+    let mut token_seen = false;
+    // Whether a cancel command has already reached the helper over the pipe —
+    // from the timeout branch, the external-token branch, or `cancel_action` /
+    // `SessionCancelHandle` (which write it directly). Prevents a second,
+    // possibly conflicting, cancel command.
+    let mut cancel_delivered = false;
+    // The helper auth token, captured once: the `select!` branches below
+    // cannot borrow `helper` while its reader future is live.
+    let auth_token = helper.auth_token().to_string();
 
     let mut stdout_collected = String::new();
     let mut saw_fail = false;
@@ -666,10 +679,16 @@ pub(crate) async fn run_via_helper(
                         exit_code
                     );
 
+                    // A cancel reaches a cross-user action over either the
+                    // watch channel (`cancel_action` / `SessionCancelHandle`)
+                    // or the session-wide/per-action `CancellationToken` (an
+                    // external `SessionConfig.cancel_token.cancel()`). Mirror
+                    // the same-user loop and classify Canceled on either.
                     let canceled = config
                         .cancel_request_rx
                         .as_ref()
-                        .is_some_and(|rx| rx.has_changed().unwrap_or(false));
+                        .is_some_and(|rx| rx.has_changed().unwrap_or(false))
+                        || cancel_token.is_cancelled();
 
                     let state = if canceled {
                         ActionState::Canceled
@@ -701,37 +720,76 @@ pub(crate) async fn run_via_helper(
                     resp
                 )));
             }
+            _ = cancel_token.cancelled(), if !token_seen => {
+                token_seen = true;
+                // `cancel_action` / `SessionCancelHandle` fire the watch
+                // channel (and write the pipe command themselves) before
+                // canceling the token, so a watch that has already changed
+                // means the command is on its way — don't send a second,
+                // possibly conflicting, one. A bare external
+                // `SessionConfig.cancel_token.cancel()` fires only the token:
+                // this is the branch that signals the helper for it.
+                let watch_fired = config
+                    .cancel_request_rx
+                    .as_ref()
+                    .is_some_and(|rx| rx.has_changed().unwrap_or(false));
+                if !cancel_delivered && !watch_fired {
+                    if let Some(writer) = cancel_writer {
+                        write_helper_cancel(writer, &auth_token, &config.cancel_method)?;
+                    }
+                }
+                cancel_delivered = true;
+            }
             _ = &mut timeout_fut, if !timed_out => {
                 timed_out = true;
                 // Send cancel to helper via the cancel_writer
-                if let Some(writer) = cancel_writer {
-                    use std::io::Write;
-                    let mut w = writer.try_clone().map_err(|e| {
-                        SessionError::HelperCommunication(format!("Failed to clone cancel_writer: {e}"))
-                    })?;
-                    let token = helper.auth_token();
-                    let cancel_method = &config.cancel_method;
-                    let notify_period = match cancel_method {
-                        crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay } => {
-                            terminate_delay.as_secs()
-                        }
-                        crate::runner::CancelMethod::Terminate => 0,
-                    };
-                    // The token alphabet excludes `"` and `\`, so no
-                    // escaping is needed to embed it in a JSON literal.
-                    if notify_period == 0 {
-                        let _ = writeln!(w, r#"{{"token":"{token}","cancel":"TERMINATE"}}"#);
-                    } else {
-                        let _ = writeln!(
-                            w,
-                            r#"{{"token":"{token}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period}}}"#
-                        );
+                if !cancel_delivered {
+                    if let Some(writer) = cancel_writer {
+                        write_helper_cancel(writer, &auth_token, &config.cancel_method)?;
                     }
-                    let _ = w.flush();
+                    cancel_delivered = true;
                 }
             }
         }
     }
+}
+
+/// Write a tokenized cancel command to the cross-user helper over
+/// `cancel_writer`, using the action's configured cancel method. Shared by
+/// the timeout and external-token `select!` branches of [`run_via_helper`].
+///
+/// `Terminate` (or a `NotifyThenTerminate` whose grace rounds to zero
+/// seconds) maps to `TERMINATE`; otherwise `NOTIFY_THEN_TERMINATE` with the
+/// declared grace period. This matches the method the same-user loop applies
+/// for the same cancel (`subprocess.rs`): `Terminate` kills immediately,
+/// `NotifyThenTerminate` signals then escalates after the grace period.
+fn write_helper_cancel(
+    writer: &std::fs::File,
+    auth_token: &str,
+    cancel_method: &crate::runner::CancelMethod,
+) -> Result<(), SessionError> {
+    use std::io::Write;
+    let mut w = writer.try_clone().map_err(|e| {
+        SessionError::HelperCommunication(format!("Failed to clone cancel_writer: {e}"))
+    })?;
+    let notify_period = match cancel_method {
+        crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay } => {
+            terminate_delay.as_secs()
+        }
+        crate::runner::CancelMethod::Terminate => 0,
+    };
+    // The token alphabet excludes `"` and `\`, so no escaping is needed to
+    // embed it in a JSON literal.
+    if notify_period == 0 {
+        let _ = writeln!(w, r#"{{"token":"{auth_token}","cancel":"TERMINATE"}}"#);
+    } else {
+        let _ = writeln!(
+            w,
+            r#"{{"token":"{auth_token}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period}}}"#
+        );
+    }
+    let _ = w.flush();
+    Ok(())
 }
 
 #[cfg(test)]

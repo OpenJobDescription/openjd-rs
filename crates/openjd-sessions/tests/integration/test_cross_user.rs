@@ -70,6 +70,36 @@ fn make_session(user: Arc<PosixSessionUser>) -> Session {
     Session::with_config(config).unwrap()
 }
 
+/// Like [`make_session`], but installs a session-wide `cancel_token` so a
+/// bare `token.cancel()` (the external cancel path a worker agent uses on a
+/// service cancel) can be exercised against the cross-user helper.
+fn make_session_with_token(
+    user: Arc<PosixSessionUser>,
+) -> (Session, tokio_util::sync::CancellationToken) {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    // Leak so the dir outlives the session constructor
+    std::mem::forget(tmp);
+    let token = tokio_util::sync::CancellationToken::new();
+    let config = SessionConfig {
+        limits: Default::default(),
+        session_id: "cross-user-test".into(),
+        job_parameter_values: HashMap::new(),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: None,
+        os_env_vars: None,
+        session_root_directory: Some(root),
+        user: Some(user),
+        profile: None,
+        cancel_token: Some(token.clone()),
+        debug_collect_stdout: true,
+        echo_openjd_directives: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
+    };
+    (Session::with_config(config).unwrap(), token)
+}
+
 fn support_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -451,6 +481,105 @@ async fn test_cross_user_session_cancel_handle_mark_failed_helper_subprocess() {
         delivered,
         "cancel must be delivered for this test to exercise mark_action_failed"
     );
+    session.cleanup();
+}
+
+// === Cross-user external-token cancel tests (issue #288) ===
+
+/// A bare external `SessionConfig.cancel_token.cancel()` (not
+/// `cancel_action`/`SessionCancelHandle`) must cancel a cross-user helper
+/// subprocess: the token is a parent of every action token, so
+/// `run_via_helper` has to observe it and signal the helper. Before the fix,
+/// `run_via_helper` watched only the watch channel, so a bare token cancel
+/// let the child run to completion and the action reported Success.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_external_token_cancels_helper_subprocess() {
+    use openjd_sessions::session::SessionState;
+
+    let user = require_target_user();
+    let (mut session, token) = make_session_with_token(user);
+
+    // Cancel the session-wide token mid-action, from another task.
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        token.cancel();
+    });
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_subprocess("sleep", Some(&["60".to_string()]), None, None, true, None)
+        .await
+        .expect("run_subprocess must return a result");
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        r.state,
+        ActionState::Canceled,
+        "a bare session-wide token cancel must classify the helper subprocess \
+         as Canceled; exit_code: {:?}, stdout: {}",
+        r.exit_code,
+        r.stdout
+    );
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "the external token cancel must interrupt the 60s sleep, took {elapsed:?}"
+    );
+    // A Canceled action makes the session ending-only (M-4 rule).
+    assert_eq!(session.state(), SessionState::ReadyEnding);
+    session.cleanup();
+}
+
+/// The same external-token cancel through `run_task` (the environment/step
+/// runner helper path, distinct from `run_subprocess`).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_external_token_cancels_helper_task() {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::{Action, StepActions, StepScript};
+    use openjd_sessions::session::SessionState;
+
+    let user = require_target_user();
+    let (mut session, token) = make_session_with_token(user);
+
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        token.cancel();
+    });
+
+    let script = StepScript {
+        let_bindings: None,
+        actions: StepActions {
+            on_run: Action {
+                command: FormatString::new("sleep").unwrap(),
+                args: Some(vec![FormatString::new("60").unwrap()]),
+                timeout: None,
+                cancelation: None,
+            },
+        },
+        embedded_files: None,
+    };
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &script, None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        r.state,
+        ActionState::Canceled,
+        "a bare session-wide token cancel must classify the helper task as \
+         Canceled; exit_code: {:?}, stdout: {}",
+        r.exit_code,
+        r.stdout
+    );
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "the external token cancel must interrupt the 60s sleep, took {elapsed:?}"
+    );
+    assert_eq!(session.state(), SessionState::ReadyEnding);
     session.cleanup();
 }
 

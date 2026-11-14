@@ -2480,7 +2480,7 @@ impl Session {
         // helper subprocess would be misreported as Failed.
         let cancel_token = self.new_action_cancel_token();
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
-        self.cancel.set_action(cancel_token, cancel_tx);
+        self.cancel.set_action(cancel_token.clone(), cancel_tx);
 
         let mut filter = crate::action_filter::ActionFilter::new(
             &self.session_id,
@@ -2517,6 +2517,7 @@ impl Session {
             &self.session_id,
             tx,
             self.cross_user.cancel_writer.as_ref(),
+            &cancel_token,
         )
         .await;
 
