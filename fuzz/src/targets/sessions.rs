@@ -10,14 +10,14 @@
 //!   any later output line contains it, and every later output line is
 //!   masked exactly as an independent reference computes (so partial leaks
 //!   at overlapping or adjacent secrets fail too).
-//! - **Environment changes are spawnable** (#360): no `SetEnv` /
+//! - **Environment changes are spawnable**: no `SetEnv` /
 //!   `RedactedEnv` with a NUL or an invalid name reaches the session.
-//! - **Output decoding** (#298, 1e1de45, #366, #369): the helper's framer and
+//! - **Output decoding**: the helper's framer and
 //!   the in-process decoder agree byte for byte, framing is independent of
 //!   how the stream is chunked, and every framed line fits the response cap.
-//! - **Embedded files stay inside the session directory** (#359, 7d4c950),
+//! - **Embedded files stay inside the session directory**,
 //!   and the session accepts every filename template validation accepted.
-//! - **Ending-only mode** (#524): over any sequence of states, the session
+//! - **Ending-only mode**: over any sequence of states, the session
 //!   reports `ReadyEnding` exactly when a reference model's stored state is
 //!   `Ready` and it is ending-only, and `clear_ending_only` succeeds only
 //!   from `ReadyEnding`, leaving `Ready`, and otherwise fails with
@@ -506,7 +506,7 @@ pub fn embedded_files(data: &[u8]) {
     let _ = convert_line_endings(&text, EndOfLine::Auto);
 }
 
-/// Session state machine: `Session::clear_ending_only` (#524) against a
+/// Session state machine: `Session::clear_ending_only` against a
 /// reference model of the stored state and the ending-only flag, as
 /// `Session::set_state_for_test` and `clear_ending_only` document them.
 ///

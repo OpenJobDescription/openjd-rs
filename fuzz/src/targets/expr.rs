@@ -4,21 +4,19 @@
 
 //! openjd-expr targets.
 //!
-//! Beyond "never panics", these encode the bug classes the project's fix
-//! history shows recur:
+//! Beyond "never panics", these encode bug classes that recur:
 //!
-//! - **Type soundness** (the largest class: #300, #316, #329, #396, #434,
-//!   2e6e1a4, 9bc8c88, ...). The same expression is evaluated statically,
+//! - **Type soundness** (the largest class). The same expression is evaluated statically,
 //!   with every symbol `Unresolved(T)` under the validation-time library,
 //!   and concretely with values of type `T`. A statically accepted
 //!   expression must produce a value of the static type and must not fail
 //!   at run time with a name/function/type error; a generated (well-typed
 //!   by construction) expression must not be rejected statically when it
 //!   evaluates fine.
-//! - **Budget enforcement** (#272, #284, #410, #417, #418, `zfill('5', -1)`):
+//! - **Budget enforcement** (e.g. `zfill('5', -1)`):
 //!   peak heap use during evaluation stays within a constant factor of the
 //!   memory limit, and reported metrics stay within their limits.
-//! - **Round trips** (f0b7040, #354, report Rec 9): transport encoding,
+//! - **Round trips**: transport encoding,
 //!   `RangeExpr` display/parse, `ExprType` display/parse, symbol table
 //!   serialization.
 //! - **Reference models** for `RangeExpr` (`len`/`get`/`iter`/`contains`/
@@ -537,8 +535,8 @@ pub(crate) fn check_static_miss(e: &ExpressionError, facts: Facts, msg: impl FnO
         crate::known::hit("expr-listcomp-non-iterable-runtime-check", msg);
     } else if facts.boolop && !is_name_error(e) && after_boolop(e) {
         // Speculative evaluation of `and`/`or` with an unresolved operand
-        // absorbs type errors in the later operands (name errors there are
-        // reported since #462).
+        // absorbs type errors in the later operands; name errors there are
+        // not absorbed.
         crate::known::hit("expr-boolop-static-type", msg);
     } else if (facts.unbound_return || facts.list_add) && is_list_element_mix_error(e) {
         crate::known::hit("expr-unbound-return-typevar", msg);
@@ -1257,9 +1255,6 @@ pub fn parse(data: &[u8]) {
     let Some((text, _)) = text_and_control(data) else {
         return;
     };
-    if crate::known::skip_deep_unclosed_brackets(text) {
-        return;
-    }
     let current = ParsedExpression::with_profile(text, &ExprProfile::current());
     let latest = ParsedExpression::new(text);
     if let Ok(c) = &current {
@@ -1284,9 +1279,6 @@ pub fn eval_text(data: &[u8]) {
     let Some((text, ctl)) = text_and_control(data) else {
         return;
     };
-    if crate::known::skip_deep_unclosed_brackets(text) {
-        return;
-    }
     let Ok(parsed) = ParsedExpression::new(text) else {
         return;
     };
@@ -1344,9 +1336,6 @@ pub fn format_string(data: &[u8]) {
     let Some((text, ctl)) = text_and_control(data) else {
         return;
     };
-    if crate::known::skip_deep_interpolations(text) {
-        return;
-    }
     let mut u = Unstructured::new(ctl);
 
     // Escaping: any text escapes to a literal that resolves to itself.

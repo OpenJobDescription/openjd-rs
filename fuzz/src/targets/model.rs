@@ -8,15 +8,15 @@
 //! untrusted template.
 //!
 //! Oracles beyond "never panics":
-//! - **Validation implies runnable** (#349, #397, #421, #315, #361): a
+//! - **Validation implies runnable**: a
 //!   template that decodes and instantiates must not fail at run time with
 //!   an undefined-symbol / unknown-function / syntax error when its actions,
 //!   `let` bindings, and embedded files are resolved the way the session
 //!   resolves them.
-//! - **Preprocess idempotence** (#384, #388): feeding
+//! - **Preprocess idempotence**: feeding
 //!   `preprocess_job_parameters` its own output yields the same values.
 //! - **Determinism and Eq/Hash agreement** on created jobs.
-//! - **Parameter-space consistency** (#398, 20c7876): `len` matches
+//! - **Parameter-space consistency**: `len` matches
 //!   iteration, `get(i)` equals the i-th iterated set, and every iterated set
 //!   passes `contains` / `validate_containment`.
 //! - **Topological order** respects every declared dependency.
@@ -878,9 +878,6 @@ pub fn decode_text(data: &[u8]) {
     let Some((text, ctl)) = text_and_control(data) else {
         return;
     };
-    if crate::known::skip_deep_interpolations(text) {
-        return;
-    }
     let mut u = Unstructured::new(ctl);
     let lim = limits();
     for doc_type in [DocumentType::Yaml, DocumentType::Json] {
@@ -962,9 +959,6 @@ pub fn misc(data: &[u8]) {
     let Some((text, ctl)) = text_and_control(data) else {
         return;
     };
-    if crate::known::skip_deep_unclosed_brackets(text) {
-        return;
-    }
     let _ = capabilities::validate_amount_capability_name(text);
     let _ = capabilities::validate_attribute_capability_name(text);
     let rev = openjd_model::SpecificationRevision::V2023_09;

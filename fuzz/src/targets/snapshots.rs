@@ -4,7 +4,7 @@
 
 //! openjd-snapshots targets: manifest codecs and manifest algebra.
 //!
-//! - **Codec round trip** (90a7bce, report §3.2): every manifest that
+//! - **Codec round trip**: every manifest that
 //!   decodes re-encodes deterministically and decodes back to the same
 //!   entries, chunk size, total size, and parent hash.
 //! - **Diff/compose algebra**: `compose(a, [diff(a, b)])` reproduces `b`'s
@@ -235,7 +235,6 @@ fn v2023_diff_roundtrip(m: &openjd_snapshots::SnapshotDiff, what: &str) {
                 m.file_chunk_size_bytes != -1
                     || (has_hashless_file(&m.files) && e.to_string().contains("is missing a hash"))
                     || e.to_string().contains("symlink")
-                    // The file sizes sum past u64::MAX (#515).
                     || e.to_string().contains("the file sizes sum past u64::MAX"),
                 "{what}: a valid diff fails to encode as v2023: {e}"
             );
