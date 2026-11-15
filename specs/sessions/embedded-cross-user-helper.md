@@ -502,11 +502,14 @@ applies for a token cancel. The exit is classified `Timeout` if the timeout
 fired, otherwise `Canceled` when the watch channel fired **or** the token is
 cancelled.
 
-Only one cancel command reaches the helper per action, whichever comes first.
-As in the same-user loop, the timeout branch is disabled once a cancel has
-been delivered, so a cancel whose grace period outlasts the timeout still ends
-`Canceled`, and a later token cancel doesn't follow a timeout with a second
-command (which would reset the helper's escalation deadline).
+`run_via_helper` itself sends at most one cancel command per action, whichever
+of the timeout and a bare token cancel comes first. As in the same-user loop,
+the timeout branch is disabled once a cancel has been delivered, so a cancel
+whose grace period outlasts the timeout still ends `Canceled`, and a later
+token cancel doesn't follow a timeout with a second command (which would reset
+the helper's escalation deadline). `cancel_action` / `SessionCancelHandle`
+always write their own command, so a later handle cancel can still shorten or
+reset the helper's deadline.
 
 `cancel_action` / `SessionCancelHandle` fire the watch channel and write the
 pipe command themselves before canceling the token, so the token branch
