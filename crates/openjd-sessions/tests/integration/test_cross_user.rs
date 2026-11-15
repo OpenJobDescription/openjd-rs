@@ -525,7 +525,7 @@ async fn test_cross_user_external_token_cancels_helper_subprocess() {
         elapsed < Duration::from_secs(30),
         "the external token cancel must interrupt the 60s sleep, took {elapsed:?}"
     );
-    // A Canceled action makes the session ending-only (M-4 rule).
+    // A Canceled action makes the session ending-only (brittle sessions).
     assert_eq!(session.state(), SessionState::ReadyEnding);
     session.cleanup();
 }
