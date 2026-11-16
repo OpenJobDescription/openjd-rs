@@ -375,7 +375,8 @@ and each of these rules.
 
 Manifests can be large, so decoding should use little memory beyond the
 input text. `tests/decode_memory.rs` enforces this: it fails if a decoder's
-peak heap use passes a fixed multiple of the input size. The test is the
+peak heap use passes a fixed multiple of the input size, or, for the
+streaming v2023 decoders, a fixed number of bytes. The test is the
 constraint. This section is guidance.
 
 How the decoders keep memory low today (`src/codec.rs`,

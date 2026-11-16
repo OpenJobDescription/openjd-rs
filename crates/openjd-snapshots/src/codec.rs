@@ -590,10 +590,12 @@ fn check_v2023_version(manifest_version: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// The `totalSize` read from a v2023 manifest, which must be present.
 fn require_total_size(total_size: Option<u64>) -> Result<u64> {
     total_size.ok_or_else(|| SnapshotError::Validation("missing or invalid totalSize".into()))
 }
 
+/// The error for a v2023 `paths` that is absent or not an array.
 fn invalid_paths_error() -> SnapshotError {
     SnapshotError::Validation("missing or invalid paths".into())
 }

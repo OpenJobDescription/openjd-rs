@@ -50,12 +50,12 @@ where
         failure: &mut failure,
     }
     .deserialize(&mut de)
-    .and_then(|header| de.end().map(|()| header));
+    .and_then(|top| de.end().map(|()| top));
     if let Some(e) = failure {
         return Err(e);
     }
-    let header = parsed.map_err(json_error)?;
-    Ok(header.finish()?)
+    let top = parsed.map_err(json_error)?;
+    Ok(top.finish()?)
 }
 
 /// I/O errors keep their kind; everything else is a syntax error in the text.
@@ -237,7 +237,7 @@ where
                         hash_alg,
                         callback: &mut *self.callback,
                         failure: &mut *self.failure,
-                        count: &mut h.total_files,
+                        total_files: &mut h.total_files,
                     })?;
                     h.paths = Some(PathsSeen {
                         hash_alg,
@@ -257,7 +257,7 @@ struct Paths<'a, F, E> {
     hash_alg: HashAlgorithm,
     callback: &'a mut F,
     failure: &'a mut Option<E>,
-    count: &'a mut usize,
+    total_files: &'a mut usize,
 }
 
 impl<'de, F, E> DeserializeSeed<'de> for Paths<'_, F, E>
@@ -302,7 +302,7 @@ where
             if let Err(e) = (self.callback)(self.hash_alg, entry) {
                 return Err(stop(self.failure, e));
             }
-            *self.count += 1;
+            *self.total_files += 1;
         }
         Ok(true)
     }

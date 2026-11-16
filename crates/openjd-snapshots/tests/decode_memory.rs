@@ -87,9 +87,10 @@ fn snapshot(n: u64, chunk_size: i64) -> Snapshot {
 
 /// Decoding reads only the fields it needs, in one parse, so its peak heap use
 /// stays a small multiple of the text's size: the parsed fields plus the
-/// manifest's entries built from them.
+/// manifest's entries built from them. The streaming v2023 decoders hold one
+/// entry at a time, so their peak stays under a fixed number of bytes.
 #[test]
-fn decoding_peaks_at_a_small_multiple_of_the_manifest_size() {
+fn decoding_peak_memory_stays_within_its_bounds() {
     // Measured with this test's manifests: 2.6x for v2023 and 3.9x for v2025.
     // Decoding through a `Value` tree peaks at 7.8x and 9.7x, and
     // `decode_manifest` parsing twice at 13.7x and 16.4x. The limits leave
