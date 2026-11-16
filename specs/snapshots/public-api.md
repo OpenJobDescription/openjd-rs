@@ -339,6 +339,65 @@ returned manifest. `decode_v2023_as_diff` is a convenience for callers that
 want to feed a v2023-formatted manifest into a diff-consuming pipeline like
 [`compose_snapshot_with_diffs`] without reconstructing the manifest.
 
+`decode_manifest` decodes a document that has a `manifestVersion` key as
+v2023, otherwise one that has a `specificationVersion` key as v2025, and
+otherwise fails with `Unknown manifest format: no manifestVersion or
+specificationVersion`. It goes by whether the key is present, not by its
+value, so `{"manifestVersion": null}` fails as `missing manifestVersion`.
+
+All four decoders read their input with the same rules:
+
+- Text that is not valid JSON fails as `Invalid JSON: <serde_json error>`,
+  with the error's line and column. That includes members the decoder does
+  not use: an out-of-range number, an invalid `\u` escape, or nesting past
+  serde_json's recursion limit anywhere in the document is rejected.
+- A member of the wrong JSON type is treated as absent. A required member
+  then fails with its "missing" error (for example, a v2023 entry whose
+  `size` is `"2"`, `-2`, or `2.0` fails as `path entry missing 'size'`),
+  and an optional one takes its default (a v2025 `runnable` of `"yes"` is
+  `false`). An array entry that is not an object has no members. Non-string
+  elements of a v2025 `chunkhashes` array are dropped.
+- When an object has a key more than once, the last value is used.
+- Unknown members are ignored.
+
+These rules assume serde_json's default number handling. A build that turns
+on serde_json's `arbitrary_precision` feature (Cargo unifies features, so a
+dependent crate can) accepts out-of-range numbers, and reads `-0` in
+`fileChunkSizeBytes`, the only signed member, as absent instead of `0`.
+
+Header errors are reported before entry errors, except that v2025 reports
+an unknown `specificationVersion` after its `dirs` and `files` errors.
+`tests/integration/test_codec_decode.rs` asserts every decode error message
+and each of these rules.
+
+#### Keeping decode memory low
+
+Manifests can be large, so decoding should use little memory beyond the
+input text. `tests/decode_memory.rs` enforces this: it fails if a decoder's
+peak heap use passes a fixed multiple of the input size. The test is the
+constraint. This section is guidance.
+
+How the decoders keep memory low today (`src/codec.rs`,
+`src/codec/raw.rs`):
+
+- They parse the input once, straight into typed values for the members
+  the decoders read. Other members are parsed and discarded.
+- They move hashes, and v2023 paths, out of the parsed values instead of
+  copying them.
+- `decode_v2025` drops the parsed directory list once it has built the
+  directory entries.
+
+When changing decoding code:
+
+- Try to read into typed structs with serde, and to parse the input only
+  once, deciding what to do from the parsed result.
+- Avoid building a generic tree such as `serde_json::Value` for a whole
+  document. Each object in it is a map with its own key strings, which
+  costs several times the text.
+- Avoid `serde::de::IgnoredAny` for skipped members when invalid JSON must
+  still be rejected. It accepts out-of-range numbers, unpaired surrogate
+  `\u` escapes, and nesting past the recursion limit.
+
 ## Data Cache
 
 ### Async Trait

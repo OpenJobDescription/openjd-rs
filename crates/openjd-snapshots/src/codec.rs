@@ -21,7 +21,7 @@
 
 use crate::hash::HashAlgorithm;
 use crate::manifest::{
-    AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, Full, Manifest, Rel, Snapshot, SnapshotDiff,
+    AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, Manifest, Rel, Snapshot, SnapshotDiff,
     SymlinkPolicy, ValidateKind,
 };
 use crate::ops::subtree_rel_snapshot;
@@ -29,6 +29,8 @@ use crate::{Result, SnapshotError, DEFAULT_FILE_CHUNK_SIZE, WHOLE_FILE_CHUNK_SIZ
 use serde_json::Value;
 use std::collections::HashMap;
 use tracing::warn;
+
+mod raw;
 
 // --- Public types ---
 
@@ -387,17 +389,21 @@ pub fn encode_snapshot_diff_v2025(m: &SnapshotDiff) -> Result<String> {
 }
 
 // --- Decode ---
+//
+// Each decoder parses its input once, into the typed view in `raw`, and then
+// validates that view. See `raw` for why no `serde_json::Value` is built.
 
 /// Auto-detect format and decode.
+///
+/// A document with a `manifestVersion` key is decoded as v2023, otherwise one
+/// with a `specificationVersion` key as v2025. The input is parsed once.
 pub fn decode_manifest(json: &str) -> Result<DecodedManifest> {
-    let data: Value = serde_json::from_str(json)
-        .map_err(|e| SnapshotError::Validation(format!("Invalid JSON: {e}")))?;
+    let raw = raw::parse(json)?;
 
-    if data.get("manifestVersion").is_some() {
-        let snap = decode_v2023(json)?;
-        Ok(DecodedManifest::Snapshot(snap))
-    } else if data.get("specificationVersion").is_some() {
-        decode_v2025(json)
+    if raw.has_manifest_version {
+        Ok(DecodedManifest::Snapshot(decode_v2023_raw(raw)?))
+    } else if raw.has_specification_version {
+        decode_v2025_raw(raw)
     } else {
         Err(SnapshotError::Validation(
             "Unknown manifest format: no manifestVersion or specificationVersion".into(),
@@ -414,7 +420,7 @@ pub fn decode_manifest(json: &str) -> Result<DecodedManifest> {
 /// [`compose_snapshot_with_diffs`](crate::compose_snapshot_with_diffs) without
 /// reconstructing the manifest).
 pub fn decode_v2023(json: &str) -> Result<Snapshot> {
-    decode_v2023_with_kind::<Full>(json)
+    decode_v2023_raw(raw::parse(json)?)
 }
 
 /// Decode v2023 JSON as a relative-path [`SnapshotDiff`].
@@ -427,18 +433,16 @@ pub fn decode_v2023(json: &str) -> Result<Snapshot> {
 /// [`compose_snapshot_with_diffs`](crate::compose_snapshot_with_diffs))
 /// without manually converting from [`Snapshot`].
 pub fn decode_v2023_as_diff(json: &str) -> Result<SnapshotDiff> {
-    decode_v2023_with_kind::<crate::manifest::Diff>(json)
+    decode_v2023_raw(raw::parse(json)?)
 }
 
 /// Shared implementation for v2023 decoding. `K` selects the phantom-type
 /// kind (`Full` or `Diff`); v2023 never produces deleted entries so either
 /// choice is equally valid at runtime.
-fn decode_v2023_with_kind<K: ValidateKind>(json: &str) -> Result<Manifest<Rel, K>> {
-    let data: Value = serde_json::from_str(json)
-        .map_err(|e| SnapshotError::Validation(format!("Invalid JSON: {e}")))?;
-
-    let version = data["manifestVersion"]
-        .as_str()
+fn decode_v2023_raw<K: ValidateKind>(raw: raw::RawManifest) -> Result<Manifest<Rel, K>> {
+    let version = raw
+        .manifest_version
+        .as_deref()
         .ok_or_else(|| SnapshotError::Validation("missing manifestVersion".into()))?;
     if version != V2023_MANIFEST_VERSION {
         return Err(SnapshotError::Validation(format!(
@@ -446,32 +450,32 @@ fn decode_v2023_with_kind<K: ValidateKind>(json: &str) -> Result<Manifest<Rel, K
         )));
     }
 
-    let hash_alg = parse_hash_alg(data["hashAlg"].as_str())?;
-    let total_size = data["totalSize"]
-        .as_u64()
+    let hash_alg = parse_hash_alg(raw.hash_alg.as_deref())?;
+    let total_size = raw
+        .total_size
         .ok_or_else(|| SnapshotError::Validation("missing or invalid totalSize".into()))?;
 
-    let raw_paths = data["paths"]
-        .as_array()
+    let raw_paths = raw
+        .paths
         .ok_or_else(|| SnapshotError::Validation("missing or invalid paths".into()))?;
 
     let mut files = Vec::with_capacity(raw_paths.len());
     for p in raw_paths {
-        let path = p["path"]
-            .as_str()
+        let path = p
+            .path
             .ok_or_else(|| SnapshotError::Validation("path entry missing 'path'".into()))?;
-        let hash = p["hash"]
-            .as_str()
+        let hash = p
+            .hash
             .ok_or_else(|| SnapshotError::Validation("path entry missing 'hash'".into()))?;
-        let size = p["size"]
-            .as_u64()
+        let size = p
+            .size
             .ok_or_else(|| SnapshotError::Validation("path entry missing 'size'".into()))?;
-        let mtime = p["mtime"]
-            .as_u64()
+        let mtime = p
+            .mtime
             .ok_or_else(|| SnapshotError::Validation("path entry missing 'mtime'".into()))?;
 
         let mut entry = FileEntry::file(path, size, mtime);
-        entry.hash = Some(hash.to_string());
+        entry.hash = Some(hash);
         files.push(entry);
     }
 
@@ -486,37 +490,37 @@ fn decode_v2023_with_kind<K: ValidateKind>(json: &str) -> Result<Manifest<Rel, K
 ///
 /// **Experimental draft format.** See the [module-level docs](self).
 pub fn decode_v2025(json: &str) -> Result<DecodedManifest> {
-    let data: Value = serde_json::from_str(json)
-        .map_err(|e| SnapshotError::Validation(format!("Invalid JSON: {e}")))?;
+    decode_v2025_raw(raw::parse(json)?)
+}
 
-    let spec = data["specificationVersion"]
-        .as_str()
+fn decode_v2025_raw(raw: raw::RawManifest) -> Result<DecodedManifest> {
+    let raw::RawManifest {
+        specification_version,
+        hash_alg,
+        total_size,
+        parent_manifest_hash: parent_hash,
+        file_chunk_size_bytes,
+        dirs: raw_dirs,
+        files: raw_files,
+        ..
+    } = raw;
+
+    let spec = specification_version
+        .as_deref()
         .ok_or_else(|| SnapshotError::Validation("missing specificationVersion".into()))?;
 
-    let hash_alg = parse_hash_alg(data["hashAlg"].as_str())?;
-    let total_size = data["totalSize"]
-        .as_u64()
+    let hash_alg = parse_hash_alg(hash_alg.as_deref())?;
+    let total_size = total_size
         .ok_or_else(|| SnapshotError::Validation("missing or invalid totalSize".into()))?;
-    let parent_hash = data
-        .get("parentManifestHash")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
 
-    // Build dir_index
-    let raw_dirs = data.get("dirs").and_then(|v| v.as_array());
-    let dir_index = build_dir_index(raw_dirs)?;
+    let raw_dirs = raw_dirs.unwrap_or_default();
+    let dir_index = build_dir_index(&raw_dirs)?;
+    let dirs = decode_dirs(&raw_dirs, &dir_index)?;
+    drop(raw_dirs);
 
-    // Decode dirs
-    let dirs = decode_dirs(raw_dirs, &dir_index)?;
+    let files = decode_files(raw_files.unwrap_or_default(), &dir_index)?;
 
-    // Decode files
-    let raw_files = data.get("files").and_then(|v| v.as_array());
-    let files = decode_files(raw_files, &dir_index)?;
-
-    let file_chunk_size_bytes = data
-        .get("fileChunkSizeBytes")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(DEFAULT_FILE_CHUNK_SIZE);
+    let file_chunk_size_bytes = file_chunk_size_bytes.unwrap_or(DEFAULT_FILE_CHUNK_SIZE);
 
     match spec {
         SPEC_ABS_SNAPSHOT => {
@@ -704,82 +708,67 @@ fn extract_parent_dirs(path: &str, result: &mut std::collections::HashSet<String
     }
 }
 
-fn build_dir_index(raw_dirs: Option<&Vec<Value>>) -> Result<HashMap<usize, String>> {
-    let mut index: HashMap<usize, String> = HashMap::new();
-    if let Some(dirs) = raw_dirs {
-        for (i, d) in dirs.iter().enumerate() {
-            let name = d["name"]
-                .as_str()
-                .ok_or_else(|| SnapshotError::Validation("dir entry missing 'name'".into()))?;
-            let expanded = expand_path_reference(name, &index)?;
-            index.insert(i, expanded);
-        }
+fn build_dir_index(raw_dirs: &[raw::RawV2025Dir]) -> Result<HashMap<usize, String>> {
+    let mut index: HashMap<usize, String> = HashMap::with_capacity(raw_dirs.len());
+    for (i, d) in raw_dirs.iter().enumerate() {
+        let name = d
+            .name
+            .as_deref()
+            .ok_or_else(|| SnapshotError::Validation("dir entry missing 'name'".into()))?;
+        let expanded = expand_path_reference(name, &index)?;
+        index.insert(i, expanded);
     }
     Ok(index)
 }
 
 fn decode_dirs(
-    raw_dirs: Option<&Vec<Value>>,
+    raw_dirs: &[raw::RawV2025Dir],
     dir_index: &HashMap<usize, String>,
 ) -> Result<Vec<DirEntry>> {
-    let mut result = Vec::new();
-    if let Some(dirs) = raw_dirs {
-        for (i, d) in dirs.iter().enumerate() {
-            let path = dir_index
-                .get(&i)
-                .ok_or_else(|| SnapshotError::Validation("dir index mismatch".into()))?;
-            let deleted = d.get("delete").and_then(|v| v.as_bool()).unwrap_or(false);
-            let mut entry = DirEntry::new(path);
-            entry.deleted = deleted;
-            result.push(entry);
-        }
+    let mut result = Vec::with_capacity(raw_dirs.len());
+    for (i, d) in raw_dirs.iter().enumerate() {
+        let path = dir_index
+            .get(&i)
+            .ok_or_else(|| SnapshotError::Validation("dir index mismatch".into()))?;
+        let mut entry = DirEntry::new(path);
+        entry.deleted = d.delete.unwrap_or(false);
+        result.push(entry);
     }
     Ok(result)
 }
 
 fn decode_files(
-    raw_files: Option<&Vec<Value>>,
+    raw_files: Vec<raw::RawV2025File>,
     dir_index: &HashMap<usize, String>,
 ) -> Result<Vec<FileEntry>> {
-    let mut result = Vec::new();
-    if let Some(files) = raw_files {
-        for f in files {
-            let name = f["name"]
-                .as_str()
-                .ok_or_else(|| SnapshotError::Validation("file entry missing 'name'".into()))?;
-            let path = expand_path_reference(name, dir_index)?;
+    let mut result = Vec::with_capacity(raw_files.len());
+    for f in raw_files {
+        let name = f
+            .name
+            .as_deref()
+            .ok_or_else(|| SnapshotError::Validation("file entry missing 'name'".into()))?;
+        let path = expand_path_reference(name, dir_index)?;
 
-            let hash = f
-                .get("hash")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            let chunk_hashes = f.get("chunkhashes").and_then(|v| v.as_array()).map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect::<Vec<_>>()
-            });
-            let symlink_target = f
-                .get("symlink")
-                .and_then(|v| v.get("name"))
-                .and_then(|v| v.as_str())
-                .map(|s| expand_path_reference(s, dir_index))
-                .transpose()?;
+        // Non-string elements of `chunkhashes` are dropped.
+        let chunk_hashes = f
+            .chunkhashes
+            .map(|hashes| hashes.into_iter().flatten().collect::<Vec<_>>());
+        let symlink_target = f
+            .symlink
+            .name
+            .as_deref()
+            .map(|s| expand_path_reference(s, dir_index))
+            .transpose()?;
 
-            let size = f.get("size").and_then(|v| v.as_u64());
-            let mtime = f.get("mtime").and_then(|v| v.as_u64());
-            let runnable = f.get("runnable").and_then(|v| v.as_bool()).unwrap_or(false);
-            let deleted = f.get("delete").and_then(|v| v.as_bool()).unwrap_or(false);
-
-            let mut entry = FileEntry::new(&path);
-            entry.hash = hash;
-            entry.size = size;
-            entry.mtime = mtime;
-            entry.chunk_hashes = chunk_hashes;
-            entry.symlink_target = symlink_target;
-            entry.runnable = runnable;
-            entry.deleted = deleted;
-            result.push(entry);
-        }
+        let mut entry = FileEntry::new(path);
+        entry.hash = f.hash;
+        entry.size = f.size;
+        entry.mtime = f.mtime;
+        entry.chunk_hashes = chunk_hashes;
+        entry.symlink_target = symlink_target;
+        entry.runnable = f.runnable.unwrap_or(false);
+        entry.deleted = f.delete.unwrap_or(false);
+        result.push(entry);
     }
     Ok(result)
 }

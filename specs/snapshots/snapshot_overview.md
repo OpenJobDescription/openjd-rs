@@ -213,6 +213,7 @@ See [snapshot_data_cache.md](snapshot_data_cache.md) for detailed documentation.
 10. **`DashMap`** for concurrent upload deduplication. Lock-free concurrent hash map avoids contention.
 11. **`rayon`** for parallel hashing in the HASH operation. True CPU parallelism without GIL.
 12. **Separate compose functions** (`compose_snapshot_with_diffs` and `compose_diffs`) make input/output type relationships explicit at compile time.
+13. **Typed, single-parse manifest decoding.** The decoders read only the members they use, straight into typed values (`codec/raw.rs`), and never build a `serde_json::Value` tree, whose per-entry maps cost several times the JSON text. Reading follows the same rules as `Value`'s accessors (a value of the wrong type is absent, the last duplicate key wins), and ignored members are still fully parsed, so invalid JSON anywhere is rejected. See "Decode Functions" in `public-api.md`.
 
 ## Constants
 
@@ -235,6 +236,8 @@ openjd-snapshots/src/
 ├── hash.rs             # HashAlgorithm, hash_data(), hash_file(), hash_file_chunked()
 ├── path_util.rs        # normalize_path(), is_absolute_path()
 ├── codec.rs            # Encode/decode v2023 and v2025 JSON formats
+├── codec/
+│   └── raw.rs          # Lenient typed view of a manifest document, read in one parse
 ├── error.rs            # SnapshotError, Result<T>
 └── ops/
     ├── mod.rs          # Re-exports

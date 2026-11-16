@@ -17,6 +17,8 @@ mod test_cache_sync;
 mod test_chunk_size;
 #[path = "integration/test_codec.rs"]
 mod test_codec;
+#[path = "integration/test_codec_decode.rs"]
+mod test_codec_decode;
 #[path = "integration/test_collect.rs"]
 mod test_collect;
 #[path = "integration/test_compose.rs"]
