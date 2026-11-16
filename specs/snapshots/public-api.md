@@ -377,13 +377,15 @@ input text. `tests/decode_memory.rs` enforces this: it fails if a decoder's
 peak heap use passes a fixed multiple of the input size. The test is the
 constraint. This section is guidance.
 
-How the decoders keep memory low today (`codec/raw.rs`):
+How the decoders keep memory low today (`src/codec.rs`,
+`src/codec/raw.rs`):
 
-- They parse the input once, straight into typed values that hold only the
-  members the decoder uses.
-- They move strings out of the parsed values into the entries instead of
+- They parse the input once, straight into typed values for the members
+  the decoders read. Other members are parsed and discarded.
+- They move hashes, and v2023 paths, out of the parsed values instead of
   copying them.
-- They drop intermediate data as soon as it has been used.
+- `decode_v2025` drops the parsed directory list once it has built the
+  directory entries.
 
 When changing decoding code:
 
@@ -393,7 +395,8 @@ When changing decoding code:
   document. Each object in it is a map with its own key strings, which
   costs several times the text.
 - Avoid `serde::de::IgnoredAny` for skipped members when invalid JSON must
-  still be rejected. It accepts out-of-range numbers and invalid escapes.
+  still be rejected. It accepts out-of-range numbers, unpaired surrogate
+  `\u` escapes, and nesting past the recursion limit.
 
 ## Data Cache
 
