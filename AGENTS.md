@@ -267,7 +267,7 @@ PRs run these checks (all must pass):
 |-----|-------------|
 | **Rustfmt** | `cargo fmt --all -- --check` (nightly) — includes the helper sub-crate |
 | **cargo-deny** | Licenses, bans, sources, and advisories — workspace and helper sub-crate |
-| **Clippy** | `cargo clippy` on Linux, Windows, macOS — includes the helper binary |
+| **Clippy** | `cargo clippy` on Linux, Windows, macOS — includes the helper binary; all features on Linux |
 | **Build** | Release build on all three platforms |
 | **Test** | `cargo test --workspace` + helper tests on all three platforms |
 | **Conformance** | Full OpenJD conformance suite (1,038 tests) on all three platforms |
