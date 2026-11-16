@@ -36,9 +36,9 @@ reproducers with a time bound, so a parser bump that brings the behavior back
 fails CI.
 
 ```toml
-ruff_python_parser = { version = "=0.0.21", features = ["stacker"] }
-ruff_python_ast = "=0.0.21"
-ruff_text_size = "=0.0.21"
+ruff_python_parser = { version = "=0.0.22", features = ["stacker"] }
+ruff_python_ast = "=0.0.22"
+ruff_text_size = "=0.0.22"
 ```
 
 **Exact version pin.** The ruff crates are pinned with `=` because they make
@@ -49,7 +49,9 @@ anything that resolved dependencies without our `Cargo.lock` failed to compile
 `openjd-expr`. That included downstream users and the cargo-semver-checks step
 in the release-plz workflow. Upgrade all three crates together, review the
 upstream AST changes, and keep `test_parser_work_bound.rs` passing as part of
-each bump.
+each bump. A bump of one crate alone leaves two `ruff_python_ast` versions in
+the dependency graph and fails to compile, so the `ruff` group in
+`.github/dependabot.yml` puts all three in one Dependabot PR.
 
 **`stacker` feature.** With it, the parser grows its stack on the heap once its
 recursion gets deep (see Depth Limit below). Without it, 64 KB of `-` or of

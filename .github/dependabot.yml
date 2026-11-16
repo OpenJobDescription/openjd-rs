@@ -12,9 +12,29 @@ updates:
       day: "monday"
     commit-message:
       prefix: "chore(deps):"
-    # Combine all minor and patch bumps into a single PR. Major bumps do not
-    # match this group and so each get their own individual PR.
+    # Dependabot puts each update in the first group that matches it, so the
+    # lock-step groups come first.
     groups:
+      # crates/openjd-expr pins these three to one exact version, and a bump
+      # of just one of them doesn't compile (two ruff_python_ast versions in
+      # the graph). Dependabot didn't treat the 0.0.21 -> 0.0.22 bumps as
+      # minor or patch (it opened #545, #546 and #547 separately), so this
+      # group has no update-types filter and takes every bump of the three.
+      ruff:
+        patterns:
+          - "ruff_python_parser"
+          - "ruff_python_ast"
+          - "ruff_text_size"
+      # The wasm-bindgen crates release together. After merging, set
+      # WASM_BINDGEN_VERSION in ci.yml to the wasm-bindgen version in
+      # Cargo.lock, or the openjd-for-js job fails (see #480).
+      wasm-bindgen:
+        patterns:
+          - "wasm-bindgen"
+          - "js-sys"
+          - "web-sys"
+      # Combine all other minor and patch bumps into a single PR. Major bumps
+      # do not match this group and so each get their own individual PR.
       cargo-minor-patch:
         patterns:
           - "*"

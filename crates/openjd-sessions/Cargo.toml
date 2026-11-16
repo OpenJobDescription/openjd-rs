@@ -48,7 +48,7 @@ getrandom = "0.4"
 futures-util = "0.3.32"
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.31", features = ["signal", "process", "user", "fs"] }
+nix = { version = "0.32", features = ["signal", "process", "user", "fs"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
@@ -74,7 +74,7 @@ windows = { version = "0.62", features = [
 [build-dependencies]
 # Helper needs nix with "poll" (parent [dependencies] has signal/process/user/fs but not poll)
 [target.'cfg(unix)'.build-dependencies]
-nix = { version = "0.31", features = ["signal", "process", "poll"] }
+nix = { version = "0.32", features = ["signal", "process", "poll"] }
 
 [target.'cfg(windows)'.build-dependencies]
 windows = { version = "0.62", features = [
