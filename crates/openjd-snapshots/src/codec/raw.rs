@@ -26,7 +26,7 @@
 //! These rules hold for serde_json's default number handling, which this
 //! crate uses. Under its `arbitrary_precision` feature, numbers that do not
 //! fit in `u64` or `i64` arrive as a private map that reads as absent, so
-//! `-0` in a signed field (`mtime`, `fileChunkSizeBytes`) reads as absent
+//! `-0` in `fileChunkSizeBytes`, the only signed field, reads as absent
 //! where `Value::as_i64` gives `0`.
 
 use crate::{Result, SnapshotError};

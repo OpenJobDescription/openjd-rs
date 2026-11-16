@@ -362,8 +362,8 @@ All four decoders read their input with the same rules:
 
 These rules assume serde_json's default number handling. A build that turns
 on serde_json's `arbitrary_precision` feature (Cargo unifies features, so a
-dependent crate can) accepts out-of-range numbers, and reads `-0` in a
-signed member (`mtime`, `fileChunkSizeBytes`) as absent instead of `0`.
+dependent crate can) accepts out-of-range numbers, and reads `-0` in
+`fileChunkSizeBytes`, the only signed member, as absent instead of `0`.
 
 Header errors are reported before entry errors, except that v2025 reports
 an unknown `specificationVersion` after its `dirs` and `files` errors.
