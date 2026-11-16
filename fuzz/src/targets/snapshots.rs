@@ -19,12 +19,13 @@ use crate::targets::text_and_control;
 use crate::{known_issue, oracle};
 use arbitrary::Unstructured;
 use openjd_snapshots::{
-    compose_diffs, compose_snapshot_with_diffs, decode_manifest, diff_snapshots,
+    compose_diffs, compose_snapshot_with_diffs, decode_manifest, decode_v2023,
+    decode_v2023_try_for_each_file, decode_v2023_try_for_each_file_from_reader, diff_snapshots,
     encode_abs_snapshot_diff_v2025, encode_abs_snapshot_v2025, encode_snapshot_diff_v2023,
     encode_snapshot_diff_v2025, encode_snapshot_v2023, encode_snapshot_v2025, entries_differ,
     filter_manifest, join_snapshot, partition_manifest, subtree_snapshot, AbsSnapshot,
     AbsSnapshotDiff, DecodedManifest, DiffOptions, FileEntry, IncludeExcludePathsFilter, Manifest,
-    PartitionOptions, SymlinkPolicy,
+    PartitionOptions, SnapshotError, SymlinkPolicy, V2023Summary,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -297,6 +298,7 @@ pub fn decode_text(data: &[u8]) {
     let Some((text, _)) = text_and_control(data) else {
         return;
     };
+    v2023_streaming(text);
     let Ok(decoded) = decode_manifest(text) else {
         return;
     };
@@ -365,8 +367,118 @@ pub fn decode_text(data: &[u8]) {
             }
         }
     }
-    let _ = openjd_snapshots::decode_v2023(text);
     let _ = openjd_snapshots::decode_v2025(text);
+}
+
+/// The streaming v2023 decoders agree with each other and with
+/// `decode_v2023`: when both succeed they give the same entries and totals,
+/// and one fails where the other succeeds only for the documented streaming
+/// differences. Runs on every input, valid or not.
+fn v2023_streaming(text: &str) {
+    let (mut streamed, mut read) = (Vec::new(), Vec::new());
+    let summary = decode_v2023_try_for_each_file(text, |_, e| {
+        streamed.push(e);
+        Ok::<_, SnapshotError>(())
+    });
+    let from_reader = decode_v2023_try_for_each_file_from_reader(text.as_bytes(), |_, e| {
+        read.push(e);
+        Ok::<_, SnapshotError>(())
+    });
+    // The reader form can place a syntax error one column later.
+    fn unplaced(r: &Result<V2023Summary, SnapshotError>) -> Result<V2023Summary, String> {
+        r.as_ref().cloned().map_err(|e| {
+            let e = e.to_string();
+            e.rfind(" at line ")
+                .map_or(e.clone(), |i| e[..i].to_string())
+        })
+    }
+    oracle!(
+        unplaced(&summary) == unplaced(&from_reader) && streamed == read,
+        "decode_v2023_try_for_each_file and _from_reader disagree: {summary:?} vs {from_reader:?}"
+    );
+
+    match (&summary, decode_v2023(text)) {
+        (Ok(s), Ok(m)) => oracle!(
+            streamed == m.files
+                && s.hash_alg == m.hash_alg
+                && s.total_size == m.total_size
+                && s.total_files == m.files.len(),
+            "decode_v2023_try_for_each_file disagrees with decode_v2023"
+        ),
+        (Ok(_), Err(e)) => oracle!(
+            e.to_string().contains("duplicate path: "),
+            "decode_v2023_try_for_each_file accepted what decode_v2023 rejects: {e}"
+        ),
+        (Err(e), Ok(_)) => oracle!(
+            streaming_order_differs(text),
+            "decode_v2023_try_for_each_file rejected what decode_v2023 accepts, with the header before paths and no repeated keys: {e}"
+        ),
+        (Err(s), Err(b)) => {
+            // On valid JSON in an order streaming reads, only the documented
+            // document-order differences may change the message: each
+            // decoder can report a different bad entry, and streaming reports
+            // a bad entry before checking totalSize. Invalid JSON is left
+            // out, since streaming may stop at an earlier error.
+            let (s, b) = (s.to_string(), b.to_string());
+            let entry = |e: &str| {
+                e.contains("path entry missing '")
+                    || e.ends_with("path must not be empty")
+                    || e.contains("expected relative path, got: ")
+            };
+            let comparable = !streaming_order_differs(text)
+                && serde_json::from_str::<serde_json::Value>(text).is_ok();
+            oracle!(
+                !comparable
+                    || s == b
+                    || (entry(&s) && (entry(&b) || b.ends_with("missing or invalid totalSize"))),
+                "decode_v2023_try_for_each_file and decode_v2023 report different errors: {s} vs {b}"
+            );
+        }
+    }
+}
+
+/// Whether the top-level keys are in an order streaming rejects but
+/// `decode_v2023` reads: `manifestVersion` or `hashAlg` missing before the
+/// first `paths` or repeated after it, or `paths` repeated.
+fn streaming_order_differs(text: &str) -> bool {
+    let Ok(TopLevelKeys(keys)) = serde_json::from_str::<TopLevelKeys>(text) else {
+        return false;
+    };
+    let Some(first) = keys.iter().position(|k| k == "paths") else {
+        return false;
+    };
+    let (before, after) = keys.split_at(first);
+    let header = ["manifestVersion", "hashAlg"];
+    header.iter().any(|h| !before.iter().any(|k| k == h))
+        || after[1..]
+            .iter()
+            .any(|k| k == "paths" || header.contains(&k.as_str()))
+}
+
+/// The keys of a top-level JSON object, in document order, repeats included.
+struct TopLevelKeys(Vec<String>);
+
+impl<'de> serde::Deserialize<'de> for TopLevelKeys {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Keys;
+        impl<'de> serde::de::Visitor<'de> for Keys {
+            type Value = TopLevelKeys;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON object")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<TopLevelKeys, A::Error> {
+                let mut keys = Vec::new();
+                while let Some((k, serde::de::IgnoredAny)) = map.next_entry::<String, _>()? {
+                    keys.push(k);
+                }
+                Ok(TopLevelKeys(keys))
+            }
+        }
+        d.deserialize_map(Keys)
+    }
 }
 
 /// A file's content identity: hash, size, symlink target, runnable.

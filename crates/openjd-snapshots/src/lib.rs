@@ -97,10 +97,10 @@ pub mod s3_check_cache;
 mod sqlite_wal;
 
 pub use codec::{
-    decode_manifest, decode_v2023, decode_v2023_as_diff, decode_v2025,
-    encode_abs_snapshot_diff_v2025, encode_abs_snapshot_v2025, encode_snapshot_diff_v2023,
-    encode_snapshot_diff_v2025, encode_snapshot_v2023, encode_snapshot_v2025, DecodedManifest,
-    ManifestFormat,
+    decode_manifest, decode_v2023, decode_v2023_as_diff, decode_v2023_try_for_each_file,
+    decode_v2023_try_for_each_file_from_reader, decode_v2025, encode_abs_snapshot_diff_v2025,
+    encode_abs_snapshot_v2025, encode_snapshot_diff_v2023, encode_snapshot_diff_v2025,
+    encode_snapshot_v2023, encode_snapshot_v2025, DecodedManifest, ManifestFormat, V2023Summary,
 };
 pub use data_cache::{
     AsyncDataCache, CopyResult, FileSystemDataCache, MultipartDataCache, RangeReadDataCache,

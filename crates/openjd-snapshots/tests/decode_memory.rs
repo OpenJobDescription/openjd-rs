@@ -10,9 +10,10 @@
 //! concurrently.
 
 use openjd_snapshots::{
-    decode_manifest, decode_v2023, decode_v2023_as_diff, decode_v2025, encode_snapshot_v2023,
-    encode_snapshot_v2025, FileEntry, HashAlgorithm, Snapshot, DEFAULT_FILE_CHUNK_SIZE,
-    WHOLE_FILE_CHUNK_SIZE,
+    decode_manifest, decode_v2023, decode_v2023_as_diff, decode_v2023_try_for_each_file,
+    decode_v2023_try_for_each_file_from_reader, decode_v2025, encode_snapshot_v2023,
+    encode_snapshot_v2025, FileEntry, HashAlgorithm, Snapshot, SnapshotError,
+    DEFAULT_FILE_CHUNK_SIZE, WHOLE_FILE_CHUNK_SIZE,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
@@ -86,9 +87,10 @@ fn snapshot(n: u64, chunk_size: i64) -> Snapshot {
 
 /// Decoding reads only the fields it needs, in one parse, so its peak heap use
 /// stays a small multiple of the text's size: the parsed fields plus the
-/// manifest's entries built from them.
+/// manifest's entries built from them. The streaming v2023 decoders hold one
+/// entry at a time, so their peak stays under a fixed number of bytes.
 #[test]
-fn decoding_peaks_at_a_small_multiple_of_the_manifest_size() {
+fn decoding_peak_memory_stays_within_its_bounds() {
     // Measured with this test's manifests: 2.6x for v2023 and 3.9x for v2025.
     // Decoding through a `Value` tree peaks at 7.8x and 9.7x, and
     // `decode_manifest` parsing twice at 13.7x and 16.4x. The limits leave
@@ -151,6 +153,34 @@ fn decoding_peaks_at_a_small_multiple_of_the_manifest_size() {
             "{name} peaked at {:.2}x the manifest size, over the {limit}x limit\n{}",
             ratio(text, peak),
             report.join("\n")
+        );
+    }
+
+    // Streaming keeps one entry at a time, so its peak does not depend on the
+    // number of entries: it is measured in bytes, not as a ratio.
+    const STREAM_LIMIT: usize = 16 * 1024;
+    let ignore = |_: HashAlgorithm, _: FileEntry| Ok::<_, SnapshotError>(());
+    let streamed = [
+        (
+            "decode_v2023_try_for_each_file",
+            peak_during(|| decode_v2023_try_for_each_file(&v2023, ignore).unwrap()),
+        ),
+        (
+            "decode_v2023_try_for_each_file_from_reader",
+            peak_during(|| {
+                let reader = std::io::BufReader::new(v2023.as_bytes());
+                decode_v2023_try_for_each_file_from_reader(reader, ignore).unwrap()
+            }),
+        ),
+    ];
+    for (name, peak) in streamed {
+        println!(
+            "{name}: peak {peak} bytes for {} bytes of text",
+            v2023.len()
+        );
+        assert!(
+            peak <= STREAM_LIMIT,
+            "{name} peaked at {peak} bytes, over the {STREAM_LIMIT} byte limit"
         );
     }
 }
