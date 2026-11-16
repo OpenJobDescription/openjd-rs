@@ -387,7 +387,7 @@ fn v2023_streaming(text: &str) {
     });
     // The reader form can place a syntax error one column later.
     fn unplaced(r: &Result<V2023Summary, SnapshotError>) -> Result<V2023Summary, String> {
-        r.as_ref().copied().map_err(|e| {
+        r.as_ref().cloned().map_err(|e| {
             let e = e.to_string();
             e.rfind(" at line ")
                 .map_or(e.clone(), |i| e[..i].to_string())
@@ -403,7 +403,7 @@ fn v2023_streaming(text: &str) {
             streamed == m.files
                 && s.hash_alg == m.hash_alg
                 && s.total_size == m.total_size
-                && s.file_count == m.files.len() as u64,
+                && s.total_files == m.files.len(),
             "decode_v2023_try_for_each_file disagrees with decode_v2023"
         ),
         (Ok(_), Err(e)) => oracle!(

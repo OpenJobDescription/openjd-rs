@@ -406,7 +406,7 @@ When changing decoding code:
 pub struct V2023Summary {
     pub hash_alg: HashAlgorithm,
     pub total_size: u64,
-    pub file_count: u64,
+    pub total_files: usize,
 }
 
 pub fn decode_v2023_try_for_each_file<F, E>(json: &str, f: F) -> Result<V2023Summary, E>
@@ -431,16 +431,19 @@ reader). Memory does grow with the largest entry and the longest string:
 normalizing a path while building its `FileEntry` can take over ten times
 the path's length, serde_json unescapes a string that contains escapes into
 a buffer even when the member is not used, and the reader form copies every
-string, used or not, into that buffer as it reads it. The summary returned holds the hash
-algorithm, the recorded `totalSize`, and the number of entries delivered. There is no v2025
-equivalent.
+string, used or not, into that buffer as it reads it. The summary returned
+holds the hash algorithm, the recorded `totalSize`, and the number of entries
+delivered. There is no v2025 equivalent.
 
 The callback's error type `E` is the function's error type: an error the
 callback returns stops the decode and is returned unchanged, and decode
 errors are converted with `From<SnapshotError>`. Unless the callback
 returns an `Err` of a concrete type somewhere, it has to name `E`, as in
 `Ok::<_, SnapshotError>(())`, since `?` inside it converts into any `E`.
-The reader form reads the text as it parses (pass it a buffered reader), and returns read errors as `SnapshotError::Io`.
+The reader form reads the text as it parses (pass it a buffered reader), and
+returns read errors as `SnapshotError::Io`. After the manifest's closing `}`
+it reads on to the end of input, to reject trailing text, so it does not
+return until the reader reports end of input.
 
 Values are read, each entry checked, and errors worded as `decode_v2023`
 does, with these differences, which streaming requires:

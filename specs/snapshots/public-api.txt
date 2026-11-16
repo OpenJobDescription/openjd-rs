@@ -20,8 +20,8 @@ pub fn openjd_snapshots::codec::ManifestFormat::fmt(&self, &mut core::fmt::Forma
 impl core::marker::Copy for openjd_snapshots::codec::ManifestFormat
 impl core::marker::StructuralPartialEq for openjd_snapshots::codec::ManifestFormat
 #[non_exhaustive] pub struct openjd_snapshots::codec::V2023Summary
-pub openjd_snapshots::codec::V2023Summary::file_count: u64
 pub openjd_snapshots::codec::V2023Summary::hash_alg: openjd_snapshots::hash::HashAlgorithm
+pub openjd_snapshots::codec::V2023Summary::total_files: usize
 pub openjd_snapshots::codec::V2023Summary::total_size: u64
 impl core::clone::Clone for openjd_snapshots::codec::V2023Summary
 pub fn openjd_snapshots::codec::V2023Summary::clone(&self) -> openjd_snapshots::codec::V2023Summary
@@ -30,7 +30,6 @@ impl core::cmp::PartialEq for openjd_snapshots::codec::V2023Summary
 pub fn openjd_snapshots::codec::V2023Summary::eq(&self, &openjd_snapshots::codec::V2023Summary) -> bool
 impl core::fmt::Debug for openjd_snapshots::codec::V2023Summary
 pub fn openjd_snapshots::codec::V2023Summary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for openjd_snapshots::codec::V2023Summary
 impl core::marker::StructuralPartialEq for openjd_snapshots::codec::V2023Summary
 pub fn openjd_snapshots::codec::decode_manifest(&str) -> openjd_snapshots::error::Result<openjd_snapshots::codec::DecodedManifest>
 pub fn openjd_snapshots::codec::decode_v2023(&str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
@@ -1246,8 +1245,8 @@ pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::default() -> openjd
 impl core::fmt::Debug for openjd_snapshots::ops::hash_upload::UploadStatistics
 pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 #[non_exhaustive] pub struct openjd_snapshots::V2023Summary
-pub openjd_snapshots::V2023Summary::file_count: u64
 pub openjd_snapshots::V2023Summary::hash_alg: openjd_snapshots::hash::HashAlgorithm
+pub openjd_snapshots::V2023Summary::total_files: usize
 pub openjd_snapshots::V2023Summary::total_size: u64
 impl core::clone::Clone for openjd_snapshots::codec::V2023Summary
 pub fn openjd_snapshots::codec::V2023Summary::clone(&self) -> openjd_snapshots::codec::V2023Summary
@@ -1256,7 +1255,6 @@ impl core::cmp::PartialEq for openjd_snapshots::codec::V2023Summary
 pub fn openjd_snapshots::codec::V2023Summary::eq(&self, &openjd_snapshots::codec::V2023Summary) -> bool
 impl core::fmt::Debug for openjd_snapshots::codec::V2023Summary
 pub fn openjd_snapshots::codec::V2023Summary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for openjd_snapshots::codec::V2023Summary
 impl core::marker::StructuralPartialEq for openjd_snapshots::codec::V2023Summary
 pub const openjd_snapshots::DEFAULT_FILE_CHUNK_SIZE: i64
 pub const openjd_snapshots::DEFAULT_S3_MULTIPART_PART_SIZE: usize

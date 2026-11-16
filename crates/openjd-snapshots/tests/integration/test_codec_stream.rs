@@ -2,10 +2,11 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-//! `decode_v2023_try_for_each_file` and `decode_v2023_try_for_each_file_from_reader`: they
-//! deliver the entries `decode_v2023` builds, with its error messages, and
-//! differ from it only where streaming must (key order, document-order
-//! errors, no duplicate-path check).
+//! `decode_v2023_try_for_each_file` and
+//! `decode_v2023_try_for_each_file_from_reader`: they deliver the entries
+//! `decode_v2023` builds, with its error messages, and differ from it only
+//! where streaming must (key order, document-order errors, no duplicate-path
+//! check).
 
 use openjd_snapshots::{
     decode_v2023, decode_v2023_try_for_each_file, decode_v2023_try_for_each_file_from_reader,
@@ -87,7 +88,7 @@ fn delivers_the_entries_decode_v2023_builds_in_order() {
     assert_eq!(entries, batch.files);
     assert_eq!(summary.hash_alg, batch.hash_alg);
     assert_eq!(summary.total_size, batch.total_size);
-    assert_eq!(summary.file_count, 50);
+    assert_eq!(summary.total_files, 50);
 }
 
 #[test]
@@ -403,7 +404,7 @@ fn duplicate_paths_are_not_checked() {
     let json = v2023(&format!("[{ENTRY},{ENTRY}]"), "");
     let (entries, summary) = stream(&json).unwrap();
     assert_eq!(entries.len(), 2);
-    assert_eq!(summary.file_count, 2);
+    assert_eq!(summary.total_files, 2);
     assert_eq!(
         decode_v2023(&json).unwrap_err().to_string(),
         "Manifest validation error: duplicate path: a.txt"
@@ -414,7 +415,7 @@ fn duplicate_paths_are_not_checked() {
 
 #[derive(Debug, PartialEq)]
 enum AppError {
-    Full(String),
+    Rejected(String),
     Decode(String),
 }
 
@@ -433,10 +434,10 @@ fn a_callback_error_stops_the_decode_and_is_returned_unchanged() {
     let mut seen = 0;
     let err = decode_v2023_try_for_each_file(&json, |_, e| {
         seen += 1;
-        Err(AppError::Full(e.path))
+        Err(AppError::Rejected(e.path))
     })
     .unwrap_err();
-    assert_eq!(err, AppError::Full("a.txt".into()));
+    assert_eq!(err, AppError::Rejected("a.txt".into()));
     assert_eq!(seen, 1);
 }
 

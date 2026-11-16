@@ -17,7 +17,7 @@
 
 use super::raw::{self, RawV2023Path, Read};
 use super::{
-    parse_hash_alg, v2023_file_entry, v2023_invalid_paths, v2023_read_total_size, v2023_version,
+    check_v2023_version, invalid_paths_error, parse_hash_alg, require_total_size, v2023_file_entry,
     V2023Summary,
 };
 use crate::hash::HashAlgorithm;
@@ -32,7 +32,7 @@ fn missing_before_paths(key: &str) -> SnapshotError {
 }
 
 /// The error for a header key that appears after `paths`.
-fn after_paths(key: &str) -> SnapshotError {
+fn key_after_paths(key: &str) -> SnapshotError {
     SnapshotError::Validation(format!("{key} must come before paths"))
 }
 
@@ -46,7 +46,7 @@ where
     let mut failure = None;
     let mut de = serde_json::Deserializer::new(read);
     let parsed = Document {
-        f: &mut f,
+        callback: &mut f,
         failure: &mut failure,
     }
     .deserialize(&mut de)
@@ -68,6 +68,8 @@ fn json_error(e: serde_json::Error) -> SnapshotError {
 }
 
 /// Puts `e` in the failure slot and returns the error that stops the parse.
+/// `decode` returns the slot's error in its place, so the placeholder text is
+/// never shown.
 fn stop<E, Er: de::Error>(failure: &mut Option<E>, e: E) -> Er {
     *failure = Some(e);
     Er::custom("decode stopped")
@@ -75,31 +77,31 @@ fn stop<E, Er: de::Error>(failure: &mut Option<E>, e: E) -> Er {
 
 /// Top-level members read so far.
 #[derive(Default)]
-struct Header {
+struct TopLevel {
     has_manifest_version: bool,
     has_hash_alg: bool,
     manifest_version: Option<String>,
     hash_alg: Option<String>,
     total_size: Option<u64>,
     /// Set once `paths` has been read.
-    paths: Option<PathsRead>,
-    file_count: u64,
+    paths: Option<PathsSeen>,
+    total_files: usize,
 }
 
-struct PathsRead {
+struct PathsSeen {
     hash_alg: HashAlgorithm,
     /// Whether `paths` was an array.
     was_array: bool,
 }
 
-impl Header {
+impl TopLevel {
     /// Checks the header read so far when `paths` arrives, in
     /// `decode_v2023`'s order.
     fn check_before_paths(&self) -> crate::Result<HashAlgorithm> {
         if !self.has_manifest_version {
             return Err(missing_before_paths("manifestVersion"));
         }
-        v2023_version(self.manifest_version.as_deref())?;
+        check_v2023_version(self.manifest_version.as_deref())?;
         if !self.has_hash_alg {
             return Err(missing_before_paths("hashAlg"));
         }
@@ -111,25 +113,25 @@ impl Header {
         let hash_alg = match &self.paths {
             Some(p) => p.hash_alg,
             None => {
-                v2023_version(self.manifest_version.as_deref())?;
+                check_v2023_version(self.manifest_version.as_deref())?;
                 parse_hash_alg(self.hash_alg.as_deref())?
             }
         };
-        let total_size = v2023_read_total_size(self.total_size)?;
+        let total_size = require_total_size(self.total_size)?;
         if !self.paths.is_some_and(|p| p.was_array) {
-            return Err(v2023_invalid_paths());
+            return Err(invalid_paths_error());
         }
         Ok(V2023Summary {
             hash_alg,
             total_size,
-            file_count: self.file_count,
+            total_files: self.total_files,
         })
     }
 }
 
 #[derive(serde::Deserialize)]
 #[serde(field_identifier, rename_all = "camelCase")]
-enum Key {
+enum TopLevelKey {
     ManifestVersion,
     HashAlg,
     TotalSize,
@@ -164,7 +166,7 @@ macro_rules! scalars_read_as {
 
 /// The whole document. A value that is not an object has no members.
 struct Document<'a, F, E> {
-    f: &'a mut F,
+    callback: &'a mut F,
     failure: &'a mut Option<E>,
 }
 
@@ -173,9 +175,9 @@ where
     F: FnMut(HashAlgorithm, FileEntry) -> Result<(), E>,
     E: From<SnapshotError>,
 {
-    type Value = Header;
+    type Value = TopLevel;
 
-    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<Header, D::Error> {
+    fn deserialize<D: Deserializer<'de>>(self, d: D) -> Result<TopLevel, D::Error> {
         d.deserialize_any(self)
     }
 }
@@ -185,39 +187,44 @@ where
     F: FnMut(HashAlgorithm, FileEntry) -> Result<(), E>,
     E: From<SnapshotError>,
 {
-    type Value = Header;
+    type Value = TopLevel;
 
+    // Every value type serde_json produces has a visit method here, so this
+    // text never appears in an error.
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("a v2023 manifest")
     }
 
-    scalars_read_as!(Header::default());
+    scalars_read_as!(TopLevel::default());
 
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Header, A::Error> {
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<TopLevel, A::Error> {
         while seq.next_element::<Read<()>>()?.is_some() {}
-        Ok(Header::default())
+        Ok(TopLevel::default())
     }
 
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Header, A::Error> {
-        let mut h = Header::default();
-        while let Some(key) = map.next_key::<Key>()? {
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<TopLevel, A::Error> {
+        let mut h = TopLevel::default();
+        while let Some(key) = map.next_key::<TopLevelKey>()? {
             match key {
-                Key::ManifestVersion if h.paths.is_some() => {
-                    return Err(stop(self.failure, after_paths("manifestVersion").into()));
+                TopLevelKey::ManifestVersion if h.paths.is_some() => {
+                    return Err(stop(
+                        self.failure,
+                        key_after_paths("manifestVersion").into(),
+                    ));
                 }
-                Key::HashAlg if h.paths.is_some() => {
-                    return Err(stop(self.failure, after_paths("hashAlg").into()));
+                TopLevelKey::HashAlg if h.paths.is_some() => {
+                    return Err(stop(self.failure, key_after_paths("hashAlg").into()));
                 }
-                Key::ManifestVersion => {
+                TopLevelKey::ManifestVersion => {
                     h.has_manifest_version = true;
                     h.manifest_version = raw::value(&mut map)?;
                 }
-                Key::HashAlg => {
+                TopLevelKey::HashAlg => {
                     h.has_hash_alg = true;
                     h.hash_alg = raw::value(&mut map)?;
                 }
-                Key::TotalSize => h.total_size = raw::value(&mut map)?,
-                Key::Paths => {
+                TopLevelKey::TotalSize => h.total_size = raw::value(&mut map)?,
+                TopLevelKey::Paths => {
                     if h.paths.is_some() {
                         let e = SnapshotError::Validation("paths appears more than once".into());
                         return Err(stop(self.failure, e.into()));
@@ -228,16 +235,16 @@ where
                     };
                     let was_array = map.next_value_seed(Paths {
                         hash_alg,
-                        f: &mut *self.f,
+                        callback: &mut *self.callback,
                         failure: &mut *self.failure,
-                        count: &mut h.file_count,
+                        count: &mut h.total_files,
                     })?;
-                    h.paths = Some(PathsRead {
+                    h.paths = Some(PathsSeen {
                         hash_alg,
                         was_array,
                     });
                 }
-                Key::Other => raw::value::<A, ()>(&mut map)?,
+                TopLevelKey::Other => raw::value::<A, ()>(&mut map)?,
             }
         }
         Ok(h)
@@ -248,9 +255,9 @@ where
 /// element has been passed to the callback.
 struct Paths<'a, F, E> {
     hash_alg: HashAlgorithm,
-    f: &'a mut F,
+    callback: &'a mut F,
     failure: &'a mut Option<E>,
-    count: &'a mut u64,
+    count: &'a mut usize,
 }
 
 impl<'de, F, E> DeserializeSeed<'de> for Paths<'_, F, E>
@@ -272,6 +279,7 @@ where
 {
     type Value = bool;
 
+    // As for `Document`, this text never appears in an error.
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str("an array of v2023 path entries")
     }
@@ -291,7 +299,7 @@ where
                 Ok(entry) => entry,
                 Err(e) => return Err(stop(self.failure, e.into())),
             };
-            if let Err(e) = (self.f)(self.hash_alg, entry) {
+            if let Err(e) = (self.callback)(self.hash_alg, entry) {
                 return Err(stop(self.failure, e));
             }
             *self.count += 1;

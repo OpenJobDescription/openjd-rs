@@ -439,9 +439,10 @@ pub fn decode_v2023_as_diff(json: &str) -> Result<SnapshotDiff> {
     decode_v2023_raw(raw::parse(json)?)
 }
 
-/// What [`decode_v2023_try_for_each_file`] read from a v2023 manifest besides
-/// its entries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// What [`decode_v2023_try_for_each_file`] and
+/// [`decode_v2023_try_for_each_file_from_reader`] read from a v2023 manifest
+/// besides its entries.
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct V2023Summary {
     /// The manifest's `hashAlg`.
@@ -449,7 +450,7 @@ pub struct V2023Summary {
     /// The manifest's `totalSize`, as written (it is not recomputed).
     pub total_size: u64,
     /// The number of entries passed to the callback.
-    pub file_count: u64,
+    pub total_files: usize,
 }
 
 /// Decode v2023 JSON one entry at a time, without building the manifest.
@@ -500,7 +501,7 @@ pub struct V2023Summary {
 /// - Paths are not checked for duplicates, since that needs every path at
 ///   once. [`decode_v2023`] rejects a manifest that lists a path twice.
 ///
-/// # Example
+/// # Examples
 ///
 /// ```
 /// use openjd_snapshots::{decode_v2023_try_for_each_file, SnapshotError};
@@ -530,8 +531,8 @@ where
     stream::decode(serde_json::de::StrRead::new(json), f)
 }
 
-/// [`decode_v2023_try_for_each_file`], reading the JSON from `reader`, so the
-/// text is never held in memory as a whole.
+/// Like [`decode_v2023_try_for_each_file`], but reads the JSON from `reader`,
+/// so the text is never held in memory as a whole.
 ///
 /// The reader is read a byte at a time, so pass a buffered one, such as a
 /// [`std::io::BufReader`]. A read error is returned as [`SnapshotError::Io`].
@@ -559,10 +560,10 @@ where
 /// kind (`Full` or `Diff`); v2023 never produces deleted entries so either
 /// choice is equally valid at runtime.
 fn decode_v2023_raw<K: ValidateKind>(raw: raw::RawManifest) -> Result<Manifest<Rel, K>> {
-    v2023_version(raw.manifest_version.as_deref())?;
+    check_v2023_version(raw.manifest_version.as_deref())?;
     let hash_alg = parse_hash_alg(raw.hash_alg.as_deref())?;
-    let total_size = v2023_read_total_size(raw.total_size)?;
-    let raw_paths = raw.paths.ok_or_else(v2023_invalid_paths)?;
+    let total_size = require_total_size(raw.total_size)?;
+    let raw_paths = raw.paths.ok_or_else(invalid_paths_error)?;
 
     // Sized up front: collecting `Result`s would grow the vector by doubling.
     let mut files = Vec::with_capacity(raw_paths.len());
@@ -578,7 +579,7 @@ fn decode_v2023_raw<K: ValidateKind>(raw: raw::RawManifest) -> Result<Manifest<R
 }
 
 /// Checks a v2023 document's `manifestVersion`.
-fn v2023_version(manifest_version: Option<&str>) -> Result<()> {
+fn check_v2023_version(manifest_version: Option<&str>) -> Result<()> {
     let version = manifest_version
         .ok_or_else(|| SnapshotError::Validation("missing manifestVersion".into()))?;
     if version != V2023_MANIFEST_VERSION {
@@ -589,11 +590,11 @@ fn v2023_version(manifest_version: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn v2023_read_total_size(total_size: Option<u64>) -> Result<u64> {
+fn require_total_size(total_size: Option<u64>) -> Result<u64> {
     total_size.ok_or_else(|| SnapshotError::Validation("missing or invalid totalSize".into()))
 }
 
-fn v2023_invalid_paths() -> SnapshotError {
+fn invalid_paths_error() -> SnapshotError {
     SnapshotError::Validation("missing or invalid paths".into())
 }
 
