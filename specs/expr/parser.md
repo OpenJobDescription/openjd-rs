@@ -36,9 +36,9 @@ reproducers with a time bound, so a parser bump that brings the behavior back
 fails CI.
 
 ```toml
-ruff_python_parser = { version = "=0.0.21", features = ["stacker"] }
-ruff_python_ast = "=0.0.21"
-ruff_text_size = "=0.0.21"
+ruff_python_parser = { version = "=0.0.22", features = ["stacker"] }
+ruff_python_ast = "=0.0.22"
+ruff_text_size = "=0.0.22"
 ```
 
 **Exact version pin.** The ruff crates are pinned with `=` because they make
@@ -50,6 +50,22 @@ anything that resolved dependencies without our `Cargo.lock` failed to compile
 in the release-plz workflow. Upgrade all three crates together, review the
 upstream AST changes, and keep `test_parser_work_bound.rs` passing as part of
 each bump.
+
+**Bumping the ruff crates.**
+
+- Bump all three together. A bump of one alone leaves two versions of a ruff
+  crate in the dependency graph and fails to compile. The `ruff` group in
+  `.github/dependabot.yml` puts all three in one Dependabot PR.
+- Title the PR `chore!: ...` or `fix(expr)!: ...`. Every bump is a breaking
+  change for openjd-expr, because `ExpressionError::with_node` takes a
+  `ruff_python_ast` node (see [public-api.md](public-api.md)). Don't use
+  `chore(deps)!:`, which is Dependabot's prefix: `release-plz.toml` leaves
+  `chore(deps)` commits out of the changelog, `!` or not.
+- In the release PR, give openjd-model and openjd-sessions breaking bumps
+  too. Their public APIs carry openjd-expr types (for example
+  `ModelError::Expression` and `SymbolTable` parameters), and release-plz
+  bumps a crate that the commit doesn't touch only by a patch, even when a
+  local dependency took a breaking bump.
 
 **`stacker` feature.** With it, the parser grows its stack on the heap once its
 recursion gets deep (see Depth Limit below). Without it, 64 KB of `-` or of
