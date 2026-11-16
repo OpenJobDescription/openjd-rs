@@ -132,11 +132,36 @@ fn header_errors_match_decode_v2023() {
             "missing or invalid paths",
         ),
         (
+            r#"{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":{"a":[1,{"b":2}],"c":"d"},"totalSize":0}"#,
+            "missing or invalid paths",
+        ),
+        (
+            r#"{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":5,"totalSize":0}"#,
+            "missing or invalid paths",
+        ),
+        (
+            r#"{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":null,"totalSize":0}"#,
+            "missing or invalid paths",
+        ),
+        (
+            r#"{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":"x","totalSize":0}"#,
+            "missing or invalid paths",
+        ),
+        // totalSize is checked before paths, as decode_v2023 checks it.
+        (
+            r#"{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":5,"totalSize":"0"}"#,
+            "missing or invalid totalSize",
+        ),
+        (
             r#"{"hashAlg":"xxh128","totalSize":0}"#,
             "missing manifestVersion",
         ),
         (r#"{"manifestVersion":"2023-03-03"}"#, "missing hashAlg"),
         ("[]", "missing manifestVersion"),
+        (
+            r#"[1,{"manifestVersion":"2023-03-03"},[true]]"#,
+            "missing manifestVersion",
+        ),
         ("7", "missing manifestVersion"),
     ];
     for (json, message) in cases {
@@ -203,6 +228,13 @@ fn invalid_json_anywhere_is_rejected() {
             &v2023("[]", r#","extra":1e400"#),
             "number out of range at line 1 column 89",
         ),
+        // Values that are skipped are still parsed in full: in a top-level
+        // array, and in a paths value that is not an array.
+        ("[1,1e400]", "number out of range at line 1 column 8"),
+        (
+            &v2023(r#"{"a":1e400}"#, ""),
+            "number out of range at line 1 column 69",
+        ),
     ];
     for (json, message) in cases {
         assert_eq!(
@@ -217,19 +249,42 @@ fn invalid_json_anywhere_is_rejected() {
 
 #[test]
 fn the_header_must_come_before_paths() {
-    let expected = "Manifest validation error: manifestVersion and hashAlg must come before paths";
-    for json in [
-        r#"{"paths":[],"hashAlg":"xxh128","manifestVersion":"2023-03-03","totalSize":0}"#,
-        r#"{"hashAlg":"xxh128","paths":[],"manifestVersion":"2023-03-03","totalSize":0}"#,
-        r#"{"manifestVersion":"2023-03-03","paths":[],"hashAlg":"xxh128","totalSize":0}"#,
+    let cases = [
+        (
+            r#"{"paths":[],"hashAlg":"xxh128","manifestVersion":"2023-03-03","totalSize":0}"#,
+            "missing manifestVersion before paths",
+        ),
+        (
+            r#"{"hashAlg":"xxh128","paths":[],"manifestVersion":"2023-03-03","totalSize":0}"#,
+            "missing manifestVersion before paths",
+        ),
+        (
+            r#"{"manifestVersion":"2023-03-03","paths":[],"hashAlg":"xxh128","totalSize":0}"#,
+            "missing hashAlg before paths",
+        ),
+        // Without the key at all, streaming cannot tell whether it comes
+        // later, so the message says where it was expected.
+        (
+            r#"{"hashAlg":"xxh128","paths":[],"totalSize":0}"#,
+            "missing manifestVersion before paths",
+        ),
+        (r#"{"paths":5}"#, "missing manifestVersion before paths"),
         // A header key repeated after paths could change what was delivered.
-        &v2023("[]", r#","hashAlg":"xxh128""#),
-        &v2023("[]", r#","manifestVersion":"2023-03-03""#),
-        // Without the key at all, streaming cannot tell it is missing until
-        // the end, so it reports the order.
-        r#"{"hashAlg":"xxh128","paths":[],"totalSize":0}"#,
-    ] {
-        assert_eq!(stream_err(json), expected, "{json}");
+        (
+            &v2023("[]", r#","hashAlg":"xxh128""#),
+            "hashAlg must come before paths",
+        ),
+        (
+            &v2023("[]", r#","manifestVersion":"2023-03-03""#),
+            "manifestVersion must come before paths",
+        ),
+    ];
+    for (json, message) in cases {
+        assert_eq!(
+            stream_err(json),
+            format!("Manifest validation error: {message}"),
+            "{json}"
+        );
     }
     // decode_v2023 reads the same reordered document.
     let reordered = format!(
@@ -267,6 +322,53 @@ fn errors_are_reported_in_document_order() {
     assert_eq!(
         decode_v2023(json).unwrap_err().to_string(),
         "Manifest validation error: missing or invalid totalSize"
+    );
+}
+
+#[test]
+fn an_error_ahead_of_a_repeated_key_is_reported() {
+    // decode_v2023 takes the last value of each key and accepts both, but
+    // streaming checks what it has read when it reaches it.
+    let cases = [
+        (
+            r#"{"hashAlg":"xxh128","manifestVersion":"bad","paths":[],"manifestVersion":"2023-03-03","totalSize":0}"#,
+            "expected manifestVersion '2023-03-03', got 'bad'",
+        ),
+        (
+            r#"{"hashAlg":"md5","manifestVersion":"2023-03-03","paths":[],"hashAlg":"xxh128","totalSize":0}"#,
+            "Unsupported hash algorithm: md5",
+        ),
+        (
+            r#"{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":[{"hash":"h"}],"paths":[],"totalSize":0}"#,
+            "path entry missing 'path'",
+        ),
+    ];
+    for (json, message) in cases {
+        assert_eq!(
+            stream_err(json),
+            format!("Manifest validation error: {message}"),
+            "{json}"
+        );
+        assert!(decode_v2023(json).is_ok(), "{json}");
+    }
+}
+
+#[test]
+fn the_first_bad_entry_is_reported() {
+    // Streaming checks each entry in full before reading the next.
+    // decode_v2023 reports the first entry missing a member before its
+    // other checks.
+    let json = v2023(
+        r#"[{"hash":"a","mtime":1,"path":"/abs","size":1},{"mtime":1,"path":"b","size":1}]"#,
+        "",
+    );
+    assert_eq!(
+        stream_err(&json),
+        "Manifest validation error: expected relative path, got: /abs"
+    );
+    assert_eq!(
+        decode_v2023(&json).unwrap_err().to_string(),
+        "Manifest validation error: path entry missing 'hash'"
     );
 }
 

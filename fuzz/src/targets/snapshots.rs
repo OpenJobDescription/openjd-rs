@@ -25,7 +25,7 @@ use openjd_snapshots::{
     encode_snapshot_diff_v2025, encode_snapshot_v2023, encode_snapshot_v2025, entries_differ,
     filter_manifest, join_snapshot, partition_manifest, subtree_snapshot, AbsSnapshot,
     AbsSnapshotDiff, DecodedManifest, DiffOptions, FileEntry, IncludeExcludePathsFilter, Manifest,
-    PartitionOptions, SnapshotError, SymlinkPolicy,
+    PartitionOptions, SnapshotError, SymlinkPolicy, V2023Summary,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -299,6 +299,7 @@ pub fn decode_text(data: &[u8]) {
     let Some((text, _)) = text_and_control(data) else {
         return;
     };
+    v2023_streaming(text);
     let Ok(decoded) = decode_manifest(text) else {
         return;
     };
@@ -367,14 +368,13 @@ pub fn decode_text(data: &[u8]) {
             }
         }
     }
-    v2023_streaming(text);
     let _ = openjd_snapshots::decode_v2025(text);
 }
 
 /// The streaming v2023 decoders agree with each other and with
 /// `decode_v2023`: when both succeed they give the same entries and totals,
 /// and one fails where the other succeeds only for the documented streaming
-/// differences.
+/// differences. Runs on every input, valid or not.
 fn v2023_streaming(text: &str) {
     let (mut streamed, mut read) = (Vec::new(), Vec::new());
     let summary = decode_v2023_for_each(text, |_, e| {
@@ -385,8 +385,16 @@ fn v2023_streaming(text: &str) {
         read.push(e);
         Ok::<_, SnapshotError>(())
     });
+    // The reader form can place a syntax error one column later.
+    fn unplaced(r: &Result<V2023Summary, SnapshotError>) -> Result<V2023Summary, String> {
+        r.as_ref().copied().map_err(|e| {
+            let e = e.to_string();
+            e.rfind(" at line ")
+                .map_or(e.clone(), |i| e[..i].to_string())
+        })
+    }
     oracle!(
-        summary.as_ref().ok() == from_reader.as_ref().ok() && streamed == read,
+        unplaced(&summary) == unplaced(&from_reader) && streamed == read,
         "decode_v2023_for_each and _from_reader disagree: {summary:?} vs {from_reader:?}"
     );
 
@@ -402,15 +410,55 @@ fn v2023_streaming(text: &str) {
             e.to_string().contains("duplicate path: "),
             "decode_v2023_for_each accepted what decode_v2023 rejects: {e}"
         ),
-        (Err(e), Ok(_)) => {
-            let e = e.to_string();
-            oracle!(
-                e.ends_with("manifestVersion and hashAlg must come before paths")
-                    || e.ends_with("paths appears more than once"),
-                "decode_v2023_for_each rejected what decode_v2023 accepts: {e}"
-            )
-        }
+        (Err(e), Ok(_)) => oracle!(
+            streaming_order_differs(text),
+            "decode_v2023_for_each rejected what decode_v2023 accepts, with the header before paths and no repeated keys: {e}"
+        ),
         (Err(_), Err(_)) => {}
+    }
+}
+
+/// Whether the top-level keys are in an order streaming rejects but
+/// `decode_v2023` reads: `manifestVersion` or `hashAlg` missing before the
+/// first `paths` or repeated after it, or `paths` repeated.
+fn streaming_order_differs(text: &str) -> bool {
+    let Ok(TopLevelKeys(keys)) = serde_json::from_str::<TopLevelKeys>(text) else {
+        return false;
+    };
+    let Some(first) = keys.iter().position(|k| k == "paths") else {
+        return false;
+    };
+    let (before, after) = keys.split_at(first);
+    let header = ["manifestVersion", "hashAlg"];
+    header.iter().any(|h| !before.iter().any(|k| k == h))
+        || after[1..]
+            .iter()
+            .any(|k| k == "paths" || header.contains(&k.as_str()))
+}
+
+/// The keys of a top-level JSON object, in document order, repeats included.
+struct TopLevelKeys(Vec<String>);
+
+impl<'de> serde::Deserialize<'de> for TopLevelKeys {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Keys;
+        impl<'de> serde::de::Visitor<'de> for Keys {
+            type Value = TopLevelKeys;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a JSON object")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<TopLevelKeys, A::Error> {
+                let mut keys = Vec::new();
+                while let Some((k, serde::de::IgnoredAny)) = map.next_entry::<String, _>()? {
+                    keys.push(k);
+                }
+                Ok(TopLevelKeys(keys))
+            }
+        }
+        d.deserialize_map(Keys)
     }
 }
 

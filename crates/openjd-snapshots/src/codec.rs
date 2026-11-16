@@ -9,7 +9,9 @@
 //! - **v2023** — **Stable.** The on-disk format used by AWS Deadline Cloud's
 //!   job attachments. Identified on disk by `"manifestVersion": "2023-03-03"`.
 //!   Entry points: [`encode_snapshot_v2023`], [`encode_snapshot_diff_v2023`],
-//!   [`decode_v2023`], [`decode_v2023_as_diff`].
+//!   [`decode_v2023`], [`decode_v2023_as_diff`], and, to read the entries
+//!   one at a time without building the manifest, [`decode_v2023_for_each`]
+//!   and [`decode_v2023_for_each_from_reader`].
 //! - **v2025** — **Experimental draft.** A proposed evolution adding diffs,
 //!   explicit directories, symlinks, and file chunking. Identified on disk by
 //!   `specificationVersion` strings that include the `beta-2025-12` tag. The
@@ -453,28 +455,41 @@ pub struct V2023Summary {
 /// Decode v2023 JSON one entry at a time, without building the manifest.
 ///
 /// Each element of `paths` is turned into a [`FileEntry`] and passed to `f`,
-/// with the manifest's hash algorithm, as soon as it is parsed. Memory use
-/// beyond `json` itself stays constant, whatever the number of entries. On
-/// success, returns the manifest's [`V2023Summary`].
+/// with the manifest's hash algorithm, as soon as it is parsed. On success,
+/// returns the manifest's [`V2023Summary`].
+///
+/// Memory use beyond `json` itself does not depend on the number of
+/// entries: one entry is held at a time. It does grow with the largest entry,
+/// since building a [`FileEntry`] normalizes its path, which can take about
+/// ten times the path's length while it runs.
 ///
 /// To stop early, return an error from `f`; it is returned unchanged. Decode
 /// errors are converted into `E` with `From<SnapshotError>`, so `E` can be
-/// [`SnapshotError`] itself, or an application error type.
+/// [`SnapshotError`] itself, or an application error type. When `f` never
+/// returns an error itself, name the type in its result, as in
+/// `Ok::<_, SnapshotError>(())`, since nothing else determines `E`.
 ///
-/// Values are read as [`decode_v2023`] reads them, entries are checked the
-/// same way, and errors have the same messages, with these differences:
+/// Values are read as [`decode_v2023`] reads them, each entry is checked as
+/// it checks entries, and errors have its messages, with these differences:
 ///
-/// - `manifestVersion` and `hashAlg` must come before `paths`, as every
-///   v2023 writer puts them (keys are sorted). Otherwise the error is
-///   `manifestVersion and hashAlg must come before paths`. A repeated `paths`
-///   key is an error (`paths appears more than once`) rather than replacing
-///   the earlier array.
-/// - Entries are delivered before the rest of the document is read. If the
-///   function returns an error (invalid JSON later in the text, a bad entry,
-///   a missing `totalSize`), the entries already delivered came from a
-///   manifest that [`decode_v2023`] would reject, and should be discarded.
-/// - Errors are reported in document order: a bad entry is reported before a
-///   missing `totalSize`, which comes after `paths`.
+/// - The header is checked when `paths` arrives, with the values read so
+///   far, so `manifestVersion` and `hashAlg` must come before `paths`, as
+///   they do in every v2023 writer's sorted-key output. If either has not
+///   appeared by then, the error is `missing manifestVersion before paths`
+///   (or `hashAlg`). If either appears again after `paths`, the error is
+///   `manifestVersion must come before paths` (or `hashAlg`), and a second
+///   `paths` key fails with `paths appears more than once`. [`decode_v2023`]
+///   instead uses the last value of a repeated key.
+/// - Errors are reported in document order, and entries are delivered before
+///   the rest of the document is read. Each entry is checked in full before
+///   the next is read, so the first bad entry is reported, where
+///   [`decode_v2023`] reports the first entry missing a member, and then the
+///   first one failing a later check. An error found before a key that
+///   [`decode_v2023`] would have taken instead (a bad header value or entry
+///   ahead of a repeated key) is reported. A bad entry is reported before a
+///   missing `totalSize`, which comes after `paths`. If the function returns
+///   an error, the entries already delivered came from a manifest that
+///   [`decode_v2023`] would reject, and should be discarded.
 /// - Paths are not checked for duplicates, since that needs every path at
 ///   once. [`decode_v2023`] rejects a manifest that lists a path twice.
 ///
@@ -510,6 +525,9 @@ where
 ///
 /// The reader is read a byte at a time, so pass a buffered one, such as a
 /// [`std::io::BufReader`]. A read error is returned as [`SnapshotError::Io`].
+/// Each string in the document, including the values of members that are
+/// not used, is copied into a buffer as it is read, so memory also grows
+/// with the longest string.
 /// Text after the manifest's closing `}` is read until the end of input, and
 /// anything but whitespace there is an error, as it is for
 /// [`decode_v2023_for_each`]. A syntax error's reported column can be one

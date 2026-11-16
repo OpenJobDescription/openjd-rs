@@ -345,7 +345,8 @@ otherwise fails with `Unknown manifest format: no manifestVersion or
 specificationVersion`. It goes by whether the key is present, not by its
 value, so `{"manifestVersion": null}` fails as `missing manifestVersion`.
 
-All four decoders read their input with the same rules:
+All four decoders read their input with the same rules (the streaming
+decoders below read values the same way):
 
 - Text that is not valid JSON fails as `Invalid JSON: <serde_json error>`,
   with the error's line and column. That includes members the decoder does
@@ -422,41 +423,54 @@ where
 
 These decode a v2023 manifest without building it. Each element of `paths`
 is converted to a `FileEntry` and passed to `f`, with the manifest's hash
-algorithm, as soon as it is parsed, so memory use stays constant, whatever
-the number of entries. `tests/decode_memory.rs` bounds the peak at 16 KiB
-for a 20,000-entry manifest (it measures about 200 bytes from a `&str`, and
-the `BufReader`'s 8 KiB buffer besides from a reader). The summary returned
-holds the hash algorithm, the recorded `totalSize`, and the number of
-entries delivered. There is no v2025 equivalent.
+algorithm, as soon as it is parsed. One entry is held at a time, so memory
+use does not depend on the number of entries. `tests/decode_memory.rs`
+bounds the peak at 16 KiB for a 20,000-entry manifest (it measures about
+200 bytes from a `&str`, plus the `BufReader`'s 8 KiB buffer from a
+reader). Memory does grow with the largest entry: normalizing a path while
+building its `FileEntry` takes up to about ten times the path's length,
+and the reader form also copies each string, used or not, into a buffer as
+it reads it. The summary returned holds the hash algorithm, the recorded
+`totalSize`, and the number of entries delivered. There is no v2025
+equivalent.
 
 The callback's error type `E` is the function's error type: an error the
 callback returns stops the decode and is returned unchanged, and decode
-errors are converted with `From<SnapshotError>`. The reader form reads the
-text as it parses (pass it a buffered reader), and returns read errors as
-`SnapshotError::Io`.
+errors are converted with `From<SnapshotError>`. A callback that never
+returns its own error has to name the type, as in `Ok::<_,
+SnapshotError>(())`. The reader form reads the text as it parses (pass it a
+buffered reader), and returns read errors as `SnapshotError::Io`.
 
-Values are read, entries checked, and errors worded as `decode_v2023` does,
-with these differences, which streaming requires:
+Values are read, each entry checked, and errors worded as `decode_v2023`
+does, with these differences, which streaming requires:
 
-- `manifestVersion` and `hashAlg` must come before `paths`, as they do in
-  every v2023 writer's sorted-key output. Otherwise, or when either comes
-  again after `paths`, the decode fails with `manifestVersion and hashAlg
-  must come before paths`. A second `paths` key fails with `paths appears
-  more than once` instead of replacing the first.
+- The header is checked when `paths` arrives, with the values read so far,
+  so `manifestVersion` and `hashAlg` must come before `paths`, as they do in
+  every v2023 writer's sorted-key output. One that has not appeared by then
+  fails with `missing manifestVersion before paths` (or `hashAlg`), one
+  that appears again after `paths` with `manifestVersion must come before
+  paths` (or `hashAlg`), and a second `paths` key with `paths appears more
+  than once`. `decode_v2023` uses the last value of a repeated key instead.
 - Errors are reported in document order, and entries are delivered before
-  the rest of the document is read. An error after some entries were
-  delivered (a later bad entry, invalid JSON, a missing `totalSize`, which
-  sorts after `paths`) means the manifest is invalid, and the delivered
-  entries should be discarded.
+  the rest of the document is read. Each entry is checked in full before
+  the next one is read, so with several bad entries the first bad one is
+  reported (`decode_v2023` reports the first entry missing a member before
+  it applies its other checks). An error found ahead of a repeated key is
+  reported, even if `decode_v2023` would have used the later value. A bad
+  entry is reported before a missing `totalSize`, which sorts after `paths`.
+  An error after some entries were delivered means the manifest is invalid,
+  and the delivered entries should be discarded.
 - Paths are not checked for duplicates, which would take memory in
   proportion to the manifest. `decode_v2023` rejects a repeated path.
 - From a reader, serde_json can report a syntax error's column one past
   where it reports it for a `&str`.
 
-`tests/integration/test_codec_stream.rs` covers these, and the
-`snapshots_decode_text` fuzz target checks on every input that the two
-streaming functions agree with each other and with `decode_v2023`, except
-in these documented ways.
+`tests/integration/test_codec_stream.rs` covers these. On every input, the
+`snapshots_decode_text` fuzz target checks that the two streaming functions
+agree with each other (the same entries, and the same error apart from its
+position), and that they agree with `decode_v2023` except where the
+document has a key order or repeated key that streaming rejects, or a
+repeated path.
 
 ## Data Cache
 

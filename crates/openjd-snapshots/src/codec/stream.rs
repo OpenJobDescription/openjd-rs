@@ -26,9 +26,15 @@ use crate::SnapshotError;
 use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use std::fmt;
 
-/// Reported when `paths` arrives before `manifestVersion` or `hashAlg`, or
-/// either of those comes after it.
-const HEADER_ORDER: &str = "manifestVersion and hashAlg must come before paths";
+/// The error for a header key that has not appeared by the time `paths` does.
+fn missing_before_paths(key: &str) -> SnapshotError {
+    SnapshotError::Validation(format!("missing {key} before paths"))
+}
+
+/// The error for a header key that appears after `paths`.
+fn after_paths(key: &str) -> SnapshotError {
+    SnapshotError::Validation(format!("{key} must come before paths"))
+}
 
 /// Reads a v2023 document from `read`, passing each entry to `f`.
 pub(super) fn decode<'de, R, F, E>(read: R, mut f: F) -> Result<V2023Summary, E>
@@ -87,15 +93,15 @@ struct PathsRead {
 }
 
 impl Header {
-    /// Checks the header when `paths` arrives, in `decode_v2023`'s order.
+    /// Checks the header read so far when `paths` arrives, in
+    /// `decode_v2023`'s order.
     fn check_before_paths(&self) -> crate::Result<HashAlgorithm> {
-        let order = || SnapshotError::Validation(HEADER_ORDER.into());
         if !self.has_manifest_version {
-            return Err(order());
+            return Err(missing_before_paths("manifestVersion"));
         }
         v2023_version(self.manifest_version.as_deref())?;
         if !self.has_hash_alg {
-            return Err(order());
+            return Err(missing_before_paths("hashAlg"));
         }
         parse_hash_alg(self.hash_alg.as_deref())
     }
@@ -196,9 +202,11 @@ where
         let mut h = Header::default();
         while let Some(key) = map.next_key::<Key>()? {
             match key {
-                Key::ManifestVersion | Key::HashAlg if h.paths.is_some() => {
-                    let e = SnapshotError::Validation(HEADER_ORDER.into());
-                    return Err(stop(self.failure, e.into()));
+                Key::ManifestVersion if h.paths.is_some() => {
+                    return Err(stop(self.failure, after_paths("manifestVersion").into()));
+                }
+                Key::HashAlg if h.paths.is_some() => {
+                    return Err(stop(self.failure, after_paths("hashAlg").into()));
                 }
                 Key::ManifestVersion => {
                     h.has_manifest_version = true;
