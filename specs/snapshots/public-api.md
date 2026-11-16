@@ -370,11 +370,30 @@ an unknown `specificationVersion` after its `dirs` and `files` errors.
 `tests/integration/test_codec_decode.rs` asserts every decode error message
 and each of these rules.
 
-Each decoder parses its input once, reading only the members it uses into
-typed values. It never builds a `serde_json::Value` tree for the document,
-so peak heap use is a small multiple of the input size: about 2.3x for
-v2023 and 3.2x for v2025 on manifests of a few hundred thousand entries.
-`tests/decode_memory.rs` guards this.
+#### Keeping decode memory low
+
+Manifests can be large, so decoding should use little memory beyond the
+input text. `tests/decode_memory.rs` enforces this: it fails if a decoder's
+peak heap use passes a fixed multiple of the input size. The test is the
+constraint. This section is guidance.
+
+How the decoders keep memory low today (`codec/raw.rs`):
+
+- They parse the input once, straight into typed values that hold only the
+  members the decoder uses.
+- They move strings out of the parsed values into the entries instead of
+  copying them.
+- They drop intermediate data as soon as it has been used.
+
+When changing decoding code:
+
+- Try to read into typed structs with serde, and to parse the input only
+  once, deciding what to do from the parsed result.
+- Avoid building a generic tree such as `serde_json::Value` for a whole
+  document. Each object in it is a map with its own key strings, which
+  costs several times the text.
+- Avoid `serde::de::IgnoredAny` for skipped members when invalid JSON must
+  still be rejected. It accepts out-of-range numbers and invalid escapes.
 
 ## Data Cache
 
