@@ -20,7 +20,7 @@ use crate::{known_issue, oracle};
 use arbitrary::Unstructured;
 use openjd_snapshots::{
     compose_diffs, compose_snapshot_with_diffs, decode_manifest, decode_v2023,
-    decode_v2023_for_each, decode_v2023_for_each_from_reader, diff_snapshots,
+    decode_v2023_try_for_each_file, decode_v2023_try_for_each_file_from_reader, diff_snapshots,
     encode_abs_snapshot_diff_v2025, encode_abs_snapshot_v2025, encode_snapshot_diff_v2023,
     encode_snapshot_diff_v2025, encode_snapshot_v2023, encode_snapshot_v2025, entries_differ,
     filter_manifest, join_snapshot, partition_manifest, subtree_snapshot, AbsSnapshot,
@@ -377,11 +377,11 @@ pub fn decode_text(data: &[u8]) {
 /// differences. Runs on every input, valid or not.
 fn v2023_streaming(text: &str) {
     let (mut streamed, mut read) = (Vec::new(), Vec::new());
-    let summary = decode_v2023_for_each(text, |_, e| {
+    let summary = decode_v2023_try_for_each_file(text, |_, e| {
         streamed.push(e);
         Ok::<_, SnapshotError>(())
     });
-    let from_reader = decode_v2023_for_each_from_reader(text.as_bytes(), |_, e| {
+    let from_reader = decode_v2023_try_for_each_file_from_reader(text.as_bytes(), |_, e| {
         read.push(e);
         Ok::<_, SnapshotError>(())
     });
@@ -395,7 +395,7 @@ fn v2023_streaming(text: &str) {
     }
     oracle!(
         unplaced(&summary) == unplaced(&from_reader) && streamed == read,
-        "decode_v2023_for_each and _from_reader disagree: {summary:?} vs {from_reader:?}"
+        "decode_v2023_try_for_each_file and _from_reader disagree: {summary:?} vs {from_reader:?}"
     );
 
     match (&summary, decode_v2023(text)) {
@@ -404,15 +404,15 @@ fn v2023_streaming(text: &str) {
                 && s.hash_alg == m.hash_alg
                 && s.total_size == m.total_size
                 && s.file_count == m.files.len() as u64,
-            "decode_v2023_for_each disagrees with decode_v2023"
+            "decode_v2023_try_for_each_file disagrees with decode_v2023"
         ),
         (Ok(_), Err(e)) => oracle!(
             e.to_string().contains("duplicate path: "),
-            "decode_v2023_for_each accepted what decode_v2023 rejects: {e}"
+            "decode_v2023_try_for_each_file accepted what decode_v2023 rejects: {e}"
         ),
         (Err(e), Ok(_)) => oracle!(
             streaming_order_differs(text),
-            "decode_v2023_for_each rejected what decode_v2023 accepts, with the header before paths and no repeated keys: {e}"
+            "decode_v2023_try_for_each_file rejected what decode_v2023 accepts, with the header before paths and no repeated keys: {e}"
         ),
         (Err(s), Err(b)) => {
             // On valid JSON in an order streaming reads, only the documented
@@ -432,7 +432,7 @@ fn v2023_streaming(text: &str) {
                 !comparable
                     || s == b
                     || (entry(&s) && (entry(&b) || b.ends_with("missing or invalid totalSize"))),
-                "decode_v2023_for_each and decode_v2023 report different errors: {s} vs {b}"
+                "decode_v2023_try_for_each_file and decode_v2023 report different errors: {s} vs {b}"
             );
         }
     }

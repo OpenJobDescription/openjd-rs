@@ -10,8 +10,8 @@
 //!   job attachments. Identified on disk by `"manifestVersion": "2023-03-03"`.
 //!   Entry points: [`encode_snapshot_v2023`], [`encode_snapshot_diff_v2023`],
 //!   [`decode_v2023`], [`decode_v2023_as_diff`], and, to read the entries
-//!   one at a time without building the manifest, [`decode_v2023_for_each`]
-//!   and [`decode_v2023_for_each_from_reader`].
+//!   one at a time without building the manifest, [`decode_v2023_try_for_each_file`]
+//!   and [`decode_v2023_try_for_each_file_from_reader`].
 //! - **v2025** — **Experimental draft.** A proposed evolution adding diffs,
 //!   explicit directories, symlinks, and file chunking. Identified on disk by
 //!   `specificationVersion` strings that include the `beta-2025-12` tag. The
@@ -439,8 +439,8 @@ pub fn decode_v2023_as_diff(json: &str) -> Result<SnapshotDiff> {
     decode_v2023_raw(raw::parse(json)?)
 }
 
-/// What [`decode_v2023_for_each`] read from a v2023 manifest besides its
-/// entries.
+/// What [`decode_v2023_try_for_each_file`] read from a v2023 manifest besides
+/// its entries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct V2023Summary {
@@ -465,7 +465,8 @@ pub struct V2023Summary {
 /// containing escapes, which serde_json unescapes into a buffer even when the
 /// member is not used.
 ///
-/// To stop early, return an error from `f`; it is returned unchanged. Decode
+/// As with [`Iterator::try_for_each`], the first error `f` returns stops the
+/// decode and is returned unchanged, so return one to stop early. Decode
 /// errors are converted into `E` with `From<SnapshotError>`, so `E` can be
 /// [`SnapshotError`] itself, or an application error type. Unless `f`
 /// returns an `Err` of a concrete type somewhere, name `E` in its result, as
@@ -502,14 +503,14 @@ pub struct V2023Summary {
 /// # Example
 ///
 /// ```
-/// use openjd_snapshots::{decode_v2023_for_each, SnapshotError};
+/// use openjd_snapshots::{decode_v2023_try_for_each_file, SnapshotError};
 ///
 /// let json = r#"{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":[
 ///     {"hash":"a1","mtime":1,"path":"a.txt","size":3},
 ///     {"hash":"b2","mtime":1,"path":"b.txt","size":4}],"totalSize":7}"#;
 ///
 /// let mut keys = Vec::new();
-/// let summary = decode_v2023_for_each(json, |alg, entry| {
+/// let summary = decode_v2023_try_for_each_file(json, |alg, entry| {
 ///     let hash = entry.hash.expect("v2023 entries always have a hash");
 ///     keys.push(format!("Data/{hash}.{alg}"));
 ///     Ok::<_, SnapshotError>(())
@@ -518,7 +519,10 @@ pub struct V2023Summary {
 /// assert_eq!(summary.total_size, 7);
 /// # Ok::<_, SnapshotError>(())
 /// ```
-pub fn decode_v2023_for_each<F, E>(json: &str, f: F) -> std::result::Result<V2023Summary, E>
+pub fn decode_v2023_try_for_each_file<F, E>(
+    json: &str,
+    f: F,
+) -> std::result::Result<V2023Summary, E>
 where
     F: FnMut(HashAlgorithm, FileEntry) -> std::result::Result<(), E>,
     E: From<SnapshotError>,
@@ -526,8 +530,8 @@ where
     stream::decode(serde_json::de::StrRead::new(json), f)
 }
 
-/// [`decode_v2023_for_each`], reading the JSON from `reader`, so the text is
-/// never held in memory as a whole.
+/// [`decode_v2023_try_for_each_file`], reading the JSON from `reader`, so the
+/// text is never held in memory as a whole.
 ///
 /// The reader is read a byte at a time, so pass a buffered one, such as a
 /// [`std::io::BufReader`]. A read error is returned as [`SnapshotError::Io`].
@@ -536,10 +540,10 @@ where
 /// with the longest string.
 /// Text after the manifest's closing `}` is read until the end of input, and
 /// anything but whitespace there is an error, as it is for
-/// [`decode_v2023_for_each`]. A syntax error's reported column can be one
-/// past the one [`decode_v2023_for_each`] reports, as serde_json counts
-/// positions differently when reading from a reader.
-pub fn decode_v2023_for_each_from_reader<R, F, E>(
+/// [`decode_v2023_try_for_each_file`]. A syntax error's reported column can be
+/// one past the one [`decode_v2023_try_for_each_file`] reports, as serde_json
+/// counts positions differently when reading from a reader.
+pub fn decode_v2023_try_for_each_file_from_reader<R, F, E>(
     reader: R,
     f: F,
 ) -> std::result::Result<V2023Summary, E>

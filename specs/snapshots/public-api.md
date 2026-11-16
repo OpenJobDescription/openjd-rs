@@ -409,12 +409,12 @@ pub struct V2023Summary {
     pub file_count: u64,
 }
 
-pub fn decode_v2023_for_each<F, E>(json: &str, f: F) -> Result<V2023Summary, E>
+pub fn decode_v2023_try_for_each_file<F, E>(json: &str, f: F) -> Result<V2023Summary, E>
 where
     F: FnMut(HashAlgorithm, FileEntry) -> Result<(), E>,
     E: From<SnapshotError>;
 
-pub fn decode_v2023_for_each_from_reader<R, F, E>(reader: R, f: F) -> Result<V2023Summary, E>
+pub fn decode_v2023_try_for_each_file_from_reader<R, F, E>(reader: R, f: F) -> Result<V2023Summary, E>
 where
     R: std::io::Read,
     F: FnMut(HashAlgorithm, FileEntry) -> Result<(), E>,

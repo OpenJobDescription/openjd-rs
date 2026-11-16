@@ -51,9 +51,9 @@ Two JSON manifest formats are supported, with very different maturity:
   job attachments use. Identified on disk by
   `"manifestVersion": "2023-03-03"`. Entry points: `encode_snapshot_v2023`,
   `encode_snapshot_diff_v2023`, `decode_v2023`, `decode_v2023_as_diff`,
-  and the streaming `decode_v2023_for_each` and
-  `decode_v2023_for_each_from_reader`, which pass each entry to a closure
-  as it is parsed instead of building the manifest.
+  and the streaming `decode_v2023_try_for_each_file` and
+  `decode_v2023_try_for_each_file_from_reader`, which pass each entry to a
+  closure as it is parsed instead of building the manifest.
 - **v2025** — **experimental draft.** A proposed evolution adding
   deletions, explicit directories, symlinks, and file chunking. Identified
   on disk by `specificationVersion` strings that include the

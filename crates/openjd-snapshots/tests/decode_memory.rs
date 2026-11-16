@@ -10,10 +10,10 @@
 //! concurrently.
 
 use openjd_snapshots::{
-    decode_manifest, decode_v2023, decode_v2023_as_diff, decode_v2023_for_each,
-    decode_v2023_for_each_from_reader, decode_v2025, encode_snapshot_v2023, encode_snapshot_v2025,
-    FileEntry, HashAlgorithm, Snapshot, SnapshotError, DEFAULT_FILE_CHUNK_SIZE,
-    WHOLE_FILE_CHUNK_SIZE,
+    decode_manifest, decode_v2023, decode_v2023_as_diff, decode_v2023_try_for_each_file,
+    decode_v2023_try_for_each_file_from_reader, decode_v2025, encode_snapshot_v2023,
+    encode_snapshot_v2025, FileEntry, HashAlgorithm, Snapshot, SnapshotError,
+    DEFAULT_FILE_CHUNK_SIZE, WHOLE_FILE_CHUNK_SIZE,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
@@ -161,14 +161,14 @@ fn decoding_peaks_at_a_small_multiple_of_the_manifest_size() {
     let ignore = |_: HashAlgorithm, _: FileEntry| Ok::<_, SnapshotError>(());
     let streamed = [
         (
-            "decode_v2023_for_each",
-            peak_during(|| decode_v2023_for_each(&v2023, ignore).unwrap()),
+            "decode_v2023_try_for_each_file",
+            peak_during(|| decode_v2023_try_for_each_file(&v2023, ignore).unwrap()),
         ),
         (
-            "decode_v2023_for_each_from_reader",
+            "decode_v2023_try_for_each_file_from_reader",
             peak_during(|| {
                 let reader = std::io::BufReader::new(v2023.as_bytes());
-                decode_v2023_for_each_from_reader(reader, ignore).unwrap()
+                decode_v2023_try_for_each_file_from_reader(reader, ignore).unwrap()
             }),
         ),
     ];

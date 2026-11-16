@@ -2,14 +2,15 @@
 // Copyright by contributors to this project.
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
-//! `decode_v2023_for_each` and `decode_v2023_for_each_from_reader`: they
+//! `decode_v2023_try_for_each_file` and `decode_v2023_try_for_each_file_from_reader`: they
 //! deliver the entries `decode_v2023` builds, with its error messages, and
 //! differ from it only where streaming must (key order, document-order
 //! errors, no duplicate-path check).
 
 use openjd_snapshots::{
-    decode_v2023, decode_v2023_for_each, decode_v2023_for_each_from_reader, encode_snapshot_v2023,
-    FileEntry, HashAlgorithm, Snapshot, SnapshotError, V2023Summary, WHOLE_FILE_CHUNK_SIZE,
+    decode_v2023, decode_v2023_try_for_each_file, decode_v2023_try_for_each_file_from_reader,
+    encode_snapshot_v2023, FileEntry, HashAlgorithm, Snapshot, SnapshotError, V2023Summary,
+    WHOLE_FILE_CHUNK_SIZE,
 };
 use std::io;
 
@@ -18,8 +19,8 @@ type Decoded = Result<(Vec<FileEntry>, V2023Summary), String>;
 /// Decodes `json` with both streaming entry points, checks they agree, and
 /// returns the delivered entries and summary, or the error message.
 fn stream(json: &str) -> Decoded {
-    let from_str = collect(|f| decode_v2023_for_each(json, f));
-    let from_reader = collect(|f| decode_v2023_for_each_from_reader(json.as_bytes(), f));
+    let from_str = collect(|f| decode_v2023_try_for_each_file(json, f));
+    let from_reader = collect(|f| decode_v2023_try_for_each_file_from_reader(json.as_bytes(), f));
     // serde_json can place a syntax error one column apart when reading from
     // a reader, so positions are not compared.
     let unplaced = |d: &Decoded| d.clone().map_err(|e| without_position(&e));
@@ -385,7 +386,7 @@ fn entries_before_an_error_are_delivered() {
         "",
     );
     let mut delivered = Vec::new();
-    let err = decode_v2023_for_each(&json, |_, e| {
+    let err = decode_v2023_try_for_each_file(&json, |_, e| {
         delivered.push(e.path);
         Ok::<_, SnapshotError>(())
     })
@@ -430,7 +431,7 @@ fn a_callback_error_stops_the_decode_and_is_returned_unchanged() {
         "",
     );
     let mut seen = 0;
-    let err = decode_v2023_for_each(&json, |_, e| {
+    let err = decode_v2023_try_for_each_file(&json, |_, e| {
         seen += 1;
         Err(AppError::Full(e.path))
     })
@@ -441,7 +442,7 @@ fn a_callback_error_stops_the_decode_and_is_returned_unchanged() {
 
 #[test]
 fn decode_errors_convert_into_the_callers_error_type() {
-    let err = decode_v2023_for_each("{", |_, _| Ok::<_, AppError>(())).unwrap_err();
+    let err = decode_v2023_try_for_each_file("{", |_, _| Ok::<_, AppError>(())).unwrap_err();
     assert_eq!(
         err,
         AppError::Decode(
@@ -474,11 +475,12 @@ fn a_read_error_is_an_io_error() {
     // The text up to the end of the first entry and its comma.
     let cut = json.find(ENTRY).unwrap() + ENTRY.len() + 1;
     let mut delivered = 0;
-    let err = decode_v2023_for_each_from_reader(FailsAfter(&json.as_bytes()[..cut]), |_, _| {
-        delivered += 1;
-        Ok::<_, SnapshotError>(())
-    })
-    .unwrap_err();
+    let err =
+        decode_v2023_try_for_each_file_from_reader(FailsAfter(&json.as_bytes()[..cut]), |_, _| {
+            delivered += 1;
+            Ok::<_, SnapshotError>(())
+        })
+        .unwrap_err();
     assert!(matches!(err, SnapshotError::Io(_)), "{err:?}");
     assert_eq!(err.to_string(), "IO error: connection reset");
     assert_eq!(delivered, 1);
