@@ -94,7 +94,8 @@ SUBTREE operates on manifest data without filesystem access. Collapsing uses:
 
 A symlink inside an expanded directory is handled like one in the subtree,
 by whether its target is within the new root: `CollapseEscaping` keeps it
-with its target rebased when the target is within the new root, and
+with its target rebased when the target is within the new root (but not
+the new root itself, which is a directory target), and
 otherwise (and always under `CollapseAll`) it is resolved to the file it
 points to. A nested symlink to a directory, a missing target, or a cycle is
 skipped: nested directory symlinks are not expanded in turn, which keeps the

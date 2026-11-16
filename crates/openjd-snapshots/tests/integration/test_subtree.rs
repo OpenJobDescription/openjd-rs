@@ -620,6 +620,39 @@ fn nested_directory_symlink_is_skipped() {
     }
 }
 
+/// A nested symlink to the subtree root is a directory symlink: it is
+/// skipped, not rebased to an empty target, for absolute and relative
+/// manifests alike.
+#[test]
+fn nested_symlink_to_subtree_root_is_skipped() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/r/s/link", "/r/x"),
+            FileEntry::symlink("/r/x/to_root", "/r/s"),
+            hf("/r/x/a", "h1", 100, 1000),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/r/s", policy).unwrap();
+        result.validate().unwrap();
+        assert_eq!(paths(&result), ["link/a".to_string()].into(), "{policy}");
+    }
+    let r = rel(
+        vec![
+            FileEntry::symlink("s/link", "x"),
+            FileEntry::symlink("x/to_root", "s"),
+            hf("x/a", "h1", 100, 1000),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_rel_snapshot(&r, "s", policy).unwrap();
+        result.validate().unwrap();
+        assert_eq!(paths(&result), ["link/a".to_string()].into(), "{policy}");
+    }
+}
+
 /// A nested symlink back to the directory being expanded is skipped too.
 #[test]
 fn nested_directory_symlink_cycle_is_skipped() {

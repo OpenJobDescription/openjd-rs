@@ -825,11 +825,19 @@ pub fn preprocess_job_parameters_with_map(
 /// Merge parameter definitions from job and environment templates.
 #[wasm_bindgen(js_name = "mergeJobParameterDefinitions")]
 pub fn merge_job_parameter_definitions(template: &JsJobTemplate) -> Result<JsValue, JsError> {
-    let merged =
-        openjd_model::merge_job_parameter_definitions(&template.inner, &[]).map_err(to_js_error)?;
+    let result = merge_job_parameter_definitions_with_vec(template).map_err(to_js_error)?;
+    serde_wasm_bindgen::to_value(&result).map_err(serde_wasm_to_js_error)
+}
 
-    // Return as array of {name, type} objects
-    let result: Vec<serde_json::Value> = merged
+/// Rust-native helper for [`merge_job_parameter_definitions`].
+///
+/// Returns the `{name, type}` objects directly so rlib-target tests can
+/// exercise the behavior without `JsValue` round-tripping.
+pub fn merge_job_parameter_definitions_with_vec(
+    template: &JsJobTemplate,
+) -> Result<Vec<serde_json::Value>, openjd_model::ModelError> {
+    let merged = openjd_model::merge_job_parameter_definitions(&template.inner, &[])?;
+    Ok(merged
         .iter()
         .map(|m| {
             serde_json::json!({
@@ -837,8 +845,7 @@ pub fn merge_job_parameter_definitions(template: &JsJobTemplate) -> Result<JsVal
                 "type": m.param_type.as_spec_str(),
             })
         })
-        .collect();
-    serde_wasm_bindgen::to_value(&result).map_err(serde_wasm_to_js_error)
+        .collect())
 }
 
 /// Evaluate let bindings and return an updated symbol table.

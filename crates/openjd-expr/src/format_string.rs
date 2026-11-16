@@ -1508,6 +1508,32 @@ mod tests {
         }
     }
 
+    /// Each character outside printable ASCII takes the narrowest numeric
+    /// escape that holds it; at each width boundary a wider value must not
+    /// take the narrower form (`\x100` would parse as `\x10` then `0`).
+    #[test]
+    fn escape_format_string_numeric_escape_widths() {
+        // Between two escapes, so the characters join the interpolation.
+        let s = "}}\u{0}\u{7f}\u{ff}\u{100}\u{ffff}\u{10000}\u{10ffff}}}";
+        assert_eq!(
+            assert_escapes_to_itself(s),
+            "{{ \"}\\x7d\\x00\\x7f\\xff\\u0100\\uffff\\U00010000\\U0010ffff}\\x7d\" }}"
+        );
+    }
+
+    /// An interpolation's string literal may be exactly
+    /// `ESCAPE_LITERAL_MAX` bytes of source; one byte more splits it.
+    #[test]
+    fn escape_format_string_literal_cap_boundary() {
+        // Source: `{{` (2) + run + `}\x7d` (5).
+        let fits = format!("{{{{{}}}}}", "x".repeat(ESCAPE_LITERAL_MAX - 7));
+        let escaped = assert_escapes_to_itself(&fits);
+        assert_eq!(FormatString::new(&escaped).unwrap().segment_count(), 1);
+        let over = format!("{{{{{}}}}}", "x".repeat(ESCAPE_LITERAL_MAX - 6));
+        let escaped = assert_escapes_to_itself(&over);
+        assert_eq!(FormatString::new(&escaped).unwrap().segment_count(), 2);
+    }
+
     /// A literal run too long to share an interpolation stays literal text.
     #[test]
     fn escape_format_string_keeps_long_literal_runs() {

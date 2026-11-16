@@ -189,8 +189,8 @@ Callers who want non-throwing validation use `try { decodeJobTemplate(...) } cat
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `createJob` | `(template: JobTemplate, params: Record<string, string>, pathOptions: PathParameterOptions, limits?: CallerLimits) → Job` | Create a fully resolved Job from a template and parameter values. Resolves all format strings, expands parameter spaces. `limits.maxTaskCount` is checked after expansion. |
-| `preprocessJobParameters` | `(template: JobTemplate, rawValues: Record<string, string>, pathOptions: PathParameterOptions) → Map<string, ExprValue>` | Coerce raw string parameter values to typed ExprValues per the parameter definitions. |
-| `mergeJobParameterDefinitions` | `(templates: (JobTemplate \| EnvironmentTemplate)[]) → JobParameterDefinition[]` | Merge parameter definitions from multiple templates per the spec's merging rules. |
+| `preprocessJobParameters` | `(template: JobTemplate, rawValues: Record<string, string>, pathOptions: PathParameterOptions) → Map<string, ExprValue>` | Coerce raw string parameter values to typed ExprValues per the parameter definitions. Returns `{[name]: {type, value}}`, where `type` is the parameter type in its spec spelling (`"INT"`, `"LIST[PATH]"`) and `value` is the display string. |
+| `mergeJobParameterDefinitions` | `(templates: (JobTemplate \| EnvironmentTemplate)[]) → JobParameterDefinition[]` | Merge parameter definitions from multiple templates per the spec's merging rules. Returns `{name, type}[]`, `type` in its spec spelling. |
 | `evaluateLetBindings` | `(bindings: string[], symbols: SymbolTable) → SymbolTable` | Evaluate `let` bindings and add results to the symbol table. |
 | `createEnvironment` | `(envTemplate: EnvironmentTemplate, params: Record<string, string>) → Environment` | Create a resolved Environment from a template. |
 | `deserializeStep` | `(obj: object) → StepTemplate` | Deserialize a step from a JS object. |

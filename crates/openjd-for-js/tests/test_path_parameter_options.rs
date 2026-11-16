@@ -293,3 +293,67 @@ fn windows_path_format_rejects_escaping_default() {
         "expected walk-up-escape rejection, got: {err}"
     );
 }
+
+/// `preprocessJobParameters` reports each parameter's `type` in its spec
+/// spelling (`"INT"`), not the Rust variant name (`"Int"`).
+#[test]
+fn preprocess_reports_spec_spelling_of_type() {
+    use openjd_for_js::model::{decode_job_template_str, preprocess_job_parameters_with_map};
+
+    let template_json = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "T",
+        "parameterDefinitions": [
+            {"name": "N", "type": "INT", "default": 3},
+            {"name": "F", "type": "FLOAT", "default": 1.5},
+            {"name": "S", "type": "STRING", "default": "x"}
+        ],
+        "steps": [
+            {"name": "S", "script": {"actions": {"onRun": {"command": "x"}}}}
+        ]
+    }"#;
+    let template =
+        decode_job_template_str(template_json, None, None, None).expect("template decodes");
+    let opts = JsPathParameterOptions::new("/tmpl", "/cwd");
+    let map = preprocess_job_parameters_with_map(&template, Default::default(), &opts)
+        .expect("parameters preprocess");
+    let types: std::collections::BTreeMap<_, _> = map
+        .iter()
+        .map(|(k, v)| (k.as_str(), v["type"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        types,
+        [("F", "FLOAT"), ("N", "INT"), ("S", "STRING")]
+            .into_iter()
+            .collect()
+    );
+}
+
+/// `mergeJobParameterDefinitions` returns `{name, type}` objects with
+/// `type` in its spec spelling.
+#[test]
+fn merge_reports_spec_spelling_of_type() {
+    use openjd_for_js::model::{decode_job_template_str, merge_job_parameter_definitions_with_vec};
+
+    let template_json = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "T",
+        "parameterDefinitions": [
+            {"name": "N", "type": "INT"},
+            {"name": "P", "type": "PATH"}
+        ],
+        "steps": [
+            {"name": "S", "script": {"actions": {"onRun": {"command": "x"}}}}
+        ]
+    }"#;
+    let template =
+        decode_job_template_str(template_json, None, None, None).expect("template decodes");
+    let merged = merge_job_parameter_definitions_with_vec(&template).expect("definitions merge");
+    assert_eq!(
+        merged,
+        vec![
+            serde_json::json!({"name": "N", "type": "INT"}),
+            serde_json::json!({"name": "P", "type": "PATH"}),
+        ]
+    );
+}
