@@ -36,7 +36,7 @@ use std::marker::PhantomData;
 
 /// A value read from any JSON input. Input of the wrong JSON type reads as
 /// `Self::default()`, so every implementation's default means "absent".
-trait Lenient: Default {
+pub(super) trait Lenient: Default {
     fn from_bool(_: bool) -> Self {
         Self::default()
     }
@@ -60,7 +60,7 @@ trait Lenient: Default {
 }
 
 /// Deserializes any JSON value into `T` through [`Lenient`].
-struct Read<T>(T);
+pub(super) struct Read<T>(pub(super) T);
 
 impl<'de, T: Lenient> Deserialize<'de> for Read<T> {
     fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
@@ -103,7 +103,9 @@ impl<'de, T: Lenient> Visitor<'de> for ReadVisitor<T> {
 }
 
 /// Reads a map value as `T`.
-fn value<'de, A: MapAccess<'de>, T: Lenient>(map: &mut A) -> std::result::Result<T, A::Error> {
+pub(super) fn value<'de, A: MapAccess<'de>, T: Lenient>(
+    map: &mut A,
+) -> std::result::Result<T, A::Error> {
     Ok(map.next_value::<Read<T>>()?.0)
 }
 

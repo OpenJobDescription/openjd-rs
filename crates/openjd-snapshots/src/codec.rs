@@ -31,6 +31,7 @@ use std::collections::HashMap;
 use tracing::warn;
 
 mod raw;
+mod stream;
 
 // --- Public types ---
 
@@ -436,47 +437,109 @@ pub fn decode_v2023_as_diff(json: &str) -> Result<SnapshotDiff> {
     decode_v2023_raw(raw::parse(json)?)
 }
 
+/// What [`decode_v2023_for_each`] read from a v2023 manifest besides its
+/// entries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct V2023Summary {
+    /// The manifest's `hashAlg`.
+    pub hash_alg: HashAlgorithm,
+    /// The manifest's `totalSize`, as written (it is not recomputed).
+    pub total_size: u64,
+    /// The number of entries passed to the callback.
+    pub file_count: u64,
+}
+
+/// Decode v2023 JSON one entry at a time, without building the manifest.
+///
+/// Each element of `paths` is turned into a [`FileEntry`] and passed to `f`,
+/// with the manifest's hash algorithm, as soon as it is parsed. Memory use
+/// beyond `json` itself stays constant, whatever the number of entries. On
+/// success, returns the manifest's [`V2023Summary`].
+///
+/// To stop early, return an error from `f`; it is returned unchanged. Decode
+/// errors are converted into `E` with `From<SnapshotError>`, so `E` can be
+/// [`SnapshotError`] itself, or an application error type.
+///
+/// Values are read as [`decode_v2023`] reads them, entries are checked the
+/// same way, and errors have the same messages, with these differences:
+///
+/// - `manifestVersion` and `hashAlg` must come before `paths`, as every
+///   v2023 writer puts them (keys are sorted). Otherwise the error is
+///   `manifestVersion and hashAlg must come before paths`. A repeated `paths`
+///   key is an error (`paths appears more than once`) rather than replacing
+///   the earlier array.
+/// - Entries are delivered before the rest of the document is read. If the
+///   function returns an error (invalid JSON later in the text, a bad entry,
+///   a missing `totalSize`), the entries already delivered came from a
+///   manifest that [`decode_v2023`] would reject, and should be discarded.
+/// - Errors are reported in document order: a bad entry is reported before a
+///   missing `totalSize`, which comes after `paths`.
+/// - Paths are not checked for duplicates, since that needs every path at
+///   once. [`decode_v2023`] rejects a manifest that lists a path twice.
+///
+/// # Example
+///
+/// ```
+/// use openjd_snapshots::{decode_v2023_for_each, SnapshotError};
+///
+/// let json = r#"{"hashAlg":"xxh128","manifestVersion":"2023-03-03","paths":[
+///     {"hash":"a1","mtime":1,"path":"a.txt","size":3},
+///     {"hash":"b2","mtime":1,"path":"b.txt","size":4}],"totalSize":7}"#;
+///
+/// let mut keys = Vec::new();
+/// let summary = decode_v2023_for_each(json, |alg, entry| {
+///     let hash = entry.hash.expect("v2023 entries always have a hash");
+///     keys.push(format!("Data/{hash}.{alg}"));
+///     Ok::<_, SnapshotError>(())
+/// })?;
+/// assert_eq!(keys, ["Data/a1.xxh128", "Data/b2.xxh128"]);
+/// assert_eq!(summary.total_size, 7);
+/// # Ok::<_, SnapshotError>(())
+/// ```
+pub fn decode_v2023_for_each<F, E>(json: &str, f: F) -> std::result::Result<V2023Summary, E>
+where
+    F: FnMut(HashAlgorithm, FileEntry) -> std::result::Result<(), E>,
+    E: From<SnapshotError>,
+{
+    stream::decode(serde_json::de::StrRead::new(json), f)
+}
+
+/// [`decode_v2023_for_each`], reading the JSON from `reader`, so the text is
+/// never held in memory as a whole.
+///
+/// The reader is read a byte at a time, so pass a buffered one, such as a
+/// [`std::io::BufReader`]. A read error is returned as [`SnapshotError::Io`].
+/// Text after the manifest's closing `}` is read until the end of input, and
+/// anything but whitespace there is an error, as it is for
+/// [`decode_v2023_for_each`]. A syntax error's reported column can be one
+/// past the one [`decode_v2023_for_each`] reports, as serde_json counts
+/// positions differently when reading from a reader.
+pub fn decode_v2023_for_each_from_reader<R, F, E>(
+    reader: R,
+    f: F,
+) -> std::result::Result<V2023Summary, E>
+where
+    R: std::io::Read,
+    F: FnMut(HashAlgorithm, FileEntry) -> std::result::Result<(), E>,
+    E: From<SnapshotError>,
+{
+    stream::decode(serde_json::de::IoRead::new(reader), f)
+}
+
 /// Shared implementation for v2023 decoding. `K` selects the phantom-type
 /// kind (`Full` or `Diff`); v2023 never produces deleted entries so either
 /// choice is equally valid at runtime.
 fn decode_v2023_raw<K: ValidateKind>(raw: raw::RawManifest) -> Result<Manifest<Rel, K>> {
-    let version = raw
-        .manifest_version
-        .as_deref()
-        .ok_or_else(|| SnapshotError::Validation("missing manifestVersion".into()))?;
-    if version != V2023_MANIFEST_VERSION {
-        return Err(SnapshotError::Validation(format!(
-            "expected manifestVersion '{V2023_MANIFEST_VERSION}', got '{version}'"
-        )));
-    }
-
+    v2023_version(raw.manifest_version.as_deref())?;
     let hash_alg = parse_hash_alg(raw.hash_alg.as_deref())?;
-    let total_size = raw
-        .total_size
-        .ok_or_else(|| SnapshotError::Validation("missing or invalid totalSize".into()))?;
+    let total_size = v2023_read_total_size(raw.total_size)?;
+    let raw_paths = raw.paths.ok_or_else(v2023_invalid_paths)?;
 
-    let raw_paths = raw
-        .paths
-        .ok_or_else(|| SnapshotError::Validation("missing or invalid paths".into()))?;
-
+    // Sized up front: collecting `Result`s would grow the vector by doubling.
     let mut files = Vec::with_capacity(raw_paths.len());
     for p in raw_paths {
-        let path = p
-            .path
-            .ok_or_else(|| SnapshotError::Validation("path entry missing 'path'".into()))?;
-        let hash = p
-            .hash
-            .ok_or_else(|| SnapshotError::Validation("path entry missing 'hash'".into()))?;
-        let size = p
-            .size
-            .ok_or_else(|| SnapshotError::Validation("path entry missing 'size'".into()))?;
-        let mtime = p
-            .mtime
-            .ok_or_else(|| SnapshotError::Validation("path entry missing 'mtime'".into()))?;
-
-        let mut entry = FileEntry::file(path, size, mtime);
-        entry.hash = Some(hash);
-        files.push(entry);
+        files.push(v2023_file_entry(p)?);
     }
 
     let mut m: Manifest<Rel, K> = Manifest::new(hash_alg, WHOLE_FILE_CHUNK_SIZE);
@@ -484,6 +547,46 @@ fn decode_v2023_raw<K: ValidateKind>(raw: raw::RawManifest) -> Result<Manifest<R
     m.total_size = total_size;
     m.validate()?;
     Ok(m)
+}
+
+/// Checks a v2023 document's `manifestVersion`.
+fn v2023_version(manifest_version: Option<&str>) -> Result<()> {
+    let version = manifest_version
+        .ok_or_else(|| SnapshotError::Validation("missing manifestVersion".into()))?;
+    if version != V2023_MANIFEST_VERSION {
+        return Err(SnapshotError::Validation(format!(
+            "expected manifestVersion '{V2023_MANIFEST_VERSION}', got '{version}'"
+        )));
+    }
+    Ok(())
+}
+
+fn v2023_read_total_size(total_size: Option<u64>) -> Result<u64> {
+    total_size.ok_or_else(|| SnapshotError::Validation("missing or invalid totalSize".into()))
+}
+
+fn v2023_invalid_paths() -> SnapshotError {
+    SnapshotError::Validation("missing or invalid paths".into())
+}
+
+/// Builds the file entry for one element of a v2023 `paths` array.
+fn v2023_file_entry(p: raw::RawV2023Path) -> Result<FileEntry> {
+    let path = p
+        .path
+        .ok_or_else(|| SnapshotError::Validation("path entry missing 'path'".into()))?;
+    let hash = p
+        .hash
+        .ok_or_else(|| SnapshotError::Validation("path entry missing 'hash'".into()))?;
+    let size = p
+        .size
+        .ok_or_else(|| SnapshotError::Validation("path entry missing 'size'".into()))?;
+    let mtime = p
+        .mtime
+        .ok_or_else(|| SnapshotError::Validation("path entry missing 'mtime'".into()))?;
+
+    let mut entry = FileEntry::file(path, size, mtime);
+    entry.hash = Some(hash);
+    Ok(entry)
 }
 
 /// Decode v2025 JSON to the appropriate manifest type.

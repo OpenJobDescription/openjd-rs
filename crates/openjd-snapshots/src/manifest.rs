@@ -634,52 +634,7 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
         }
 
         for f in &self.files {
-            P::validate_path(&f.path)?;
-            K::validate_deleted(f.deleted)?;
-            if f.deleted {
-                if f.size.is_some()
-                    || f.mtime.is_some()
-                    || f.hash.is_some()
-                    || f.chunk_hashes.is_some()
-                    || f.symlink_target.is_some()
-                {
-                    return Err(crate::SnapshotError::Validation(format!(
-                        "deleted entry must have no data fields: {}",
-                        f.path
-                    )));
-                }
-            } else if let Some(ref target) = f.symlink_target {
-                P::validate_path(target).map_err(|_| {
-                    crate::SnapshotError::Validation(format!(
-                        "symlink_target path style mismatch for {}: {}",
-                        f.path, target
-                    ))
-                })?;
-                if f.hash.is_some() || f.chunk_hashes.is_some() {
-                    return Err(crate::SnapshotError::Validation(format!(
-                        "symlink must not have hash or chunk_hashes: {}",
-                        f.path
-                    )));
-                }
-            } else {
-                // Regular file: at most one of hash, chunk_hashes, symlink_target
-                let count = [f.hash.is_some(), f.chunk_hashes.is_some()]
-                    .iter()
-                    .filter(|&&v| v)
-                    .count();
-                if count > 1 {
-                    return Err(crate::SnapshotError::Validation(format!(
-                        "regular file must have at most one of hash/chunk_hashes: {}",
-                        f.path
-                    )));
-                }
-                if f.size.is_none() || f.mtime.is_none() {
-                    return Err(crate::SnapshotError::Validation(format!(
-                        "regular file must have size and mtime: {}",
-                        f.path
-                    )));
-                }
-            }
+            Self::validate_file(f)?;
         }
         for d in &self.dirs {
             P::validate_path(&d.path)?;
@@ -745,6 +700,58 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
             }
         }
 
+        Ok(())
+    }
+
+    /// The checks [`validate`](Self::validate) makes on each file entry on its
+    /// own, before the checks that need the whole manifest.
+    pub(crate) fn validate_file(f: &FileEntry) -> crate::Result<()> {
+        P::validate_path(&f.path)?;
+        K::validate_deleted(f.deleted)?;
+        if f.deleted {
+            if f.size.is_some()
+                || f.mtime.is_some()
+                || f.hash.is_some()
+                || f.chunk_hashes.is_some()
+                || f.symlink_target.is_some()
+            {
+                return Err(crate::SnapshotError::Validation(format!(
+                    "deleted entry must have no data fields: {}",
+                    f.path
+                )));
+            }
+        } else if let Some(ref target) = f.symlink_target {
+            P::validate_path(target).map_err(|_| {
+                crate::SnapshotError::Validation(format!(
+                    "symlink_target path style mismatch for {}: {}",
+                    f.path, target
+                ))
+            })?;
+            if f.hash.is_some() || f.chunk_hashes.is_some() {
+                return Err(crate::SnapshotError::Validation(format!(
+                    "symlink must not have hash or chunk_hashes: {}",
+                    f.path
+                )));
+            }
+        } else {
+            // Regular file: at most one of hash, chunk_hashes, symlink_target
+            let count = [f.hash.is_some(), f.chunk_hashes.is_some()]
+                .iter()
+                .filter(|&&v| v)
+                .count();
+            if count > 1 {
+                return Err(crate::SnapshotError::Validation(format!(
+                    "regular file must have at most one of hash/chunk_hashes: {}",
+                    f.path
+                )));
+            }
+            if f.size.is_none() || f.mtime.is_none() {
+                return Err(crate::SnapshotError::Validation(format!(
+                    "regular file must have size and mtime: {}",
+                    f.path
+                )));
+            }
+        }
         Ok(())
     }
 }

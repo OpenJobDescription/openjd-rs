@@ -398,6 +398,66 @@ When changing decoding code:
   still be rejected. It accepts out-of-range numbers, unpaired surrogate
   `\u` escapes, and nesting past the recursion limit.
 
+### Streaming v2023 Decode
+
+```rust
+#[non_exhaustive]
+pub struct V2023Summary {
+    pub hash_alg: HashAlgorithm,
+    pub total_size: u64,
+    pub file_count: u64,
+}
+
+pub fn decode_v2023_for_each<F, E>(json: &str, f: F) -> Result<V2023Summary, E>
+where
+    F: FnMut(HashAlgorithm, FileEntry) -> Result<(), E>,
+    E: From<SnapshotError>;
+
+pub fn decode_v2023_for_each_from_reader<R: io::Read, F, E>(reader: R, f: F)
+    -> Result<V2023Summary, E>
+where
+    F: FnMut(HashAlgorithm, FileEntry) -> Result<(), E>,
+    E: From<SnapshotError>;
+```
+
+These decode a v2023 manifest without building it. Each element of `paths`
+is converted to a `FileEntry` and passed to `f`, with the manifest's hash
+algorithm, as soon as it is parsed, so memory use stays constant, whatever
+the number of entries. `tests/decode_memory.rs` bounds the peak at 16 KiB
+for a 20,000-entry manifest (it measures about 200 bytes from a `&str`, and
+the `BufReader`'s 8 KiB buffer besides from a reader). The summary returned
+holds the hash algorithm, the recorded `totalSize`, and the number of
+entries delivered. There is no v2025 equivalent.
+
+The callback's error type `E` is the function's error type: an error the
+callback returns stops the decode and is returned unchanged, and decode
+errors are converted with `From<SnapshotError>`. The reader form reads the
+text as it parses (pass it a buffered reader), and returns read errors as
+`SnapshotError::Io`.
+
+Values are read, entries checked, and errors worded as `decode_v2023` does,
+with these differences, which streaming requires:
+
+- `manifestVersion` and `hashAlg` must come before `paths`, as they do in
+  every v2023 writer's sorted-key output. Otherwise, or when either comes
+  again after `paths`, the decode fails with `manifestVersion and hashAlg
+  must come before paths`. A second `paths` key fails with `paths appears
+  more than once` instead of replacing the first.
+- Errors are reported in document order, and entries are delivered before
+  the rest of the document is read. An error after some entries were
+  delivered (a later bad entry, invalid JSON, a missing `totalSize`, which
+  sorts after `paths`) means the manifest is invalid, and the delivered
+  entries should be discarded.
+- Paths are not checked for duplicates, which would take memory in
+  proportion to the manifest. `decode_v2023` rejects a repeated path.
+- From a reader, serde_json can report a syntax error's column one past
+  where it reports it for a `&str`.
+
+`tests/integration/test_codec_stream.rs` covers these, and the
+`snapshots_decode_text` fuzz target checks on every input that the two
+streaming functions agree with each other and with `decode_v2023`, except
+in these documented ways.
+
 ## Data Cache
 
 ### Async Trait

@@ -19,12 +19,13 @@ use crate::targets::text_and_control;
 use crate::{known_issue, oracle};
 use arbitrary::Unstructured;
 use openjd_snapshots::{
-    compose_diffs, compose_snapshot_with_diffs, decode_manifest, diff_snapshots,
+    compose_diffs, compose_snapshot_with_diffs, decode_manifest, decode_v2023,
+    decode_v2023_for_each, decode_v2023_for_each_from_reader, diff_snapshots,
     encode_abs_snapshot_diff_v2025, encode_abs_snapshot_v2025, encode_snapshot_diff_v2023,
     encode_snapshot_diff_v2025, encode_snapshot_v2023, encode_snapshot_v2025, entries_differ,
     filter_manifest, join_snapshot, partition_manifest, subtree_snapshot, AbsSnapshot,
     AbsSnapshotDiff, DecodedManifest, DiffOptions, FileEntry, IncludeExcludePathsFilter, Manifest,
-    PartitionOptions, SymlinkPolicy,
+    PartitionOptions, SnapshotError, SymlinkPolicy,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -366,8 +367,51 @@ pub fn decode_text(data: &[u8]) {
             }
         }
     }
-    let _ = openjd_snapshots::decode_v2023(text);
+    v2023_streaming(text);
     let _ = openjd_snapshots::decode_v2025(text);
+}
+
+/// The streaming v2023 decoders agree with each other and with
+/// `decode_v2023`: when both succeed they give the same entries and totals,
+/// and one fails where the other succeeds only for the documented streaming
+/// differences.
+fn v2023_streaming(text: &str) {
+    let (mut streamed, mut read) = (Vec::new(), Vec::new());
+    let summary = decode_v2023_for_each(text, |_, e| {
+        streamed.push(e);
+        Ok::<_, SnapshotError>(())
+    });
+    let from_reader = decode_v2023_for_each_from_reader(text.as_bytes(), |_, e| {
+        read.push(e);
+        Ok::<_, SnapshotError>(())
+    });
+    oracle!(
+        summary.as_ref().ok() == from_reader.as_ref().ok() && streamed == read,
+        "decode_v2023_for_each and _from_reader disagree: {summary:?} vs {from_reader:?}"
+    );
+
+    match (&summary, decode_v2023(text)) {
+        (Ok(s), Ok(m)) => oracle!(
+            streamed == m.files
+                && s.hash_alg == m.hash_alg
+                && s.total_size == m.total_size
+                && s.file_count == m.files.len() as u64,
+            "decode_v2023_for_each disagrees with decode_v2023"
+        ),
+        (Ok(_), Err(e)) => oracle!(
+            e.to_string().contains("duplicate path: "),
+            "decode_v2023_for_each accepted what decode_v2023 rejects: {e}"
+        ),
+        (Err(e), Ok(_)) => {
+            let e = e.to_string();
+            oracle!(
+                e.ends_with("manifestVersion and hashAlg must come before paths")
+                    || e.ends_with("paths appears more than once"),
+                "decode_v2023_for_each rejected what decode_v2023 accepts: {e}"
+            )
+        }
+        (Err(_), Err(_)) => {}
+    }
 }
 
 /// A file's content identity: hash, size, symlink target, runnable.

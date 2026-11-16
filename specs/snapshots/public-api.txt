@@ -19,9 +19,24 @@ impl core::fmt::Debug for openjd_snapshots::codec::ManifestFormat
 pub fn openjd_snapshots::codec::ManifestFormat::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Copy for openjd_snapshots::codec::ManifestFormat
 impl core::marker::StructuralPartialEq for openjd_snapshots::codec::ManifestFormat
+#[non_exhaustive] pub struct openjd_snapshots::codec::V2023Summary
+pub openjd_snapshots::codec::V2023Summary::file_count: u64
+pub openjd_snapshots::codec::V2023Summary::hash_alg: openjd_snapshots::hash::HashAlgorithm
+pub openjd_snapshots::codec::V2023Summary::total_size: u64
+impl core::clone::Clone for openjd_snapshots::codec::V2023Summary
+pub fn openjd_snapshots::codec::V2023Summary::clone(&self) -> openjd_snapshots::codec::V2023Summary
+impl core::cmp::Eq for openjd_snapshots::codec::V2023Summary
+impl core::cmp::PartialEq for openjd_snapshots::codec::V2023Summary
+pub fn openjd_snapshots::codec::V2023Summary::eq(&self, &openjd_snapshots::codec::V2023Summary) -> bool
+impl core::fmt::Debug for openjd_snapshots::codec::V2023Summary
+pub fn openjd_snapshots::codec::V2023Summary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_snapshots::codec::V2023Summary
+impl core::marker::StructuralPartialEq for openjd_snapshots::codec::V2023Summary
 pub fn openjd_snapshots::codec::decode_manifest(&str) -> openjd_snapshots::error::Result<openjd_snapshots::codec::DecodedManifest>
 pub fn openjd_snapshots::codec::decode_v2023(&str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
 pub fn openjd_snapshots::codec::decode_v2023_as_diff(&str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub fn openjd_snapshots::codec::decode_v2023_for_each<F, E>(&str, F) -> core::result::Result<openjd_snapshots::codec::V2023Summary, E> where F: core::ops::function::FnMut(openjd_snapshots::hash::HashAlgorithm, openjd_snapshots::manifest::FileEntry) -> core::result::Result<(), E>, E: core::convert::From<openjd_snapshots::error::SnapshotError>
+pub fn openjd_snapshots::codec::decode_v2023_for_each_from_reader<R, F, E>(R, F) -> core::result::Result<openjd_snapshots::codec::V2023Summary, E> where R: std::io::Read, F: core::ops::function::FnMut(openjd_snapshots::hash::HashAlgorithm, openjd_snapshots::manifest::FileEntry) -> core::result::Result<(), E>, E: core::convert::From<openjd_snapshots::error::SnapshotError>
 pub fn openjd_snapshots::codec::decode_v2025(&str) -> openjd_snapshots::error::Result<openjd_snapshots::codec::DecodedManifest>
 pub fn openjd_snapshots::codec::encode_abs_snapshot_diff_v2025(&openjd_snapshots::manifest::AbsSnapshotDiff) -> openjd_snapshots::error::Result<alloc::string::String>
 pub fn openjd_snapshots::codec::encode_abs_snapshot_v2025(&openjd_snapshots::manifest::AbsSnapshot) -> openjd_snapshots::error::Result<alloc::string::String>
@@ -1230,6 +1245,19 @@ impl core::default::Default for openjd_snapshots::ops::hash_upload::UploadStatis
 pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::default() -> openjd_snapshots::ops::hash_upload::UploadStatistics
 impl core::fmt::Debug for openjd_snapshots::ops::hash_upload::UploadStatistics
 pub fn openjd_snapshots::ops::hash_upload::UploadStatistics::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+#[non_exhaustive] pub struct openjd_snapshots::V2023Summary
+pub openjd_snapshots::V2023Summary::file_count: u64
+pub openjd_snapshots::V2023Summary::hash_alg: openjd_snapshots::hash::HashAlgorithm
+pub openjd_snapshots::V2023Summary::total_size: u64
+impl core::clone::Clone for openjd_snapshots::codec::V2023Summary
+pub fn openjd_snapshots::codec::V2023Summary::clone(&self) -> openjd_snapshots::codec::V2023Summary
+impl core::cmp::Eq for openjd_snapshots::codec::V2023Summary
+impl core::cmp::PartialEq for openjd_snapshots::codec::V2023Summary
+pub fn openjd_snapshots::codec::V2023Summary::eq(&self, &openjd_snapshots::codec::V2023Summary) -> bool
+impl core::fmt::Debug for openjd_snapshots::codec::V2023Summary
+pub fn openjd_snapshots::codec::V2023Summary::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for openjd_snapshots::codec::V2023Summary
+impl core::marker::StructuralPartialEq for openjd_snapshots::codec::V2023Summary
 pub const openjd_snapshots::DEFAULT_FILE_CHUNK_SIZE: i64
 pub const openjd_snapshots::DEFAULT_S3_MULTIPART_PART_SIZE: usize
 pub const openjd_snapshots::WHOLE_FILE_CHUNK_SIZE: i64
@@ -1304,6 +1332,8 @@ pub fn openjd_snapshots::compose_snapshot_with_diffs<P: core::clone::Clone>(&ope
 pub fn openjd_snapshots::decode_manifest(&str) -> openjd_snapshots::error::Result<openjd_snapshots::codec::DecodedManifest>
 pub fn openjd_snapshots::decode_v2023(&str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Snapshot>
 pub fn openjd_snapshots::decode_v2023_as_diff(&str) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::SnapshotDiff>
+pub fn openjd_snapshots::decode_v2023_for_each<F, E>(&str, F) -> core::result::Result<openjd_snapshots::codec::V2023Summary, E> where F: core::ops::function::FnMut(openjd_snapshots::hash::HashAlgorithm, openjd_snapshots::manifest::FileEntry) -> core::result::Result<(), E>, E: core::convert::From<openjd_snapshots::error::SnapshotError>
+pub fn openjd_snapshots::decode_v2023_for_each_from_reader<R, F, E>(R, F) -> core::result::Result<openjd_snapshots::codec::V2023Summary, E> where R: std::io::Read, F: core::ops::function::FnMut(openjd_snapshots::hash::HashAlgorithm, openjd_snapshots::manifest::FileEntry) -> core::result::Result<(), E>, E: core::convert::From<openjd_snapshots::error::SnapshotError>
 pub fn openjd_snapshots::decode_v2025(&str) -> openjd_snapshots::error::Result<openjd_snapshots::codec::DecodedManifest>
 pub fn openjd_snapshots::diff_snapshots<P: core::clone::Clone>(&openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>, &openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Full>, &openjd_snapshots::ops::diff::DiffOptions) -> openjd_snapshots::error::Result<openjd_snapshots::manifest::Manifest<P, openjd_snapshots::manifest::Diff>>
 pub async fn openjd_snapshots::download_abs_manifest(&openjd_snapshots::manifest::AbsManifest, alloc::sync::Arc<dyn openjd_snapshots::data_cache::AsyncDataCache>, openjd_snapshots::ops::download::DownloadOptions) -> openjd_snapshots::error::Result<openjd_snapshots::ops::download::DownloadResult>
