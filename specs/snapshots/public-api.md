@@ -414,9 +414,9 @@ where
     F: FnMut(HashAlgorithm, FileEntry) -> Result<(), E>,
     E: From<SnapshotError>;
 
-pub fn decode_v2023_for_each_from_reader<R: io::Read, F, E>(reader: R, f: F)
-    -> Result<V2023Summary, E>
+pub fn decode_v2023_for_each_from_reader<R, F, E>(reader: R, f: F) -> Result<V2023Summary, E>
 where
+    R: std::io::Read,
     F: FnMut(HashAlgorithm, FileEntry) -> Result<(), E>,
     E: From<SnapshotError>;
 ```
@@ -431,23 +431,24 @@ reader). Memory does grow with the largest entry and the longest string:
 normalizing a path while building its `FileEntry` can take over ten times
 the path's length, serde_json unescapes a string that contains escapes into
 a buffer even when the member is not used, and the reader form copies every
-string, used or not, into that buffer as it reads it. The summary returned holds the hash algorithm, the recorded
-`totalSize`, and the number of entries delivered. There is no v2025
+string, used or not, into that buffer as it reads it. The summary returned holds the hash
+algorithm, the recorded `totalSize`, and the number of entries delivered. There is no v2025
 equivalent.
 
 The callback's error type `E` is the function's error type: an error the
 callback returns stops the decode and is returned unchanged, and decode
 errors are converted with `From<SnapshotError>`. Unless the callback
 returns an `Err` of a concrete type somewhere, it has to name `E`, as in
-`Ok::<_, SnapshotError>(())`, since `?` inside it converts into any `E`. The reader form reads the text as it parses (pass it a
-buffered reader), and returns read errors as `SnapshotError::Io`.
+`Ok::<_, SnapshotError>(())`, since `?` inside it converts into any `E`.
+The reader form reads the text as it parses (pass it a buffered reader), and returns read errors as `SnapshotError::Io`.
 
 Values are read, each entry checked, and errors worded as `decode_v2023`
 does, with these differences, which streaming requires:
 
 - The header is checked when `paths` arrives, with the values read so far,
   so `manifestVersion` and `hashAlg` must come before `paths`, as they do in
-  every v2023 writer's sorted-key output. One that has not appeared by then
+  canonical (sorted-key) v2023 output, which `encode_snapshot_v2023`
+  writes. One that has not appeared by then
   fails with `missing manifestVersion before paths` (or `hashAlg`), one
   that appears again after `paths` with `manifestVersion must come before
   paths` (or `hashAlg`), and a second `paths` key with `paths appears more

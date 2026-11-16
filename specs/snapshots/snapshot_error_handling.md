@@ -53,6 +53,7 @@ All other error sources are converted to string representations via `.map_err(|e
 | `tokio::task::JoinError` | `Task(String)` | `.map_err(\|e\| SnapshotError::Task(e.to_string()))` |
 | `tokio::runtime::Builder` errors | `Task(String)` | `.map_err(\|e\| SnapshotError::Task(e.to_string()))` |
 | `walkdir::Error` | `Io(std::io::Error)` | `.map_err(\|e\| SnapshotError::Io(std::io::Error::other(e.to_string())))` |
+| `serde_json::Error` in the streaming v2023 decoders | `Io(std::io::Error)` when `is_io()` (a failed read in `decode_v2023_for_each_from_reader`), else `Validation(String)` | `Invalid JSON: {e}` for the `Validation` case |
 | S3 data cache I/O operations | `Io(std::io::Error)` | `.map_err(SnapshotError::Io)` or `.map_err(crate::SnapshotError::Io)` |
 
 **Tradeoff:** Converting to `String` breaks the `source()` chain, making it harder to programmatically inspect the underlying error. However, it avoids leaking `rusqlite`, `aws-sdk-s3`, and `tokio` types into the public API, which would make those crates part of the semver contract.
@@ -131,7 +132,7 @@ When cancelled, the operation returns `SnapshotError::Cancelled`. In-flight work
 | PARTITION | `Validation` |
 | JOIN | `Validation` |
 | CACHE_SYNC | `Io`, `Task`, `Cancelled` |
-| Codec (encode/decode) | `Validation` |
+| Codec (encode/decode) | `Validation`; `decode_v2023_for_each_from_reader` also `Io` for a failed read. The streaming decoders return the caller's error type `E`, which receives these through `From<SnapshotError>`, and the callback's own errors unchanged |
 | Manifest validate | `Validation` |
 
 ## Test Coverage

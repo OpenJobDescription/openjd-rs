@@ -477,7 +477,8 @@ pub struct V2023Summary {
 ///
 /// - The header is checked when `paths` arrives, with the values read so
 ///   far, so `manifestVersion` and `hashAlg` must come before `paths`, as
-///   they do in every v2023 writer's sorted-key output. If either has not
+///   they do in canonical (sorted-key) v2023 output, which
+///   [`encode_snapshot_v2023`] writes. If either has not
 ///   appeared by then, the error is `missing manifestVersion before paths`
 ///   (or `hashAlg`). If either appears again after `paths`, the error is
 ///   `manifestVersion must come before paths` (or `hashAlg`), and a second
