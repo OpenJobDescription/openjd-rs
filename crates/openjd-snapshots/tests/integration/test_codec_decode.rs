@@ -424,6 +424,30 @@ fn v2025_entry_members_of_the_wrong_type_are_absent() {
 }
 
 #[test]
+fn v2025_entry_members_are_decoded() {
+    let json = r#"{"dirs":[{"name":"d"},{"delete":true,"name":"gone"}],"fileChunkSizeBytes":-1,"files":[{"hash":"h1","mtime":1,"name":"$0/a.txt","size":2},{"delete":true,"name":"old.txt"}],"hashAlg":"xxh128","specificationVersion":"relative-manifest-diff-beta-2025-12","totalSize":2}"#;
+    let decoded = match decode_v2025(json).unwrap() {
+        DecodedManifest::SnapshotDiff(d) => d,
+        other => panic!("expected a relative diff, got {other:?}"),
+    };
+    let dirs: Vec<(&str, bool)> = decoded
+        .dirs
+        .iter()
+        .map(|d| (d.path.as_str(), d.deleted))
+        .collect();
+    assert_eq!(dirs, [("d", false), ("gone", true)]);
+    let files: Vec<(&str, Option<&str>, bool)> = decoded
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f.hash.as_deref(), f.deleted))
+        .collect();
+    assert_eq!(
+        files,
+        [("d/a.txt", Some("h1"), false), ("old.txt", None, true)]
+    );
+}
+
+#[test]
 fn v2025_non_string_chunk_hashes_are_dropped() {
     let json = r#"{"dirs":[],"fileChunkSizeBytes":256,"files":[{"chunkhashes":["c1",2,null,"c2"],"mtime":1,"name":"big","size":512}],"hashAlg":"xxh128","specificationVersion":"relative-manifest-snapshot-beta-2025-12","totalSize":512}"#;
     let decoded = rel_snapshot(decode_v2025(json).unwrap());

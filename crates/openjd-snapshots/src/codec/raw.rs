@@ -22,6 +22,12 @@
 //!   nesting past the recursion limit) fails here too, with the same error.
 //!   That is why skipped values go through `deserialize_any` rather than
 //!   [`serde::de::IgnoredAny`], which accepts such input.
+//!
+//! These rules hold for serde_json's default number handling, which this
+//! crate uses. Under its `arbitrary_precision` feature, numbers that do not
+//! fit in `u64` or `i64` arrive as a private map that reads as absent, so
+//! `-0` in a signed field (`mtime`, `fileChunkSizeBytes`) reads as absent
+//! where `Value::as_i64` gives `0`.
 
 use crate::{Result, SnapshotError};
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
@@ -42,9 +48,6 @@ trait Lenient: Default {
     }
     fn from_text(_: &str) -> Self {
         Self::default()
-    }
-    fn from_string(s: String) -> Self {
-        Self::from_text(&s)
     }
     fn from_seq<'de, A: SeqAccess<'de>>(mut seq: A) -> std::result::Result<Self, A::Error> {
         while seq.next_element::<Read<()>>()?.is_some() {}
@@ -88,9 +91,6 @@ impl<'de, T: Lenient> Visitor<'de> for ReadVisitor<T> {
     fn visit_str<E>(self, v: &str) -> std::result::Result<Read<T>, E> {
         Ok(Read(T::from_text(v)))
     }
-    fn visit_string<E>(self, v: String) -> std::result::Result<Read<T>, E> {
-        Ok(Read(T::from_string(v)))
-    }
     fn visit_unit<E>(self) -> std::result::Result<Read<T>, E> {
         Ok(Read(T::default()))
     }
@@ -115,16 +115,11 @@ impl Lenient for Option<String> {
     fn from_text(s: &str) -> Self {
         Some(s.to_owned())
     }
-    fn from_string(s: String) -> Self {
-        Some(s)
-    }
 }
 
-/// `Value::as_u64`: a non-negative integer.
+/// `Value::as_u64`: a non-negative integer. serde_json reports only negative
+/// integers through `visit_i64`, so those keep the default and read as absent.
 impl Lenient for Option<u64> {
-    fn from_i64(n: i64) -> Self {
-        u64::try_from(n).ok()
-    }
     fn from_u64(n: u64) -> Self {
         Some(n)
     }
