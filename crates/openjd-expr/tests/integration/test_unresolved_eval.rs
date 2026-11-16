@@ -1737,19 +1737,34 @@ fn subscript_unresolved_slice_checks_bound_types() {
     for (expr, msg) in [
         (
             "S[::'x']",
-            "No matching signature for __getitem__(string, nulltype, nulltype, string)",
+            "No matching signature for __getitem__(string, nulltype, nulltype, string)\n\
+             \x20 S[::'x']\n\
+             \x20 ~^~~~~~~",
         ),
         (
             "L[::'x']",
-            "No matching signature for __getitem__(list[int], nulltype, nulltype, string)",
+            "No matching signature for __getitem__(list[int], nulltype, nulltype, string)\n\
+             \x20 L[::'x']\n\
+             \x20 ~^~~~~~~",
         ),
         (
             "R[::True]",
-            "No matching signature for __getitem__(range_expr, nulltype, nulltype, bool)",
+            "No matching signature for __getitem__(range_expr, nulltype, nulltype, bool)\n\
+             \x20 R[::True]\n\
+             \x20 ~^~~~~~~~",
         ),
         (
             "[1, 2][N:'x']",
-            "No matching signature for __getitem__(list[int], int, string, nulltype)",
+            "No matching signature for __getitem__(list[int], int, string, nulltype)\n\
+             \x20 [1, 2][N:'x']\n\
+             \x20 ~~~~~~^~~~~~~",
+        ),
+        // Inside a larger expression the caret spans only the slice.
+        (
+            "1 + S[True:]",
+            "No matching signature for __getitem__(string, bool, nulltype, nulltype)\n\
+             \x20 1 + S[True:]\n\
+             \x20     ~^~~~~~~",
         ),
     ] {
         assert_err_w(expr, &st, &[msg]);
