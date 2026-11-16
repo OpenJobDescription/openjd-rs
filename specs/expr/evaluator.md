@@ -770,9 +770,12 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
   (`(R if C else S)[::2]`) keeps the signatures' type, here
   `range_expr | list[int] | string`: other members add types of their own,
   so the range member is not narrowed. A bound of unknown type (`any`)
-  makes the result unknown too (`S[NA:]` is `unresolved`, not
-  `unresolved[string]`), as an `any` index does, since no single
-  signature can be chosen for it
+  makes the result `unresolved[any]` (`S[NA:]`, not `unresolved[string]`),
+  as an `any` index does: a type-only call with an `any` argument is `any`
+  (function-library.md, the unknown-argument rule). The range narrowing
+  still applies on top, so `R[NA:]` is `unresolved[range_expr]` and
+  `R[NA::-1]` is `unresolved[list[int]]`; only a step of unknown type
+  leaves a range slice `unresolved[any]`
 - Out-of-bounds index raises an error; out-of-bounds slice clamps silently
 - Indexing a receiver every form of which is the empty list
   (`list[nulltype]`, e.g. `[None for x in L]`, or `[]` with an unresolved
