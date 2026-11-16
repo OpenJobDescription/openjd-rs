@@ -238,7 +238,6 @@ Numeric limits derived from context. FEATURE_BUNDLE_1 raises many limits:
 | `max_task_param_range_len` | 1024 | 1024 |
 | `max_task_param_string_len` | 1024 | 1024 |
 | `max_job_param_string_len` | 1024 | 1024 |
-| `max_command_len` | 1024 | 1024 |
 | `max_description_len` | 2048 | 2048 |
 
 `max_task_param_range_len` applies to the **list** forms of a task parameter
@@ -246,6 +245,10 @@ range only — `<IntRangeList>` (§3.4.1.1), `<FloatRangeList>` (§3.4.1.2) and
 `<StringRangeList>` (§3.4.1.3). §3.4.1.1.1 `<IntRangeExpr>` states no element
 cap, so an expression's expansion is unbounded here; a host that needs to bound
 fan-out uses `CallerLimits::max_task_count`.
+
+There is no baseline limit on an action `command`: Template Schemas §5.1
+`<CommandString>` imposes no maximum length. A host that needs one uses the
+opt-in `CallerLimits::max_resolved_arg_len`.
 
 ### EffectiveRules
 
