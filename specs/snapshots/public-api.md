@@ -339,6 +339,38 @@ returned manifest. `decode_v2023_as_diff` is a convenience for callers that
 want to feed a v2023-formatted manifest into a diff-consuming pipeline like
 [`compose_snapshot_with_diffs`] without reconstructing the manifest.
 
+`decode_manifest` decodes a document that has a `manifestVersion` key as
+v2023, otherwise one that has a `specificationVersion` key as v2025, and
+otherwise fails with `Unknown manifest format: no manifestVersion or
+specificationVersion`. It goes by whether the key is present, not by its
+value, so `{"manifestVersion": null}` fails as `missing manifestVersion`.
+
+All four decoders read their input with the same rules:
+
+- Text that is not valid JSON fails as `Invalid JSON: <serde_json error>`,
+  with the error's line and column. That includes members the decoder does
+  not use: an out-of-range number, an invalid `\u` escape, or nesting past
+  serde_json's recursion limit anywhere in the document is rejected.
+- A member of the wrong JSON type is treated as absent. A required member
+  then fails with its "missing" error (for example, a v2023 entry whose
+  `size` is `"2"`, `-2`, or `2.0` fails as `path entry missing 'size'`),
+  and an optional one takes its default (a v2025 `runnable` of `"yes"` is
+  `false`). An array entry that is not an object has no members. Non-string
+  elements of a v2025 `chunkhashes` array are dropped.
+- When an object has a key more than once, the last value is used.
+- Unknown members are ignored.
+
+Header errors are reported before entry errors, except that v2025 reports
+an unknown `specificationVersion` after its `dirs` and `files` errors.
+`tests/integration/test_codec_decode.rs` asserts every decode error message
+and each of these rules.
+
+Each decoder parses its input once, reading only the members it uses into
+typed values. It never builds a `serde_json::Value` tree for the document,
+so peak heap use is a small multiple of the input size: about 2.3x for
+v2023 and 3.2x for v2025 on manifests of a few hundred thousand entries.
+`tests/decode_memory.rs` guards this.
+
 ## Data Cache
 
 ### Async Trait
