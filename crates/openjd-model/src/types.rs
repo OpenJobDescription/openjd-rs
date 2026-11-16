@@ -212,7 +212,7 @@ impl std::str::FromStr for TemplateSpecificationVersion {
 /// Marked `#[non_exhaustive]` so that future revisions and extensions can
 /// add parameter types (as RFC 0007 already did for `Bool`, `RangeExpr`,
 /// and the `List[…]` family) without a SemVer break.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 #[allow(
     missing_docs,
@@ -294,6 +294,14 @@ impl JobParameterType {
 impl fmt::Display for JobParameterType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_spec_str())
+    }
+}
+
+/// Serialize as the spec spelling (`"INT"`, `"LIST[LIST[INT]]"`), the same
+/// string as `Display` and the template's `type` field.
+impl serde::Serialize for JobParameterType {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_spec_str())
     }
 }
 
@@ -795,6 +803,27 @@ mod tests {
             .copied()
             .filter(|v| v.is_environment_template())
             .collect()
+    }
+
+    #[test]
+    fn job_parameter_type_serializes_as_spec_spelling() {
+        let cases = [
+            (JobParameterType::String, "\"STRING\""),
+            (JobParameterType::Int, "\"INT\""),
+            (JobParameterType::Float, "\"FLOAT\""),
+            (JobParameterType::Path, "\"PATH\""),
+            (JobParameterType::Bool, "\"BOOL\""),
+            (JobParameterType::RangeExpr, "\"RANGE_EXPR\""),
+            (JobParameterType::ListString, "\"LIST[STRING]\""),
+            (JobParameterType::ListInt, "\"LIST[INT]\""),
+            (JobParameterType::ListFloat, "\"LIST[FLOAT]\""),
+            (JobParameterType::ListPath, "\"LIST[PATH]\""),
+            (JobParameterType::ListBool, "\"LIST[BOOL]\""),
+            (JobParameterType::ListListInt, "\"LIST[LIST[INT]]\""),
+        ];
+        for (t, json) in cases {
+            assert_eq!(serde_json::to_string(&t).unwrap(), json, "{t:?}");
+        }
     }
 
     #[test]

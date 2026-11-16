@@ -520,8 +520,11 @@ fn directory_symlink_collapsed_with_implicit_dirs() {
     assert!(p.contains("link/b.png"));
 }
 
+/// A symlink inside a collapsed directory follows the same policy as one in
+/// the subtree (snapshot_symlink_handling.md, "Directory target"): its
+/// target escapes the new root, so it is collapsed too.
 #[test]
-fn directory_symlink_with_nested_symlink_collapse_escaping_preserves() {
+fn directory_symlink_with_nested_escaping_symlink_collapse_escaping_collapses() {
     let m = rel(
         vec![
             FileEntry::symlink("assets/textures/link", "assets/shared/v2"),
@@ -546,12 +549,93 @@ fn directory_symlink_with_nested_symlink_collapse_escaping_preserves() {
     assert_eq!(reg.hash.as_deref(), Some("h1"));
     assert!(reg.symlink_target.is_none());
 
-    // CollapseEscaping preserves nested symlinks inside expanded directories
     let nested = by_path["link/nested_link"];
-    assert_eq!(
-        nested.symlink_target.as_deref(),
-        Some("assets/data/actual.png")
+    assert_eq!(nested.hash.as_deref(), Some("h2"));
+    assert_eq!(nested.size, Some(200));
+    assert!(nested.symlink_target.is_none());
+    result.validate().unwrap();
+}
+
+/// The fuzz-found case: an absolute snapshot whose collapsed directory holds
+/// a symlink with an absolute target. The relative result must validate.
+#[test]
+fn directory_symlink_with_nested_absolute_symlink_gives_valid_relative_snapshot() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/r/s/link", "/r/x"),
+            FileEntry::symlink("/r/x/nested", "/r/x/a"),
+            hf("/r/x/a", "h1", 100, 1000),
+        ],
+        vec![],
     );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/r/s", policy).unwrap();
+        result.validate().unwrap();
+        let by_path: std::collections::HashMap<_, _> =
+            result.files.iter().map(|f| (f.path.as_str(), f)).collect();
+        assert_eq!(by_path.len(), 2, "{policy}");
+        assert_eq!(by_path["link/a"].hash.as_deref(), Some("h1"), "{policy}");
+        let nested = by_path["link/nested"];
+        assert_eq!(nested.hash.as_deref(), Some("h1"), "{policy}");
+        assert!(nested.symlink_target.is_none(), "{policy}");
+    }
+}
+
+/// A symlink inside a collapsed directory whose target is in the new root is
+/// kept under `CollapseEscaping`, with its target rebased.
+#[test]
+fn directory_symlink_with_nested_symlink_into_subtree_is_rebased() {
+    let m = abs(
+        vec![
+            hf("/r/s/f", "h1", 100, 1000),
+            FileEntry::symlink("/r/s/link", "/r/x"),
+            FileEntry::symlink("/r/x/back", "/r/s/f"),
+        ],
+        vec![],
+    );
+    let result = subtree_snapshot(&m, "/r/s", SymlinkPolicy::CollapseEscaping).unwrap();
+    result.validate().unwrap();
+    let back = result.files.iter().find(|f| f.path == "link/back").unwrap();
+    assert_eq!(back.symlink_target.as_deref(), Some("f"));
+}
+
+/// A directory symlink inside a collapsed directory is skipped, not expanded
+/// in turn (expanding nested directory symlinks has no bound on the output).
+#[test]
+fn nested_directory_symlink_is_skipped() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/r/s/link", "/r/x"),
+            FileEntry::symlink("/r/x/inner", "/r/y"),
+            hf("/r/x/a", "h1", 100, 1000),
+            hf("/r/y/deep", "h2", 100, 1000),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/r/s", policy).unwrap();
+        result.validate().unwrap();
+        let p = paths(&result);
+        assert_eq!(p, ["link/a".to_string()].into(), "{policy}");
+    }
+}
+
+/// A nested symlink back to the directory being expanded is skipped too.
+#[test]
+fn nested_directory_symlink_cycle_is_skipped() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/r/s/link", "/r/x"),
+            FileEntry::symlink("/r/x/loop", "/r/x"),
+            hf("/r/x/a", "h1", 100, 1000),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/r/s", policy).unwrap();
+        result.validate().unwrap();
+        assert_eq!(paths(&result), ["link/a".to_string()].into(), "{policy}");
+    }
 }
 
 #[test]

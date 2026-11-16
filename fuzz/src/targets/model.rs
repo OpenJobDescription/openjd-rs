@@ -401,8 +401,7 @@ fn param_def_surface(template: &JobTemplate) {
     for d in template.parameter_definitions_list() {
         let t = d.job_param_type();
         let ser = serde_json::to_value(t).ok();
-        known_issue!(
-            "model-param-type-serde-spelling",
+        oracle!(
             ser == Some(serde_json::Value::String(t.to_string())),
             "JobParameterType displays as {t} but serializes as {ser:?}"
         );

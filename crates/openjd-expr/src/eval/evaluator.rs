@@ -1716,7 +1716,7 @@ impl<'a> Evaluator<'a> {
                 let inner = unwrap_unresolved(&value.expr_type());
                 Some(match inner.list_element_type() {
                     Some(elem) => ExprValue::unresolved(ExprType::list(elem.clone())),
-                    None => ExprValue::unresolved(inner),
+                    None => ExprValue::unresolved(range_slice_type(inner, &step)),
                 })
             } else if start.is_unresolved() || stop.is_unresolved() || step.is_unresolved() {
                 // Any unresolved bound makes the result unresolved.
@@ -2380,6 +2380,40 @@ fn is_type_variable(t: &ExprType) -> bool {
             | crate::types::TypeCode::TypeVarT2
             | crate::types::TypeCode::TypeVarT3
     )
+}
+
+/// The static type of slicing an unresolved non-list value of type `inner`
+/// (or a union of such types) with `step`. A `range_expr` slice is a
+/// `range_expr` for an omitted or non-negative step and a `list[int]` for a
+/// negative one (range-expr.md §"Operations"), so a negative step replaces
+/// `range_expr` with `list[int]`, and a step that may be negative adds
+/// `list[int]`. Other types are unchanged.
+fn range_slice_type(inner: ExprType, step: &ExprValue) -> ExprType {
+    let members: Vec<ExprType> = if inner.code() == crate::types::TypeCode::Union {
+        inner.params().to_vec()
+    } else {
+        vec![inner.clone()]
+    };
+    if !members.contains(&ExprType::RANGE_EXPR) {
+        return inner;
+    }
+    match step {
+        ExprValue::Null => inner,
+        ExprValue::Int(n) if *n >= 0 => inner,
+        ExprValue::Int(_) => ExprType::union(
+            members
+                .into_iter()
+                .map(|m| {
+                    if m == ExprType::RANGE_EXPR {
+                        ExprType::list(ExprType::INT)
+                    } else {
+                        m
+                    }
+                })
+                .collect(),
+        ),
+        _ => ExprType::union(vec![inner, ExprType::list(ExprType::INT)]),
+    }
 }
 
 /// Unwrap unresolved[T] to T, or return the type as-is if not unresolved.

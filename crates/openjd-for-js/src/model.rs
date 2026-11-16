@@ -814,7 +814,7 @@ pub fn preprocess_job_parameters_with_map(
             (
                 k,
                 serde_json::json!({
-                    "type": format!("{:?}", v.param_type),
+                    "type": v.param_type.as_spec_str(),
                     "value": v.value.to_display_string(),
                 }),
             )
@@ -834,7 +834,7 @@ pub fn merge_job_parameter_definitions(template: &JsJobTemplate) -> Result<JsVal
         .map(|m| {
             serde_json::json!({
                 "name": m.name,
-                "type": format!("{:?}", m.param_type),
+                "type": m.param_type.as_spec_str(),
             })
         })
         .collect();

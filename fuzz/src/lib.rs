@@ -92,13 +92,6 @@ pub mod known {
              `skip_deep_unclosed_brackets`).",
         ),
         (
-            "model-param-type-serde-spelling",
-            "`JobParameterType` serializes with serde's variant names (`\"Int\"`, \
-             `\"ListListInt\"`) while its `Display` and the template spelling are `\"INT\"`, \
-             `\"LIST[LIST[INT]]\"`, so a serialized `Job`'s `parameters[*].paramType` (and \
-             openjd-for-js, which uses `{:?}`) does not use the spec spelling.",
-        ),
-        (
             "expr-static-fold-host-path-format",
             "Template validation folds path operations on literals in the validating host's \
              path format, so a format-dependent condition (`is_absolute(path('../a') / \
@@ -120,13 +113,6 @@ pub mod known {
              imprecise), so `[x for x in Task.Param.I]` with an INT task parameter validates \
              and then fails every run with `Cannot iterate over int`, even though a declared \
              parameter's type is exact.",
-        ),
-        (
-            "expr-escape-segment-cap",
-            "`escape_format_string` writes each `{{` and `}}` as its own interpolation \
-             (`}}` becomes `{{ \"}\" + \"}\" }}`), and literal text between them \
-             counts as segments too, so escaping e.g. `a}}` 501 times gives a format string that \
-             does not parse (`too many interpolation segments (1002); maximum is 1000`).",
         ),
         (
             "expr-runtime-dispatch-miss",
@@ -174,14 +160,6 @@ pub mod known {
              `Cannot use '*' operator with list[string] and float` when the power is a float.",
         ),
         (
-            "expr-range-slice-static-type",
-            "A stepped slice of an unresolved `range_expr` is typed `range_expr` whatever the \
-             step (evaluator.rs, the unresolved slice path), but a negative step gives \
-             `list[int]` (specs/expr/function-library.md; the signature returns \
-             `range_expr | list[int]`), so `R[:None:-1] + 'x'` or `list(R[:None:-1])` \
-             validates and fails at run time.",
-        ),
-        (
             "expr-dispatch-derive-mismatch",
             "`derive_return_type` and run-time dispatch can pick different overloads when an \
              argument coerces: `path + path` derives `string` (via `(string, string)`) but \
@@ -221,12 +199,6 @@ pub mod known {
              (`/a` and `/a/b`, including entries beneath a symlink); diff/compose then treat \
              the file's deletion as deleting the subtree, so `compose(a, [diff(a, b)]) != b`, \
              and `subtree_snapshot` with symlink collapsing emits duplicate paths.",
-        ),
-        (
-            "snapshots-collapse-nested-symlink",
-            "`subtree_snapshot` with a collapsing symlink policy pulls a symlinked directory's \
-             contents into the subtree but leaves a nested symlink's absolute target as-is, so \
-             the relative result fails `validate()` (`symlink_target path style mismatch`).",
         ),
         (
             "snapshots-subtree-root-symlink-empty-target",

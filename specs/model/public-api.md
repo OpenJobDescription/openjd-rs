@@ -841,7 +841,8 @@ impl ValidationContext {
 
 ```rust
 /// Job parameter type — the `type` field on a job parameter definition,
-/// after `UPPER_SNAKE_CASE` → Rust-identifier conversion.
+/// after `UPPER_SNAKE_CASE` → Rust-identifier conversion. `Display` and
+/// `Serialize` both write the spec spelling (`"INT"`, `"LIST[LIST[INT]]"`).
 #[non_exhaustive]
 pub enum JobParameterType {
     String, Int, Float, Path, Bool, RangeExpr,

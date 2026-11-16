@@ -1062,29 +1062,121 @@ impl<'a> FormatStringOptions<'a> {
 /// Escape `{{` and `}}` in a string so the format string parser treats them as literals.
 /// A lone `{` directly before `}}` is escaped too, so it cannot join the
 /// escape's opening `{{`.
+///
+/// Escaped text is written as a `{{ "..." }}` interpolation of a string
+/// literal that evaluates to it. Escapes, and the literal text between them
+/// that fits, share one interpolation, so the segment count does not grow
+/// with the number of escapes. Each interpolation's source stays under the
+/// 512-byte expression cap of wasm32 builds, so the output parses on every
+/// target. Text with no `{{` or `}}` is returned unchanged.
 #[must_use]
 pub fn escape_format_string(value: &str) -> String {
+    // Split `value` into literal runs and the text that must be escaped:
+    // `{{`, `}}`, and a lone `{` right before `}}` (which would otherwise
+    // join the escape's opening `{{` into `{{{`, which does not parse).
+    let mut pieces: Vec<(bool, &str)> = Vec::new();
+    let bytes = value.as_bytes();
+    let (mut i, mut literal_start) = (0, 0);
+    while i < bytes.len() {
+        let len = match &bytes[i..] {
+            [b'{', b'{', ..] | [b'}', b'}', ..] => 2,
+            [b'{', b'}', b'}', ..] => 1,
+            _ => 0,
+        };
+        if len == 0 {
+            i += 1;
+            continue;
+        }
+        if literal_start < i {
+            pieces.push((false, &value[literal_start..i]));
+        }
+        pieces.push((true, &value[i..i + len]));
+        i += len;
+        literal_start = i;
+    }
+    if literal_start < bytes.len() {
+        pieces.push((false, &value[literal_start..]));
+    }
+
+    // Each escape becomes part of a `{{ "..." }}` interpolation of a string
+    // literal. Escapes, and the literal runs between them that fit, share
+    // one interpolation, so the segment count does not grow with the number
+    // of escapes; a literal run that does not fit stays literal text.
     let mut result = String::new();
-    let mut chars = value.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '{' && chars.peek() == Some(&'{') {
-            chars.next();
-            result.push_str("{{ \"{{\" }}");
-        } else if c == '}' && chars.peek() == Some(&'}') {
-            chars.next();
-            result.push_str("{{ \"}\" + \"}\" }}");
-        } else if c == '{' && {
-            let mut ahead = chars.clone();
-            ahead.next() == Some('}') && ahead.next() == Some('}')
-        } {
-            // A lone `{` right before an escaped `}}` would join the
-            // escape's opening `{{` into `{{{`, which does not parse.
-            result.push_str("{{ \"{\" }}");
-        } else {
-            result.push(c);
+    let mut group = EscapeGroup::default();
+    for (i, &(escape, text)) in pieces.iter().enumerate() {
+        let joins = escape || (!group.is_empty() && pieces.get(i + 1).is_some_and(|p| p.0));
+        if !joins {
+            group.flush(&mut result);
+            result.push_str(text);
+        } else if !group.push(text) {
+            group.flush(&mut result);
+            if !group.push(text) {
+                // A literal run too long for any interpolation.
+                result.push_str(text);
+            }
         }
     }
+    group.flush(&mut result);
     result
+}
+
+/// The largest string-literal source an [`escape_format_string`]
+/// interpolation holds. Under the 512-byte expression cap of wasm32 builds
+/// (`MAX_PARSE_INPUT_LEN`), so the output parses on every target.
+const ESCAPE_LITERAL_MAX: usize = 400;
+
+/// The string literal of one [`escape_format_string`] interpolation, as
+/// source text without its quotes.
+#[derive(Default)]
+struct EscapeGroup {
+    source: String,
+}
+
+impl EscapeGroup {
+    fn is_empty(&self) -> bool {
+        self.source.is_empty()
+    }
+
+    /// Append `text`'s literal source, unless it would exceed
+    /// [`ESCAPE_LITERAL_MAX`]; returns whether it was appended.
+    fn push(&mut self, text: &str) -> bool {
+        let mut source = std::mem::take(&mut self.source);
+        let start = source.len();
+        for c in text.chars() {
+            match c {
+                '\\' => source.push_str("\\\\"),
+                '"' => source.push_str("\\\""),
+                '\n' => source.push_str("\\n"),
+                '\r' => source.push_str("\\r"),
+                '\t' => source.push_str("\\t"),
+                // The format string parser ends an interpolation at the
+                // first `}}`, string literal or not.
+                '}' if source.ends_with('}') => source.push_str("\\x7d"),
+                ' '..='~' => source.push(c),
+                c if (c as u32) < 0x100 => source.push_str(&format!("\\x{:02x}", c as u32)),
+                c if (c as u32) < 0x10000 => source.push_str(&format!("\\u{:04x}", c as u32)),
+                c => source.push_str(&format!("\\U{:08x}", c as u32)),
+            }
+            if source.len() > ESCAPE_LITERAL_MAX {
+                source.truncate(start);
+                self.source = source;
+                return false;
+            }
+        }
+        self.source = source;
+        true
+    }
+
+    /// Write the interpolation, if any, to `out` and empty the group.
+    fn flush(&mut self, out: &mut String) {
+        if !self.source.is_empty() {
+            out.push_str("{{ \"");
+            out.push_str(&self.source);
+            out.push_str("\" }}");
+            self.source.clear();
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1313,10 +1405,7 @@ mod tests {
                 s
             );
         }
-        assert_eq!(
-            escape_format_string("{}}"),
-            "{{ \"{\" }}{{ \"}\" + \"}\" }}"
-        );
+        assert_eq!(escape_format_string("{}}"), "{{ \"{}\\x7d\" }}");
         // A lone `{` is escaped only when `}}` follows it; elsewhere it
         // stays literal.
         for s in ["a{}b", "{x}", "{", "a{"] {
@@ -1333,18 +1422,102 @@ mod tests {
     }
     #[test]
     fn escape_format_string_double_close_braces() {
-        assert_eq!(escape_format_string("}}"), "{{ \"}\" + \"}\" }}");
+        assert_eq!(escape_format_string("}}"), "{{ \"}\\x7d\" }}");
     }
     #[test]
     fn escape_format_string_mixed() {
-        assert_eq!(
-            escape_format_string("a{{b}}c"),
-            "a{{ \"{{\" }}b{{ \"}\" + \"}\" }}c"
-        );
+        assert_eq!(escape_format_string("a{{b}}c"), "a{{ \"{{b}\\x7d\" }}c");
     }
     #[test]
     fn escape_format_string_empty() {
         assert_eq!(escape_format_string(""), "");
+    }
+
+    /// The expression sources of `fs`'s interpolations, found the way
+    /// `parse_segments` finds them: from each `{{` to the next `}}`.
+    fn interpolation_sources(fs: &str) -> Vec<&str> {
+        let mut out = Vec::new();
+        let mut pos = 0;
+        while let Some(op) = fs[pos..].find("{{") {
+            let es = pos + op + 2;
+            let co = es + fs[es..].find("}}").unwrap();
+            out.push(&fs[es..co]);
+            pos = co + 2;
+        }
+        out
+    }
+
+    fn assert_escapes_to_itself(s: &str) -> String {
+        let escaped = escape_format_string(s);
+        let fs = FormatString::new(&escaped)
+            .unwrap_or_else(|e| panic!("{} bytes -> {} bytes: {e}", s.len(), escaped.len()));
+        assert_eq!(
+            fs.resolve_string_with(&SymbolTable::new(), &FormatStringOptions::new())
+                .unwrap(),
+            s
+        );
+        // Every interpolation fits the smallest expression cap, the 512-byte
+        // one of wasm32 builds, so the output parses on every target.
+        for src in interpolation_sources(&escaped) {
+            assert!(src.len() <= 512, "{} byte interpolation", src.len());
+        }
+        escaped
+    }
+
+    /// Escapes separated by literal text share an interpolation, so the
+    /// segment count does not grow with the number of escapes
+    /// (`MAX_FORMAT_STRING_SEGMENTS`). Found by the `expr_format_string`
+    /// fuzz target.
+    #[test]
+    fn escape_format_string_stays_under_segment_cap() {
+        for s in [
+            "a}}".repeat(501),
+            "{{a".repeat(2000),
+            "}".repeat(5000),
+            "{".repeat(5000),
+            "{}}".repeat(1000),
+            "x{{\"\\\n\r\t\u{0}\u{7f}é\u{2028}😀}}y".repeat(300),
+        ] {
+            let escaped = assert_escapes_to_itself(&s);
+            let segments = FormatString::new(&escaped).unwrap().segment_count();
+            assert!(segments <= 100, "{segments} segments for {} bytes", s.len());
+        }
+    }
+
+    /// Input up to 32 KB fits `MAX_FORMAT_STRING_SEGMENTS` however its
+    /// escapes and literal runs fall: runs just too long to share an
+    /// interpolation, runs just short enough, and characters with the
+    /// longest escapes.
+    #[test]
+    fn escape_format_string_32k_input_fits_segment_cap() {
+        let unit_inputs = [
+            format!("}}}}{}", "\0".repeat(101)),
+            format!("}}}}{}", "x".repeat(401)),
+            format!("}}}}{}", "\0".repeat(99)),
+            format!("{{}}}}{}", "\0".repeat(100)),
+            "}}\0".to_string(),
+            "}}}\0".to_string(),
+        ];
+        for unit in unit_inputs {
+            let s = unit.repeat(32 * 1024 / unit.len());
+            assert!(s.len() <= 32 * 1024);
+            let escaped = assert_escapes_to_itself(&s);
+            assert!(
+                FormatString::new(&escaped).unwrap().segment_count() <= MAX_FORMAT_STRING_SEGMENTS
+            );
+        }
+    }
+
+    /// A literal run too long to share an interpolation stays literal text.
+    #[test]
+    fn escape_format_string_keeps_long_literal_runs() {
+        let long = "x".repeat(1000);
+        let s = format!("{{{{{long}}}}}{long}");
+        let escaped = assert_escapes_to_itself(&s);
+        assert_eq!(
+            escaped,
+            format!("{{{{ \"{{{{\" }}}}{long}{{{{ \"}}\\x7d\" }}}}{long}")
+        );
     }
     #[test]
     fn resolve_value_single_expr_int() {

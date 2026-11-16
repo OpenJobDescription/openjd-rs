@@ -1683,6 +1683,49 @@ fn subscript_unknown_slice_bounds_type() {
     assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
 }
 
+/// A slice of a `range_expr` is a `range_expr` for a non-negative step and a
+/// `list[int]` for a negative one (range-expr.md §"Operations"), so an
+/// unresolved range's slice is typed from its step.
+#[test]
+fn subscript_unknown_range_slice_type_follows_step() {
+    let st = st_unresolved(vec![
+        ("R", "range_expr"),
+        ("U", "range_expr | string"),
+        ("S", "string"),
+        ("N", "int"),
+    ]);
+    for (expr, ty) in [
+        ("R[1:3]", "unresolved[range_expr]"),
+        ("R[::2]", "unresolved[range_expr]"),
+        ("R[::None]", "unresolved[range_expr]"),
+        ("R[::-1]", "unresolved[list[int]]"),
+        ("R[:None:-1]", "unresolved[list[int]]"),
+        ("R[::N]", "unresolved[range_expr | list[int]]"),
+        ("R[::-N]", "unresolved[range_expr | list[int]]"),
+        ("U[::2]", "unresolved[range_expr | string]"),
+        ("U[::-1]", "unresolved[list[int] | string]"),
+        ("U[::N]", "unresolved[range_expr | string | list[int]]"),
+        ("S[::-1]", "unresolved[string]"),
+    ] {
+        assert_eq!(eval_u(expr, &st).expr_type(), tp(ty), "{expr}");
+    }
+}
+
+#[test]
+fn subscript_unknown_range_negative_step_slice_is_a_list() {
+    let st = st_unresolved(vec![("R", "range_expr")]);
+    assert_err_w(
+        "R[:None:-1] + 'x'",
+        &st,
+        &["Cannot use '+' operator with list[int] and string"],
+    );
+    assert_err_w(
+        "list(R[:None:-1])",
+        &st,
+        &["No matching signature for list(list[int])"],
+    );
+}
+
 // ══════════════════════════════════════════════════════════════
 // round() return type with unresolved ndigits (§RFC 0006)
 // ══════════════════════════════════════════════════════════════

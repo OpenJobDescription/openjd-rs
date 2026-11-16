@@ -755,7 +755,12 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
 Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 
 - Negative indices wrap around (Python semantics)
-- Slices return the same type as the input (string→string, list→list)
+- Slices return the same type as the input (string→string, list→list),
+  except that a `range_expr` slice with a negative step is a `list[int]`
+  (range-expr.md). When the receiver is an unresolved `range_expr` (or a
+  union with one), the result is typed from the step: `range_expr` for an
+  omitted or non-negative literal step, `list[int]` for a negative one, and
+  `range_expr | list[int]` for a step that may be either (`R[::N]`)
 - Out-of-bounds index raises an error; out-of-bounds slice clamps silently
 - Indexing a receiver every form of which is the empty list
   (`list[nulltype]`, e.g. `[None for x in L]`, or `[]` with an unresolved
