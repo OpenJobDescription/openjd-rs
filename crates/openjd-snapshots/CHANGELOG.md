@@ -4,6 +4,23 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.5.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-snapshots-v0.4.1...openjd-snapshots-v0.5.0) - 2026-11-16
+
+### Features
+
+- Stream v2023 manifest entries to a callback ([#554](https://github.com/OpenJobDescription/openjd-rs/pull/554)) ([#554](https://github.com/OpenJobDescription/openjd-rs/pull/554))
+
+
+### Miscellaneous
+
+- [**breaking**] Bump the ruff crates together to 0.0.22 and update dependencies ([#556](https://github.com/OpenJobDescription/openjd-rs/pull/556)) ([#556](https://github.com/OpenJobDescription/openjd-rs/pull/556))
+
+
+### Performance
+
+- Decode manifests in one typed parse, without a serde_json::Value tree ([#551](https://github.com/OpenJobDescription/openjd-rs/pull/551)) ([#551](https://github.com/OpenJobDescription/openjd-rs/pull/551))
+
+
 ## [0.4.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-snapshots-v0.4.0...openjd-snapshots-v0.4.1) - 2026-11-14
 
 ### Miscellaneous

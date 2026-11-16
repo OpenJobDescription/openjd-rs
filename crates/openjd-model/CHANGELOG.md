@@ -4,6 +4,13 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.16.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.16.0...openjd-model-v0.16.1) - 2026-11-16
+
+### Miscellaneous
+
+- Updated the following local packages: openjd-expr
+
+
 ## [0.16.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.15.0...openjd-model-v0.16.0) - 2026-11-14
 
 ### Bug fixes
