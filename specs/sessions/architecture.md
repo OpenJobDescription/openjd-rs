@@ -50,12 +50,17 @@ src/
 ```
 build.rs                    # Compiles embedded cross-user helper binary
 helper/                     # Standalone helper binary crate
-├── Cargo.toml              # Independent workspace ([workspace] = {})
+├── Cargo.bundled.toml      # Manifest (copied to Cargo.toml to build); independent workspace
 └── src/
     ├── main.rs             # Shared stdin reader, command dispatch loop
     ├── protocol.rs         # Command/Response JSON serde types
+    ├── framer.rs           # Bounded line framer for child output (both runners)
     ├── runner.rs           # poll(2) loop, child management, cancel handling
-    └── runner_win.rs       # Windows runner (placeholder)
+    ├── runner_win.rs       # Windows runner: spawn, output threads, cancel
+    ├── process_tree.rs     # PID-reuse-safe tree walk, shared with subprocess.rs
+    ├── process_tree_win.rs # Windows snapshot and checked tree kill, shared with subprocess.rs
+    ├── job_object.rs       # Windows kill-on-close Job Object guard
+    └── win32_which.rs      # Windows executable search, shared with win32_locate.rs
 ```
 
 ## Public API Surface
@@ -184,8 +189,9 @@ both platforms:
 - Cross-user subprocess execution: implemented end-to-end — `WindowsSessionUser`
   (password and logon-token modes), the embedded helper binary spawned via
   `CreateProcessWithLogonW`/`CreateProcessAsUserW` (`win32.rs`), CTRL_BREAK notify and
-  Job-Object/`CreateToolhelp32Snapshot` process-tree termination inside the helper
-  (`helper/src/runner_win.rs`)
+  a kill-on-close Job Object inside the helper (`helper/src/runner_win.rs`,
+  `job_object.rs`), and `CreateToolhelp32Snapshot` process-tree termination shared
+  with `subprocess.rs` (`helper/src/process_tree_win.rs`)
 - Win32 helpers: `win32.rs` (logon, user lookup, environment blocks),
   `win32_permissions.rs` (ACL management), `win32_remove.rs` (the cleanup removal
   pass, which deletes what it can and reports what it cannot), `win32_file_locks.rs`

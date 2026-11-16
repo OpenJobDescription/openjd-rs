@@ -369,11 +369,14 @@ the kernel closes the helper's last handle to the job, which fires
 `KILL_ON_JOB_CLOSE` and terminates every workload still in the job.
 
 This is the cleanup path on Windows. The
-`kill_process_tree(child_pid)` walk in `runner_win::handle_cancel`
+`kill_process_tree(child_pid, None)` walk in `runner_win::handle_cancel`
 handles the *cooperative* cancel case (`Cancel::Terminate` /
 `NotifyThenTerminate`) and exists primarily so the runner can return a
 prompt `exited` response to the session; the Job Object is what
-guarantees no leaks on the *abnormal-exit* path.
+guarantees no leaks on the *abnormal-exit* path. The walk validates
+parent/child edges by creation time so a reused PID can't pull an
+unrelated process into the tree (see
+[subprocess.md](subprocess.md#process-tree-killing)).
 
 `runner_win::run_command` also explicitly calls
 `AssignProcessToJobObject(job, workload_handle)` after spawn. This is
