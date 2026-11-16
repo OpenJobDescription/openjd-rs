@@ -49,18 +49,23 @@ anything that resolved dependencies without our `Cargo.lock` failed to compile
 `openjd-expr`. That included downstream users and the cargo-semver-checks step
 in the release-plz workflow. Upgrade all three crates together, review the
 upstream AST changes, and keep `test_parser_work_bound.rs` passing as part of
-each bump. A bump of one crate alone leaves two `ruff_python_ast` versions in
-the dependency graph and fails to compile, so the `ruff` group in
-`.github/dependabot.yml` puts all three in one Dependabot PR. Each bump is a
-breaking change for openjd-expr, because `ExpressionError::with_node` takes a
-`ruff_python_ast` node (see [public-api.md](public-api.md)), so its PR is
-titled `chore!: ...` or `fix(expr)!: ...`. `release-plz.toml` leaves
-`chore(deps)` commits out of the changelog, `!` or not, so a Dependabot PR
-needs a new title. The public APIs of openjd-model and openjd-sessions also
-carry openjd-expr types (for example `ModelError::Expression` and
-`SymbolTable` parameters), so the release PR must give each of them a breaking
-bump too: release-plz bumps a crate that the commit doesn't touch only by a
-patch, even when a local dependency took a breaking bump.
+each bump.
+
+**Bumping the ruff crates.**
+
+- Bump all three together. A bump of one alone leaves two versions of a ruff
+  crate in the dependency graph and fails to compile. The `ruff` group in
+  `.github/dependabot.yml` puts all three in one Dependabot PR.
+- Title the PR `chore!: ...` or `fix(expr)!: ...`. Every bump is a breaking
+  change for openjd-expr, because `ExpressionError::with_node` takes a
+  `ruff_python_ast` node (see [public-api.md](public-api.md)). Don't use
+  `chore(deps)!:`, which is Dependabot's prefix: `release-plz.toml` leaves
+  `chore(deps)` commits out of the changelog, `!` or not.
+- In the release PR, give openjd-model and openjd-sessions breaking bumps
+  too. Their public APIs carry openjd-expr types (for example
+  `ModelError::Expression` and `SymbolTable` parameters), and release-plz
+  bumps a crate that the commit doesn't touch only by a patch, even when a
+  local dependency took a breaking bump.
 
 **`stacker` feature.** With it, the parser grows its stack on the heap once its
 recursion gets deep (see Depth Limit below). Without it, 64 KB of `-` or of
