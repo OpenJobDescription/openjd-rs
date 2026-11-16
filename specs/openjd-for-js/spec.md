@@ -456,7 +456,7 @@ All errors extend ECMAScript's `Error` class with a `.message` property.
 ### Covered (full parity)
 
 - All template decode functions (str and dict variants)
-- All job creation functions (createJob, preprocessJobParameters, mergeJobParameterDefinitions, evaluateLetBindings)
+- All job creation functions (createJob, preprocessJobParameters, mergeJobParameterDefinitions, evaluateLetBindings); `mergeJobParameterDefinitions` takes only the job template, where Python also accepts environment templates, so its parity is partial
 - All model types (JobTemplate, Job, Step, Action, Environment, etc.)
 - All expression types (ExprValue, FormatString, SymbolTable, FunctionLibrary, ParsedExpression)
 - All error types

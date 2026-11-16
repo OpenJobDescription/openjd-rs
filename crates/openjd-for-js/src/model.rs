@@ -822,7 +822,9 @@ pub fn preprocess_job_parameters_with_map(
         .collect())
 }
 
-/// Merge parameter definitions from job and environment templates.
+/// Merge the job template's parameter definitions (no environment
+/// templates). Returns an array of `Map`s with `name` and `type`, `type` in
+/// its spec spelling.
 #[wasm_bindgen(js_name = "mergeJobParameterDefinitions")]
 pub fn merge_job_parameter_definitions(template: &JsJobTemplate) -> Result<JsValue, JsError> {
     let result = merge_job_parameter_definitions_with_vec(template).map_err(to_js_error)?;

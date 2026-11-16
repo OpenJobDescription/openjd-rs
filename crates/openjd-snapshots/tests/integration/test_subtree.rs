@@ -599,6 +599,29 @@ fn directory_symlink_with_nested_symlink_into_subtree_is_rebased() {
     assert_eq!(back.symlink_target.as_deref(), Some("f"));
 }
 
+/// A nested symlink to a directory inside the new root is kept under
+/// `CollapseEscaping`, rebased like one to a file. `CollapseAll` resolves
+/// it, and a directory resolves to nothing, so it is skipped there.
+#[test]
+fn nested_symlink_to_directory_in_subtree_is_rebased() {
+    let m = abs(
+        vec![
+            hf("/r/s/d/f", "h1", 100, 1000),
+            FileEntry::symlink("/r/s/link", "/r/x"),
+            FileEntry::symlink("/r/x/to_d", "/r/s/d"),
+        ],
+        vec![],
+    );
+    let result = subtree_snapshot(&m, "/r/s", SymlinkPolicy::CollapseEscaping).unwrap();
+    result.validate().unwrap();
+    let to_d = result.files.iter().find(|f| f.path == "link/to_d").unwrap();
+    assert_eq!(to_d.symlink_target.as_deref(), Some("d"));
+
+    let result = subtree_snapshot(&m, "/r/s", SymlinkPolicy::CollapseAll).unwrap();
+    result.validate().unwrap();
+    assert_eq!(paths(&result), ["d/f".to_string()].into());
+}
+
 /// A directory symlink inside a collapsed directory is skipped, not expanded
 /// in turn (expanding nested directory symlinks has no bound on the output).
 #[test]
@@ -620,9 +643,9 @@ fn nested_directory_symlink_is_skipped() {
     }
 }
 
-/// A nested symlink to the subtree root is a directory symlink: it is
-/// skipped, not rebased to an empty target, for absolute and relative
-/// manifests alike.
+/// A nested symlink to the subtree root would rebase to an empty target,
+/// which is not valid, so it is resolved instead; the root is a directory,
+/// so it is skipped. Absolute and relative manifests alike.
 #[test]
 fn nested_symlink_to_subtree_root_is_skipped() {
     let m = abs(
