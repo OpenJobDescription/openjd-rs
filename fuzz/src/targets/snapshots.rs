@@ -414,7 +414,27 @@ fn v2023_streaming(text: &str) {
             streaming_order_differs(text),
             "decode_v2023_for_each rejected what decode_v2023 accepts, with the header before paths and no repeated keys: {e}"
         ),
-        (Err(_), Err(_)) => {}
+        (Err(s), Err(b)) => {
+            // On valid JSON in an order streaming reads, only the documented
+            // document-order differences may change the message: each
+            // decoder can report a different bad entry, and streaming reports
+            // a bad entry before checking totalSize. Invalid JSON is left
+            // out, since streaming may stop at an earlier error.
+            let (s, b) = (s.to_string(), b.to_string());
+            let entry = |e: &str| {
+                e.contains("path entry missing '")
+                    || e.ends_with("path must not be empty")
+                    || e.contains("expected relative path, got: ")
+            };
+            let comparable = !streaming_order_differs(text)
+                && serde_json::from_str::<serde_json::Value>(text).is_ok();
+            oracle!(
+                !comparable
+                    || s == b
+                    || (entry(&s) && (entry(&b) || b.ends_with("missing or invalid totalSize"))),
+                "decode_v2023_for_each and decode_v2023 report different errors: {s} vs {b}"
+            );
+        }
     }
 }
 

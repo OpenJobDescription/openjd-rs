@@ -427,18 +427,19 @@ algorithm, as soon as it is parsed. One entry is held at a time, so memory
 use does not depend on the number of entries. `tests/decode_memory.rs`
 bounds the peak at 16 KiB for a 20,000-entry manifest (it measures about
 200 bytes from a `&str`, plus the `BufReader`'s 8 KiB buffer from a
-reader). Memory does grow with the largest entry: normalizing a path while
-building its `FileEntry` takes up to about ten times the path's length,
-and the reader form also copies each string, used or not, into a buffer as
-it reads it. The summary returned holds the hash algorithm, the recorded
+reader). Memory does grow with the largest entry and the longest string:
+normalizing a path while building its `FileEntry` can take over ten times
+the path's length, serde_json unescapes a string that contains escapes into
+a buffer even when the member is not used, and the reader form copies every
+string, used or not, into that buffer as it reads it. The summary returned holds the hash algorithm, the recorded
 `totalSize`, and the number of entries delivered. There is no v2025
 equivalent.
 
 The callback's error type `E` is the function's error type: an error the
 callback returns stops the decode and is returned unchanged, and decode
-errors are converted with `From<SnapshotError>`. A callback that never
-returns its own error has to name the type, as in `Ok::<_,
-SnapshotError>(())`. The reader form reads the text as it parses (pass it a
+errors are converted with `From<SnapshotError>`. Unless the callback
+returns an `Err` of a concrete type somewhere, it has to name `E`, as in
+`Ok::<_, SnapshotError>(())`, since `?` inside it converts into any `E`. The reader form reads the text as it parses (pass it a
 buffered reader), and returns read errors as `SnapshotError::Io`.
 
 Values are read, each entry checked, and errors worded as `decode_v2023`
@@ -451,15 +452,18 @@ does, with these differences, which streaming requires:
   that appears again after `paths` with `manifestVersion must come before
   paths` (or `hashAlg`), and a second `paths` key with `paths appears more
   than once`. `decode_v2023` uses the last value of a repeated key instead.
-- Errors are reported in document order, and entries are delivered before
-  the rest of the document is read. Each entry is checked in full before
-  the next one is read, so with several bad entries the first bad one is
-  reported (`decode_v2023` reports the first entry missing a member before
-  it applies its other checks). An error found ahead of a repeated key is
-  reported, even if `decode_v2023` would have used the later value. A bad
-  entry is reported before a missing `totalSize`, which sorts after `paths`.
-  An error after some entries were delivered means the manifest is invalid,
-  and the delivered entries should be discarded.
+- Errors are mostly reported in document order, and entries are delivered
+  before the rest of the document is read. Each entry is checked in full
+  before the next one is read, so with several bad entries the first bad
+  one is reported (`decode_v2023` reports the first entry missing a member
+  before it applies its other checks). An error found ahead of a repeated
+  key is reported, even if `decode_v2023` would have used the later value.
+  `totalSize` is checked at the end, wherever it appears, since a later one
+  replaces an earlier one, so a bad entry is reported before a missing or
+  invalid `totalSize`.
+- After an error, the entries already delivered should be discarded: the
+  manifest is invalid, or the decode was stopped by the callback or a read
+  error, so they may not be all of its entries.
 - Paths are not checked for duplicates, which would take memory in
   proportion to the manifest. `decode_v2023` rejects a repeated path.
 - From a reader, serde_json can report a syntax error's column one past
@@ -468,9 +472,12 @@ does, with these differences, which streaming requires:
 `tests/integration/test_codec_stream.rs` covers these. On every input, the
 `snapshots_decode_text` fuzz target checks that the two streaming functions
 agree with each other (the same entries, and the same error apart from its
-position), and that they agree with `decode_v2023` except where the
-document has a key order or repeated key that streaming rejects, or a
-repeated path.
+position). It checks that they agree with `decode_v2023`: one may succeed
+where the other fails only for a key order or repeated key that streaming
+rejects, or a repeated path, and when both fail on valid JSON in an order
+streaming reads, the messages match except that each may report a
+different bad entry, or streaming a bad entry where `decode_v2023` reports
+`totalSize`.
 
 ## Data Cache
 

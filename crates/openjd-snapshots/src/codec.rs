@@ -460,14 +460,17 @@ pub struct V2023Summary {
 ///
 /// Memory use beyond `json` itself does not depend on the number of
 /// entries: one entry is held at a time. It does grow with the largest entry,
-/// since building a [`FileEntry`] normalizes its path, which can take about
-/// ten times the path's length while it runs.
+/// since building a [`FileEntry`] normalizes its path, which can take over
+/// ten times the path's length while it runs, and with the longest string
+/// containing escapes, which serde_json unescapes into a buffer even when the
+/// member is not used.
 ///
 /// To stop early, return an error from `f`; it is returned unchanged. Decode
 /// errors are converted into `E` with `From<SnapshotError>`, so `E` can be
-/// [`SnapshotError`] itself, or an application error type. When `f` never
-/// returns an error itself, name the type in its result, as in
-/// `Ok::<_, SnapshotError>(())`, since nothing else determines `E`.
+/// [`SnapshotError`] itself, or an application error type. Unless `f`
+/// returns an `Err` of a concrete type somewhere, name `E` in its result, as
+/// in `Ok::<_, SnapshotError>(())`: `?` inside `f` converts into any `E`, so
+/// it does not determine it.
 ///
 /// Values are read as [`decode_v2023`] reads them, each entry is checked as
 /// it checks entries, and errors have its messages, with these differences:
@@ -480,16 +483,18 @@ pub struct V2023Summary {
 ///   `manifestVersion must come before paths` (or `hashAlg`), and a second
 ///   `paths` key fails with `paths appears more than once`. [`decode_v2023`]
 ///   instead uses the last value of a repeated key.
-/// - Errors are reported in document order, and entries are delivered before
-///   the rest of the document is read. Each entry is checked in full before
-///   the next is read, so the first bad entry is reported, where
+/// - Errors are mostly reported in document order, and entries are delivered
+///   before the rest of the document is read. Each entry is checked in full
+///   before the next is read, so the first bad entry is reported, where
 ///   [`decode_v2023`] reports the first entry missing a member, and then the
 ///   first one failing a later check. An error found before a key that
 ///   [`decode_v2023`] would have taken instead (a bad header value or entry
-///   ahead of a repeated key) is reported. A bad entry is reported before a
-///   missing `totalSize`, which comes after `paths`. If the function returns
-///   an error, the entries already delivered came from a manifest that
-///   [`decode_v2023`] would reject, and should be discarded.
+///   ahead of a repeated key) is reported. `totalSize` is checked at the end,
+///   wherever it appears, since a later `totalSize` replaces an earlier one,
+///   so a bad entry is reported before a missing or invalid `totalSize`.
+/// - If the function returns an error, discard the entries already
+///   delivered: the manifest is invalid, or the decode was stopped by `f` or
+///   by a read error, so the entries may not be all of them.
 /// - Paths are not checked for duplicates, since that needs every path at
 ///   once. [`decode_v2023`] rejects a manifest that lists a path twice.
 ///

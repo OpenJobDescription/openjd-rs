@@ -157,6 +157,12 @@ fn header_errors_match_decode_v2023() {
             "missing manifestVersion",
         ),
         (r#"{"manifestVersion":"2023-03-03"}"#, "missing hashAlg"),
+        // Present before paths but not a string: the key is there, so the
+        // value is what is missing.
+        (
+            r#"{"hashAlg":5,"manifestVersion":"2023-03-03","paths":[],"totalSize":0}"#,
+            "missing hashAlg",
+        ),
         ("[]", "missing manifestVersion"),
         (
             r#"[1,{"manifestVersion":"2023-03-03"},[true]]"#,
