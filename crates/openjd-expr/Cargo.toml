@@ -47,7 +47,7 @@ ryu = { workspace = true }
 #
 # The `stacker` feature lets the parser grow its stack on deep recursion
 # (`-` * 65535 + `1` overflows a 32 MB stack without it). Keep it on.
-ruff_python_parser = { version = "=0.0.21", features = ["stacker"] }
+ruff_python_parser = { version = "=0.0.22", features = ["stacker"] }
 ruff_python_ast = "=0.0.21"
 ruff_text_size = "=0.0.21"
 
