@@ -84,7 +84,7 @@ When a symlink is collapsed, it is replaced with the actual content at its targe
 
 **Directory target:** The symlink is replaced with the entire directory tree at the target. All entries appear under the symlink's path. When collecting from the filesystem, nested symlinks are handled recursively; SUBTREE handles them as described below.
 
-In SUBTREE, collapsing looks up targets in the manifest data (no filesystem access). The `resolve_symlink()` helper follows symlink chains up to 64 hops, detecting cycles. The `expand_dir_symlink()` helper remaps directory contents under the symlink's path; a symlink inside it is rebased or resolved to a file as described in [SUBTREE](snapshot_operation_subtree.md#symlink-resolution), and a nested directory symlink is skipped.
+In SUBTREE, collapsing looks up targets in the manifest data (no filesystem access). The `resolve_symlink()` helper follows symlink chains up to 64 hops, detecting cycles. The `expand_dir_symlink()` helper remaps directory contents under the symlink's path; a symlink inside it is rebased, resolved to a file, or skipped as described in [SUBTREE](snapshot_operation_subtree.md#symlink-resolution); nested directory symlinks are never expanded in turn.
 
 ## Cycle Detection
 

@@ -58,12 +58,13 @@ fn is_dir_target(target: &str, file_lookup: &HashMap<&str, &FileEntry>) -> bool 
 /// A nested symlink inside the expanded directory is handled like a symlink
 /// in the subtree, by whether its target is within the new root `prefix`:
 /// - `CollapseEscaping` keeps a nested symlink whose target is within the
-///   new root, with the target rebased. A target equal to the new root
-///   counts as a directory target.
-/// - Otherwise (`CollapseAll`, or an escaping target) the nested symlink is
-///   resolved to the file it points to. A nested symlink to a directory, a
-///   missing target, or a cycle is skipped: nested directory symlinks are not
-///   expanded in turn.
+///   new root, with the target rebased, whether the target is a file or a
+///   directory. The new root itself is excluded: its rebased target would
+///   be empty, which is not a valid symlink target.
+/// - Otherwise (`CollapseAll`, an escaping target, or the new root) the
+///   nested symlink is resolved to the file it points to. One whose target
+///   is a directory, missing, or a cycle is skipped: nested directory
+///   symlinks are not expanded in turn.
 fn expand_dir_symlink(
     link_rel_path: &str,
     target: &str,
@@ -82,8 +83,9 @@ fn expand_dir_symlink(
         let new_path = format!("{link_rel_path}/{suffix}");
         if let Some(ref sym_target) = f.symlink_target {
             let rebased = match symlink_policy {
-                // A target equal to the new root rebases to an empty
-                // target; that is a directory symlink, so it is skipped.
+                // A target equal to the new root would rebase to an empty
+                // target, which is not valid; it is resolved instead, and
+                // the root is a directory, so the symlink is skipped.
                 SymlinkPolicy::CollapseEscaping => {
                     strip_prefix(sym_target, prefix).filter(|t| !t.is_empty())
                 }
