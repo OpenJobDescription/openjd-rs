@@ -17,9 +17,11 @@ updates:
     groups:
       # crates/openjd-expr pins these three to one exact version, and a bump
       # of just one of them doesn't compile (two ruff_python_ast versions in
-      # the graph). Dependabot didn't treat the 0.0.21 -> 0.0.22 bumps as
-      # minor or patch (it opened #545, #546 and #547 separately), so this
-      # group has no update-types filter and takes every bump of the three.
+      # the graph). Dependabot classes every 0.0.z bump of a Cargo crate as
+      # major, so cargo-minor-patch skips them (#545, #546 and #547 came as
+      # separate PRs). This group has no update-types filter and takes every
+      # bump of the three. Each one breaks openjd-expr's API (see
+      # specs/expr/parser.md), so retitle its PR with `!` before merging.
       ruff:
         patterns:
           - "ruff_python_parser"
