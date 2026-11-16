@@ -53,8 +53,14 @@ each bump. A bump of one crate alone leaves two `ruff_python_ast` versions in
 the dependency graph and fails to compile, so the `ruff` group in
 `.github/dependabot.yml` puts all three in one Dependabot PR. Each bump is a
 breaking change for openjd-expr, because `ExpressionError::with_node` takes a
-`ruff_python_ast` node (see [public-api.md](public-api.md)), so its commit
-carries `!` or a `BREAKING CHANGE` footer.
+`ruff_python_ast` node (see [public-api.md](public-api.md)), so its PR is
+titled `chore!: ...` or `fix(expr)!: ...`. `release-plz.toml` leaves
+`chore(deps)` commits out of the changelog, `!` or not, so a Dependabot PR
+needs a new title. The public APIs of openjd-model and openjd-sessions also
+carry openjd-expr types (for example `ModelError::Expression` and
+`SymbolTable` parameters), so the release PR must give each of them a breaking
+bump too: release-plz bumps a crate that the commit doesn't touch only by a
+patch, even when a local dependency took a breaking bump.
 
 **`stacker` feature.** With it, the parser grows its stack on the heap once its
 recursion gets deep (see Depth Limit below). Without it, 64 KB of `-` or of
