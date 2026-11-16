@@ -118,8 +118,8 @@ pub mod known {
             "expr-runtime-dispatch-miss",
             "Some expressions pass static validation and then find no run-time signature: \
              indexing a value that isn't indexable at run time, or with an index type \
-             `__getitem__` doesn't accept \
-             (`L[re_match(..):None:None]`, `s[1:2:1.5]`), an operand that is `null` at run \
+             `__getitem__` doesn't accept through a union-typed bound \
+             (`L[re_match(..):None:None]`), an operand that is `null` at run \
              time (`re_search(..) + range_expr(..)`), and `bool` arithmetic (`True * 3`). \
              Each fails with `No matching signature for __getitem__(..)` or `Cannot use \
              '<op>' operator with ..`.",

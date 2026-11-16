@@ -1708,43 +1708,31 @@ impl<'a> Evaluator<'a> {
                 return Err(ExpressionError::new("Slice step cannot be zero"));
             }
 
-            // When the result is a type-only `Unresolved`, the operands
-            // are discarded. Release them before tracking the result;
-            // this is a success path, so nothing else would reset the
-            // memory tracking.
-            let unresolved_result = if value.is_unresolved() {
-                let inner = unwrap_unresolved(&value.expr_type());
-                Some(match inner.list_element_type() {
-                    Some(elem) => ExprValue::unresolved(ExprType::list(elem.clone())),
-                    None => ExprValue::unresolved(range_slice_type(inner, &step)),
-                })
-            } else if start.is_unresolved() || stop.is_unresolved() || step.is_unresolved() {
-                // Any unresolved bound makes the result unresolved.
-                if value.is_list() {
-                    let elem_type = value.list_elem_type().unwrap();
-                    Some(ExprValue::unresolved(ExprType::list(elem_type.clone())))
-                } else if matches!(&value, ExprValue::String(_)) {
-                    Some(ExprValue::unresolved(ExprType::STRING))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-            if let Some(result) = unresolved_result {
-                for operand in [&value, &start, &stop, &step] {
-                    self.release(operand);
-                }
-                return self.track(result);
-            }
-
-            // Dispatch 4-arg __getitem__ through the library
+            // Dispatch 4-arg __getitem__ through the library, for
+            // unresolved operands too: the signatures check the bound types
+            // and give the result type.
+            let range_step = range_slice_step(&value, &step);
             let node = ast::Expr::Subscript(s.clone());
-            return self.dispatch_with_node(
+            let result = self.dispatch_with_node(
                 "__getitem__",
                 vec![value, start, stop, step],
                 Some(&node),
-            );
+            )?;
+            // The signature types a `range_expr` slice as
+            // `range_expr | list[int]`, since which one it is depends on
+            // the step's sign (range-expr.md §"Operations"). With a known
+            // step the result is one of them.
+            return match range_step {
+                Some(step) if result.is_unresolved() => {
+                    self.release(&result);
+                    self.track(ExprValue::unresolved(if step > 0 {
+                        ExprType::RANGE_EXPR
+                    } else {
+                        ExprType::list(ExprType::INT)
+                    }))
+                }
+                _ => Ok(result),
+            };
         }
 
         let slice = self.eval_node(&s.slice, None)?;
@@ -2382,37 +2370,19 @@ fn is_type_variable(t: &ExprType) -> bool {
     )
 }
 
-/// The static type of slicing an unresolved non-list value of type `inner`
-/// (or a union of such types) with `step`. A `range_expr` slice is a
-/// `range_expr` for an omitted or non-negative step and a `list[int]` for a
-/// negative one (range-expr.md §"Operations"), so a negative step replaces
-/// `range_expr` with `list[int]`, and a step that may be negative adds
-/// `list[int]`. Other types are unchanged.
-fn range_slice_type(inner: ExprType, step: &ExprValue) -> ExprType {
-    let members: Vec<ExprType> = if inner.code() == crate::types::TypeCode::Union {
-        inner.params().to_vec()
-    } else {
-        vec![inner.clone()]
-    };
-    if !members.contains(&ExprType::RANGE_EXPR) {
-        return inner;
+/// The step of a slice of a `range_expr` receiver (concrete, or unresolved
+/// of exactly type `range_expr`) whose step is known: `1` when omitted,
+/// otherwise the literal step. `None` for any other receiver or a step that
+/// is not a concrete `int`. A union receiver is left to its signature's
+/// type, since other members contribute types of their own.
+fn range_slice_step(value: &ExprValue, step: &ExprValue) -> Option<i64> {
+    if unwrap_unresolved(&value.expr_type()) != ExprType::RANGE_EXPR {
+        return None;
     }
     match step {
-        ExprValue::Null => inner,
-        ExprValue::Int(n) if *n >= 0 => inner,
-        ExprValue::Int(_) => ExprType::union(
-            members
-                .into_iter()
-                .map(|m| {
-                    if m == ExprType::RANGE_EXPR {
-                        ExprType::list(ExprType::INT)
-                    } else {
-                        m
-                    }
-                })
-                .collect(),
-        ),
-        _ => ExprType::union(vec![inner, ExprType::list(ExprType::INT)]),
+        ExprValue::Null => Some(1),
+        ExprValue::Int(n) => Some(*n),
+        _ => None,
     }
 }
 

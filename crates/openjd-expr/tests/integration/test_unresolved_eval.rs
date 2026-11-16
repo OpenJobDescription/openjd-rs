@@ -1702,12 +1702,57 @@ fn subscript_unknown_range_slice_type_follows_step() {
         ("R[:None:-1]", "unresolved[list[int]]"),
         ("R[::N]", "unresolved[range_expr | list[int]]"),
         ("R[::-N]", "unresolved[range_expr | list[int]]"),
-        ("U[::2]", "unresolved[range_expr | string]"),
-        ("U[::-1]", "unresolved[list[int] | string]"),
-        ("U[::N]", "unresolved[range_expr | string | list[int]]"),
+        // A concrete receiver with an unresolved bound is typed the same
+        // way as an unresolved receiver.
+        ("range_expr('1-5')[N:]", "unresolved[range_expr]"),
+        ("range_expr('1-5')[N::-1]", "unresolved[list[int]]"),
+        (
+            "range_expr('1-5')[::N]",
+            "unresolved[range_expr | list[int]]",
+        ),
+        // A union receiver keeps its signatures' types: each member's
+        // slice type, with `range_expr | list[int]` for the range member.
+        ("U[::2]", "unresolved[range_expr | string | list[int]]"),
+        ("U[::-1]", "unresolved[range_expr | string | list[int]]"),
         ("S[::-1]", "unresolved[string]"),
+        ("S[N:]", "unresolved[string]"),
+        ("'abc'[N:]", "unresolved[string]"),
+        ("[1, 2][N:]", "unresolved[list[int]]"),
     ] {
         assert_eq!(eval_u(expr, &st).expr_type(), tp(ty), "{expr}");
+    }
+}
+
+/// Slice bounds must be `int` or `null`, also when the receiver or another
+/// bound is unresolved: the slice is typed by its `__getitem__` signatures,
+/// as a concrete one is.
+#[test]
+fn subscript_unresolved_slice_checks_bound_types() {
+    let st = st_unresolved(vec![
+        ("R", "range_expr"),
+        ("S", "string"),
+        ("L", "list[int]"),
+        ("N", "int"),
+    ]);
+    for (expr, msg) in [
+        (
+            "S[::'x']",
+            "No matching signature for __getitem__(string, nulltype, nulltype, string)",
+        ),
+        (
+            "L[::'x']",
+            "No matching signature for __getitem__(list[int], nulltype, nulltype, string)",
+        ),
+        (
+            "R[::True]",
+            "No matching signature for __getitem__(range_expr, nulltype, nulltype, bool)",
+        ),
+        (
+            "[1, 2][N:'x']",
+            "No matching signature for __getitem__(list[int], int, string, nulltype)",
+        ),
+    ] {
+        assert_err_w(expr, &st, &[msg]);
     }
 }
 
