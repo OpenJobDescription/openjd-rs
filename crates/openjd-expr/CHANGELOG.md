@@ -4,6 +4,13 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.16.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.15.0...openjd-expr-v0.16.0) - 2026-11-17
+
+### Miscellaneous
+
+- [**breaking**] Bump the ruff crates together to 0.0.22 and update dependencies ([#556](https://github.com/OpenJobDescription/openjd-rs/pull/556)) ([#556](https://github.com/OpenJobDescription/openjd-rs/pull/556))
+
+
 ## [0.15.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.14.0...openjd-expr-v0.15.0) - 2026-11-14
 
 ### Bug fixes
