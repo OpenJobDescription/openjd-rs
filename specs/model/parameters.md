@@ -247,8 +247,10 @@ cap, so an expression's expansion is unbounded here; a host that needs to bound
 fan-out uses `CallerLimits::max_task_count`.
 
 There is no baseline limit on an action `command`: Template Schemas §5.1
-`<CommandString>` imposes no maximum length. A host that needs one uses the
-opt-in `CallerLimits::max_resolved_arg_len`.
+`<CommandString>` imposes no maximum length. A host can bound the final resolved
+`command` and each `args` entry with the opt-in
+`CallerLimits::max_resolved_arg_len`; for a literal command, that directly caps
+its length during template validation.
 
 ### EffectiveRules
 
