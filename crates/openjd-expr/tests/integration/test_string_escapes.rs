@@ -7,7 +7,8 @@
 //!
 //! Every expected value below is what CPython 3.12 gives for the same
 //! literal, except where a test says otherwise: a surrogate escape, which
-//! CPython keeps in the string and EXPR rejects.
+//! CPython keeps in the string and EXPR rejects, and a lowercase algorithmic
+//! `\N{...}` name, which CPython accepts from 3.13.
 
 use openjd_expr::{ExprValue, ParsedExpression, SymbolTable};
 
@@ -103,6 +104,8 @@ fn hex_and_unicode_escapes() {
         // Names match without regard to case, and aliases are accepted.
         (r"'\N{bullet}'", "\u{2022}"),
         (r"'\N{LATIN CAPITAL LETTER GHA}'", "\u{1a2}"),
+        // An algorithmic name, in lowercase: CPython accepts it from 3.13.
+        (r"'\N{cjk unified ideograph-4e00}'", "\u{4e00}"),
     ];
     for (expr, want) in cases {
         assert_eq!(eval_str(expr), *want, "{expr}");
@@ -203,14 +206,65 @@ fn surrogate_capital_u_escape_is_an_error() {
     );
 }
 
+const SURROGATE_D800: &str =
+    "Syntax error: \\ud800 is a surrogate code point, which a string can't hold\n";
+
 /// A surrogate escape in a triple-quoted string, in the second part of an
-/// implicit concatenation, and after an escaped backslash is still found.
+/// implicit concatenation, after an escaped backslash, and after a line
+/// continuation is still found.
 #[test]
 fn surrogate_escape_found_in_every_string_form() {
-    assert!(err(r"'''a\ud800'''").contains("\\ud800 is a surrogate code point"));
-    assert!(err(r"'ok' '\udbff'").contains("\\udbff is a surrogate code point"));
-    assert!(err(r"'\\\ud800'").contains("\\ud800 is a surrogate code point"));
-    assert!(err("'a\\\n\\ud800'").contains("\\ud800 is a surrogate code point"));
+    assert_err(
+        r"'''a\ud800'''",
+        &[SURROGATE_D800, "  '''a\\ud800'''\n", "      ^~~~~~"],
+    );
+    assert_err(
+        r"'ok' '\udbff'",
+        &[
+            "Syntax error: \\udbff is a surrogate code point, which a string can't hold\n",
+            "  'ok' '\\udbff'\n",
+            "        ^~~~~~",
+        ],
+    );
+    assert_err(
+        r"'\\\ud800'",
+        &[SURROGATE_D800, "  '\\\\\\ud800'\n", "     ^~~~~~"],
+    );
+    // A multi-line expression shows the line the escape is on.
+    assert_err(
+        "'a\\\n\\ud800'",
+        &[SURROGATE_D800, "  \\ud800'\n", "  ^~~~~~"],
+    );
+}
+
+/// A literal in a slice bound is checked like any other (audit round 1:
+/// slice bounds weren't walked by AST validation).
+#[test]
+fn surrogate_escape_in_a_slice_bound_is_an_error() {
+    assert_err(
+        r"'abc'[0:len('\ud800')]",
+        &[
+            SURROGATE_D800,
+            "  'abc'[0:len('\\ud800')]\n",
+            "               ^~~~~~",
+        ],
+    );
+    assert_err(
+        r"'abc'[::len('\U0000d800')]",
+        &[
+            "Syntax error: \\U0000d800 is a surrogate code point, which a string can't hold\n",
+            "  'abc'[::len('\\U0000d800')]\n",
+            "               ^~~~~~~~~~",
+        ],
+    );
+    assert_err(
+        r"[1, 2, 3][len('\udfff'):]",
+        &[
+            "Syntax error: \\udfff is a surrogate code point, which a string can't hold\n",
+            "  [1, 2, 3][len('\\udfff'):]\n",
+            "                 ^~~~~~",
+        ],
+    );
 }
 
 /// `\\u` is an escaped backslash followed by `u`, not a `\u` escape, and a
@@ -223,22 +277,45 @@ fn surrogate_shaped_text_that_is_not_an_escape() {
     assert_eq!(eval_str(r"'\N{LATIN SMALL LETTER U}d800'"), "ud800");
 }
 
+// These messages are ruff's lexer's own.
+const UNEXPECTED_UNICODE: &str = "Syntax error: Got unexpected unicode\n";
+
 #[test]
 fn truncated_hex_escape_is_an_error() {
-    assert!(err(r"'\x4g'").starts_with("Syntax error: "));
-    assert!(err(r"'\u12'").starts_with("Syntax error: "));
-    assert!(err(r"'\U1234'").starts_with("Syntax error: "));
+    assert_err(r"'\x4g'", &[UNEXPECTED_UNICODE, "  '\\x4g'\n", "      ^"]);
+    assert_err(r"'\u12'", &[UNEXPECTED_UNICODE, "  '\\u12'\n", "  ^~~~~~"]);
+    assert_err(
+        r"'\U1234'",
+        &[UNEXPECTED_UNICODE, "  '\\U1234'\n", "  ^~~~~~~~"],
+    );
 }
 
 #[test]
 fn unknown_or_missing_unicode_name_is_an_error() {
-    assert!(err(r"'\N{NOT A CHARACTER NAME}'").starts_with("Syntax error: "));
-    assert!(err(r"'\N'").starts_with("Syntax error: "));
+    assert_err(
+        r"'\N{NOT A CHARACTER NAME}'",
+        &[
+            UNEXPECTED_UNICODE,
+            "  '\\N{NOT A CHARACTER NAME}'\n",
+            "      ^~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+    assert_err(
+        r"'\N'",
+        &[
+            "Syntax error: Missing `{` in Unicode escape sequence\n",
+            "  '\\N'\n",
+            "  ^~~~",
+        ],
+    );
 }
 
 #[test]
 fn unicode_escape_above_max_code_point_is_an_error() {
-    assert!(err(r"'\U00110000'").starts_with("Syntax error: "));
+    assert_err(
+        r"'\U00110000'",
+        &[UNEXPECTED_UNICODE, "  '\\U00110000'\n", "  ^~~~~~~~~~~~"],
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -267,22 +344,42 @@ fn re_sub_rejects_every_disallowed_control_character() {
             continue;
         }
         let expr = format!("re_sub('a-b', '-', '\\x{:02x}')", u32::from(c));
-        let e = err(&expr);
-        assert!(
-            e.starts_with(&format!(
-                "Control characters in replacement strings are not supported (U+{:04X})\n",
-                u32::from(c)
-            )),
-            "{expr}: {e}"
+        let message = format!(
+            "Control characters in replacement strings are not supported (U+{:04X})\n",
+            u32::from(c)
         );
+        let source = format!("  {expr}\n");
+        let caret = format!("  ^{}", "~".repeat(expr.len() - 1));
+        assert_err(&expr, &[&message, &source, &caret]);
     }
 }
 
 /// Only the first control character is named.
 #[test]
 fn re_sub_names_the_first_control_character() {
-    assert!(err(r"re_sub('a-b', '-', 'x\x7f\x01')")
-        .starts_with("Control characters in replacement strings are not supported (U+007F)\n"));
+    assert_err(
+        r"re_sub('a-b', '-', 'x\x7f\x01')",
+        &[
+            "Control characters in replacement strings are not supported (U+007F)\n",
+            "  re_sub('a-b', '-', 'x\\x7f\\x01')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
+}
+
+/// The group-reference check runs first, so a replacement with both a
+/// control character and a group reference reports the group reference
+/// (audit round 1: nothing pinned the order).
+#[test]
+fn re_sub_group_reference_reported_before_control_character() {
+    assert_err(
+        r"re_sub('a-b', '-', '\x01$1')",
+        &[
+            "Group references in replacement strings are not supported\n",
+            "  re_sub('a-b', '-', '\\x01$1')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
 }
 
 #[test]
@@ -330,15 +427,25 @@ fn re_sub_control_character_from_a_symbol_is_rejected() {
         .and_then(|p| p.evaluate(&st))
         .unwrap_err()
         .to_string();
-    assert!(
-        e.starts_with("Control characters in replacement strings are not supported (U+001B)\n"),
-        "{e}"
+    assert_eq!(
+        e,
+        concat!(
+            "Control characters in replacement strings are not supported (U+001B)\n",
+            "  re_sub('a-b', '-', Param.Repl)\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        )
     );
 }
 
 /// A group reference written raw is still rejected as a group reference.
 #[test]
 fn re_sub_group_reference_still_rejected_raw() {
-    assert!(err(r"re_sub('a1', '(\d)', r'\1')")
-        .starts_with("Group references in replacement strings are not supported\n"));
+    assert_err(
+        r"re_sub('a1', '(\d)', r'\1')",
+        &[
+            "Group references in replacement strings are not supported\n",
+            "  re_sub('a1', '(\\d)', r'\\1')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
 }

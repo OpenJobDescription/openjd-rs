@@ -993,6 +993,11 @@ fn validate_structure_inner(
             validate_structure_inner(&s.value, source, depth + 1, profile)?;
             validate_structure_inner(&s.slice, source, depth + 1, profile)?;
         }
+        ast::Expr::Slice(sl) => {
+            for bound in [&sl.lower, &sl.upper, &sl.step].into_iter().flatten() {
+                validate_structure_inner(bound, source, depth + 1, profile)?;
+            }
+        }
         ast::Expr::Attribute(a) => {
             validate_structure_inner(&a.value, source, depth + 1, profile)?;
         }
