@@ -1268,3 +1268,98 @@ fn path_valued_step_let_in_range_passes_validation() {
     }"#;
     decode_ok(s);
 }
+
+/// A step whose `let` bindings feed host requirements and a parameterSpace
+/// range, for pinning every diagnostic those sites report and their order.
+fn job_with_let_in_hr_and_range(let_bindings: &str, range_ref: &str) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "parameterDefinitions": [{{"name": "N", "type": "INT", "default": 4}}],
+        "steps": [{{
+            "name": "S",
+            "let": [{let_bindings}],
+            "hostRequirements": {{
+                "amounts": [{{"name": "amount.worker.vcpu", "min": "{{{{ b }}}}"}}]
+            }},
+            "parameterSpace": {{
+                "taskParameterDefinitions": [
+                    {{"name": "F", "type": "STRING", "range": ["{{{{ {range_ref} }}}}"]}}
+                ]
+            }},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#
+    )
+}
+
+fn full_err(s: &str) -> String {
+    decode_job_template(
+        yaml_val(s),
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err(&format!("Expected error for: {s}"))
+    .to_string()
+}
+
+/// Bindings that evaluate are visible to host requirements and ranges.
+#[test]
+fn step_let_feeds_host_requirements_and_range() {
+    decode_ok(&job_with_let_in_hr_and_range(
+        r#""b = Param.N + 1", "t = 'x' * b""#,
+        "t",
+    ));
+}
+
+/// A binding that fails to evaluate is reported by the host-requirements
+/// pass and the step body at `let[j]`, and by the range pass at the step,
+/// where the failed name is unbound.
+#[test]
+fn step_let_evaluation_failure_diagnostics() {
+    let msg = full_err(&job_with_let_in_hr_and_range(
+        r#""b = Param.N + 1", "t = str(b)""#,
+        "t",
+    ));
+    assert_eq!(
+        msg,
+        "Model validation error: 4 validation errors for JobTemplate\n\
+         steps[0] -> let[1]:\n\
+         \tInvalid expression in let binding 't': Unknown function: 'str'\n  \
+         t = str(b)\n      \
+         ^~~~~~\n\
+         steps[0]:\n\
+         \tlet binding 't': Unknown function: 'str'\n  \
+         str(b)\n  \
+         ^~~~~~\n\
+         steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\
+         \tFailed to parse interpolation expression at [0, 7]. Undefined variable: 't'. Did you mean: b\n  \
+         t\n  \
+         ^\n\
+         steps[0] -> let[1]:\n\
+         \tInvalid expression in let binding 't': Unknown function: 'str'\n  \
+         t = str(b)\n      \
+         ^~~~~~"
+    );
+}
+
+/// A structural error with no evaluation failure is reported by the
+/// host-requirements pass and the step body; the range pass sees the
+/// evaluated binding and reports nothing.
+#[test]
+fn step_let_structural_error_diagnostics() {
+    let msg = full_err(&job_with_let_in_hr_and_range(
+        r#""b = Param.N + 1", "Tt = 'x'""#,
+        "Tt",
+    ));
+    assert_eq!(
+        msg,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> let[1]:\n\
+         \tname 'Tt' must start with lowercase letter or underscore.\n\
+         steps[0] -> let[1]:\n\
+         \tname 'Tt' must start with lowercase letter or underscore."
+    );
+}

@@ -19,7 +19,7 @@ use openjd_expr::types::ExprType;
 use openjd_expr::value::ExprValue;
 use openjd_expr::FormatString;
 
-use crate::error::{path_field, path_index, PathElement, ValidationErrors};
+use crate::error::{path_field, path_index, PathElement, ValidationError, ValidationErrors};
 use crate::template::*;
 use crate::types::{ModelExtension, ValidationContext};
 
@@ -1699,6 +1699,98 @@ fn check_embedded_files_data(
     }
 }
 
+/// A step's template-scope symtab with its step-level `let` bindings
+/// evaluated in.
+///
+/// Built once per step by [`step_let_scope`] and shared by the three pass-8
+/// sites that need it (host requirements, parameterSpace ranges, the step
+/// body), so the bindings are evaluated once. `errors` holds what
+/// `validate_let_bindings` reported; each site replays it where it is due.
+struct StepLetScope {
+    symtab: SymbolTable,
+    names: HashSet<String>,
+    errors: Vec<ValidationError>,
+    /// No binding failed to parse or evaluate.
+    all_evaluated: bool,
+}
+
+/// Evaluate `step`'s `let` bindings (EXPR only) into a copy of `base`, the
+/// template-scope symtab with `Job.Name` and `Step.Name`.
+fn step_let_scope(
+    step: &StepTemplate,
+    step_path: &[PathElement],
+    base: &SymbolTable,
+    expr_active: bool,
+    ev: &FsEval<'_>,
+    profile: &openjd_expr::ExprProfile,
+) -> StepLetScope {
+    let mut scope = StepLetScope {
+        symtab: base.clone(),
+        names: HashSet::new(),
+        errors: Vec::new(),
+        all_evaluated: true,
+    };
+    if let (true, Some(bindings)) = (expr_active, &step.let_bindings) {
+        let mut errors = ValidationErrors::default();
+        scope.all_evaluated = validate_let_bindings(
+            bindings,
+            &path_field(step_path, "let"),
+            &HashSet::new(),
+            &mut scope.names,
+            &mut scope.symtab,
+            ev,
+            profile,
+            &mut errors,
+        );
+        scope.errors = errors.errors;
+    }
+    scope
+}
+
+/// The parameterSpace range symtab when a step-level binding failed.
+///
+/// Range expressions see a failed binding as unbound, and the failure is
+/// reported at the step as `let binding '<name>'`. While every binding
+/// evaluates, the result equals [`StepLetScope::symtab`], so this runs only
+/// on that failure path, to keep its diagnostics.
+fn range_symtab_after_let_failure(
+    bindings: &[String],
+    step_path: &[PathElement],
+    base: &SymbolTable,
+    ev: &FsEval<'_>,
+    profile: &openjd_expr::ExprProfile,
+    errors: &mut ValidationErrors,
+) -> SymbolTable {
+    let mut range_symtab = base.clone();
+    for binding in bindings {
+        if let Some(eq_pos) = binding.find('=') {
+            let name = binding[..eq_pos].trim();
+            let expr_str = binding[eq_pos + 1..].trim();
+            if !name.is_empty() && !expr_str.is_empty() {
+                match ParsedExpression::with_profile(expr_str, profile) {
+                    Ok(parsed) => {
+                        match ev
+                            .budgeted(parsed.with_library(ev.lib))
+                            .evaluate(&[&range_symtab as &SymbolTable])
+                        {
+                            Ok(val) => {
+                                let _ = range_symtab.set(name, val);
+                            }
+                            Err(e) => {
+                                errors.add(step_path, format!("let binding '{name}': {e}"));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        errors.add(step_path, format!("let binding '{name}': {e}"));
+                    }
+                }
+            }
+        }
+    }
+    range_symtab
+}
+
 pub fn validate_format_strings(
     jt: &JobTemplate,
     ctx: &ValidationContext,
@@ -1754,33 +1846,40 @@ pub fn validate_format_strings(
     );
 
     // ── Host requirements: template scope + step let bindings ──
-    for (i, step) in jt.steps.iter().enumerate() {
+    // Every step's `let` bindings are evaluated once, here, into the
+    // template-scope symtab (Param.* non-PATH, RawParam.*, and with EXPR
+    // Job.Name and Step.Name). The host requirements, parameterSpace ranges,
+    // and step body below all read the result.
+    let mut step_base_symtab = template_symtab.clone();
+    if expr_active {
+        step_base_symtab
+            .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
+            .expect("symtab");
+        step_base_symtab
+            .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
+            .expect("symtab");
+    }
+    let step_scopes: Vec<StepLetScope> = jt
+        .steps
+        .iter()
+        .enumerate()
+        .map(|(i, step)| {
+            let step_path = [PathElement::Field("steps".into()), PathElement::Index(i)];
+            step_let_scope(
+                step,
+                &step_path,
+                &step_base_symtab,
+                expr_active,
+                &template_ev,
+                &template_profile,
+            )
+        })
+        .collect();
+    for (i, (step, scope)) in jt.steps.iter().zip(&step_scopes).enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
         if let Some(hr) = &step.host_requirements {
-            // Build a symtab with Param/RawParam + step let bindings
-            let mut hr_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
-            if expr_active {
-                hr_symtab
-                    .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                hr_symtab
-                    .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                if let Some(bindings) = &step.let_bindings {
-                    let let_path = path_field(&step_path, "let");
-                    let mut hr_let_names = HashSet::new();
-                    validate_let_bindings(
-                        bindings,
-                        &let_path,
-                        &HashSet::new(),
-                        &mut hr_let_names,
-                        &mut hr_symtab,
-                        &template_ev,
-                        &template_profile,
-                        errors,
-                    );
-                }
-            }
+            errors.errors.extend(scope.errors.iter().cloned());
+            let hr_symtab = &scope.symtab;
             let hr_path = path_field(&step_path, "hostRequirements");
             // §3.3.1.1 / §3.3.2.1: a capability name is `@fmtstring`, and its
             // constraints apply to the resolved name. The name's
@@ -1800,7 +1899,7 @@ pub fn validate_format_strings(
                     let amt_path = path_index(&amounts_path, j);
                     let sr = validate_fs_with(
                         &amt.name,
-                        &hr_symtab,
+                        hr_symtab,
                         &template_ev,
                         &path_field(&amt_path, "name"),
                         Some(&name_constraint),
@@ -1810,7 +1909,7 @@ pub fn validate_format_strings(
                     if let Some(min) = &amt.min {
                         validate_fs_with(
                             min,
-                            &hr_symtab,
+                            hr_symtab,
                             &template_ev,
                             &path_field(&amt_path, "min"),
                             Some(&ResolvedConstraint::Float {
@@ -1823,7 +1922,7 @@ pub fn validate_format_strings(
                     if let Some(max) = &amt.max {
                         validate_fs_with(
                             max,
-                            &hr_symtab,
+                            hr_symtab,
                             &template_ev,
                             &path_field(&amt_path, "max"),
                             Some(&ResolvedConstraint::Float {
@@ -1852,7 +1951,7 @@ pub fn validate_format_strings(
                     let attr_path = path_index(&attrs_path, j);
                     let sr = validate_fs_with(
                         &attr.name,
-                        &hr_symtab,
+                        hr_symtab,
                         &template_ev,
                         &path_field(&attr_path, "name"),
                         Some(&name_constraint),
@@ -1880,7 +1979,7 @@ pub fn validate_format_strings(
                         for (k, v) in any_of.iter().enumerate() {
                             validate_fs_with(
                                 v,
-                                &hr_symtab,
+                                hr_symtab,
                                 &template_ev,
                                 &path_index(&path_field(&attr_path, "anyOf"), k),
                                 Some(&attr_constraint),
@@ -1892,7 +1991,7 @@ pub fn validate_format_strings(
                         for (k, v) in all_of.iter().enumerate() {
                             validate_fs_with(
                                 v,
-                                &hr_symtab,
+                                hr_symtab,
                                 &template_ev,
                                 &path_index(&path_field(&attr_path, "allOf"), k),
                                 Some(&attr_constraint),
@@ -1973,59 +2072,30 @@ pub fn validate_format_strings(
     }
 
     // ── Steps ──
-    for (i, step) in jt.steps.iter().enumerate() {
+    for (i, (step, scope)) in jt.steps.iter().zip(step_scopes).enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
 
         // Task parameter ranges use TEMPLATE scope (no PATH Param.*)
         if let Some(ps) = &step.parameter_space {
             let ps_path = path_field(&step_path, "parameterSpace");
             let tpd_path = path_field(&ps_path, "taskParameterDefinitions");
-            let mut range_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
-            if expr_active {
-                range_symtab
-                    .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                range_symtab
-                    .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                // Step-level let bindings are in template scope and must be
-                // visible in parameterSpace range expressions.
-                if let Some(bindings) = &step.let_bindings {
-                    for binding in bindings {
-                        if let Some(eq_pos) = binding.find('=') {
-                            let name = binding[..eq_pos].trim();
-                            let expr_str = binding[eq_pos + 1..].trim();
-                            if !name.is_empty() && !expr_str.is_empty() {
-                                match openjd_expr::eval::ParsedExpression::with_profile(
-                                    expr_str,
-                                    &template_profile,
-                                ) {
-                                    Ok(parsed) => {
-                                        match template_ev
-                                            .budgeted(parsed.with_library(template_ev.lib))
-                                            .evaluate(&[&range_symtab as &SymbolTable])
-                                        {
-                                            Ok(val) => {
-                                                let _ = range_symtab.set(name, val);
-                                            }
-                                            Err(e) => {
-                                                errors.add(
-                                                    &step_path,
-                                                    format!("let binding '{name}': {e}"),
-                                                );
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        errors
-                                            .add(&step_path, format!("let binding '{name}': {e}"));
-                                    }
-                                }
-                            }
-                        }
-                    }
+            // Step-level let bindings are in template scope and must be
+            // visible in parameterSpace range expressions.
+            let failed_range_symtab;
+            let range_symtab = match &step.let_bindings {
+                Some(bindings) if !scope.all_evaluated => {
+                    failed_range_symtab = range_symtab_after_let_failure(
+                        bindings,
+                        &step_path,
+                        &step_base_symtab,
+                        &template_ev,
+                        &template_profile,
+                        errors,
+                    );
+                    &failed_range_symtab
                 }
-            }
+                _ => &scope.symtab,
+            };
             for (j, tp) in ps.task_parameter_definitions.iter().enumerate() {
                 let p_path = path_index(&tpd_path, j);
                 // §3.4.2: a STRING/PATH range element may be at most 1024
@@ -2056,7 +2126,7 @@ pub fn validate_format_strings(
                         validate_int_range_fs(
                             &t.range,
                             numeric_item_constraint,
-                            &range_symtab,
+                            range_symtab,
                             &template_ev,
                             &path_field(&p_path, "range"),
                             errors,
@@ -2071,7 +2141,7 @@ pub fn validate_format_strings(
                                 if let crate::template::FloatRangeItem::FormatString(fs) = item {
                                     validate_fs_with(
                                         fs,
-                                        &range_symtab,
+                                        range_symtab,
                                         &template_ev,
                                         &path_index(&path_field(&p_path, "range"), k),
                                         numeric_item_constraint,
@@ -2086,7 +2156,7 @@ pub fn validate_format_strings(
                             for (k, item) in items.iter().enumerate() {
                                 validate_fs_with(
                                     item,
-                                    &range_symtab,
+                                    range_symtab,
                                     &template_ev,
                                     &path_index(&path_field(&p_path, "range"), k),
                                     Some(&string_range_item_constraint),
@@ -2100,7 +2170,7 @@ pub fn validate_format_strings(
                             for (k, item) in items.iter().enumerate() {
                                 validate_fs_with(
                                     item,
-                                    &range_symtab,
+                                    range_symtab,
                                     &template_ev,
                                     &path_index(&path_field(&p_path, "range"), k),
                                     Some(&path_range_item_constraint),
@@ -2113,7 +2183,7 @@ pub fn validate_format_strings(
                         validate_int_range_fs(
                             &t.range,
                             numeric_item_constraint,
-                            &range_symtab,
+                            range_symtab,
                             &template_ev,
                             &path_field(&p_path, "range"),
                             errors,
@@ -2128,7 +2198,7 @@ pub fn validate_format_strings(
                         {
                             validate_fs_with(
                                 fs,
-                                &range_symtab,
+                                range_symtab,
                                 &template_ev,
                                 &path_field(&chunks_path, "defaultTaskCount"),
                                 Some(&ResolvedConstraint::Int {
@@ -2146,7 +2216,7 @@ pub fn validate_format_strings(
                         {
                             validate_fs_with(
                                 fs,
-                                &range_symtab,
+                                range_symtab,
                                 &template_ev,
                                 &path_field(&chunks_path, "targetRuntimeSeconds"),
                                 Some(&ResolvedConstraint::Int {
@@ -2169,39 +2239,24 @@ pub fn validate_format_strings(
         // Template-scope symtab for the step's job-creation-stage fields:
         // Param.* (non-PATH), RawParam.*, and with EXPR Job.Name, Step.Name,
         // and step-level let bindings — no Session.*, no Task.*. Used for
-        // step let bindings and for `timeout`/`notifyPeriodInSeconds`
-        // (plain @fmtstring: resolved at job creation, before any session
-        // exists).
-        let mut step_template_symtab =
-            build_template_scope_symtab(jt.parameter_definitions.as_deref());
-        if expr_active {
-            step_template_symtab
-                .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-                .expect("symtab");
-            step_template_symtab
-                .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
-                .expect("symtab");
-        }
+        // `timeout`/`notifyPeriodInSeconds` (plain @fmtstring: resolved at
+        // job creation, before any session exists).
+        let StepLetScope {
+            symtab: step_template_symtab,
+            names: step_let_names,
+            errors: let_errors,
+            ..
+        } = scope;
 
-        // Let bindings: validate and evaluate into symtab if EXPR, reject if not.
+        // Let bindings: report what evaluating them found if EXPR, reject if not.
         // Step-level let bindings are TEMPLATE scope (template_lib, no Session.*, no PATH Param.*).
         // Script-level let bindings are TASK scope (host_lib).
-        if let Some(bindings) = &step.let_bindings {
+        if step.let_bindings.is_some() {
             let let_path = path_field(&step_path, "let");
             if !expr_active {
                 errors.add(&let_path, "'let' requires the EXPR extension.");
             } else {
-                let mut step_let_names = HashSet::new();
-                validate_let_bindings(
-                    bindings,
-                    &let_path,
-                    &HashSet::new(),
-                    &mut step_let_names,
-                    &mut step_template_symtab,
-                    &template_ev,
-                    &template_profile,
-                    errors,
-                );
+                errors.errors.extend(let_errors);
                 // Copy evaluated let bindings into task_symtab so script-level code can use them
                 for name in &step_let_names {
                     if let Some(val) = step_template_symtab.get_value(name) {
@@ -2687,6 +2742,10 @@ fn validate_single_env_comprehensions(env: &Environment, errors: &mut Validation
     }
 }
 
+/// Validate a `let` block and evaluate its bindings into `symtab`.
+///
+/// Returns `false` when any well-formed binding failed to parse or evaluate,
+/// and `true` otherwise (structural errors alone leave it `true`).
 #[allow(clippy::too_many_arguments)]
 fn validate_let_bindings(
     bindings: &[String],
@@ -2697,14 +2756,15 @@ fn validate_let_bindings(
     ev: &FsEval<'_>,
     profile: &openjd_expr::ExprProfile,
     errors: &mut ValidationErrors,
-) {
+) -> bool {
     if bindings.is_empty() {
         errors.add(path, "if provided, must not be empty.");
-        return;
+        return true;
     }
     if bindings.len() > 50 {
         errors.add(path, "must not contain more than 50 bindings.");
     }
+    let mut all_evaluated = true;
     let mut names = HashSet::new();
     for (i, binding) in bindings.iter().enumerate() {
         let b_path = path_index(path, i);
@@ -2755,8 +2815,10 @@ fn validate_let_bindings(
         }
         out_names.insert(name.to_string());
 
-        evaluate_let_binding(binding, eq_pos, &b_path, true, symtab, ev, profile, errors);
+        all_evaluated &=
+            evaluate_let_binding(binding, eq_pos, &b_path, true, symtab, ev, profile, errors);
     }
+    all_evaluated
 }
 
 /// Parse and evaluate one well-formed `name = expr` binding (`eq_pos` is
@@ -2769,6 +2831,8 @@ fn validate_let_bindings(
 ///
 /// `check_self_reference` adds pass 8's structural self-reference check
 /// (the job-creation re-check leaves structure to template validation).
+///
+/// Returns whether the binding parsed and evaluated.
 #[allow(clippy::too_many_arguments)]
 fn evaluate_let_binding(
     binding: &str,
@@ -2779,7 +2843,7 @@ fn evaluate_let_binding(
     ev: &FsEval<'_>,
     profile: &openjd_expr::ExprProfile,
     errors: &mut ValidationErrors,
-) {
+) -> bool {
     let name = binding[..eq_pos].trim();
     let expr = binding[eq_pos + 1..].trim();
     // The prefix is included in error messages so caret positions align with
@@ -2815,17 +2879,20 @@ fn evaluate_let_binding(
                     // (above, at template validation), so they can never collide with
                     // the uppercase-rooted scopes, and ignoring the result is safe.
                     let _ = symtab.set(name, result);
+                    true
                 }
                 Err(e) => {
                     report(&e, errors);
                     // Still add as unresolved(ANY) so later bindings don't cascade errors
                     let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
+                    false
                 }
             }
         }
         Err(e) => {
             report(&e, errors);
             let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
+            false
         }
     }
 }
