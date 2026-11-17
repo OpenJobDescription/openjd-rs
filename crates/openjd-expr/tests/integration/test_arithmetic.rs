@@ -562,7 +562,14 @@ fn round_int_negative_ndigits_is_exact() {
 fn round_int_negative_ndigits_i64_bounds() {
     // i64::MAX ends in 7, so rounding to tens goes up and out of range;
     // ...804 rounds down and stays in range.
-    assert_overflow("round(9223372036854775807, -1)");
+    assert_err(
+        "round(9223372036854775807, -1)",
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  round(9223372036854775807, -1)\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
     assert!(matches!(
         eval("round(9223372036854775804, -1)"),
         ExprValue::Int(9_223_372_036_854_775_800)
@@ -672,6 +679,17 @@ fn round_float_non_positive_ndigits_i64_bounds() {
     assert!(matches!(eval("round(4e19, -20)"), ExprValue::Int(0)));
     assert!(matches!(eval("round(5e19, -20)"), ExprValue::Int(0)));
     assert_overflow("round(6e19, -20)");
+    // 5·10^20 and 5·10^21 are exact f64s, so these are exact ties that go to
+    // the even 0. 5·10^21 = 5^22·2^21 is the largest exact tie of this form.
+    for expr in [
+        "round(5e20, -21)",
+        "round(-5e20, -21)",
+        "round(5e21, -22)",
+        "round(-5e21, -22)",
+    ] {
+        assert!(matches!(eval(expr), ExprValue::Int(0)), "{expr}");
+    }
+    assert_overflow("round(5.000000000000001e21, -22)");
 }
 
 #[test]

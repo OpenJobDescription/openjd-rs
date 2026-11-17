@@ -388,21 +388,24 @@ mod tests {
             state ^= state >> 27;
             state.wrapping_mul(0x2545_f491_4f6c_dd1d)
         };
-        let limit = 1i64 << 53;
+        let limit: i128 = 1 << 53;
         for _ in 0..200_000 {
             let r = next();
             let k = (r % 19) as u32 + 1;
-            let q = 10i64.saturating_pow(k).min(limit);
-            // Half the samples sit on a tie, to exercise half-to-even.
-            let x = if (r >> 8) & 1 == 0 {
-                (next() % limit as u64) as i64
+            let q = 10i128.pow(k);
+            // Half the samples sit on a tie m·10^k + 10^k / 2, to exercise
+            // half-to-even, for every k with a tie below 2^53 (k <= 16).
+            let max_m = if q / 2 < limit {
+                (limit - 1 - q / 2) / q
             } else {
-                ((next() % (limit / q) as u64) as i64) * q + q / 2
+                -1
             };
-            let x = if (r >> 9) & 1 == 0 { x } else { -x };
-            if x.abs() >= limit {
-                continue;
-            }
+            let x = if (r >> 8) & 1 == 0 || max_m < 0 {
+                i128::from(next()) % limit
+            } else {
+                (i128::from(next()) % (max_m + 1)) * q + q / 2
+            };
+            let x = i64::try_from(if (r >> 9) & 1 == 0 { x } else { -x }).unwrap();
             assert_eq!(
                 new_round(x, k) as f64,
                 old_f64_round(x, k),

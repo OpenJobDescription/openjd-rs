@@ -625,9 +625,11 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   `round(x: float)` and `round(x: float, ndigits)` with `ndigits` ≤ 0 return `int`, and
   a result outside the 64-bit signed range is an integer overflow error. The range is
   checked on the exact result, so `round(-9223372036854775808.0, -1)`, which is
-  −9223372036854775810, overflows. These `int` results use integer arithmetic (i128,
-  since 10^19 exceeds i64). A float of at least 2^127 rounds to 0 or overflows, decided
-  by comparing its exact decimal digits with `10^k / 2`.
+  −9223372036854775810, overflows. These `int` results, and `round(x: int, ndigits)`,
+  use exact integer arithmetic on the magnitude in u128 (10^19 exceeds i64), then apply
+  the sign and check the range. A float of at least 2^127 rounds to 0 or overflows,
+  decided by comparing its exact decimal digits with `10^k / 2`. Every i64 rounds to 0
+  when `ndigits` ≤ −20, and every float when `ndigits` ≤ −309.
 - **`round(x, ndigits)` with `ndigits` > 0** returns a `float` whose display keeps
   `ndigits` decimal places (`round(3.5, 2)` is `3.50`). The exact value is formatted to `ndigits` places
   (Rust's `{:.n}` rounds the exact value half-to-even) and that text is parsed back,

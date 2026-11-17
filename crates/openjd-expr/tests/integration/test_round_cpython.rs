@@ -17,6 +17,8 @@
 use openjd_expr::{ExprValue, ExpressionErrorKind, ParsedExpression, SymbolTable};
 
 const FIXTURE: &str = include_str!("data/round_cpython.txt");
+const FLOAT_CASES: usize = 1184;
+const INT_CASES: usize = 628;
 
 fn eval(expr: &str) -> Result<ExprValue, openjd_expr::ExpressionError> {
     ParsedExpression::new(expr).and_then(|p| p.evaluate(&SymbolTable::new()))
@@ -65,8 +67,10 @@ fn round_matches_cpython() {
         .lines()
         .filter(|line| !line.starts_with('#') && !line.is_empty())
         .collect();
-    // Guard against a truncated fixture silently testing less.
-    assert!(lines.len() > 1500, "fixture has {} cases", lines.len());
+    // Guard against a truncated fixture silently testing less. Update the
+    // counts when the generator adds cases.
+    let count = |kind: &str| lines.iter().filter(|l| l.starts_with(kind)).count();
+    assert_eq!((count("f "), count("i ")), (FLOAT_CASES, INT_CASES));
     let failures: Vec<String> = lines.iter().filter_map(|l| check(l)).collect();
     assert!(
         failures.is_empty(),
