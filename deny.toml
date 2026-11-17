@@ -33,7 +33,13 @@ multiple-versions = "allow"
 
 [advisories]
 version = 2
-ignore = []
+ignore = [
+    # chrono is unmaintained. The only remaining path to it is the s3s and
+    # s3s-fs 0.17 dev-dependencies of openjd-snapshots (mock S3 server for
+    # tests), so it never ships. Remove once s3s releases without chrono:
+    # https://github.com/OpenJobDescription/openjd-rs/issues/557
+    { id = "RUSTSEC-2026-0543", reason = "chrono only reached via s3s 0.17 dev-dependencies; tracked in #557" },
+]
 
 [sources]
 unknown-registry = "deny"

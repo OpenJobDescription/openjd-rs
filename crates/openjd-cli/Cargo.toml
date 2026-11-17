@@ -30,7 +30,7 @@ serde-saphyr = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
 tokio-util = "0.7"
 log = { version = "0.4", features = ["kv", "kv_std"] }
-chrono = "0.4"
+jiff = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
