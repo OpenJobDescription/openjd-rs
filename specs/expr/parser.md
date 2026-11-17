@@ -200,8 +200,10 @@ surrogate. During AST validation, `reject_surrogate_escapes` scans the source te
 each non-raw string literal part (an implicitly concatenated literal has several) for
 `\u` and `\U` escapes, skipping every other escape by its first two bytes, and
 reports `Syntax error: \ud800 is a surrogate code point, which a string can't hold`
-with the caret on the escape. AST validation reaches every literal, including those in
-slice bounds (`x[0:len('\ud800')]`), which it walks like any other subexpression. The lexer has already checked each escape's syntax, so
+with the caret on the escape. AST validation walks slice bounds
+(`x[0:len('\ud800')]`) like any other subexpression, at the depth of the slice itself,
+as the evaluator does. It doesn't walk a comprehension's loop target, but any target
+other than a plain name is rejected at evaluation. The lexer has already checked each escape's syntax, so
 the scan only needs to find where escapes start. Raw strings have no escapes and are
 skipped.
 
