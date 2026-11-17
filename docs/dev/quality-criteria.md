@@ -65,6 +65,13 @@ when they carry behavior a user relies on. Where `public-api.md` shows a
 signature, the signature MUST match the listing. Doc comments MUST be accurate.
 The API SHOULD be ergonomic and consistent with the other openjd crates.
 
+`public-api.md` SHOULD contain only what a caller needs: purpose, signatures,
+invariants, and error behavior. That includes behavior that differs from the
+Python reference in a way a caller can observe, stated as behavior. Design
+rationale (including why a behavior differs from Python), algorithms,
+performance and memory notes, and test or fuzz coverage belong in the crate's
+other spec files, linked from `public-api.md`.
+
 **Q3. Code implements the specs.** Code MUST faithfully implement what the
 specs say. Error messages MUST be high quality: specific, actionable, located
 (a path or a caret), and consistent with the Python reference where one exists.
