@@ -98,7 +98,7 @@ fn validate_symlink_targets_relative(files: &[FileEntry]) -> Result<()> {
 /// Checked rather than saturating: sizes are caller data, and a clamped
 /// `totalSize` would disagree with the entries. Python writes the exact
 /// (arbitrary-precision) sum instead; Rust's `u64` sizes cannot, so this is
-/// an intentional divergence (see `specs/snapshots/public-api.md`).
+/// an intentional divergence (see `specs/snapshots/snapshot_codec.md`).
 fn v2023_total_size(paths: &[Value]) -> Result<u64> {
     paths
         .iter()

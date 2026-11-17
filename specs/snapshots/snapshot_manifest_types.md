@@ -109,7 +109,20 @@ Both provide accessor methods via a macro: `files()`, `dirs()`, `hash_alg()`, `f
 | `with_parent_hash(hash)` | Builder: set parent_manifest_hash |
 | `clear_hashes()` | Set `hash` and `chunk_hashes` to `None` for all regular files |
 | `recompute_total_size()` | Recalculate `total_size` from file entries (saturates at `u64::MAX`; the v2023 encoders instead reject a sum that overflows) |
+| `common_root()` | Longest directory prefix shared by the non-deleted entries (see [Common Root](#common-root)) |
 | `validate()` | Run all validation checks (requires `P: ValidatePaths, K: ValidateKind`) |
+
+### Common Root
+
+`common_root` returns the longest directory prefix that is an ancestor of (or
+equal to) every meaningful non-deleted path in the manifest. Files contribute
+their parent directory; empty dirs contribute themselves; non-empty dirs
+(those with a strict descendant declared elsewhere in the manifest) are
+ignored so that a dir entry like `/` does not collapse the result toward
+root when it merely contains other declared entries. Returns `None` if the
+manifest is empty (or all entries are deleted). Composes with
+`subtree_snapshot` to extract a relative-path subtree from an absolute
+manifest without the caller needing to know a root path.
 
 ## FileEntry
 
@@ -246,6 +259,15 @@ See [snapshot_symlink_handling.md](snapshot_symlink_handling.md) for detailed do
 | Positive value | > chunk size | `chunk_hashes` |
 
 When `chunk_hashes` is used, chunk count = `ceil(size / file_chunk_size_bytes)`.
+
+`hash::hash_file_chunked(path, chunk_size, expected_size)` takes a mandatory
+`expected_size`. Content-addressed hashing requires the file on disk to match
+what the manifest claims, so the function checks the actual file size against
+`expected_size` before hashing and returns `io::ErrorKind::InvalidData` on
+mismatch. This lets callers detect file-size drift (for example, a file that
+was truncated or extended after being recorded in a manifest) without a
+separate stat call, and guarantees that the returned chunk hashes describe
+exactly the bytes the caller intended to hash.
 
 ## Constants
 

@@ -71,14 +71,9 @@ pub fn hash_file_chunked(
 ) -> std::io::Result<Vec<String>>;
 ```
 
-`expected_size` is mandatory on `hash_file_chunked`. Content-addressed
-hashing requires the file on disk to match what the manifest claims,
-so the function checks the actual file size against `expected_size`
-before hashing and returns `io::ErrorKind::InvalidData` on mismatch.
-This lets callers detect file-size drift (for example, a file that
-was truncated or extended after being recorded in a manifest) without
-a separate stat call, and guarantees that the returned chunk hashes
-describe exactly the bytes the caller intended to hash.
+`hash_file_chunked` returns `io::ErrorKind::InvalidData` if the file's size
+is not `expected_size`. See
+[snapshot_manifest_types.md § File Chunked Hashing](snapshot_manifest_types.md#file-chunked-hashing).
 
 Re-exported at the crate root:
 
@@ -134,15 +129,10 @@ pub fn recompute_total_size(&mut self); // saturates at u64::MAX
 pub fn common_root(&self) -> Option<String>;
 ```
 
-`common_root` returns the longest directory prefix that is an ancestor (or
-equal to) every meaningful non-deleted path in the manifest. Files contribute
-their parent directory; empty dirs contribute themselves; non-empty dirs
-(those with a strict descendant declared elsewhere in the manifest) are
-ignored so that a dir entry like `/` does not collapse the result toward
-root when it merely contains other declared entries. Returns `None` if the
-manifest is empty (or all entries are deleted). Composes with
-[`subtree_snapshot`] to extract a relative-path subtree from an absolute
-manifest without the caller needing to know a root path.
+`common_root` returns the longest directory prefix shared by the manifest's
+non-deleted entries, or `None` if there are none. Combined with
+[`subtree_snapshot`], it extracts a relative-path subtree from an absolute
+manifest. See [snapshot_manifest_types.md § Common Root](snapshot_manifest_types.md#common-root).
 
 #### Methods (where `P: ValidatePaths, K: ValidateKind`)
 
@@ -299,20 +289,10 @@ pub fn encode_snapshot_v2025(m: &Snapshot) -> Result<String>;
 pub fn encode_snapshot_diff_v2025(m: &SnapshotDiff) -> Result<String>;
 ```
 
-Both v2023 encoders write `totalSize` as the sum of the encoded entries'
-sizes and return `SnapshotError::Validation` if that sum exceeds `u64::MAX`;
-they never write a clamped total. The v2025 encoders write the manifest's
-`total_size` field as is, which `recompute_total_size` may have clamped to
-`u64::MAX`.
-
-This is an intentional divergence from Python. Python's v2023 encoder uses
-arbitrary-precision integers, so it writes the exact sum (for example
-`18446744073709551616` for two `2^63`-byte files), and Python reads that
-back. Rust stores sizes as `u64`, so it cannot represent such a manifest: the
-v2023 encoders reject it rather than write a `totalSize` that disagrees with
-the entries, and `decode_v2023` rejects a `totalSize` above `u64::MAX` as
-`missing or invalid totalSize`. No real file set reaches this size; the limit
-matters only for crafted manifests.
+The v2023 encoders write `totalSize` as the sum of the entries' sizes and
+return `SnapshotError::Validation` if that sum exceeds `u64::MAX`. The v2025
+encoders write the manifest's `total_size` field as is. See
+[snapshot_codec.md § Encoding](snapshot_codec.md#encoding).
 
 The generic `encode_v2025` is also public via the `codec` module path:
 
@@ -339,66 +319,15 @@ returned manifest. `decode_v2023_as_diff` is a convenience for callers that
 want to feed a v2023-formatted manifest into a diff-consuming pipeline like
 [`compose_snapshot_with_diffs`] without reconstructing the manifest.
 
-`decode_manifest` decodes a document that has a `manifestVersion` key as
-v2023, otherwise one that has a `specificationVersion` key as v2025, and
-otherwise fails with `Unknown manifest format: no manifestVersion or
-specificationVersion`. It goes by whether the key is present, not by its
-value, so `{"manifestVersion": null}` fails as `missing manifestVersion`.
+`decode_manifest` picks v2023 when the document has a `manifestVersion` key
+and v2025 when it has a `specificationVersion` key, and otherwise fails.
 
-All four decoders read their input with the same rules (the streaming
-decoders below read values the same way):
-
-- Text that is not valid JSON fails as `Invalid JSON: <serde_json error>`,
-  with the error's line and column. That includes members the decoder does
-  not use: an out-of-range number, an invalid `\u` escape, or nesting past
-  serde_json's recursion limit anywhere in the document is rejected.
-- A member of the wrong JSON type is treated as absent. A required member
-  then fails with its "missing" error (for example, a v2023 entry whose
-  `size` is `"2"`, `-2`, or `2.0` fails as `path entry missing 'size'`),
-  and an optional one takes its default (a v2025 `runnable` of `"yes"` is
-  `false`). An array entry that is not an object has no members. Non-string
-  elements of a v2025 `chunkhashes` array are dropped.
-- When an object has a key more than once, the last value is used.
-- Unknown members are ignored.
-
-These rules assume serde_json's default number handling. A build that turns
-on serde_json's `arbitrary_precision` feature (Cargo unifies features, so a
-dependent crate can) accepts out-of-range numbers, and reads `-0` in
-`fileChunkSizeBytes`, the only signed member, as absent instead of `0`.
-
-Header errors are reported before entry errors, except that v2025 reports
-an unknown `specificationVersion` after its `dirs` and `files` errors.
-`tests/integration/test_codec_decode.rs` asserts every decode error message
-and each of these rules.
-
-#### Keeping decode memory low
-
-Manifests can be large, so decoding should use little memory beyond the
-input text. `tests/decode_memory.rs` enforces this: it fails if a decoder's
-peak heap use passes a fixed multiple of the input size, or, for the
-streaming v2023 decoders, a fixed number of bytes. The test is the
-constraint. This section is guidance.
-
-How the decoders keep memory low today (`src/codec.rs`,
-`src/codec/raw.rs`):
-
-- They parse the input once, straight into typed values for the members
-  the decoders read. Other members are parsed and discarded.
-- They move hashes, and v2023 paths, out of the parsed values instead of
-  copying them.
-- `decode_v2025` drops the parsed directory list once it has built the
-  directory entries.
-
-When changing decoding code:
-
-- Try to read into typed structs with serde, and to parse the input only
-  once, deciding what to do from the parsed result.
-- Avoid building a generic tree such as `serde_json::Value` for a whole
-  document. Each object in it is a map with its own key strings, which
-  costs several times the text.
-- Avoid `serde::de::IgnoredAny` for skipped members when invalid JSON must
-  still be rejected. It accepts out-of-range numbers, unpaired surrogate
-  `\u` escapes, and nesting past the recursion limit.
+The decoders fail with `SnapshotError::Validation`. Text that is not valid
+JSON anywhere in the document is rejected. A member of the wrong JSON type
+is treated as absent, a repeated key takes its last value, and unknown
+members are ignored. Duplicate paths are rejected. See
+[snapshot_codec.md § Decoding](snapshot_codec.md#decoding) for the full
+reading rules, error order, and memory constraints.
 
 ### Streaming v2023 Decode
 
@@ -424,65 +353,33 @@ where
 
 These decode a v2023 manifest without building it. Each element of `paths`
 is converted to a `FileEntry` and passed to `f`, with the manifest's hash
-algorithm, as soon as it is parsed. One entry is held at a time, so memory
-use does not depend on the number of entries. `tests/decode_memory.rs`
-bounds the peak at 16 KiB for a 20,000-entry manifest (it measures about
-200 bytes from a `&str`, plus the `BufReader`'s 8 KiB buffer from a
-reader). Memory does grow with the largest entry and the longest string:
-normalizing a path while building its `FileEntry` can take over ten times
-the path's length, serde_json unescapes a string that contains escapes into
-a buffer even when the member is not used, and the reader form copies every
-string, used or not, into that buffer as it reads it. The summary returned
-holds the hash algorithm, the recorded `totalSize`, and the number of entries
-delivered. There is no v2025 equivalent.
+algorithm, as soon as it is parsed, so memory use does not depend on the
+number of entries. The returned summary holds the hash algorithm, the
+recorded `totalSize`, and the number of entries delivered. There is no v2025
+equivalent.
 
 The callback's error type `E` is the function's error type: an error the
 callback returns stops the decode and is returned unchanged, and decode
 errors are converted with `From<SnapshotError>`. Unless the callback
 returns an `Err` of a concrete type somewhere, it has to name `E`, as in
 `Ok::<_, SnapshotError>(())`, since `?` inside it converts into any `E`.
-The reader form reads the text as it parses (pass it a buffered reader), and
-returns read errors as `SnapshotError::Io`. After the manifest's closing `}`
-it reads on to the end of input, to reject trailing text, so it does not
-return until the reader reports end of input.
 
-Values are read, each entry checked, and errors worded as `decode_v2023`
-does, with these differences, which streaming requires:
+The reader form returns read errors as `SnapshotError::Io`, and reads to the
+end of input before returning. Pass it a buffered reader.
 
-- The header is checked when `paths` arrives, with the values read so far,
-  so `manifestVersion` and `hashAlg` must come before `paths`, as they do in
-  canonical (sorted-key) v2023 output, which `encode_snapshot_v2023`
-  writes. One that has not appeared by then
-  fails with `missing manifestVersion before paths` (or `hashAlg`), one
-  that appears again after `paths` with `manifestVersion must come before
-  paths` (or `hashAlg`), and a second `paths` key with `paths appears more
-  than once`. `decode_v2023` uses the last value of a repeated key instead.
-- Errors are mostly reported in document order, and entries are delivered
-  before the rest of the document is read. Each entry is checked in full
-  before the next one is read, so with several bad entries the first bad
-  one is reported (`decode_v2023` reports the first entry missing a member
-  before it applies its other checks). An error found ahead of a repeated
-  key is reported, even if `decode_v2023` would have used the later value.
-  `totalSize` is checked at the end, wherever it appears, since a later one
-  replaces an earlier one, so a bad entry is reported before a missing or
-  invalid `totalSize`.
-- After an error, the entries already delivered should be discarded: the
-  manifest is invalid, or the decode was stopped by the callback or a read
-  error, so they may not be all of its entries.
-- Paths are not checked for duplicates, which would take memory in
-  proportion to the manifest. `decode_v2023` rejects a repeated path.
-- From a reader, serde_json can report a syntax error's column one past
-  where it reports it for a `&str`.
+Values are read, entries checked, and errors worded as `decode_v2023` does,
+except that:
 
-`tests/integration/test_codec_stream.rs` covers these. On every input, the
-`snapshots_decode_text` fuzz target checks that the two streaming functions
-agree with each other (the same entries, and the same error apart from its
-position). It checks that they agree with `decode_v2023`: one may succeed
-where the other fails only for a key order or repeated key that streaming
-rejects, or a repeated path, and when both fail on valid JSON in an order
-streaming reads, the messages match except that each may report a
-different bad entry, or streaming a bad entry where `decode_v2023` reports
-`totalSize`.
+- `manifestVersion` and `hashAlg` must come before `paths` (as they do in
+  `encode_snapshot_v2023` output) and must not appear again after it, and
+  `paths` must appear only once;
+- errors are reported mostly in document order, after earlier entries have
+  been delivered, so after any error the caller should discard the entries
+  it received;
+- duplicate paths are not rejected.
+
+See [snapshot_codec.md § Streaming v2023 Decode](snapshot_codec.md#streaming-v2023-decode)
+for the exact error messages and memory profile.
 
 ## Data Cache
 
@@ -600,41 +497,30 @@ impl S3DataCache {
 
 Implements `AsyncDataCache` (with `copy_from` for S3-to-S3 server-side copy),
 `MultipartDataCache`, and `RangeReadDataCache`. By default `copy_from` performs
-a single `CopyObject` with no extra `HeadObject`. Calling `with_copy_config`
-opts in to size-aware routing: `copy_from` then issues one `HeadObject` and uses
-parallel multipart `UploadPartCopy` for sources above the configured threshold
-(required both to copy sources > 5 GiB and to parallelize large cross-region
-copies).
+a single `CopyObject`, which S3 limits to sources of 5 GiB. `with_copy_config`
+opts in to multipart `UploadPartCopy` above a size threshold, at the cost of
+one `HeadObject` per copy. See
+[snapshot_data_cache.md § Server-Side Copy](snapshot_data_cache.md#server-side-copy-copy_from).
 
 ### S3CopyConfig
 
-`TransferConfig`-style tuning for `S3DataCache::copy_from`. Used to control when
-a server-side copy switches from a single `CopyObject` to a parallel multipart
-`UploadPartCopy`, and how that multipart copy is sized and parallelized.
+Tuning for `S3DataCache::copy_from`: when a server-side copy switches from a
+single `CopyObject` to a parallel multipart `UploadPartCopy`, and how that
+multipart copy is sized and parallelized.
 
 ```rust
 pub struct S3CopyConfig {
-    /// Sources strictly larger than this use multipart UploadPartCopy.
-    /// Default 5 MiB — a performance cutoff, since parallel multipart copy
-    /// beats single CopyObject for cross-region transfers at every size at or
-    /// above S3's 5 MiB minimum part size. Clamped to 5 GiB at copy time (the
-    /// CopyObject ceiling).
-    pub multipart_threshold: u64,
-    /// Target size of each UploadPartCopy part. Default 5 MiB (the S3 minimum
-    /// part size, which maximizes parallelism). Grown automatically to keep
-    /// the part count <= 10,000 and clamped to the S3 part-size range
-    /// (5 MiB..=5 GiB).
-    pub part_size: u64,
-    /// Maximum number of concurrent UploadPartCopy requests per object.
-    /// Default 64.
-    pub max_concurrency: usize,
+    pub multipart_threshold: u64, // sources strictly larger use multipart; clamped to 5 GiB
+    pub part_size: u64,           // grown to keep <= 10,000 parts; clamped to 5 MiB..=5 GiB
+    pub max_concurrency: usize,   // concurrent UploadPartCopy requests per object
 }
 
 pub const S3_MAX_SINGLE_COPY_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 ```
 
-Implements `Default` (5 MiB threshold, 5 MiB parts, concurrency 64) — the
-empirically validated cross-region copy settings.
+Implements `Default` (5 MiB threshold, 5 MiB parts, concurrency 64). See
+[snapshot_data_cache.md](snapshot_data_cache.md#transferconfig-style-copy-tuning-s3copyconfig)
+for how the defaults were chosen.
 
 ### CacheValidationState
 
@@ -668,12 +554,10 @@ impl HashCache {
 }
 ```
 
-`HashCache::new` and `S3CheckCache::new` create `cache_dir` if needed, open
-the database, and request WAL journaling. If SQLite cannot use WAL they still
-succeed and log a warning. They fail with `SnapshotError::Io` if `cache_dir`
-cannot be created, and with `SnapshotError::Cache` on SQLite errors,
-including a failed WAL PRAGMA. A `Cache` error names the database file, for
-example `Cache error: <cache_dir>/hash_cache.db: database is locked`. See
+`HashCache::new` and `S3CheckCache::new` create `cache_dir` if needed and
+open the database. They fail with `SnapshotError::Io` if `cache_dir` cannot
+be created, and with `SnapshotError::Cache` on SQLite errors; a `Cache` error
+names the database file. See
 [snapshot_hash_cache.md § Journal Mode](snapshot_hash_cache.md#journal-mode).
 
 ## S3 Check Cache
@@ -894,11 +778,8 @@ pub fn entries_differ(
 pub struct DiffOptions {
     pub parent_manifest_hash: Option<String>,
     pub ignore_hashes: bool,
-    /// Dual-purpose flag: ignores `runnable` when comparing, *and* copies the
-    /// parent's `runnable` into the diff entry for modified files. The
-    /// ignore-on-compare half is delegated to `entries_differ` via its
-    /// `ignore_runnable` parameter; the copy-on-emit half is handled inside
-    /// `diff_snapshots`.
+    /// Ignores `runnable` when comparing, and copies the parent's `runnable`
+    /// into the diff entry for modified files.
     pub preserve_runnable: bool,
 }
 ```
