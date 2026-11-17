@@ -95,16 +95,71 @@ pub fn max_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(result)
 }
 
-fn round_half_even(x: f64) -> f64 {
-    let rounded = x.round();
-    if (x - rounded).abs() == 0.5 {
-        if rounded as i64 % 2 != 0 {
-            rounded - x.signum()
-        } else {
-            rounded
-        }
+/// Round `mag + frac` to the nearest multiple of `10^k`, ties to even, and
+/// return that multiple. `mag` is an integer and `frac` is an exact fraction,
+/// `0 <= frac < 1`, so the comparison with the halfway point is exact: for
+/// `k >= 1` the halfway point `10^k / 2` is an integer, and `frac` only breaks
+/// a tie in the integer remainder. `None` means the multiple overflows `u128`.
+fn round_magnitude_to_pow10(mag: u128, frac: f64, k: u32) -> Option<u128> {
+    if k == 0 {
+        let up = frac > 0.5 || (frac == 0.5 && mag % 2 == 1);
+        return mag.checked_add(u128::from(up));
+    }
+    // 10^39 exceeds 2^129, more than twice any `mag` that reaches here
+    // (below 2^127), so every such value rounds to 0.
+    let Some(q) = 10u128.checked_pow(k) else {
+        return Some(0);
+    };
+    let (quot, rem) = (mag / q, mag % q);
+    let half = q / 2;
+    let up = rem > half || (rem == half && (frac > 0.0 || quot % 2 == 1));
+    (quot + u128::from(up)).checked_mul(q)
+}
+
+/// The i64 with sign `negative` and magnitude `mag`, or an overflow error.
+fn signed_i64(negative: bool, mag: u128) -> Result<i64, ExpressionError> {
+    let overflow = |_| ExpressionError::integer_overflow();
+    let v = i128::try_from(mag).map_err(overflow)?;
+    i64::try_from(if negative { -v } else { v }).map_err(overflow)
+}
+
+/// `round(x, ndigits)` for `ndigits <= 0`: the exact value of `x` rounded
+/// half-to-even to a multiple of `10^-ndigits`, as an i64.
+fn round_float_to_int(x: f64, ndigits: i64) -> Result<i64, ExpressionError> {
+    // round(v, n) is 0 whenever 10^|n| exceeds 2·|v|, and every finite f64
+    // is below 10^309 / 2. This also keeps the negation below in range
+    // (ndigits can be i64::MIN).
+    if ndigits <= -309 {
+        return Ok(0);
+    }
+    let k = u32::try_from(-ndigits).expect("0 <= -ndigits <= 308");
+    let ax = x.abs();
+    // 2^127, exactly. Below it the integer part fits in u128 exactly.
+    const TWO_POW_127: f64 = 170_141_183_460_469_231_731_687_303_715_884_105_728.0;
+    if ax < TWO_POW_127 {
+        let int_part = ax.trunc();
+        // Both conversions are exact: int_part is an integer below 2^127,
+        // and the fraction of an f64 is itself representable.
+        let mag = round_magnitude_to_pow10(int_part as u128, ax - int_part, k)
+            .ok_or_else(ExpressionError::integer_overflow)?;
+        return signed_i64(x.is_sign_negative(), mag);
+    }
+    // |x| >= 2^127 is an integer. The result is 0 when |x| <= 10^k / 2.
+    // Otherwise it is a nonzero multiple of 10^k, so at least 10^k, and at
+    // least |x| - 10^k / 2; one of those exceeds 2^126, far outside the
+    // i64 range. `{:.0}` writes the exact decimal value of |x|, and
+    // 10^k / 2 = 5·10^(k-1) is the k-digit number 50...0. No f64 this large
+    // equals it (5^k·2^(k-1) is an f64 only if 5^k < 2^53, so k <= 22, and
+    // then it is below 2^127), so comparing the leading digit is enough.
+    if !ax.is_finite() {
+        return Err(ExpressionError::integer_overflow());
+    }
+    let digits = format!("{ax:.0}");
+    let k = k as usize;
+    if digits.len() < k || (digits.len() == k && digits.as_bytes()[0] < b'5') {
+        Ok(0)
     } else {
-        rounded
+        Err(ExpressionError::integer_overflow())
     }
 }
 
@@ -186,14 +241,6 @@ pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                 // of attempting a matching allocation.
                 let requested = usize::try_from(ndigits).unwrap_or(usize::MAX);
                 ctx.count_string_ops(requested)?;
-                let factor = 10f64.powi(ndigits.min(i32::MAX as i64) as i32);
-                // 10^ndigits overflows f64 beyond ~308 digits; rounding
-                // at that precision leaves any f64 unchanged.
-                let rounded = if factor.is_infinite() {
-                    f.value()
-                } else {
-                    round_half_even(f.value() * factor) / factor
-                };
                 // Rust's formatting machinery panics ("Formatting
                 // argument out of range") for precision above
                 // u16::MAX, and operation budgeting alone admits
@@ -205,7 +252,16 @@ pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                 // against the memory budget before allocation.
                 const MAX_F64_FRACTION_DIGITS: usize = 1074;
                 let prec = requested.min(MAX_F64_FRACTION_DIGITS);
-                let mut text = format!("{:.prec$}", rounded, prec = prec);
+                // `{:.prec$}` rounds the exact value of x half-to-even to
+                // `prec` places, and parsing that text gives the nearest
+                // f64, which is CPython's algorithm. Scaling by 10^ndigits
+                // instead would round twice (round(2.675, 2) is 2.67, not
+                // 2.68). The text reads back as the value, and a finite
+                // value cannot round to infinity at a positive precision.
+                let mut text = format!("{:.prec$}", f.value(), prec = prec);
+                let rounded: f64 = text
+                    .parse()
+                    .expect("Rust's own float formatting parses as f64");
                 let pad = requested - prec;
                 if pad > 0 {
                     ctx.check_memory(text.len() + pad)?;
@@ -217,21 +273,7 @@ pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                 Ok(ExprValue::Float(Float64::with_str(rounded, text)?))
             } else {
                 // round(x) and round(x, ndigits <= 0) return int (§2.2.2).
-                // round(v, n) is 0 whenever 10^|n| exceeds 2·|v|, and every
-                // finite f64 is below 10^309 / 2, so short-circuit — this
-                // also keeps the negation and powi below in range (ndigits
-                // can be i64::MIN, whose direct negation overflows).
-                if ndigits <= -309 {
-                    return Ok(ExprValue::Int(0));
-                }
-                let factor = 10f64.powi((-ndigits) as i32);
-                // A result outside the i64 range, including an infinite
-                // product near the top of the f64 range, is an overflow.
-                let v = round_half_even(f.value() / factor) * factor;
-                if !float_fits_i64(v) {
-                    return Err(ExpressionError::integer_overflow());
-                }
-                Ok(ExprValue::Int(v as i64))
+                Ok(ExprValue::Int(round_float_to_int(f.value(), ndigits)?))
             }
         }
         ExprValue::Int(i) => {
@@ -251,12 +293,11 @@ pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                 if ndigits <= -20 {
                     return Ok(ExprValue::Int(0));
                 }
-                let factor = 10f64.powi((-ndigits) as i32);
-                let v = round_half_even(*i as f64 / factor) * factor;
-                if !float_fits_i64(v) {
-                    return Err(ExpressionError::integer_overflow());
-                }
-                Ok(ExprValue::Int(v as i64))
+                // Exact integer arithmetic; 10^19 needs more than 64 bits.
+                let k = u32::try_from(-ndigits).expect("1 <= -ndigits <= 19");
+                let mag = round_magnitude_to_pow10(u128::from(i.unsigned_abs()), 0.0, k)
+                    .expect("a multiple of 10^19 near an i64 fits u128");
+                Ok(ExprValue::Int(signed_i64(*i < 0, mag)?))
             }
         }
         _ => Err(ExpressionError::new("round() requires numeric argument")),
@@ -306,5 +347,93 @@ pub fn sum_list(ctx: Ctx, a: &[ExprValue]) -> R {
         Ok(ExprValue::Int(sum))
     } else {
         Err(ExpressionError::new("sum() requires list or range_expr"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The f64 rounding that `round(int, ndigits < 0)` used before it
+    /// switched to integer arithmetic.
+    fn old_f64_round(i: i64, k: u32) -> f64 {
+        let factor = 10f64.powi(k as i32);
+        let y = i as f64 / factor;
+        let rounded = y.round();
+        let r = if (y - rounded).abs() == 0.5 && rounded as i64 % 2 != 0 {
+            rounded - y.signum()
+        } else {
+            rounded
+        };
+        r * factor
+    }
+
+    fn new_round(i: i64, k: u32) -> i64 {
+        let mag = round_magnitude_to_pow10(u128::from(i.unsigned_abs()), 0.0, k).unwrap();
+        signed_i64(i < 0, mag).unwrap()
+    }
+
+    /// A property test without a property-testing dependency: for
+    /// |x| < 2^53 the f64 quotient x / 10^k is off by under 1/10^k, and an
+    /// exact quotient that is not a tie is at least 1/10^k from the halfway
+    /// point, so the old f64 rounding was already exact there, ties
+    /// included. The integer rounding must agree with it on every input.
+    #[test]
+    fn integer_rounding_matches_f64_below_2_pow_53() {
+        // xorshift64*, fixed seed, so a failure reproduces.
+        let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
+        let mut next = || {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            state.wrapping_mul(0x2545_f491_4f6c_dd1d)
+        };
+        let limit = 1i64 << 53;
+        for _ in 0..200_000 {
+            let r = next();
+            let k = (r % 19) as u32 + 1;
+            let q = 10i64.saturating_pow(k).min(limit);
+            // Half the samples sit on a tie, to exercise half-to-even.
+            let x = if (r >> 8) & 1 == 0 {
+                (next() % limit as u64) as i64
+            } else {
+                ((next() % (limit / q) as u64) as i64) * q + q / 2
+            };
+            let x = if (r >> 9) & 1 == 0 { x } else { -x };
+            if x.abs() >= limit {
+                continue;
+            }
+            assert_eq!(
+                new_round(x, k) as f64,
+                old_f64_round(x, k),
+                "x = {x}, k = {k}"
+            );
+        }
+    }
+
+    #[test]
+    fn round_magnitude_ties_go_to_even() {
+        assert_eq!(round_magnitude_to_pow10(2, 0.5, 0), Some(2));
+        assert_eq!(round_magnitude_to_pow10(3, 0.5, 0), Some(4));
+        assert_eq!(round_magnitude_to_pow10(3, 0.25, 0), Some(3));
+        assert_eq!(round_magnitude_to_pow10(3, 0.75, 0), Some(4));
+        assert_eq!(round_magnitude_to_pow10(250, 0.0, 2), Some(200));
+        assert_eq!(round_magnitude_to_pow10(350, 0.0, 2), Some(400));
+        // A fraction past an integer tie rounds up.
+        assert_eq!(round_magnitude_to_pow10(250, 0.5, 2), Some(300));
+        assert_eq!(round_magnitude_to_pow10(249, 0.75, 2), Some(200));
+        assert_eq!(round_magnitude_to_pow10(u128::MAX, 0.0, 39), Some(0));
+        assert_eq!(round_magnitude_to_pow10(u128::MAX, 0.75, 0), None);
+        assert_eq!(round_magnitude_to_pow10(u128::MAX, 0.0, 1), None);
+    }
+
+    #[test]
+    fn signed_i64_range() {
+        assert_eq!(signed_i64(false, i64::MAX as u128).ok(), Some(i64::MAX));
+        assert!(signed_i64(false, 1 << 63).is_err());
+        assert_eq!(signed_i64(true, 1 << 63).ok(), Some(i64::MIN));
+        assert!(signed_i64(true, (1 << 63) + 1).is_err());
+        assert!(signed_i64(true, u128::MAX).is_err());
+        assert_eq!(signed_i64(true, 0).ok(), Some(0));
     }
 }

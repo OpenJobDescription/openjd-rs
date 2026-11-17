@@ -5,7 +5,7 @@
 //! Tests ported from Python test_arithmetic.py
 
 use openjd_expr::value::Float64;
-use openjd_expr::{ExprValue, ExpressionError, ParsedExpression, SymbolTable};
+use openjd_expr::{ExprValue, ExpressionError, ExpressionErrorKind, ParsedExpression, SymbolTable};
 
 fn eval(expr: &str) -> ExprValue {
     ParsedExpression::new(expr)
@@ -503,8 +503,7 @@ fn round_ndigits_negative_out_of_range_overflows() {
             "  ^~~~~~~~~~~~~~~~",
         ],
     );
-    // Near the top of the f64 range the scaled-back product is infinite,
-    // which is also outside the range.
+    // Near the top of the f64 range the result is far outside the range.
     assert_err(
         "round(1.7e308, -308)",
         &[
@@ -529,6 +528,221 @@ fn round_ndigits_positive_still_float() {
     assert!(matches!(eval("round(2.5, 1)"), ExprValue::Float(_)));
     assert_eq!(eval("round(3.5, 2)").to_display_string(), "3.50");
     assert_eq!(eval("round(0.125, 2)").to_display_string(), "0.12");
+}
+
+fn assert_overflow(expr: &str) {
+    let e = eval_err(expr);
+    assert!(
+        matches!(e.kind(), ExpressionErrorKind::IntegerOverflow),
+        "{expr}: {e}"
+    );
+}
+
+// Exact rounding (§2.2.2): half-to-even on the exact value of the input, as
+// CPython does, with no intermediate f64 scaling. Expected values are
+// CPython's, from `round(x, n)` for ints and `round(Fraction(x), n)` for
+// floats; test_round_cpython.rs checks a larger generated sample.
+
+#[test]
+fn round_int_negative_ndigits_is_exact() {
+    // Scaling through f64 gave 3550693609030000128.
+    assert!(matches!(
+        eval("round(3550693609029500000, -6)"),
+        ExprValue::Int(3_550_693_609_030_000_000)
+    ));
+    assert!(matches!(
+        eval("round(3550693609028500000, -6)"),
+        ExprValue::Int(3_550_693_609_028_000_000)
+    ));
+    assert!(matches!(eval("round(-155, -1)"), ExprValue::Int(-160)));
+    assert!(matches!(eval("round(-250, -2)"), ExprValue::Int(-200)));
+}
+
+#[test]
+fn round_int_negative_ndigits_i64_bounds() {
+    // i64::MAX ends in 7, so rounding to tens goes up and out of range;
+    // ...804 rounds down and stays in range.
+    assert_overflow("round(9223372036854775807, -1)");
+    assert!(matches!(
+        eval("round(9223372036854775804, -1)"),
+        ExprValue::Int(9_223_372_036_854_775_800)
+    ));
+    assert!(matches!(
+        eval("round(9223372036854775807, -2)"),
+        ExprValue::Int(9_223_372_036_854_775_800)
+    ));
+    assert_overflow("round(-9223372036854775808, -1)");
+    assert!(matches!(
+        eval("round(-9223372036854775808, -2)"),
+        ExprValue::Int(-9_223_372_036_854_775_800)
+    ));
+    // k = 18, 19 and 20.
+    assert!(matches!(
+        eval("round(9223372036854775807, -18)"),
+        ExprValue::Int(9_000_000_000_000_000_000)
+    ));
+    assert!(matches!(
+        eval("round(-9223372036854775808, -18)"),
+        ExprValue::Int(-9_000_000_000_000_000_000)
+    ));
+    assert_overflow("round(9223372036854775807, -19)");
+    assert_overflow("round(-9223372036854775808, -19)");
+    assert!(matches!(
+        eval("round(4999999999999999999, -19)"),
+        ExprValue::Int(0)
+    ));
+    // A tie at 10^19 / 2 goes to the even 0; one more goes to 10^19.
+    assert!(matches!(
+        eval("round(5000000000000000000, -19)"),
+        ExprValue::Int(0)
+    ));
+    assert!(matches!(
+        eval("round(-5000000000000000000, -19)"),
+        ExprValue::Int(0)
+    ));
+    assert_overflow("round(5000000000000000001, -19)");
+    assert_overflow("round(-5000000000000000001, -19)");
+    assert!(matches!(
+        eval("round(9223372036854775807, -20)"),
+        ExprValue::Int(0)
+    ));
+    assert!(matches!(
+        eval("round(-9223372036854775808, -20)"),
+        ExprValue::Int(0)
+    ));
+}
+
+#[test]
+fn round_float_negative_ndigits_is_exact() {
+    // 3.5506936090295e18 is stored as 3550693609029499904, below the tie.
+    assert!(matches!(
+        eval("round(3.5506936090295e18, -6)"),
+        ExprValue::Int(3_550_693_609_029_000_000)
+    ));
+    // The f64 can be above 2^63 while the result is in range.
+    assert!(matches!(
+        eval("round(9.3e18, -18)"),
+        ExprValue::Int(9_000_000_000_000_000_000)
+    ));
+    assert!(matches!(
+        eval("round(-9.3e18, -18)"),
+        ExprValue::Int(-9_000_000_000_000_000_000)
+    ));
+    assert!(matches!(
+        eval("round(9.2e18, -17)"),
+        ExprValue::Int(9_200_000_000_000_000_000)
+    ));
+    // 9.5e18 is exact, and the tie goes to the even 10·10^18.
+    assert_overflow("round(9.5e18, -18)");
+    assert_overflow("round(-9.5e18, -18)");
+}
+
+#[test]
+fn round_float_non_positive_ndigits_i64_bounds() {
+    // The largest f64 below 2^63 is 9223372036854774784.
+    assert!(matches!(
+        eval("round(9223372036854774784.0, -3)"),
+        ExprValue::Int(9_223_372_036_854_775_000)
+    ));
+    assert!(matches!(
+        eval("round(9223372036854774784.0, -15)"),
+        ExprValue::Int(9_223_000_000_000_000_000)
+    ));
+    // Rounding up crosses 2^63.
+    assert_overflow("round(9223372036854774784.0, -10)");
+    assert_overflow("round(9.2e18, -19)");
+    // 2^63 itself is out of range at any k that leaves it nonzero; -2^63
+    // is in range at k = 0, but -2^63 rounded to tens is
+    // -9223372036854775810, which is not. (CPython returns the float
+    // -2.0**63 here, the nearest double to that value.)
+    assert_overflow("round(9223372036854775808.0)");
+    assert_overflow("round(9223372036854775808.0, -1)");
+    assert!(matches!(
+        eval("round(-9223372036854775808.0)"),
+        ExprValue::Int(i64::MIN)
+    ));
+    assert_overflow("round(-9223372036854775808.0, -1)");
+    assert!(matches!(
+        eval("round(-9223372036854775808.0, -18)"),
+        ExprValue::Int(-9_000_000_000_000_000_000)
+    ));
+    // k = 19 and 20.
+    assert!(matches!(eval("round(4.9e18, -19)"), ExprValue::Int(0)));
+    assert_overflow("round(5.000000000000001e18, -19)");
+    assert!(matches!(eval("round(4e19, -20)"), ExprValue::Int(0)));
+    assert!(matches!(eval("round(5e19, -20)"), ExprValue::Int(0)));
+    assert_overflow("round(6e19, -20)");
+}
+
+#[test]
+fn round_float_beyond_2_pow_127() {
+    // Above 2^127 the result is 0 or out of range, decided exactly:
+    // 5e300 is stored above 5·10^300, so it rounds to 10^301.
+    assert_overflow("round(5e300, -301)");
+    assert_overflow("round(-5e300, -301)");
+    assert!(matches!(eval("round(4e300, -301)"), ExprValue::Int(0)));
+    assert!(matches!(eval("round(1e300, -301)"), ExprValue::Int(0)));
+    // 2^127 = 1.7e38 rounds to 2·10^38 at k = 38 and to 0 at k = 39.
+    assert_overflow("round(170141183460469231731687303715884105728.0, -38)");
+    assert!(matches!(
+        eval("round(170141183460469231731687303715884105728.0, -39)"),
+        ExprValue::Int(0)
+    ));
+    // The largest f64 below 2^127.
+    assert_overflow("round(170141183460469212842221372237303250944.0, -38)");
+    assert!(matches!(
+        eval("round(170141183460469212842221372237303250944.0, -39)"),
+        ExprValue::Int(0)
+    ));
+    assert!(matches!(eval("round(4.9e307, -308)"), ExprValue::Int(0)));
+    assert_overflow("round(1.7976931348623157e308, -308)");
+}
+
+#[test]
+fn round_float_positive_ndigits_rounds_once() {
+    // 2.675 is stored as 2.67499999999999982236431605997495353221893310546875.
+    assert_eq!(eval("round(2.675, 2)").to_display_string(), "2.67");
+    assert_eq!(eval("round(-2.675, 2)").to_display_string(), "-2.67");
+    // 1.05 is stored just above 1.05.
+    assert_eq!(eval("round(1.05, 1)").to_display_string(), "1.1");
+    assert_eq!(eval("round(0.685, 2)").to_display_string(), "0.69");
+    assert_eq!(
+        eval("round(123456.785, 2)").to_display_string(),
+        "123456.79"
+    );
+    // Exact binary ties still go to even.
+    assert_eq!(eval("round(0.125, 2)").to_display_string(), "0.12");
+    assert_eq!(eval("round(0.375, 2)").to_display_string(), "0.38");
+    // The result is the nearest f64 to the rounded decimal.
+    let ExprValue::Float(v) = eval("round(2.675, 2)") else {
+        panic!("round(2.675, 2) is a float");
+    };
+    assert_eq!(v.value(), 2.67);
+}
+
+#[test]
+fn round_float_positive_ndigits_extremes_stay_finite() {
+    let ExprValue::Float(v) = eval("round(1e308, 2)") else {
+        panic!("round(1e308, 2) is a float");
+    };
+    assert_eq!(v.value(), 1e308);
+    assert!(eval("round(1e308, 2)").to_display_string().ends_with(".00"));
+    let ExprValue::Float(v) = eval("round(1.7976931348623157e308, 1)") else {
+        panic!("round(f64::MAX, 1) is a float");
+    };
+    assert_eq!(v.value(), f64::MAX);
+    // The smallest subnormal rounds to 0 at 323 places and keeps its value
+    // at 324 and at 1074, where its expansion ends.
+    let ExprValue::Float(v) = eval("round(5e-324, 323)") else {
+        panic!("a float");
+    };
+    assert_eq!(v.value(), 0.0);
+    for n in [324, 1074, 1100] {
+        let ExprValue::Float(v) = eval(&format!("round(5e-324, {n})")) else {
+            panic!("a float");
+        };
+        assert_eq!(v.value(), 5e-324, "n = {n}");
+    }
 }
 
 #[test]
