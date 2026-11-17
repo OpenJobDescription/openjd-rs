@@ -1596,3 +1596,37 @@ fn step_let_scopes_and_error_order_across_steps() {
         .join("\n")
     );
 }
+
+/// After a binding fails, the step body still sees every binding: those
+/// that evaluated with their values, the failed one as unresolved.
+#[test]
+fn step_let_failure_body_sees_evaluated_bindings() {
+    let s = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR"],
+        "steps": [{
+            "name": "S",
+            "let": ["b = 1", "t = str(b)"],
+            "parameterSpace": {
+                "taskParameterDefinitions": [{"name": "F", "type": "INT", "range": "1-{{ b }}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "echo", "args": ["{{ b }}", "{{ t }}"]}}}
+        }]
+    }"#;
+    assert_eq!(
+        full_err(s),
+        [
+            "Model validation error: 2 validation errors for JobTemplate",
+            "steps[0]:",
+            "\tlet binding 't': Unknown function: 'str'",
+            "  str(b)",
+            "  ^~~~~~",
+            "steps[0] -> let[1]:",
+            "\tInvalid expression in let binding 't': Unknown function: 'str'",
+            "  t = str(b)",
+            "      ^~~~~~",
+        ]
+        .join("\n")
+    );
+}

@@ -1868,7 +1868,7 @@ pub fn validate_format_strings(
     let mut step_errors = ValidationErrors::default();
     for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
-        let scope = step_let_scope(
+        let mut scope = step_let_scope(
             step,
             &step_path,
             &step_base_symtab,
@@ -2020,6 +2020,10 @@ pub fn validate_format_strings(
             let failed_range_symtab;
             let range_symtab = match &step.let_bindings {
                 Some(bindings) if !scope.all_evaluated => {
+                    // Free the shared scope's values while the range pass
+                    // builds its own; they are rebuilt below, so this path
+                    // holds one copy of the step's bindings at a time.
+                    scope.symtab = SymbolTable::new();
                     failed_range_symtab = range_symtab_after_let_failure(
                         bindings,
                         &step_path,
@@ -2168,6 +2172,19 @@ pub fn validate_format_strings(
                     }
                 }
             }
+        }
+
+        if step.parameter_space.is_some() && !scope.all_evaluated {
+            // Rebuild the symtab the range fallback freed above.
+            scope.symtab = step_let_scope(
+                step,
+                &step_path,
+                &step_base_symtab,
+                expr_active,
+                &template_ev,
+                &template_profile,
+            )
+            .symtab;
         }
 
         let mut task_symtab = build_task_scope_symtab(jt, step, expr_active);
