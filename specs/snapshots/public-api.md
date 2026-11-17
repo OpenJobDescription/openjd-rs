@@ -319,8 +319,8 @@ returned manifest. `decode_v2023_as_diff` is a convenience for callers that
 want to feed a v2023-formatted manifest into a diff-consuming pipeline like
 [`compose_snapshot_with_diffs`] without reconstructing the manifest.
 
-`decode_manifest` picks v2023 when the document has a `manifestVersion` key
-and v2025 when it has a `specificationVersion` key, and otherwise fails.
+`decode_manifest` picks v2023 when the document has a `manifestVersion` key,
+otherwise v2025 when it has a `specificationVersion` key, and otherwise fails.
 
 The decoders fail with `SnapshotError::Validation`. Text that is not valid
 JSON anywhere in the document is rejected. A member of the wrong JSON type
@@ -557,7 +557,8 @@ impl HashCache {
 `HashCache::new` and `S3CheckCache::new` create `cache_dir` if needed and
 open the database. They fail with `SnapshotError::Io` if `cache_dir` cannot
 be created, and with `SnapshotError::Cache` on SQLite errors; a `Cache` error
-names the database file. See
+names the database file. If SQLite cannot use WAL journaling they still
+succeed and log a warning. See
 [snapshot_hash_cache.md § Journal Mode](snapshot_hash_cache.md#journal-mode).
 
 ## S3 Check Cache
@@ -573,8 +574,7 @@ impl S3CheckCache {
 }
 ```
 
-`S3CheckCache::new` has the same journal-mode and error behavior as
-`HashCache::new` (see above).
+See [Hash Cache](#hash-cache) for `S3CheckCache::new`'s error behavior.
 
 ## Operations
 
