@@ -290,8 +290,10 @@ pub fn encode_snapshot_diff_v2025(m: &SnapshotDiff) -> Result<String>;
 ```
 
 The v2023 encoders write `totalSize` as the sum of the entries' sizes and
-return `SnapshotError::Validation` if that sum exceeds `u64::MAX`. The v2025
-encoders write the manifest's `total_size` field as is. See
+return `SnapshotError::Validation` if that sum exceeds `u64::MAX`. Python's
+encoder instead writes the exact sum, and `decode_v2023` rejects such a
+`totalSize`. The v2025 encoders write the manifest's `total_size` field as is.
+See
 [snapshot_codec.md § Encoding](snapshot_codec.md#encoding).
 
 The generic `encode_v2025` is also public via the `codec` module path:
