@@ -620,7 +620,13 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   quotient, which would lose precision for large quotients.
 - **Float floor division** derives its quotient from that remainder before rounding
   toward negative infinity. This avoids flooring an already-rounded direct quotient.
-- **`round()`** uses banker's rounding / round-half-even (§2.2.2)
+- **`round()`** uses banker's rounding / round-half-even (§2.2.2). `round(x: float)`
+  and `round(x: float, ndigits)` with `ndigits` ≤ 0 return `int`, and a result outside
+  the 64-bit signed range is an integer overflow error. With `ndigits` > 0 the result
+  is a `float` whose display keeps `ndigits` decimal places (`round(3.5, 2)` is
+  `3.50`). The registered signature is `(float, int) -> float | int`: static typing
+  uses signatures only, so a literal `ndigits` does not narrow the type, and a
+  caller that needs an `int` or a `float` gets the value checked when it evaluates.
 - **String classification** (`isdigit`, `isalpha`, `isalnum`, `isspace`,
   `isupper`, `islower`, §2.2.4) matches Python's `str` methods of the same
   name exactly, not Rust's `char` predicates, which use different Unicode

@@ -179,13 +179,14 @@ pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                     _ => None,
                 })
                 .unwrap_or(0);
-            if !has_ndigits {
+            if !has_ndigits || ndigits == 0 {
+                // round(x) and round(x, 0) both return int (§2.2.2).
                 let v = round_half_even(f.value());
                 if !float_fits_i64(v) {
                     return Err(ExpressionError::integer_overflow());
                 }
                 Ok(ExprValue::Int(v as i64))
-            } else if ndigits >= 0 {
+            } else if ndigits > 0 {
                 // The formatted output grows with ndigits; charge the
                 // budget before computing so a huge precision (e.g.
                 // round(1.5, 10**18)) trips the operation limit instead
@@ -200,47 +201,44 @@ pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                 } else {
                     round_half_even(f.value() * factor) / factor
                 };
-                if ndigits == 0 {
-                    // `rounded` is integral, so the default display
-                    // (`format_float`) already renders it canonically:
-                    // trailing `.0` in range, scientific notation outside.
-                    Ok(ExprValue::Float(Float64::new(rounded)?))
-                } else {
-                    // Rust's formatting machinery panics ("Formatting
-                    // argument out of range") for precision above
-                    // u16::MAX, and operation budgeting alone admits
-                    // precisions like 100,000. An f64's exact decimal
-                    // expansion has at most 1074 fractional digits, so
-                    // format at most that many and zero-fill the rest —
-                    // the digits past that point are always zero, so the
-                    // output is unchanged — with the full length checked
-                    // against the memory budget before allocation.
-                    const MAX_F64_FRACTION_DIGITS: usize = 1074;
-                    let prec = requested.min(MAX_F64_FRACTION_DIGITS);
-                    let mut text = format!("{:.prec$}", rounded, prec = prec);
-                    let pad = requested - prec;
-                    if pad > 0 {
-                        ctx.check_memory(text.len() + pad)?;
-                        text.reserve_exact(pad);
-                        for _ in 0..pad {
-                            text.push('0');
-                        }
+                // Rust's formatting machinery panics ("Formatting
+                // argument out of range") for precision above
+                // u16::MAX, and operation budgeting alone admits
+                // precisions like 100,000. An f64's exact decimal
+                // expansion has at most 1074 fractional digits, so
+                // format at most that many and zero-fill the rest —
+                // the digits past that point are always zero, so the
+                // output is unchanged — with the full length checked
+                // against the memory budget before allocation.
+                const MAX_F64_FRACTION_DIGITS: usize = 1074;
+                let prec = requested.min(MAX_F64_FRACTION_DIGITS);
+                let mut text = format!("{:.prec$}", rounded, prec = prec);
+                let pad = requested - prec;
+                if pad > 0 {
+                    ctx.check_memory(text.len() + pad)?;
+                    text.reserve_exact(pad);
+                    for _ in 0..pad {
+                        text.push('0');
                     }
-                    Ok(ExprValue::Float(Float64::with_str(rounded, text)?))
                 }
+                Ok(ExprValue::Float(Float64::with_str(rounded, text)?))
             } else {
-                // ndigits < 0. round(v, n) is 0 whenever 10^|n| exceeds
-                // 2·|v|, and every finite f64 is below 10^309 / 2, so
-                // short-circuit — this also keeps the negation and powi
-                // below in range (ndigits can be i64::MIN, whose direct
-                // negation overflows).
+                // ndigits < 0 returns int (§2.2.2). round(v, n) is 0
+                // whenever 10^|n| exceeds 2·|v|, and every finite f64 is
+                // below 10^309 / 2, so short-circuit — this also keeps the
+                // negation and powi below in range (ndigits can be
+                // i64::MIN, whose direct negation overflows).
                 if ndigits <= -309 {
-                    return Ok(ExprValue::Float(Float64::new(0.0)?));
+                    return Ok(ExprValue::Int(0));
                 }
                 let factor = 10f64.powi((-ndigits) as i32);
-                Ok(ExprValue::Float(Float64::new(
-                    round_half_even(f.value() / factor) * factor,
-                )?))
+                // A result outside the i64 range, including an infinite
+                // product near the top of the f64 range, is an overflow.
+                let v = round_half_even(f.value() / factor) * factor;
+                if !float_fits_i64(v) {
+                    return Err(ExpressionError::integer_overflow());
+                }
+                Ok(ExprValue::Int(v as i64))
             }
         }
         ExprValue::Int(i) => {

@@ -383,35 +383,136 @@ fn round_ndigits_0_25() {
 fn round_ndigits_0_75() {
     assert_eq!(eval("round(0.75, 1)").to_display_string(), "0.8");
 }
+// round(float, ndigits) returns int when ndigits <= 0 (spec §2.2.2,
+// "returns `int` when `ndigits` ≤ 0, `float` when `ndigits` > 0").
 #[test]
 fn round_ndigits_2_5_0() {
-    assert_eq!(eval("round(2.5, 0)").to_display_string(), "2.0");
+    assert!(matches!(eval("round(2.5, 0)"), ExprValue::Int(2)));
 }
 #[test]
 fn round_ndigits_3_5_0() {
-    assert_eq!(eval("round(3.5, 0)").to_display_string(), "4.0");
+    assert!(matches!(eval("round(3.5, 0)"), ExprValue::Int(4)));
+}
+#[test]
+fn round_ndigits_zero_3_7() {
+    assert!(matches!(eval("round(3.7, 0)"), ExprValue::Int(4)));
+    assert_eq!(eval("round(3.7, 0)").to_display_string(), "4");
 }
 
 #[test]
-fn round_ndigits_zero_large_float_preserves_display() {
-    assert_eq!(
-        eval("string(round(1e300, 0))").to_display_string(),
-        "1e+300"
+fn round_ndigits_negative_returns_int() {
+    // The spec's worked example: round(1234.5, -1) returns 1230.
+    assert!(matches!(eval("round(1234.5, -1)"), ExprValue::Int(1230)));
+    assert_eq!(eval("round(1234.5, -1)").to_display_string(), "1230");
+    assert!(matches!(eval("round(-1234.5, -1)"), ExprValue::Int(-1230)));
+    assert!(matches!(eval("round(1234.5, -3)"), ExprValue::Int(1000)));
+    assert!(matches!(eval("round(0.4, -1)"), ExprValue::Int(0)));
+}
+
+#[test]
+fn round_ndigits_negative_half_even() {
+    // 1250 / 100 = 12.5 exactly, which rounds to the even 12.
+    assert!(matches!(eval("round(1250.0, -2)"), ExprValue::Int(1200)));
+    assert!(matches!(eval("round(1350.0, -2)"), ExprValue::Int(1400)));
+    assert!(matches!(eval("round(-1250.0, -2)"), ExprValue::Int(-1200)));
+}
+
+#[test]
+fn round_ndigits_non_positive_negative_zero_is_zero() {
+    // -0.4 rounds to -0.0; the int result has no sign.
+    assert!(matches!(eval("round(-0.4, 0)"), ExprValue::Int(0)));
+    assert_eq!(eval("round(-0.4, 0)").to_display_string(), "0");
+    assert!(matches!(eval("round(-4.0, -1)"), ExprValue::Int(0)));
+}
+
+#[test]
+fn round_ndigits_non_positive_large_values_in_range() {
+    // 9e15 is integral and inside the i64 range: it stays exact.
+    assert!(matches!(
+        eval("round(9e15, 0)"),
+        ExprValue::Int(9_000_000_000_000_000)
+    ));
+    assert!(matches!(
+        eval("round(1e17, -1)"),
+        ExprValue::Int(100_000_000_000_000_000)
+    ));
+    // The largest f64 below 2^63 is in range.
+    assert!(matches!(
+        eval("round(9223372036854774784.0, 0)"),
+        ExprValue::Int(9_223_372_036_854_774_784)
+    ));
+    assert!(matches!(
+        eval("round(-9223372036854775808.0, 0)"),
+        ExprValue::Int(i64::MIN)
+    ));
+}
+
+#[test]
+fn round_ndigits_zero_out_of_range_overflows() {
+    assert_err(
+        "round(1e300, 0)",
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  round(1e300, 0)\n",
+            "  ^~~~~~~~~~~~~~~",
+        ],
     );
-    assert_eq!(
-        eval("string(round(-1e300, 0))").to_display_string(),
-        "-1e+300"
+    assert_err(
+        "round(-1e300, 0)",
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  round(-1e300, 0)\n",
+            "  ^~~~~~~~~~~~~~~~",
+        ],
+    );
+    // 2^63 is one past i64::MAX.
+    assert_err(
+        "round(9223372036854775808.0, 0)",
+        &["Integer overflow: result is outside the 64-bit signed range\n"],
     );
 }
 
 #[test]
-fn round_ndigits_zero_matches_display_threshold() {
-    // Float display switches to scientific notation at 1e16.
-    assert_eq!(eval("string(round(1e17, 0))").to_display_string(), "1e+17");
-    assert_eq!(
-        eval("string(round(9e15, 0))").to_display_string(),
-        "9000000000000000.0"
+fn round_ndigits_negative_out_of_range_overflows() {
+    assert_err(
+        "round(1e300, -1)",
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  round(1e300, -1)\n",
+            "  ^~~~~~~~~~~~~~~~",
+        ],
     );
+    assert_err(
+        "round(-1e300, -5)",
+        &["Integer overflow: result is outside the 64-bit signed range\n"],
+    );
+    // Rounding 9e18 up to a multiple of 10^19 leaves the range.
+    assert_err(
+        "round(9e18, -19)",
+        &["Integer overflow: result is outside the 64-bit signed range\n"],
+    );
+    // Near the top of the f64 range the scaled-back product is infinite,
+    // which is also outside the range.
+    assert_err(
+        "round(1.7e308, -308)",
+        &["Integer overflow: result is outside the 64-bit signed range\n"],
+    );
+}
+
+#[test]
+fn round_ndigits_negative_beyond_magnitude_is_zero() {
+    // 5e18 / 10^19 = 0.5, which rounds to the even 0.
+    assert!(matches!(eval("round(5e18, -19)"), ExprValue::Int(0)));
+    assert!(matches!(eval("round(1e300, -301)"), ExprValue::Int(0)));
+    assert!(matches!(eval("round(1.7e308, -309)"), ExprValue::Int(0)));
+    assert!(matches!(eval("round(-1.7e308, -400)"), ExprValue::Int(0)));
+}
+
+#[test]
+fn round_ndigits_positive_still_float() {
+    assert!(matches!(eval("round(2.5, 1)"), ExprValue::Float(_)));
+    assert_eq!(eval("round(3.5, 2)").to_display_string(), "3.50");
+    assert_eq!(eval("round(0.125, 2)").to_display_string(), "0.12");
 }
 
 #[test]
@@ -764,11 +865,11 @@ fn round_ndigits_neg_0_75() {
 }
 #[test]
 fn round_ndigits_neg_2_5_0() {
-    assert_eq!(eval("round(-2.5, 0)").to_display_string(), "-2.0");
+    assert!(matches!(eval("round(-2.5, 0)"), ExprValue::Int(-2)));
 }
 #[test]
 fn round_ndigits_neg_3_5_0() {
-    assert_eq!(eval("round(-3.5, 0)").to_display_string(), "-4.0");
+    assert!(matches!(eval("round(-3.5, 0)"), ExprValue::Int(-4)));
 }
 
 // TestFailFunction - missing cases
