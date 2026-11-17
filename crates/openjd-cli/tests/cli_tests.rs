@@ -168,6 +168,36 @@ fn cli_command(args: &[&str]) -> Command {
     cmd
 }
 
+/// Asserts that every timestamped log line in `stdout` (each line holding a
+/// tab) starts with a wall-clock timestamp `YYYY-MM-DDTHH:MM:SS.mmm`, followed
+/// by `Z` when `utc` is true and by nothing when it is false.
+fn assert_wall_clock_timestamps(stdout: &str, utc: bool) {
+    let shape = if utc {
+        "dddd-dd-ddTdd:dd:dd.dddZ"
+    } else {
+        "dddd-dd-ddTdd:dd:dd.ddd"
+    };
+    let prefixes: Vec<&str> = stdout
+        .lines()
+        .filter_map(|line| line.split_once('\t').map(|(ts, _)| ts))
+        .collect();
+    assert!(
+        !prefixes.is_empty(),
+        "no timestamped lines, stdout: {stdout}"
+    );
+    for ts in prefixes {
+        let matches = ts.len() == shape.len()
+            && ts.chars().zip(shape.chars()).all(|(c, want)| match want {
+                'd' => c.is_ascii_digit(),
+                _ => c == want,
+            });
+        assert!(
+            matches,
+            "timestamp {ts:?} does not match {shape}, stdout: {stdout}"
+        );
+    }
+}
+
 fn run_cli(args: &[&str]) -> (i32, String, String) {
     let output = cli_command(args)
         .output()
@@ -2973,11 +3003,7 @@ mod new_cli_options {
             "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        // UTC timestamps contain 'T' and 'Z'
-        assert!(
-            stdout.contains('T') && stdout.contains('Z'),
-            "Expected UTC timestamps, stdout: {stdout}"
-        );
+        assert_wall_clock_timestamps(&stdout, true);
     }
 
     #[test]
@@ -2994,11 +3020,7 @@ mod new_cli_options {
             "",
         ]);
         assert_eq!(code, 0, "stderr: {stderr}");
-        // Local timestamps contain 'T' but not 'Z'
-        assert!(
-            stdout.contains('T'),
-            "Expected local timestamps, stdout: {stdout}"
-        );
+        assert_wall_clock_timestamps(&stdout, false);
     }
 
     #[test]

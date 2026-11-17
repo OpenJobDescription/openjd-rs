@@ -91,7 +91,7 @@ Local timezone timestamp in ISO 8601 format:
 2024-03-15T14:30:46.357    Hello from task
 ```
 
-Uses `chrono::Local::now()`.
+Uses `jiff::Zoned::now()`, which reads the system time zone.
 
 ### UTC
 
@@ -102,7 +102,7 @@ UTC timestamp in ISO 8601 format with Z suffix:
 2024-03-15T21:30:46.357Z    Hello from task
 ```
 
-Uses `chrono::Utc::now()`.
+Uses `jiff::Timestamp::now()`, which `strftime` formats in UTC.
 
 ## Global State
 
