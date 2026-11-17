@@ -799,6 +799,60 @@ fn syntax_error_message(
     error.to_string()
 }
 
+/// Reject a `\u` or `\U` escape whose value is a surrogate code point
+/// (U+D800 to U+DFFF) in a non-raw string literal (Expression Language
+/// §1.1.5). A string can't hold a surrogate, and ruff's lexer replaces one
+/// with U+FFFD without saying so, where CPython keeps it. The parser has
+/// already checked every escape's syntax, so this pass only finds where each
+/// escape starts and reads the hex digits after `\u` and `\U`.
+fn reject_surrogate_escapes(
+    part: &ast::StringLiteral,
+    source: &str,
+) -> Result<(), ExpressionError> {
+    if part.flags.prefix().is_raw() {
+        return Ok(());
+    }
+    let start = part.content_range().start().to_usize();
+    let end = part.content_range().end().to_usize();
+    let Some(content) = source.get(start..end) else {
+        return Ok(());
+    };
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'\\' {
+            i += 1;
+            continue;
+        }
+        let digits = match bytes.get(i + 1) {
+            Some(b'u') => 4,
+            Some(b'U') => 8,
+            // Any other escape, including `\\`, is two bytes long as far as
+            // finding the next escape goes: what follows its second byte
+            // (octal or hex digits, `{name}`) never holds a backslash.
+            _ => {
+                i += 2;
+                continue;
+            }
+        };
+        let escape_end = i + 2 + digits;
+        if let Some(value) = content
+            .get(i + 2..escape_end)
+            .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+        {
+            if (0xD800..=0xDFFF).contains(&value) {
+                let escape = &content[i..escape_end];
+                return Err(ExpressionError::new(format!(
+                    "Syntax error: {escape} is a surrogate code point, which a string can't hold"
+                ))
+                .with_span(source, start + i, start + escape_end));
+            }
+        }
+        i = escape_end;
+    }
+    Ok(())
+}
+
 /// Validate structural constraints on the AST that can't be caught by the parser.
 fn validate_structure(
     node: &ast::Expr,
@@ -944,6 +998,7 @@ fn validate_structure_inner(
         }
         ast::Expr::StringLiteral(s) => {
             for part in &s.value {
+                reject_surrogate_escapes(part, source)?;
                 if matches!(
                     part.flags.prefix(),
                     ruff_python_ast::str_prefix::StringLiteralPrefix::Unicode

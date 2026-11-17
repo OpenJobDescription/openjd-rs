@@ -724,6 +724,16 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   a trailing newline in Python but is end-of-haystack only in Rust
   (Python's `$` ≈ Rust's `(?:\n?\z)`); the intersection dialect allows `$`,
   so results differ on newline-terminated input.
+- **`re_sub` replacements** are literal text (§2.2.5). `validate_regex_replacement`
+  rejects a group reference (`\1`-`\9`, `\g<...>`, `$` followed by a digit or `{`)
+  with "Group references in replacement strings are not supported", and then a
+  control character with "Control characters in replacement strings are not
+  supported (U+0001)", naming the first one. A control character is one in Unicode
+  general category `Cc` (`char::is_control`: U+0000 to U+001F and U+007F to U+009F)
+  other than tab, newline and carriage return, which replacements commonly need. The
+  control-character rule catches a group reference written in a non-raw string:
+  `'\1'` reaches `re_sub` already decoded to U+0001 (openjd-rs#311). The pattern and
+  the input string are not checked.
 - **`repr_sh/cmd/pwsh`** produce shell-safe quoting per platform conventions (§2.2.6).
   `repr_pwsh` renders nested lists as nested array literals, using the unary
   comma for a one-element outer list (`@(,@(1, 2))`) since `@(@(1, 2))`
