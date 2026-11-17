@@ -1710,12 +1710,13 @@ struct StepLetScope {
     symtab: SymbolTable,
     names: HashSet<String>,
     errors: Vec<ValidationError>,
-    /// No binding failed to parse or evaluate.
+    /// No binding failed to parse or evaluate. Also `true` when nothing was
+    /// evaluated (no EXPR, or no bindings).
     all_evaluated: bool,
 }
 
 /// Evaluate `step`'s `let` bindings (EXPR only) into a copy of `base`, the
-/// template-scope symtab with `Job.Name` and `Step.Name`.
+/// template-scope symtab (with `Job.Name` and `Step.Name` under EXPR).
 fn step_let_scope(
     step: &StepTemplate,
     step_path: &[PathElement],
@@ -1846,10 +1847,11 @@ pub fn validate_format_strings(
     );
 
     // ── Host requirements: template scope + step let bindings ──
-    // Every step's `let` bindings are evaluated once, here, into the
-    // template-scope symtab (Param.* non-PATH, RawParam.*, and with EXPR
-    // Job.Name and Step.Name). The host requirements, parameterSpace ranges,
-    // and step body below all read the result.
+    // Every step's `let` bindings are evaluated here into the template-scope
+    // symtab (Param.* non-PATH, RawParam.*, and with EXPR Job.Name and
+    // Step.Name). The host requirements, parameterSpace ranges, and step body
+    // below read the result; ranges evaluate them again only when one fails
+    // (`range_symtab_after_let_failure`).
     let mut step_base_symtab = template_symtab.clone();
     if expr_active {
         step_base_symtab
