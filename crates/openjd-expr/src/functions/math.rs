@@ -171,7 +171,7 @@ pub fn ceil_int(_: Ctx, a: &[ExprValue]) -> R {
 pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     match &a[0] {
         ExprValue::Float(f) => {
-            let has_ndigits = a.len() > 1;
+            // round(x) rounds as round(x, 0) does.
             let ndigits = a
                 .get(1)
                 .and_then(|v| match v {
@@ -179,14 +179,7 @@ pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                     _ => None,
                 })
                 .unwrap_or(0);
-            if !has_ndigits || ndigits == 0 {
-                // round(x) and round(x, 0) both return int (§2.2.2).
-                let v = round_half_even(f.value());
-                if !float_fits_i64(v) {
-                    return Err(ExpressionError::integer_overflow());
-                }
-                Ok(ExprValue::Int(v as i64))
-            } else if ndigits > 0 {
+            if ndigits > 0 {
                 // The formatted output grows with ndigits; charge the
                 // budget before computing so a huge precision (e.g.
                 // round(1.5, 10**18)) trips the operation limit instead
@@ -223,11 +216,11 @@ pub fn round_fn(ctx: Ctx, a: &[ExprValue]) -> R {
                 }
                 Ok(ExprValue::Float(Float64::with_str(rounded, text)?))
             } else {
-                // ndigits < 0 returns int (§2.2.2). round(v, n) is 0
-                // whenever 10^|n| exceeds 2·|v|, and every finite f64 is
-                // below 10^309 / 2, so short-circuit — this also keeps the
-                // negation and powi below in range (ndigits can be
-                // i64::MIN, whose direct negation overflows).
+                // round(x) and round(x, ndigits <= 0) return int (§2.2.2).
+                // round(v, n) is 0 whenever 10^|n| exceeds 2·|v|, and every
+                // finite f64 is below 10^309 / 2, so short-circuit — this
+                // also keeps the negation and powi below in range (ndigits
+                // can be i64::MIN, whose direct negation overflows).
                 if ndigits <= -309 {
                     return Ok(ExprValue::Int(0));
                 }

@@ -468,7 +468,11 @@ fn round_ndigits_zero_out_of_range_overflows() {
     // 2^63 is one past i64::MAX.
     assert_err(
         "round(9223372036854775808.0, 0)",
-        &["Integer overflow: result is outside the 64-bit signed range\n"],
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  round(9223372036854775808.0, 0)\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
     );
 }
 
@@ -484,18 +488,30 @@ fn round_ndigits_negative_out_of_range_overflows() {
     );
     assert_err(
         "round(-1e300, -5)",
-        &["Integer overflow: result is outside the 64-bit signed range\n"],
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  round(-1e300, -5)\n",
+            "  ^~~~~~~~~~~~~~~~~",
+        ],
     );
     // Rounding 9e18 up to a multiple of 10^19 leaves the range.
     assert_err(
         "round(9e18, -19)",
-        &["Integer overflow: result is outside the 64-bit signed range\n"],
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  round(9e18, -19)\n",
+            "  ^~~~~~~~~~~~~~~~",
+        ],
     );
     // Near the top of the f64 range the scaled-back product is infinite,
     // which is also outside the range.
     assert_err(
         "round(1.7e308, -308)",
-        &["Integer overflow: result is outside the 64-bit signed range\n"],
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  round(1.7e308, -308)\n",
+            "  ^~~~~~~~~~~~~~~~~~~~",
+        ],
     );
 }
 
