@@ -168,15 +168,43 @@ fn cli_command(args: &[&str]) -> Command {
     cmd
 }
 
-/// Asserts that every timestamped log line in `stdout` (each line holding a
-/// tab) starts with a wall-clock timestamp `YYYY-MM-DDTHH:MM:SS.mmm`, followed
-/// by `Z` when `utc` is true and by nothing when it is false.
-fn assert_wall_clock_timestamps(stdout: &str, utc: bool) {
+/// Runs `openjd run` on the `BareStep` step of `job_with_test_steps.yaml`
+/// with `--timestamp-format <format>` and `TZ` set to `tz`, then asserts that
+/// every timestamped log line (each line holding a tab) starts with a
+/// wall-clock timestamp in the zone `offset_seconds` east of UTC, falling
+/// within the run. The prefix must be `YYYY-MM-DDTHH:MM:SS.mmm`, followed by
+/// `Z` when `utc` is true and by nothing when it is false.
+fn assert_wall_clock_timestamps(format: &str, tz: &str, offset_seconds: i32, utc: bool) {
+    let tdir = templates_dir();
+    let before = jiff::Timestamp::now();
+    let output = cli_command(&[
+        "run",
+        tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
+        "--step",
+        "BareStep",
+        "--timestamp-format",
+        format,
+        "--extensions",
+        "",
+    ])
+    .env("TZ", tz)
+    .output()
+    .expect("failed to execute openjd");
+    let after = jiff::Timestamp::now();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(0), "stderr: {stderr}");
+
     let shape = if utc {
         "dddd-dd-ddTdd:dd:dd.dddZ"
     } else {
         "dddd-dd-ddTdd:dd:dd.ddd"
     };
+    let zone = jiff::tz::TimeZone::fixed(jiff::tz::Offset::from_seconds(offset_seconds).unwrap());
+    // Timestamps are truncated to milliseconds, so allow one second of slack
+    // on each side of the run.
+    let earliest = before - jiff::SignedDuration::from_secs(1);
+    let latest = after + jiff::SignedDuration::from_secs(1);
     let prefixes: Vec<&str> = stdout
         .lines()
         .filter_map(|line| line.split_once('\t').map(|(ts, _)| ts))
@@ -194,6 +222,13 @@ fn assert_wall_clock_timestamps(stdout: &str, utc: bool) {
         assert!(
             matches,
             "timestamp {ts:?} does not match {shape}, stdout: {stdout}"
+        );
+        let civil: jiff::civil::DateTime = ts.trim_end_matches('Z').parse().unwrap();
+        let instant = civil.to_zoned(zone.clone()).unwrap().timestamp();
+        assert!(
+            earliest <= instant && instant <= latest,
+            "timestamp {ts:?} at UTC offset {offset_seconds}s is {instant}, \
+             outside the run [{before}, {after}], stdout: {stdout}"
         );
     }
 }
@@ -2991,36 +3026,16 @@ mod new_cli_options {
 
     #[test]
     fn test_run_timestamp_format_utc() {
-        let tdir = templates_dir();
-        let (code, stdout, stderr) = run_cli(&[
-            "run",
-            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step",
-            "BareStep",
-            "--timestamp-format",
-            "utc",
-            "--extensions",
-            "",
-        ]);
-        assert_eq!(code, 0, "stderr: {stderr}");
-        assert_wall_clock_timestamps(&stdout, true);
+        // A non-UTC zone, so printing local time instead of UTC would fail.
+        assert_wall_clock_timestamps("utc", "<+0545>-5:45", 0, true);
     }
 
     #[test]
     fn test_run_timestamp_format_local() {
-        let tdir = templates_dir();
-        let (code, stdout, stderr) = run_cli(&[
-            "run",
-            tdir.join("job_with_test_steps.yaml").to_str().unwrap(),
-            "--step",
-            "BareStep",
-            "--timestamp-format",
-            "local",
-            "--extensions",
-            "",
-        ]);
-        assert_eq!(code, 0, "stderr: {stderr}");
-        assert_wall_clock_timestamps(&stdout, false);
+        // POSIX rule for a fixed UTC+05:45 zone, which jiff resolves from
+        // `TZ` on every platform without a time zone database. Printing UTC
+        // instead of local time would fall outside the run.
+        assert_wall_clock_timestamps("local", "<+0545>-5:45", 5 * 3600 + 45 * 60, false);
     }
 
     #[test]
