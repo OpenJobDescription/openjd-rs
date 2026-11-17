@@ -1705,7 +1705,8 @@ fn check_embedded_files_data(
 /// Built once per step by [`step_let_scope`] and shared by the three pass-8
 /// sites that need it (host requirements, parameterSpace ranges, the step
 /// body), so the bindings are evaluated once. `errors` holds what
-/// `validate_let_bindings` reported; each site replays it where it is due.
+/// `validate_let_bindings` reported; the host-requirements and step-body
+/// sites both report it.
 struct StepLetScope {
     symtab: SymbolTable,
     names: HashSet<String>,
@@ -1846,12 +1847,12 @@ pub fn validate_format_strings(
         errors,
     );
 
-    // ── Host requirements: template scope + step let bindings ──
-    // Every step's `let` bindings are evaluated here into the template-scope
+    // ── Steps: host requirements, then the remaining checks ──
+    // Each step's `let` bindings are evaluated once, into the template-scope
     // symtab (Param.* non-PATH, RawParam.*, and with EXPR Job.Name and
-    // Step.Name). The host requirements, parameterSpace ranges, and step body
-    // below read the result; ranges evaluate them again only when one fails
-    // (`range_symtab_after_let_failure`).
+    // Step.Name), and that one scope serves the step's host requirements,
+    // parameterSpace ranges, and body. Ranges evaluate them again only when
+    // one fails (`range_symtab_after_let_failure`).
     let mut step_base_symtab = template_symtab.clone();
     if expr_active {
         step_base_symtab
@@ -1861,24 +1862,20 @@ pub fn validate_format_strings(
             .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
             .expect("symtab");
     }
-    let step_scopes: Vec<StepLetScope> = jt
-        .steps
-        .iter()
-        .enumerate()
-        .map(|(i, step)| {
-            let step_path = [PathElement::Field("steps".into()), PathElement::Index(i)];
-            step_let_scope(
-                step,
-                &step_path,
-                &step_base_symtab,
-                expr_active,
-                &template_ev,
-                &template_profile,
-            )
-        })
-        .collect();
-    for (i, (step, scope)) in jt.steps.iter().zip(&step_scopes).enumerate() {
+    // Host-requirement errors for every step come before the job
+    // environments' errors, and the other step errors after them, so the
+    // latter collect in `step_errors` until the job environments are done.
+    let mut step_errors = ValidationErrors::default();
+    for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
+        let scope = step_let_scope(
+            step,
+            &step_path,
+            &step_base_symtab,
+            expr_active,
+            &template_ev,
+            &template_profile,
+        );
         if let Some(hr) = &step.host_requirements {
             errors.errors.extend(scope.errors.iter().cloned());
             let hr_symtab = &scope.symtab;
@@ -2011,71 +2008,8 @@ pub fn validate_format_strings(
                 );
             }
         }
-    }
 
-    // ── Job environments: session scope (timeouts: template scope) ──
-    if let Some(envs) = &jt.job_environments {
-        let envs_path = path_field(&[], "jobEnvironments");
-        // Job-creation-scope symtab for env `timeout`/`notifyPeriodInSeconds`:
-        // Param.* (non-PATH), RawParam.*, and Job.Name with EXPR. No
-        // Step.Name (job envs are not attached to a step) and no env-script
-        // let bindings (those are evaluated at session time).
-        let mut env_template_symtab =
-            build_template_scope_symtab(jt.parameter_definitions.as_deref());
-        if expr_active {
-            env_template_symtab
-                .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-                .expect("symtab");
-        }
-        for (i, env) in envs.iter().enumerate() {
-            let mut env_symtab = build_session_scope_symtab(
-                jt.parameter_definitions.as_deref(),
-                env,
-                false,
-                expr_active,
-            );
-            // Env script let bindings: validate and evaluate into the symtab
-            // if EXPR, reject if not.
-            if let Some(script) = &env.script {
-                if let Some(bindings) = &script.let_bindings {
-                    let let_path =
-                        path_field(&path_field(&path_index(&envs_path, i), "script"), "let");
-                    if !expr_active {
-                        errors.add(&let_path, "'let' requires the EXPR extension.");
-                    } else {
-                        let mut env_let_names = HashSet::new();
-                        validate_let_bindings(
-                            bindings,
-                            &let_path,
-                            &HashSet::new(),
-                            &mut env_let_names,
-                            &mut env_symtab,
-                            &host_ev,
-                            &host_profile,
-                            errors,
-                        );
-                    }
-                }
-            }
-            validate_env_format_strings(
-                env,
-                &env_symtab,
-                &host_ev,
-                &env_template_symtab,
-                &template_ev,
-                &path_index(&envs_path, i),
-                expr_active,
-                limits.max_env_var_value_len,
-                ctx.caller_limits.max_resolved_arg_len,
-                ctx.caller_limits.max_resolved_data_len,
-                errors,
-            );
-        }
-    }
-
-    // ── Steps ──
-    for (i, (step, scope)) in jt.steps.iter().zip(step_scopes).enumerate() {
-        let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
+        let errors = &mut step_errors;
 
         // Task parameter ranges use TEMPLATE scope (no PATH Param.*)
         if let Some(ps) = &step.parameter_space {
@@ -2404,6 +2338,68 @@ pub fn validate_format_strings(
             }
         }
     }
+
+    // ── Job environments: session scope (timeouts: template scope) ──
+    if let Some(envs) = &jt.job_environments {
+        let envs_path = path_field(&[], "jobEnvironments");
+        // Job-creation-scope symtab for env `timeout`/`notifyPeriodInSeconds`:
+        // Param.* (non-PATH), RawParam.*, and Job.Name with EXPR. No
+        // Step.Name (job envs are not attached to a step) and no env-script
+        // let bindings (those are evaluated at session time).
+        let mut env_template_symtab =
+            build_template_scope_symtab(jt.parameter_definitions.as_deref());
+        if expr_active {
+            env_template_symtab
+                .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
+                .expect("symtab");
+        }
+        for (i, env) in envs.iter().enumerate() {
+            let mut env_symtab = build_session_scope_symtab(
+                jt.parameter_definitions.as_deref(),
+                env,
+                false,
+                expr_active,
+            );
+            // Env script let bindings: validate and evaluate into the symtab
+            // if EXPR, reject if not.
+            if let Some(script) = &env.script {
+                if let Some(bindings) = &script.let_bindings {
+                    let let_path =
+                        path_field(&path_field(&path_index(&envs_path, i), "script"), "let");
+                    if !expr_active {
+                        errors.add(&let_path, "'let' requires the EXPR extension.");
+                    } else {
+                        let mut env_let_names = HashSet::new();
+                        validate_let_bindings(
+                            bindings,
+                            &let_path,
+                            &HashSet::new(),
+                            &mut env_let_names,
+                            &mut env_symtab,
+                            &host_ev,
+                            &host_profile,
+                            errors,
+                        );
+                    }
+                }
+            }
+            validate_env_format_strings(
+                env,
+                &env_symtab,
+                &host_ev,
+                &env_template_symtab,
+                &template_ev,
+                &path_index(&envs_path, i),
+                expr_active,
+                limits.max_env_var_value_len,
+                ctx.caller_limits.max_resolved_arg_len,
+                ctx.caller_limits.max_resolved_data_len,
+                errors,
+            );
+        }
+    }
+
+    errors.errors.extend(step_errors.errors);
 
     // Environment script comprehension validation (EXPR only)
     if expr_active {

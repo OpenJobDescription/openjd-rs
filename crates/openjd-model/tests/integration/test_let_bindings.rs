@@ -1506,3 +1506,93 @@ fn step_let_without_expr_is_not_in_scope() {
         .join("\n")
     );
 }
+
+/// When a binding fails to parse, the range pass reports the parse error at
+/// the step.
+#[test]
+fn step_let_parse_failure_diagnostics() {
+    let msg = full_err(&job_with_let_in_hr_and_range_ext(
+        r#""EXPR", "FEATURE_BUNDLE_1""#,
+        r#""x = (""#,
+        "1",
+        "'a'",
+    ));
+    let let_error = [
+        "steps[0] -> let[0]:",
+        "\tInvalid expression in let binding 'x': Syntax error: unexpected EOF while parsing",
+        "  x = (",
+        "      ^",
+    ];
+    let mut expected = vec!["Model validation error: 3 validation errors for JobTemplate"];
+    expected.extend(let_error);
+    expected.extend([
+        "steps[0]:",
+        "\tlet binding 'x': Syntax error: unexpected EOF while parsing",
+        "  (",
+        "  ^",
+    ]);
+    expected.extend(let_error);
+    assert_eq!(msg, expected.join("\n"));
+}
+
+/// Each step's host requirements see that step's own bindings, and errors
+/// come in this order: every step's host requirements, then the job
+/// environments, then each step's remaining checks.
+#[test]
+fn step_let_scopes_and_error_order_across_steps() {
+    let s = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "jobEnvironments": [{"name": "J", "variables": {"V": "{{ nope_env }}"}}],
+        "steps": [
+            {
+                "name": "A",
+                "let": ["v = 2"],
+                "hostRequirements": {
+                    "amounts": [{"name": "amount.worker.vcpu", "min": "{{ v }}", "max": "{{ nope_a }}"}]
+                },
+                "script": {"actions": {"onRun": {"command": "echo", "args": ["{{ v }}", "{{ nope_a2 }}"]}}}
+            },
+            {
+                "name": "B",
+                "let": ["w = 'x'"],
+                "hostRequirements": {
+                    "amounts": [{"name": "amount.worker.vcpu", "min": "{{ w }}"}]
+                },
+                "script": {"actions": {"onRun": {"command": "echo", "args": ["{{ w }}", "{{ nope_b }}"]}}}
+            },
+            {
+                "name": "C",
+                "script": {"actions": {"onRun": {"command": "echo"}}}
+            }
+        ]
+    }"#;
+    assert_eq!(
+        full_err(s),
+        [
+            "Model validation error: 5 validation errors for JobTemplate",
+            "steps[0] -> hostRequirements -> amounts[0] -> max:",
+            "\tFailed to parse interpolation expression at [0, 12]. Undefined variable: 'nope_a'.",
+            "  nope_a",
+            "  ^~~~~~",
+            "steps[1] -> hostRequirements -> amounts[0] -> min:",
+            "\tFailed to parse interpolation expression at [0, 7]. Cannot coerce string to float?",
+            "  w",
+            "  ^",
+            "jobEnvironments[0] -> variables -> V:",
+            "\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'nope_env'.",
+            "  nope_env",
+            "  ^~~~~~~~",
+            "steps[0] -> script -> actions -> onRun -> args[1]:",
+            "\tFailed to parse interpolation expression at [0, 13]. Undefined variable: 'nope_a2'.",
+            "  nope_a2",
+            "  ^~~~~~~",
+            "steps[1] -> script -> actions -> onRun -> args[1]:",
+            "\tFailed to parse interpolation expression at [0, 12]. Undefined variable: 'nope_b'.",
+            "  nope_b",
+            "  ^~~~~~",
+        ]
+        .join("\n")
+    );
+}
