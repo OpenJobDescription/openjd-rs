@@ -293,6 +293,16 @@ fn slice_bound_depth_limit_matches_index() {
     ] {
         expect_too_deep(&expr);
     }
+    // The parser reports it, with the caret on the innermost operand.
+    let expr = format!("'abcdef'[{}1:]", minus(64));
+    let err = ParsedExpression::new(&expr).expect_err("64 levels in a slice bound");
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "Expression nesting depth (65) exceeded limit (64)\n  {expr}\n  {}^",
+            " ".repeat(9 + 64)
+        )
+    );
 }
 
 #[test]

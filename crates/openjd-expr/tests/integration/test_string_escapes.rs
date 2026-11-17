@@ -131,10 +131,13 @@ fn backslash_newline_is_a_line_continuation() {
     assert_eq!(eval_str("r'ab\\\ncd'"), "ab\\\ncd");
 }
 
-/// A `\` before CR LF continues the line too, as CPython reads source.
+/// A `\` before CR LF or a lone CR continues the line too, as CPython reads
+/// source.
 #[test]
 fn backslash_crlf_is_a_line_continuation() {
     assert_eq!(eval_str("'ab\\\r\ncd'"), "abcd");
+    assert_eq!(eval_str("'ab\\\rcd'"), "abcd");
+    assert_eq!(eval_str("'''ab\\\rcd'''"), "abcd");
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -406,6 +409,20 @@ fn re_sub_allows_characters_outside_category_cc() {
     for (expr, want) in cases {
         assert_eq!(eval_str(expr), *want, "{expr}");
     }
+}
+
+/// The replacement is checked whether or not the pattern matches (audit
+/// round 3: every other test's pattern matched).
+#[test]
+fn re_sub_checks_the_replacement_when_nothing_matches() {
+    assert_err(
+        r"re_sub('abc', 'x', '\x01')",
+        &[
+            "Control characters in replacement strings are not supported (U+0001)\n",
+            "  re_sub('abc', 'x', '\\x01')\n",
+            "  ^~~~~~~~~~~~~~~~~~~~~~~~~~",
+        ],
+    );
 }
 
 /// The rule applies to the replacement only, not to the input or pattern,
