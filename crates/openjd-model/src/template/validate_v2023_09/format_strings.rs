@@ -1702,18 +1702,18 @@ fn check_embedded_files_data(
 /// A step's template-scope symtab with its step-level `let` bindings
 /// evaluated in.
 ///
-/// Built once per step by [`step_let_scope`] and shared by the three pass-8
-/// sites that need it (host requirements, parameterSpace ranges, the step
-/// body), so bindings that all evaluate are evaluated once. `errors` holds
-/// what `validate_let_bindings` reported; the host-requirements and step-body
-/// sites both report it.
+/// Built once per step by [`step_let_scope`]. When the bindings are `clean`
+/// it is shared by the three pass-8 sites that need it (host requirements,
+/// parameterSpace ranges, the step body), so they are evaluated once.
+/// Otherwise each site evaluates them as it needs, as the range site must
+/// anyway, so at most one copy of a step's values and errors is alive.
 struct StepLetScope {
     symtab: SymbolTable,
     names: HashSet<String>,
     errors: Vec<ValidationError>,
-    /// No binding failed to parse or evaluate. Also `true` when nothing was
-    /// evaluated (no EXPR, or no bindings).
-    all_evaluated: bool,
+    /// `validate_let_bindings` reported nothing (also when it did not run:
+    /// no EXPR, or no bindings).
+    clean: bool,
 }
 
 /// Evaluate `step`'s `let` bindings (EXPR only) into a copy of `base`, the
@@ -1726,35 +1726,35 @@ fn step_let_scope(
     ev: &FsEval<'_>,
     profile: &openjd_expr::ExprProfile,
 ) -> StepLetScope {
-    let mut scope = StepLetScope {
-        symtab: base.clone(),
-        names: HashSet::new(),
-        errors: Vec::new(),
-        all_evaluated: true,
-    };
+    let mut symtab = base.clone();
+    let mut names = HashSet::new();
+    let mut errors = ValidationErrors::default();
     if let (true, Some(bindings)) = (expr_active, &step.let_bindings) {
-        let mut errors = ValidationErrors::default();
-        scope.all_evaluated = validate_let_bindings(
+        validate_let_bindings(
             bindings,
             &path_field(step_path, "let"),
             &HashSet::new(),
-            &mut scope.names,
-            &mut scope.symtab,
+            &mut names,
+            &mut symtab,
             ev,
             profile,
             &mut errors,
         );
-        scope.errors = errors.errors;
     }
-    scope
+    StepLetScope {
+        symtab,
+        names,
+        clean: errors.is_empty(),
+        errors: errors.errors,
+    }
 }
 
-/// The parameterSpace range symtab when a step-level binding failed.
+/// The parameterSpace range symtab when the step's bindings are not clean.
 ///
 /// Range expressions see a failed binding as unbound, and the failure is
-/// reported at the step as `let binding '<name>'`. While every binding
-/// evaluates, the result equals [`StepLetScope::symtab`], so this runs only
-/// on that failure path, to keep its diagnostics.
+/// reported at the step as `let binding '<name>'`. For clean bindings the
+/// result equals [`StepLetScope::symtab`], so this runs only for the others,
+/// to keep their diagnostics.
 fn range_symtab_after_let_failure(
     bindings: &[String],
     step_path: &[PathElement],
@@ -1912,12 +1912,10 @@ pub fn validate_format_strings(
     }
 
     // ── Steps: host requirements, then the remaining checks ──
-    // Each step's `let` bindings are evaluated once, into the template-scope
-    // symtab (Param.* non-PATH, RawParam.*, and with EXPR Job.Name and
-    // Step.Name), and that one scope serves the step's host requirements,
-    // parameterSpace ranges, and body. When one fails, ranges evaluate them
-    // their own way (`range_symtab_after_let_failure`) and the body evaluates
-    // them again.
+    // Each step's `let` bindings are evaluated into the template-scope symtab
+    // (Param.* non-PATH, RawParam.*, and with EXPR Job.Name and Step.Name).
+    // When they report no error, that one scope serves the step's host
+    // requirements, parameterSpace ranges, and body (see `StepLetScope`).
     let mut step_base_symtab = template_symtab.clone();
     if expr_active {
         step_base_symtab
@@ -1942,13 +1940,9 @@ pub fn validate_format_strings(
             &template_profile,
         );
         if let Some(hr) = &step.host_requirements {
-            // The step body reports these errors again, from this scope when
-            // every binding evaluated and from its own evaluation otherwise.
-            if scope.all_evaluated {
-                errors.errors.extend(scope.errors.iter().cloned());
-            } else {
-                errors.errors.append(&mut scope.errors);
-            }
+            // The step body reports these errors again: from this scope when
+            // it is clean (they are empty), from its own evaluation otherwise.
+            errors.errors.append(&mut scope.errors);
             let hr_symtab = &scope.symtab;
             let hr_path = path_field(&step_path, "hostRequirements");
             // §3.3.1.1 / §3.3.2.1: a capability name is `@fmtstring`, and its
@@ -2080,13 +2074,12 @@ pub fn validate_format_strings(
             }
         }
 
-        // A failed binding's error can carry a large value. On that path each
-        // later site evaluates the bindings itself, as the range fallback must
-        // anyway, so only one copy is alive at a time.
-        if !scope.all_evaluated {
-            scope.symtab = SymbolTable::new();
-            scope.errors = Vec::new();
-        }
+        // Bindings that are not clean can carry large values in their errors,
+        // so the remaining sites evaluate them as they need and the scope is
+        // dropped here. The body can take it as is when no site ran before.
+        let scope = (scope.clean
+            || (step.host_requirements.is_none() && step.parameter_space.is_none()))
+        .then_some(scope);
 
         let errors = &mut step_errors;
 
@@ -2097,10 +2090,11 @@ pub fn validate_format_strings(
             // Step-level let bindings are in template scope and must be
             // visible in parameterSpace range expressions.
             let failed_range_symtab;
-            let range_symtab = match &step.let_bindings {
-                Some(bindings) if !scope.all_evaluated => {
+            let range_symtab = match &scope {
+                Some(scope) => &scope.symtab,
+                None => {
                     failed_range_symtab = range_symtab_after_let_failure(
-                        bindings,
+                        step.let_bindings.as_deref().unwrap_or_default(),
                         &step_path,
                         &step_base_symtab,
                         &template_ev,
@@ -2109,7 +2103,6 @@ pub fn validate_format_strings(
                     );
                     &failed_range_symtab
                 }
-                _ => &scope.symtab,
             };
             for (j, tp) in ps.task_parameter_definitions.iter().enumerate() {
                 let p_path = path_index(&tpd_path, j);
@@ -2256,17 +2249,16 @@ pub fn validate_format_strings(
         // and step-level let bindings — no Session.*, no Task.*. Used for
         // `timeout`/`notifyPeriodInSeconds` (plain @fmtstring: resolved at
         // job creation, before any session exists).
-        let scope = if scope.all_evaluated {
-            scope
-        } else {
-            step_let_scope(
+        let scope = match scope {
+            Some(scope) => scope,
+            None => step_let_scope(
                 step,
                 &step_path,
                 &step_base_symtab,
                 expr_active,
                 &template_ev,
                 &template_profile,
-            )
+            ),
         };
         let StepLetScope {
             symtab: step_template_symtab,
@@ -2772,10 +2764,6 @@ fn validate_single_env_comprehensions(env: &Environment, errors: &mut Validation
     }
 }
 
-/// Validate a `let` block and evaluate its bindings into `symtab`.
-///
-/// Returns `false` when any well-formed binding failed to parse or evaluate,
-/// and `true` otherwise (structural errors alone leave it `true`).
 #[allow(clippy::too_many_arguments)]
 fn validate_let_bindings(
     bindings: &[String],
@@ -2786,15 +2774,14 @@ fn validate_let_bindings(
     ev: &FsEval<'_>,
     profile: &openjd_expr::ExprProfile,
     errors: &mut ValidationErrors,
-) -> bool {
+) {
     if bindings.is_empty() {
         errors.add(path, "if provided, must not be empty.");
-        return true;
+        return;
     }
     if bindings.len() > 50 {
         errors.add(path, "must not contain more than 50 bindings.");
     }
-    let mut all_evaluated = true;
     let mut names = HashSet::new();
     for (i, binding) in bindings.iter().enumerate() {
         let b_path = path_index(path, i);
@@ -2845,10 +2832,8 @@ fn validate_let_bindings(
         }
         out_names.insert(name.to_string());
 
-        all_evaluated &=
-            evaluate_let_binding(binding, eq_pos, &b_path, true, symtab, ev, profile, errors);
+        evaluate_let_binding(binding, eq_pos, &b_path, true, symtab, ev, profile, errors);
     }
-    all_evaluated
 }
 
 /// Parse and evaluate one well-formed `name = expr` binding (`eq_pos` is
@@ -2861,8 +2846,6 @@ fn validate_let_bindings(
 ///
 /// `check_self_reference` adds pass 8's structural self-reference check
 /// (the job-creation re-check leaves structure to template validation).
-///
-/// Returns whether the binding parsed and evaluated.
 #[allow(clippy::too_many_arguments)]
 fn evaluate_let_binding(
     binding: &str,
@@ -2873,7 +2856,7 @@ fn evaluate_let_binding(
     ev: &FsEval<'_>,
     profile: &openjd_expr::ExprProfile,
     errors: &mut ValidationErrors,
-) -> bool {
+) {
     let name = binding[..eq_pos].trim();
     let expr = binding[eq_pos + 1..].trim();
     // The prefix is included in error messages so caret positions align with
@@ -2909,20 +2892,17 @@ fn evaluate_let_binding(
                     // (above, at template validation), so they can never collide with
                     // the uppercase-rooted scopes, and ignoring the result is safe.
                     let _ = symtab.set(name, result);
-                    true
                 }
                 Err(e) => {
                     report(&e, errors);
                     // Still add as unresolved(ANY) so later bindings don't cascade errors
                     let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
-                    false
                 }
             }
         }
         Err(e) => {
             report(&e, errors);
             let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
-            false
         }
     }
 }

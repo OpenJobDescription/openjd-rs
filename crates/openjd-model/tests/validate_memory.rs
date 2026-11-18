@@ -67,35 +67,47 @@ fn peak_during<T>(f: impl FnOnce() -> T) -> usize {
 /// Size of each large `let` value, in bytes.
 const V: usize = 4_000_000;
 
-/// A job template with `steps` steps whose `let` block is `lets`, each with
-/// host requirements and a parameterSpace range that read `x`.
-fn template(steps: usize, lets: &str, job_env_lets: Option<&str>) -> serde_json::Value {
-    let step = |i: usize| {
-        serde_json::json!({
+/// One step's shape: its `let` block, and the format strings its host
+/// requirements, parameterSpace range, and `onRun` args evaluate.
+#[derive(Clone, Copy, Default)]
+struct Step<'a> {
+    lets: &'a [&'a str],
+    hr_min: Option<&'a str>,
+    range: Option<&'a str>,
+    arg: Option<&'a str>,
+}
+
+/// A job template with `steps` copies of `step`, and a job environment with
+/// `job_env_lets` when given.
+fn template(steps: usize, step: Step, job_env_lets: Option<&[&str]>) -> serde_json::Value {
+    let one = |i: usize| {
+        let mut s = serde_json::json!({
             "name": format!("S{i}"),
-            "let": serde_json::from_str::<serde_json::Value>(lets).unwrap(),
-            "hostRequirements": {
-                "amounts": [{"name": "amount.worker.vcpu", "min": "{{ len(x) % 4 + 1 }}"}]
-            },
-            "parameterSpace": {
-                "taskParameterDefinitions": [
-                    {"name": "F", "type": "INT", "range": "1-{{ len(x) % 3 + 1 }}"}
-                ]
-            },
-            "script": {"actions": {"onRun": {"command": "echo"}}}
-        })
+            "let": step.lets,
+            "script": {"actions": {"onRun": {"command": "echo", "args": step.arg.into_iter().collect::<Vec<_>>()}}}
+        });
+        if let Some(min) = step.hr_min {
+            s["hostRequirements"] =
+                serde_json::json!({"amounts": [{"name": "amount.worker.vcpu", "min": min}]});
+        }
+        if let Some(range) = step.range {
+            s["parameterSpace"] = serde_json::json!({
+                "taskParameterDefinitions": [{"name": "F", "type": "INT", "range": range}]
+            });
+        }
+        s
     };
     let mut t = serde_json::json!({
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
         "name": "M",
-        "steps": (0..steps).map(step).collect::<Vec<_>>(),
+        "steps": (0..steps).map(one).collect::<Vec<_>>(),
     });
     if let Some(env_lets) = job_env_lets {
         t["jobEnvironments"] = serde_json::json!([{
             "name": "J",
             "script": {
-                "let": serde_json::from_str::<serde_json::Value>(env_lets).unwrap(),
+                "let": env_lets,
                 "actions": {"onEnter": {"command": "echo", "args": ["{{ w }}"]}}
             }
         }]);
@@ -111,31 +123,143 @@ fn validate(t: serde_json::Value) {
     );
 }
 
-/// Template validation holds one step's evaluated `let` values at a time,
-/// whether the bindings evaluate or fail, and does not keep earlier steps'
-/// errors alive while it evaluates the job environments.
+/// Template validation holds at most one copy of a step's evaluated `let`
+/// values and `let` errors at a time, on every path, and does not keep
+/// earlier steps' errors alive while it evaluates the job environments.
 #[test]
 fn validation_peak_memory_stays_within_its_bounds() {
-    // Measured with these templates, in multiples of V: 2.09, 2.01 and
-    // 17.01. Keeping every step's values peaks at 30x in the first case, two
-    // copies of a failing step's values at 3x in the second, and step errors
-    // alongside the job environment's values at 18x in the third.
-    let x = format!(r#""x = 'A' * {V}""#);
+    let x = format!("x = 'A' * {V}");
+    let big = format!("len('C' * {})", 10 * V);
+    let long_name = format!("{} = 1", "a".repeat(V));
+    let no_eq = "b".repeat(V);
+    let env_z = format!("z = 'B' * {}", 3 * V);
+    let hr_x = Some("{{ len(x) % 4 + 1 }}");
+    let range_x = Some("1-{{ len(x) % 3 + 1 }}");
+    let range_big = format!("1-{{{{ {big} % 3 + 1 }}}}");
+    let hr_big = format!("{{{{ {big} % 4 + 1 }}}}");
+    let arg_big = format!("{{{{ {big} }}}}");
+    let fails = [x.as_str(), "y = int('nope')"];
+    let fails_large = [x.as_str(), "y = int(x)"];
+
+    // (name, template, limit in multiples of V). Each limit is origin/main's
+    // peak plus 0.5; the comment gives that peak and what each regression
+    // this guards measured.
     let cases = [
-        ("30 steps", template(30, &format!("[{x}]"), None), 2.5),
+        // 2.09. Keeping every step's values: 31.10.
         (
-            "3 steps, a binding fails",
-            template(3, &format!(r#"[{x}, "y = int('nope')"]"#), None),
+            "30 steps",
+            template(
+                30,
+                Step {
+                    lets: &[&x],
+                    hr_min: hr_x,
+                    range: range_x,
+                    ..Default::default()
+                },
+                None,
+            ),
             2.5,
         ),
+        // 2.01. A second copy of a failing step's values: 3.00.
+        (
+            "3 steps, a binding fails",
+            template(
+                3,
+                Step {
+                    lets: &fails,
+                    hr_min: hr_x,
+                    range: range_x,
+                    ..Default::default()
+                },
+                None,
+            ),
+            2.5,
+        ),
+        // 17.01. Step errors alive during the job environment: 18.00.
         (
             "3 steps, large errors, large job environment",
             template(
                 3,
-                &format!(r#"[{x}, "y = int(x)"]"#),
-                Some(&format!(r#"["z = 'B' * {}", "w = len(z)"]"#, 3 * V)),
+                Step {
+                    lets: &fails_large,
+                    hr_min: hr_x,
+                    range: range_x,
+                    ..Default::default()
+                },
+                Some(&[&env_z, "w = len(z)"]),
             ),
             17.5,
+        ),
+        // 11.00. Structural errors kept through the ranges: 14.00.
+        (
+            "long binding name, large range temporary",
+            template(
+                1,
+                Step {
+                    lets: &[&long_name],
+                    range: Some(&range_big),
+                    ..Default::default()
+                },
+                None,
+            ),
+            11.5,
+        ),
+        // 10.00. Structural errors kept through the ranges: 12.00.
+        (
+            "binding without '=', large range temporary",
+            template(
+                1,
+                Step {
+                    lets: &[&no_eq],
+                    range: Some(&range_big),
+                    ..Default::default()
+                },
+                None,
+            ),
+            10.5,
+        ),
+        // 15.00. A failed scope kept through the body's evaluation: 17.00.
+        (
+            "large errors, range, large body temporary",
+            template(
+                1,
+                Step {
+                    lets: &fails_large,
+                    range: Some("1-3"),
+                    arg: Some(&arg_big),
+                    ..Default::default()
+                },
+                None,
+            ),
+            15.5,
+        ),
+        // 12.00. Errors copied rather than moved at host requirements: 13.00.
+        (
+            "large errors, large host-requirement temporary",
+            template(
+                1,
+                Step {
+                    lets: &fails_large,
+                    hr_min: Some(&hr_big),
+                    ..Default::default()
+                },
+                None,
+            ),
+            12.5,
+        ),
+        // 13.00. The body takes the scope as is when no site ran before it.
+        (
+            "large errors, large body temporary",
+            template(
+                1,
+                Step {
+                    lets: &fails_large,
+                    arg: Some(&arg_big),
+                    ..Default::default()
+                },
+                None,
+            ),
+            13.5,
         ),
     ];
     let mut report = Vec::new();
