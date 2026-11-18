@@ -256,6 +256,19 @@ fn validation_peak_memory_stays_within_its_bounds() {
             ),
             13.5,
         ),
+        // 14.00. Keeping the binding names through the body: 15.00.
+        (
+            "long binding name, large body temporary",
+            template(
+                &[Step {
+                    lets: &[&long_name],
+                    arg: Some(&arg_big),
+                    ..Default::default()
+                }],
+                None,
+            ),
+            14.5,
+        ),
         // 20.00. Job-environment errors alive while host requirements
         // evaluate: 23.00.
         (

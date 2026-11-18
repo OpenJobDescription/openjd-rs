@@ -1763,50 +1763,48 @@ fn step_let_scope(
 /// Range expressions see a failed binding as unbound, and the failure is
 /// reported at the step as `let binding '<name>'`. For clean bindings the
 /// result equals [`StepLetScope::symtab`], so this runs only for the others,
-/// to keep their diagnostics.
+/// to keep their diagnostics. Bindings are only evaluated (and so only fail
+/// to be clean) with EXPR.
 fn range_symtab_for_unclean_lets(
     jt: &JobTemplate,
     step: &StepTemplate,
     step_path: &[PathElement],
-    expr_active: bool,
     template_ev: &FsEval<'_>,
     template_profile: &openjd_expr::ExprProfile,
     errors: &mut ValidationErrors,
 ) -> SymbolTable {
     let mut range_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
-    if expr_active {
-        range_symtab
-            .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-            .expect("symtab");
-        range_symtab
-            .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
-            .expect("symtab");
-        if let Some(bindings) = &step.let_bindings {
-            for binding in bindings {
-                if let Some(eq_pos) = binding.find('=') {
-                    let name = binding[..eq_pos].trim();
-                    let expr_str = binding[eq_pos + 1..].trim();
-                    if !name.is_empty() && !expr_str.is_empty() {
-                        match openjd_expr::eval::ParsedExpression::with_profile(
-                            expr_str,
-                            template_profile,
-                        ) {
-                            Ok(parsed) => {
-                                match template_ev
-                                    .budgeted(parsed.with_library(template_ev.lib))
-                                    .evaluate(&[&range_symtab as &SymbolTable])
-                                {
-                                    Ok(val) => {
-                                        let _ = range_symtab.set(name, val);
-                                    }
-                                    Err(e) => {
-                                        errors.add(step_path, format!("let binding '{name}': {e}"));
-                                    }
+    range_symtab
+        .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
+        .expect("symtab");
+    range_symtab
+        .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
+        .expect("symtab");
+    if let Some(bindings) = &step.let_bindings {
+        for binding in bindings {
+            if let Some(eq_pos) = binding.find('=') {
+                let name = binding[..eq_pos].trim();
+                let expr_str = binding[eq_pos + 1..].trim();
+                if !name.is_empty() && !expr_str.is_empty() {
+                    match openjd_expr::eval::ParsedExpression::with_profile(
+                        expr_str,
+                        template_profile,
+                    ) {
+                        Ok(parsed) => {
+                            match template_ev
+                                .budgeted(parsed.with_library(template_ev.lib))
+                                .evaluate(&[&range_symtab as &SymbolTable])
+                            {
+                                Ok(val) => {
+                                    let _ = range_symtab.set(name, val);
+                                }
+                                Err(e) => {
+                                    errors.add(step_path, format!("let binding '{name}': {e}"));
                                 }
                             }
-                            Err(e) => {
-                                errors.add(step_path, format!("let binding '{name}': {e}"));
-                            }
+                        }
+                        Err(e) => {
+                            errors.add(step_path, format!("let binding '{name}': {e}"));
                         }
                     }
                 }
@@ -2118,7 +2116,6 @@ pub fn validate_format_strings(
                         jt,
                         step,
                         &step_path,
-                        expr_active,
                         &template_ev,
                         &template_profile,
                         errors,
@@ -2304,6 +2301,7 @@ pub fn validate_format_strings(
                 }
             }
         }
+        drop(step_let_names);
 
         if let Some(script) = &step.script {
             validate_step_script_format_strings(
