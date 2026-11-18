@@ -1715,8 +1715,8 @@ const RETAINED_SCOPE_BUDGET: usize = 4 * 1024 * 1024;
 
 /// A step's clean `let` values, kept from the host-requirements loop for the
 /// step's ranges and body. Only the bindings are kept, not the symtab, and
-/// only values whose heap size is known exactly, so [`Self::bytes`], with
-/// the deque's share, is at least the bytes their allocations request
+/// only values whose heap size is known exactly, so [`Self::bytes`] plus
+/// [`Self::DEQUE_MIN_BYTES`] is at least the bytes their allocations request
 /// (allocator rounding is not counted).
 struct RetainedBindings {
     step: usize,
@@ -1752,8 +1752,8 @@ impl RetainedBindings {
         })
     }
 
-    /// Heap bytes held: this entry, the bindings vector, and each name's and
-    /// value's allocation.
+    /// Bytes charged: twice this entry's deque slot (for spare capacity),
+    /// the bindings vector, and each name's and value's allocation.
     fn bytes(&self) -> usize {
         self.bytes
     }
@@ -1770,8 +1770,9 @@ impl RetainedBindings {
     }
 }
 
-/// Heap bytes a scalar value owns, or `None` for lists, ranges, and any
-/// variant added later, whose allocation this crate cannot measure.
+/// Heap bytes a scalar value owns, or `None` for lists, ranges, unresolved
+/// types with parameters, and any variant added later, whose allocation this
+/// crate cannot measure.
 fn exact_heap_size(value: &ExprValue) -> Option<usize> {
     match value {
         ExprValue::Null | ExprValue::Bool(_) | ExprValue::Int(_) => Some(0),
