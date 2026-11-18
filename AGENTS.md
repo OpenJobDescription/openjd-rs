@@ -169,17 +169,17 @@ The structure:
 
 ```
 specs/
-├── architecture.md              # Top-level crate structure and design
-├── expr/README.md               # → expr spec index
-├── model/README.md              # → model spec index
-├── sessions/README.md           # → sessions spec index
-├── snapshots/README.md          # → snapshots spec index
-├── cli/README.md                # → cli spec index
-├── openjd-for-js/spec.md        # openjd-for-js spec (a single document)
-├── job-attachments-snapshots.md # Cross-cutting design doc
+├── architecture.md                # Top-level crate structure and design
+├── expr/README.md                 # → expr spec index
+├── model/README.md                # → model spec index
+├── sessions/README.md             # → sessions spec index
+├── snapshots/README.md            # → snapshots spec index
+├── cli/README.md                  # → cli spec index
+├── openjd-for-js/spec.md          # openjd-for-js spec (a single document)
+├── job-attachments-snapshots.md   # Cross-cutting design doc
 ├── snapshots-benchmarking-plan.md # How to benchmark openjd-snapshots
-├── rust-port-agent-method.md    # Porting methodology from Python
-└── windows-cross-user-helper.md # Cross-cutting Windows design
+├── rust-port-agent-method.md      # Porting methodology from Python
+└── windows-cross-user-helper.md   # Cross-cutting Windows design
 ```
 
 Start with `specs/<crate>/README.md` for any crate. Each README indexes all spec documents for its crate and explains the relationships between them. `openjd-for-js` has a single spec, `specs/openjd-for-js/spec.md`.
