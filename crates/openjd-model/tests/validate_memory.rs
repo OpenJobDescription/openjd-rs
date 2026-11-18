@@ -122,7 +122,8 @@ fn template(steps: &[Step], job_env_lets: Option<&[&str]>) -> serde_json::Value 
 fn hr_template(steps: usize, params: usize, expr: bool, lets: &[String]) -> serde_json::Value {
     let params: Vec<_> = (0..params)
         .map(|k| serde_json::json!({"name": format!("P{k}"), "type": "STRING", "default": "v"}))
-        .collect();
+        .chain([serde_json::json!({"name": "I", "type": "INT", "default": 1})])
+        .collect::<Vec<_>>();
     let steps: Vec<_> = (0..steps)
         .map(|i| {
             let mut s = serde_json::json!({
@@ -175,6 +176,18 @@ fn validation_peak_memory_stays_within_its_bounds() {
     let fails = [x.as_str(), "y = int('nope')"];
     let fails_large = [x.as_str(), "y = int(x)"];
     let small_lets: Vec<String> = (0..50).map(|k| format!("v{k} = {k}")).collect();
+    let long_names: Vec<String> = (0..50)
+        .map(|k| format!("v{k}{} = {k}", "n".repeat(500)))
+        .collect();
+    let float_lets: Vec<String> = (0..50)
+        .map(|k| format!("v{k} = {k}.{}", "1".repeat(1000)))
+        .collect();
+    let union_lets: Vec<String> = (0..50)
+        .map(|k| format!("v{k} = Param.I if Param.I > 0 else [{k}]"))
+        .collect();
+    let list_lets: Vec<String> = (0..10)
+        .map(|k| format!("v{k} = ['A' * 50000, 'B' * 50000]"))
+        .collect();
 
     // (name, template, limit in multiples of V). Each comment gives the
     // measured peak, which each limit exceeds by about 0.5, and what would
@@ -347,6 +360,40 @@ fn validation_peak_memory_stays_within_its_bounds() {
         (
             "1000 host-requirement steps, 50 small bindings each",
             hr_template(1000, 0, true, &small_lets),
+            1.7,
+        ),
+        // Each case below keeps bindings across many steps; its limit is
+        // origin/main's peak plus RETAINED_SCOPE_BUDGET (1.05) and 0.1, and
+        // the comment gives origin/main's peak and a regression's.
+        // 2.50. Keeping a value larger than the budget: 5.00.
+        (
+            "3 steps, one value larger than the budget",
+            hr_template(3, 0, true, &[format!("x = 'A' * {}", 5 * V / 4)]),
+            2.6,
+        ),
+        // 0.13. Under-charging names or entries: 2.33 or 1.34.
+        (
+            "300 steps, 50 bindings with 512-character names",
+            hr_template(300, 0, true, &long_names),
+            1.3,
+        ),
+        // 0.13. Under-charging float spellings: 4.22.
+        (
+            "300 steps, 50 floats with 1000-digit spellings",
+            hr_template(300, 0, true, &float_lets),
+            1.3,
+        ),
+        // 0.52. Keeping union-typed unresolved values (heap not
+        // measured): 2.56.
+        (
+            "1000 steps, 50 union-typed bindings",
+            hr_template(1000, 0, true, &union_lets),
+            1.6,
+        ),
+        // 0.54. Keeping lists: 25.33.
+        (
+            "100 steps, 10 two-string lists",
+            hr_template(100, 0, true, &list_lets),
             1.7,
         ),
     ];

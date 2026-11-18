@@ -1715,8 +1715,8 @@ const RETAINED_SCOPE_BUDGET: usize = 4 * 1024 * 1024;
 
 /// A step's clean `let` values, kept from the host-requirements loop for the
 /// step's ranges and body. Only the bindings are kept, not the symtab, and
-/// only values whose heap size is known exactly, so [`Self::bytes`] is what
-/// they occupy.
+/// only values whose heap size is known exactly, so [`Self::bytes`], with
+/// the deque's share, is at least what they occupy.
 struct RetainedBindings {
     step: usize,
     bindings: Vec<(String, ExprValue)>,
@@ -1724,13 +1724,18 @@ struct RetainedBindings {
 }
 
 impl RetainedBindings {
+    /// The deque's smallest nonzero buffer (four entries) less what the
+    /// first entry's charge covers, charged before anything is kept.
+    const DEQUE_MIN_BYTES: usize = 2 * std::mem::size_of::<Self>();
+
     /// The scope's bindings, or `None` when there are none (nothing to save)
     /// or a value's heap size is not known exactly.
     fn from_scope(step: usize, scope: StepLetScope) -> Option<Self> {
         if scope.names.is_empty() {
             return None;
         }
-        // The deque holding entries may have twice the capacity it uses.
+        // The deque holding entries may have twice the capacity it uses
+        // (its smallest buffer is charged up front, see `DEQUE_MIN_BYTES`).
         let mut bytes = 2 * std::mem::size_of::<Self>()
             + scope.names.len() * std::mem::size_of::<(String, ExprValue)>();
         let mut bindings = Vec::with_capacity(scope.names.len());
@@ -1937,7 +1942,7 @@ pub fn validate_format_strings(
     // all kept bindings stay within `RETAINED_SCOPE_BUDGET`; past it, those
     // sites evaluate the bindings again.
     let mut retained: std::collections::VecDeque<RetainedBindings> = Default::default();
-    let mut retained_bytes = 0usize;
+    let mut retained_bytes = RetainedBindings::DEQUE_MIN_BYTES;
     for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
         if let Some(hr) = &step.host_requirements {
