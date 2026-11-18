@@ -190,7 +190,8 @@ digits, so `'\400'` is U+0100 and `'\1234'` is `'S4'`), and a backslash before a
 line break (LF, CR LF or CR), which continues the line. An unrecognized escape such as `\d`, `\q`
 or `\8` keeps its backslash, as §1.1.5 says; CPython 3.12 warns about it
 and about octal above `\377`, and this crate has no warnings, so it accepts both
-silently. A malformed escape (`\x4g`, `\u12`, an unknown `\N{...}`, `\U00110000`) is
+silently. §1.1.5 notes that the next major revision of the expression language
+specification should consider rejecting both forms. A malformed escape (`\x4g`, `\u12`, an unknown `\N{...}`, `\U00110000`) is
 a ruff lexical error. `\N{...}` looks names up in ruff's own table, which matches
 CPython 3.13 for the names §1.1.5 requires but rejects some it lets implementations
 differ on, such as `TANGUT IDEOGRAPH-17000`. It also accepts
