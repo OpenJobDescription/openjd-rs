@@ -1630,3 +1630,40 @@ fn step_let_failure_body_sees_evaluated_bindings() {
         .join("\n")
     );
 }
+
+/// After a binding fails, the step body's template-scope fields still see
+/// `Step.Name` and the bindings that read it.
+#[test]
+fn step_let_failure_timeout_sees_step_name() {
+    let s = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "steps": [{
+            "name": "S",
+            "let": ["s = Step.Name", "b = int('nope')"],
+            "parameterSpace": {
+                "taskParameterDefinitions": [{"name": "F", "type": "INT", "range": "1-3"}]
+            },
+            "script": {"actions": {"onRun": {
+                "command": "echo",
+                "timeout": "{{ len(Step.Name) + len(s) }}"
+            }}}
+        }]
+    }"#;
+    assert_eq!(
+        full_err(s),
+        [
+            "Model validation error: 2 validation errors for JobTemplate",
+            "steps[0]:",
+            "\tlet binding 'b': Cannot convert 'nope' to int",
+            "  int('nope')",
+            "  ^~~~~~~~~~~",
+            "steps[0] -> let[1]:",
+            "\tInvalid expression in let binding 'b': Cannot convert 'nope' to int",
+            "  b = int('nope')",
+            "      ^~~~~~~~~~~",
+        ]
+        .join("\n")
+    );
+}
