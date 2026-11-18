@@ -1704,3 +1704,33 @@ fn step_let_body_sees_only_its_own_bindings() {
         .join("\n")
     );
 }
+
+/// Bindings shared from host requirements leave `Job.Name` and `Step.Name`
+/// in scope for the step's ranges and body.
+#[test]
+fn step_let_shared_scope_keeps_job_and_step_names() {
+    decode_ok(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "steps": [{
+            "name": "S",
+            "let": ["a = 1"],
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.vcpu", "min": 1}]
+            },
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "F", "type": "STRING", "range": ["{{ Job.Name }}-{{ Step.Name }}"]}
+                ]
+            },
+            "script": {"actions": {"onRun": {
+                "command": "echo",
+                "args": ["{{ a }}"],
+                "timeout": "{{ len(Step.Name) + 10 }}"
+            }}}
+        }]
+    }"#,
+    );
+}

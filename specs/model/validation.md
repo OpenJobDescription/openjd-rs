@@ -323,8 +323,9 @@ reports nothing, the sites share one evaluation; otherwise each evaluates it
 and reports as before. Host requirements run for every step before the job
 environments, so sharing with them keeps the evaluated values until the
 step's ranges and body run. Pass 8 keeps at most `RETAINED_SCOPE_BUDGET`
-(4 MiB) of them at once, and only scalar values whose size it can measure;
-past that the later sites evaluate again. Output is the same either way.
+(4 MiB, counted as requested allocation bytes) of them at once, and only
+scalar values whose size it can measure; past that the later sites evaluate
+again. Output is the same either way.
 
 ### Function Libraries
 

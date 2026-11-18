@@ -1716,7 +1716,8 @@ const RETAINED_SCOPE_BUDGET: usize = 4 * 1024 * 1024;
 /// A step's clean `let` values, kept from the host-requirements loop for the
 /// step's ranges and body. Only the bindings are kept, not the symtab, and
 /// only values whose heap size is known exactly, so [`Self::bytes`], with
-/// the deque's share, is at least what they occupy.
+/// the deque's share, is at least the bytes their allocations request
+/// (allocator rounding is not counted).
 struct RetainedBindings {
     step: usize,
     bindings: Vec<(String, ExprValue)>,
@@ -3046,6 +3047,31 @@ pub(crate) fn check_carried_forward_let_bindings(
             &ev,
             &profile,
             errors,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The charge for one kept binding covers its deque slots, its entry in
+    /// the bindings vector, its name, and its value.
+    #[test]
+    fn retained_bindings_charge_every_allocation() {
+        let mut symtab = SymbolTable::new();
+        symtab.set("ab", ExprValue::String("xyz".into())).unwrap();
+        let scope = StepLetScope {
+            symtab,
+            names: HashSet::from(["ab".to_string()]),
+        };
+        let kept = RetainedBindings::from_scope(0, scope).unwrap();
+        assert_eq!(
+            kept.bytes(),
+            2 * std::mem::size_of::<RetainedBindings>()
+                + std::mem::size_of::<(String, ExprValue)>()
+                + 2
+                + 3
         );
     }
 }
