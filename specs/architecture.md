@@ -12,8 +12,9 @@ both experimental (see [Crate Status](#crate-status)).
 ## Project Structure
 
 The tree shows each crate's source directories. Comments say what a directory holds
-rather than listing its files; each crate's spec index (`specs/<crate>/README.md`)
-names the modules.
+rather than listing its files. Each crate also has a `tests/` directory of integration
+tests, not shown. The crate spec directories under `specs/` describe the modules in
+detail; see [Detailed Specifications](#detailed-specifications).
 
 ```
 openjd-rs/
@@ -21,7 +22,8 @@ openjd-rs/
 ├── crates/
 │   ├── openjd-expr/            # Expression language
 │   │   └── src/                # lib.rs plus one module per area: types, values, symbol table, format strings,
-│   │       │                   #   function library and profiles, range expressions, path mapping, errors
+│   │       │                   #   function library and profiles, range expressions, path mapping and
+│   │       │                   #   URI-aware paths, errors, and their helpers
 │   │       ├── eval/           # Expression parsing (ruff_python_parser) and the bounded AST-walking evaluator
 │   │       └── functions/      # Built-in function implementations, one file per function family
 │   ├── openjd-model/           # Template parsing, validation, job creation
@@ -33,8 +35,9 @@ openjd-rs/
 │   │           └── create_job/ # create_job: parameter resolution and template instantiation
 │   ├── openjd-sessions/        # Session runtime
 │   │   ├── build.rs            # Builds the cross-user helper and embeds it in the crate
-│   │   └── src/                # lib.rs plus session, action, subprocess, logging and action filtering,
-│   │       │                   #   embedded files, temp dirs, session users, cross-user client, win32_* modules
+│   │   └── src/                # lib.rs plus modules for the session, actions and their status, subprocesses,
+│   │       │                   #   let bindings, limits, logging and action filtering, embedded files,
+│   │       │                   #   temp dirs, session users, the cross-user client, and Windows support
 │   │       ├── runner/         # Environment and step script runners
 │   │       └── helper/         # Cross-user helper binary: a separate Cargo project (Cargo.bundled.toml)
 │   │           ├── src/        # Helper protocol and output framing, Unix and Windows runners, process trees
@@ -43,13 +46,16 @@ openjd-rs/
 │   │   └── src/                # main.rs (subcommand dispatch), check, summary, help, shared helpers
 │   │       └── run/            # `openjd run`: parameters, execution, result reporting
 │   ├── openjd-snapshots/       # Job attachments snapshots (experimental)
-│   │   └── src/                # lib.rs plus manifest types, hashing, caches, S3 helpers
-│   │       ├── codec/          # On-disk manifest encoders and decoders (v2023, v2025)
+│   │   └── src/                # lib.rs plus manifest types, the codec (v2023 and v2025 encode and decode),
+│   │       │                   #   hashing, caches, and S3 helpers
+│   │       ├── codec/          # Codec internals: a lenient typed manifest reader and a streaming v2023 decoder
 │   │       ├── ops/            # Snapshot operations: collect, hash, filter, diff, upload, download, ...
 │   │       └── bin/            # Benchmark binary
 │   └── openjd-for-js/          # WebAssembly bindings (experimental), with npm package files
 │       ├── src/                # wasm-bindgen bindings for openjd-model and openjd-expr
 │       └── js-tests/           # Vitest tests of the built package
+├── .github/                    # CI workflows (authoritative for the CI checks), PR and issue templates
+├── skills/                     # Agent skills, including implement-change
 ├── fuzz/                       # Fuzz harness: a separate cargo workspace (see fuzz/README.md)
 ├── scripts/                    # Dev and CI scripts: public API check, fuzz coverage gate, cross-user tests, table generators
 ├── docs/
@@ -173,8 +179,8 @@ without notice:
   expected to change. It is released to crates.io by release-plz with the
   beta crates.
 - **`openjd-for-js`** — WebAssembly bindings for `openjd-model` and
-  `openjd-expr`. Built as an npm package; not published to crates.io or
-  npm (`publish = false`). Both the Rust side and the npm package layout
+  `openjd-expr`. Built as an npm package; not published to crates.io
+  (`publish = false`) or to npm. Both the Rust side and the npm package layout
   are subject to change.
 
 ## Detailed Specifications
