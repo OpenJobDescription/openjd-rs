@@ -25,6 +25,8 @@ replaces all of that with async/await, channels, and cancellation tokens.
 | [runners.md](runners.md) | EnvironmentScriptRunner and StepScriptRunner, two-phase embedded file flow |
 | [embedded-files.md](embedded-files.md) | Two-phase file materialization, let binding integration, cross-user permissions |
 | [cross-user.md](cross-user.md) | Cross-user subprocess execution, signal delivery, file ownership (POSIX) |
+| [embedded-cross-user-helper.md](embedded-cross-user-helper.md) | The persistent cross-user helper binary: embedding, authentication token, wire protocol |
+| [cross-user-subprocess-issues.md](cross-user-subprocess-issues.md) | Cross-user subprocess startup issues and the plan for them |
 | [cross-user-testing.md](cross-user-testing.md) | Docker-based test infrastructure for cross-user functionality |
 | [tempdir.md](tempdir.md) | Secure temp directory creation, sticky bit validation, cleanup |
 | [logging.md](logging.md) | LogContent bitflags, structured kv metadata, session_log! macro, banners |
