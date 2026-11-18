@@ -620,7 +620,23 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   quotient, which would lose precision for large quotients.
 - **Float floor division** derives its quotient from that remainder before rounding
   toward negative infinity. This avoids flooring an already-rounded direct quotient.
-- **`round()`** uses banker's rounding / round-half-even (§2.2.2)
+- **`round()`** uses banker's rounding / round-half-even (§2.2.2) on the exact value
+  of its input, as Python's `round` does, with no intermediate f64 scaling.
+  `round(x: float)` and `round(x: float, ndigits)` with `ndigits` ≤ 0 return `int`, and
+  a result outside the 64-bit signed range is an integer overflow error. The range is
+  checked on the exact result, so `round(-9223372036854775808.0, -1)`, which is
+  −9223372036854775810, overflows. These `int` results, and `round(x: int, ndigits)`,
+  use exact integer arithmetic on the magnitude in u128 (10^19 exceeds i64), then apply
+  the sign and check the range. A float of at least 2^127 rounds to 0 or overflows,
+  decided by comparing its exact decimal digits with `10^k / 2`. Every i64 rounds to 0
+  when `ndigits` ≤ −20, and every float when `ndigits` ≤ −309.
+- **`round(x, ndigits)` with `ndigits` > 0** returns a `float` whose display keeps
+  `ndigits` decimal places (`round(3.5, 2)` is `3.50`). The exact value is formatted to `ndigits` places
+  (Rust's `{:.n}` rounds the exact value half-to-even) and that text is parsed back,
+  which is CPython's algorithm: `round(2.675, 2)` is `2.67`, because 2.675 is stored
+  just below 2.675. The registered signature is `(float, int) -> float | int`: static
+  typing uses signatures only, so a literal `ndigits` does not narrow the type, and a
+  caller that needs an `int` or a `float` gets the value checked when it evaluates.
 - **String classification** (`isdigit`, `isalpha`, `isalnum`, `isspace`,
   `isupper`, `islower`, §2.2.4) matches Python's `str` methods of the same
   name exactly, not Rust's `char` predicates, which use different Unicode

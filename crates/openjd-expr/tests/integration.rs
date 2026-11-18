@@ -77,6 +77,8 @@ mod test_regex_validation;
 mod test_repr_pwsh_roundtrip;
 #[path = "integration/test_rfc_examples.rs"]
 mod test_rfc_examples;
+#[path = "integration/test_round_cpython.rs"]
+mod test_round_cpython;
 #[path = "integration/test_slicing.rs"]
 mod test_slicing;
 #[path = "integration/test_string_operation_counting.rs"]
