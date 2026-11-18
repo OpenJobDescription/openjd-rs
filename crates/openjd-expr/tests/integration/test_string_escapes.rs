@@ -296,7 +296,7 @@ fn error_caret_after_a_string_with_a_line_break() {
 }
 
 // ══════════════════════════════════════════════════════════════
-// Unrecognized escapes keep their backslash, permanently
+// Unrecognized escapes keep their backslash
 // ══════════════════════════════════════════════════════════════
 
 #[test]

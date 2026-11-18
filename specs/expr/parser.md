@@ -188,7 +188,7 @@ String literals are decoded by ruff's lexer, which follows CPython: every escape
 Expression Language §1.1.5, including `\a`, `\b`, `\f`, `\v`, octal `\ooo` (up to 3
 digits, so `'\400'` is U+0100 and `'\1234'` is `'S4'`), and a backslash before a
 line break (LF, CR LF or CR), which continues the line. An unrecognized escape such as `\d`, `\q`
-or `\8` keeps its backslash, which §1.1.5 makes permanent; CPython 3.12 warns about it
+or `\8` keeps its backslash, as §1.1.5 says; CPython 3.12 warns about it
 and about octal above `\377`, and this crate has no warnings, so it accepts both
 silently. A malformed escape (`\x4g`, `\u12`, an unknown `\N{...}`, `\U00110000`) is
 a ruff lexical error. `\N{...}` looks names up in ruff's own table, which matches
