@@ -502,12 +502,18 @@ wire can't express.
 
 The method is the one `runner::cancel_method_for_action` resolves for the
 action that will run, recorded in the shared cancel state once any wrap hook
-has been applied. Until it is recorded (a cancel that lands between the action
-registering and its method resolving, or a method that failed to resolve, in
-which case the runner fails the action), `cancel_action` and the handle keep
-the earlier command: `NOTIFY_THEN_TERMINATE` with the `time_limit` as the
-grace, or `DEFAULT_CANCEL_NOTIFY_PERIOD_SECS` (5) without one, and `TERMINATE`
-for a zero `time_limit`.
+has been applied. The session resolves it against the action's symbol table
+before the script's `let` bindings, and the runner after them. They agree for
+every cancelation a template can declare, because validation keeps
+cancelation fields at template scope; a job built through the API whose
+cancelation refers to a `let` binding fails to resolve in the session and gets
+the command below. Until a method is recorded (a cancel that lands between the
+action registering and its method resolving, or a method that failed to
+resolve), `cancel_action` and the handle keep the earlier command:
+`NOTIFY_THEN_TERMINATE` with the `time_limit` as the grace, or
+`DEFAULT_CANCEL_NOTIFY_PERIOD_SECS` (5) without one. A `time_limit` under one
+second gives `TERMINATE` (before the shared builder it gave
+`NOTIFY_THEN_TERMINATE` with 0 seconds).
 
 A test-only `#[path]` include of `helper/src/protocol.rs` (as for
 `framer.rs`) parses every command the builder produces with the helper's own

@@ -258,7 +258,9 @@ impl Session {
     /// cancelation) is killed at once. A `NOTIFY_THEN_TERMINATE` action
     /// is notified and killed after its declared grace, capped at
     /// `time_limit`; `Some(zero)` kills at once. Same-user and
-    /// cross-user sessions follow the same rule.
+    /// cross-user sessions follow the same rule, except that cross-user
+    /// sends the grace in whole seconds, truncated: a grace under one
+    /// second kills at once without the notify signal.
     ///
     /// `mark_action_failed: true` reports a cancelled action as
     /// Failed rather than Canceled in the final `ActionResult`. This

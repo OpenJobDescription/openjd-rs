@@ -3389,7 +3389,10 @@ mod cancel_escalation {
         (s, writer_path)
     }
 
-    /// With no time_limit, the default notify period is 5s.
+    /// No action is running, so no cancel method is recorded: with no
+    /// time_limit the command falls back to the 5s default notify period.
+    /// (A running action's command follows its own method; see the
+    /// `handle_cancel_*` tests below.)
     #[tokio::test(flavor = "multi_thread")]
     async fn default_grace_sends_notify_then_terminate() {
         let tmp = TempDir::new().unwrap();
@@ -3417,7 +3420,7 @@ mod cancel_escalation {
         );
     }
 
-    /// Custom grace (8s) — e.g. set via a job template's cancelation timeout.
+    /// No cancel method recorded: an 8s time_limit is used as the grace.
     #[tokio::test(flavor = "multi_thread")]
     async fn custom_grace_8s_sends_correct_notify_period() {
         let tmp = TempDir::new().unwrap();
@@ -3727,6 +3730,163 @@ mod cancel_escalation {
         let msgs = read_cancel_messages(&writer_path);
         assert_eq!(msgs.len(), 1, "{msgs:?}");
         assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "TERMINATE");
+    }
+
+    /// `cancelation` declaring NOTIFY_THEN_TERMINATE, with `secs` as the
+    /// notify period or no period.
+    fn ntt_cancelation(secs: Option<u64>) -> Option<CancelationMode> {
+        Some(CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds: secs.map(|n| fs(&n.to_string())),
+        })
+    }
+
+    fn sleep_action(cancelation: Option<CancelationMode>) -> Action {
+        let mut a = action("sh", vec!["-c", "sleep 30"]);
+        a.cancelation = cancelation;
+        a
+    }
+
+    fn env(
+        name: &str,
+        on_enter: Option<Action>,
+        on_wrap_env_enter: Option<Action>,
+        on_exit: Option<Action>,
+    ) -> Environment {
+        Environment {
+            name: name.into(),
+            description: None,
+            script: Some(EnvironmentScript {
+                let_bindings: None,
+                actions: EnvironmentActions {
+                    on_enter,
+                    on_wrap_env_enter,
+                    on_wrap_task_run: None,
+                    on_wrap_env_exit: None,
+                    on_exit,
+                },
+                embedded_files: None,
+            }),
+            variables: None,
+            resolved_symtab: None,
+        }
+    }
+
+    /// A session with an injected cancel pipe, and a handle that cancels
+    /// whatever runs 200 ms after `arm` is called.
+    fn session_and_pipe(tmp: &TempDir) -> (Session, std::path::PathBuf) {
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        let writer_path = tmp.path().join("cancel_writer.log");
+        let writer = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&writer_path)
+            .unwrap();
+        s.set_cancel_writer_for_test(writer);
+        (s, writer_path)
+    }
+
+    fn arm(s: &Session, time_limit: Option<Duration>) {
+        let handle = s.cancel_handle();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            assert!(handle.cancel(time_limit, false), "nothing was running");
+        });
+    }
+
+    /// Cancel `env`'s onEnter through the handle and return the command.
+    async fn env_enter_cancel_command(
+        s: &mut Session,
+        path: &std::path::Path,
+        env: &Environment,
+    ) -> serde_json::Value {
+        arm(s, None);
+        let _ = s.enter_environment(env, None, None, None).await;
+        let msgs = read_cancel_messages(path);
+        assert_eq!(msgs.len(), 1, "{msgs:?}");
+        msgs[0].clone()
+    }
+
+    fn assert_command(msg: &serde_json::Value, expected: Option<u64>) {
+        match expected {
+            None => assert_eq!(msg["cancel"].as_str().unwrap(), "TERMINATE", "{msg}"),
+            Some(n) => {
+                assert_eq!(
+                    msg["cancel"].as_str().unwrap(),
+                    "NOTIFY_THEN_TERMINATE",
+                    "{msg}"
+                );
+                assert_eq!(msg["notifyPeriodInSeconds"].as_u64().unwrap(), n, "{msg}");
+            }
+        }
+    }
+
+    /// onEnter records its own method: TERMINATE when it declares none,
+    /// and the environment default of 30 s for NOTIFY_THEN_TERMINATE with
+    /// no period.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_enter_follows_its_cancel_method() {
+        for (cancelation, expected) in [(None, None), (ntt_cancelation(None), Some(30))] {
+            let tmp = TempDir::new().unwrap();
+            let (mut s, path) = session_and_pipe(&tmp);
+            let e = env("E", Some(sleep_action(cancelation)), None, None);
+            let msg = env_enter_cancel_command(&mut s, &path, &e).await;
+            assert_command(&msg, expected);
+        }
+    }
+
+    /// onExit records its own method, as onEnter does.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_exit_follows_its_cancel_method() {
+        for (cancelation, expected) in [(None, None), (ntt_cancelation(None), Some(30))] {
+            let tmp = TempDir::new().unwrap();
+            let (mut s, path) = session_and_pipe(&tmp);
+            let e = env("E", None, None, Some(sleep_action(cancelation)));
+            let id = s.enter_environment(&e, None, None, None).await.unwrap();
+            arm(&s, None);
+            let _ = s.exit_environment(&id, None, true, None).await;
+            let msgs = read_cancel_messages(&path);
+            assert_eq!(msgs.len(), 1, "{msgs:?}");
+            assert_command(&msgs[0], expected);
+        }
+    }
+
+    /// A task that declares NOTIFY_THEN_TERMINATE with no period records
+    /// the task default of 120 s.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_task_without_notify_period_uses_task_default() {
+        let script = StepScript {
+            let_bindings: None,
+            actions: StepActions {
+                on_run: sleep_action(ntt_cancelation(None)),
+            },
+            embedded_files: None,
+        };
+        let msgs = run_and_handle_cancel(&script, None).await;
+        assert_eq!(msgs.len(), 1);
+        assert_command(&msgs[0], Some(120));
+    }
+
+    /// When a wrap environment's onWrapEnvEnter replaces an inner onEnter,
+    /// the method recorded is the wrap action's, not the inner action's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_wrapped_enter_follows_the_wrap_action() {
+        for (wrap_cancel, inner_cancel, expected) in [
+            (ntt_cancelation(Some(7)), None, Some(7)),
+            (None, ntt_cancelation(Some(7)), None),
+        ] {
+            let tmp = TempDir::new().unwrap();
+            let (mut s, path) = session_and_pipe(&tmp);
+            let outer = env(
+                "Outer",
+                Some(action("true", vec![])),
+                Some(sleep_action(wrap_cancel)),
+                None,
+            );
+            s.enter_environment(&outer, None, None, None).await.unwrap();
+            let inner = env("Inner", Some(sleep_action(inner_cancel)), None, None);
+            let msg = env_enter_cancel_command(&mut s, &path, &inner).await;
+            assert_command(&msg, expected);
+        }
     }
 
     /// A time_limit under one second truncates to zero whole seconds on the

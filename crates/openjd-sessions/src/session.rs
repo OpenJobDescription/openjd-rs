@@ -293,11 +293,13 @@ struct CancelShared {
     /// Channel to send cancel requests (with optional time limit) to the subprocess.
     request_tx: Option<tokio::sync::watch::Sender<Option<Duration>>>,
     /// The running action's cancel method, resolved by
-    /// [`crate::runner::cancel_method_for_action`] exactly as the runner
-    /// resolves it, and recorded once the effective action is known so a
-    /// helper-pipe cancel command follows the same method the same-user
-    /// path applies (see `subprocess.rs`). `None` until it is recorded, or
-    /// when resolution failed (the runner then fails the action itself).
+    /// [`crate::runner::cancel_method_for_action`] and recorded once the
+    /// effective action is known, so a helper-pipe cancel command follows
+    /// the method the same-user path applies (see `subprocess.rs`). It is
+    /// resolved against the action's symbol table before the script's `let`
+    /// bindings, while the runner resolves after them; the two agree for
+    /// any cancelation a template can declare (template scope only).
+    /// `None` until it is recorded, or when resolution failed.
     cancel_method: Option<crate::runner::CancelMethod>,
     /// When true, a Canceled action result is reported as Failed.
     mark_failed: bool,
@@ -446,11 +448,12 @@ impl SessionCancelHandle {
 ///
 /// `cancel_method` is `None` when no method is recorded yet: the cancel
 /// landed after `set_action` but before the effective action was resolved,
-/// or resolution failed. That case keeps the behaviour it had before the
+/// or resolution failed. That case keeps the command it had before the
 /// shared builder: `NOTIFY_THEN_TERMINATE` with the `time_limit` as the
-/// grace, or [`DEFAULT_CANCEL_NOTIFY_PERIOD_SECS`] without one, and
-/// `TERMINATE` for a zero `time_limit`. The method isn't known, so there is
-/// no same-user answer to match.
+/// grace, or [`DEFAULT_CANCEL_NOTIFY_PERIOD_SECS`] without one. The one
+/// change is that a `time_limit` under one second now gives `TERMINATE`
+/// (it used to give `NOTIFY_THEN_TERMINATE` with 0 seconds). The method
+/// isn't known, so there is no same-user answer to match.
 fn send_helper_cancel_command(
     mut writer: &std::fs::File,
     auth_token: Option<&str>,
@@ -1075,8 +1078,11 @@ impl Session {
     /// A `TERMINATE` action (including one that declares no cancelation)
     /// is killed at once, whatever `time_limit` is. A `NOTIFY_THEN_TERMINATE`
     /// action is notified and killed after its declared grace, capped at
-    /// `time_limit`; `Some(Duration::ZERO)` kills it at once.
-    /// `mark_action_failed` reports the canceled action as Failed.
+    /// `time_limit`; `Some(Duration::ZERO)` kills it at once. On a
+    /// cross-user session the grace is sent to the helper in whole seconds,
+    /// truncated, so a grace under one second kills at once without the
+    /// notify signal. `mark_action_failed` reports the canceled action as
+    /// Failed.
     pub fn cancel_action(
         &mut self,
         time_limit: Option<Duration>,
@@ -4594,8 +4600,8 @@ mod helper_cancel_command_tests {
     }
 
     /// With no method recorded yet, the command keeps its earlier form:
-    /// the time limit as the grace, the 5 s default without one, and
-    /// TERMINATE for a zero limit.
+    /// the time limit as the grace, and the 5 s default without one. A
+    /// limit under one second (zero included) gives TERMINATE.
     #[test]
     fn cancel_action_without_recorded_method_keeps_the_legacy_command() {
         for (limit, expected) in [
@@ -4610,6 +4616,16 @@ mod helper_cancel_command_tests {
                 format!(
                     r#"{{"token":"{TOKEN}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":60}}"#
                 ),
+            ),
+            (
+                Some(Duration::from_millis(1500)),
+                format!(
+                    r#"{{"token":"{TOKEN}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":1}}"#
+                ),
+            ),
+            (
+                Some(Duration::from_millis(500)),
+                format!(r#"{{"token":"{TOKEN}","cancel":"TERMINATE"}}"#),
             ),
             (
                 Some(Duration::ZERO),
