@@ -99,10 +99,10 @@ calling subprocess primitives directly.
 ## Constants
 
 ```rust
-/// Notify period a cross-user cancel command uses when the running
-/// action's cancel method isn't known yet and the caller gave no
-/// `time_limit` (see embedded-cross-user-helper.md § Choosing the cancel
-/// command). Not the default grace of an action: that is 120 s for
+/// Notify period a cross-user cancel command uses after the helper has
+/// the action's Run command, when the action's cancel method failed to
+/// resolve and the caller gave no `time_limit` (see
+/// embedded-cross-user-helper.md § Choosing the cancel command). Not the default grace of an action: that is 120 s for
 /// `onRun` and 30 s for environment actions (runners.md).
 pub const session::DEFAULT_CANCEL_NOTIFY_PERIOD_SECS: u64 = 5;
 ```
@@ -378,6 +378,8 @@ impl Session {
     /// cancellation and right before its Run command goes to the
     /// cross-user helper, so a test can cancel in that window.
     pub fn set_before_helper_run_hook_for_test(&mut self, hook: Arc<dyn Fn() + Send + Sync>);
+    /// Makes each later cross-user runner's dup of the cancel pipe fail.
+    pub fn fail_runner_cancel_writer_for_test(&mut self);
     pub fn clone_cancel_writer(&self) -> Option<std::fs::File>;
 }
 ```

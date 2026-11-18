@@ -1085,6 +1085,39 @@ mod run_gate_tests {
         assert_eq!(*log.borrow(), ["run", "held cancel None"]);
     }
 
+    /// The lock is held across the held-cancel write, so a cancel that
+    /// arrives after Run is written after the held one, not before it
+    /// (which would leave the older time limit last).
+    #[test]
+    fn a_cancel_during_the_held_write_waits_for_it() {
+        use std::sync::{Arc, Barrier, Mutex};
+        let gate = Arc::new(HelperRunGate::new());
+        let log = Arc::new(Mutex::new(Vec::<String>::new()));
+        gate.deliver_cancel(Some(Duration::from_secs(3)), || panic!("before Run"));
+        let in_write = Arc::new(Barrier::new(2));
+        let canceller = {
+            let (gate, log, in_write) = (gate.clone(), log.clone(), in_write.clone());
+            std::thread::spawn(move || {
+                in_write.wait();
+                gate.deliver_cancel(None, || log.lock().unwrap().push("later cancel".into()));
+            })
+        };
+        gate.start_run::<(), ()>(
+            &mut (),
+            |_| Ok(()),
+            |_, _| {
+                in_write.wait();
+                // Give the canceller time to try; it must block on the lock.
+                std::thread::sleep(Duration::from_millis(100));
+                log.lock().unwrap().push("held cancel".into());
+                Ok(())
+            },
+        )
+        .unwrap();
+        canceller.join().unwrap();
+        assert_eq!(*log.lock().unwrap(), ["held cancel", "later cancel"]);
+    }
+
     #[test]
     fn hook_runs_before_run_without_the_lock() {
         let gate = std::sync::Arc::new(std::sync::OnceLock::<HelperRunGate>::new());
@@ -1100,6 +1133,49 @@ mod run_gate_tests {
         let log = RefCell::new(Vec::new());
         run(gate.get().unwrap(), &log);
         assert_eq!(*log.borrow(), ["run", "held cancel None"]);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod write_helper_cancel_tests {
+    /// Concurrent `write_helper_cancel` calls (the run loop's timeout or
+    /// token branch racing a handle) never mix their lines.
+    #[test]
+    fn concurrent_lines_stay_whole() {
+        use std::io::BufRead;
+        use std::time::Duration;
+        let (reader, writer) = std::io::pipe().unwrap();
+        let writer = std::fs::File::from(std::os::fd::OwnedFd::from(writer));
+        const N: usize = 5000;
+        let writers: Vec<_> = (0..2u64)
+            .map(|i| {
+                let w = writer.try_clone().unwrap();
+                std::thread::spawn(move || {
+                    let method = crate::runner::CancelMethod::NotifyThenTerminate {
+                        terminate_delay: Duration::from_secs(10 + i),
+                    };
+                    for _ in 0..N {
+                        super::write_helper_cancel(&w, "AbCdEfGhIjKlMnOpQrStUv", &method).unwrap();
+                    }
+                })
+            })
+            .collect();
+        drop(writer);
+        let lines = std::thread::spawn(move || {
+            std::io::BufReader::new(reader)
+                .lines()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>()
+        });
+        for w in writers {
+            w.join().unwrap();
+        }
+        let lines = lines.join().unwrap();
+        assert_eq!(lines.len(), 2 * N);
+        for line in &lines {
+            serde_json::from_str::<crate::helper_protocol::Command>(line)
+                .unwrap_or_else(|e| panic!("mixed cancel line {line:?}: {e}"));
+        }
     }
 }
 

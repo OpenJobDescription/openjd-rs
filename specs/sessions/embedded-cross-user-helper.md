@@ -489,7 +489,8 @@ Every cancel command the session writes comes from one builder,
 `cross_user_helper::helper_cancel_line(token, method, time_limit)`.
 `cancel_action` and `SessionCancelHandle::cancel` call it with the caller's
 `time_limit`; `run_via_helper`'s timeout and bare-token branches call it with
-no `time_limit`. It picks the wire method the way the same-user loop picks its
+no `time_limit`; and `run_via_helper` calls it for a cancel held before Run
+with that cancel's `time_limit` (see [Cancel before Run](#cancel-before-run)). It picks the wire method the way the same-user loop picks its
 signal (`subprocess.rs`):
 
 | Action's cancel method | Command |
@@ -536,7 +537,8 @@ under one lock:
   value.
 - `run_via_helper` calls `HelperRunGate::start_run`, which writes Run and
   then the held cancel, if any, before it releases the lock. That command is
-  `helper_cancel_line(token, config.cancel_method, time_limit)`, the
+  `helper_cancel_line(None, config.cancel_method, time_limit)` (`send_command`
+  adds the token), the
   runner's method with the held `time_limit`, which is what the same-user
   loop applies. It goes through the helper's own stdin (`send_command`), so
   it is written even when the runner's dup of the cancel pipe failed. If
@@ -594,17 +596,18 @@ the helper built from the action's configured cancel method and no
 [Choosing the cancel command](#choosing-the-cancel-command)): `TERMINATE` for a `TERMINATE` action, `NOTIFY_THEN_TERMINATE`
 with the declared grace period otherwise, which is what the same-user loop
 applies for a token cancel. The exit is classified `Timeout` if the timeout
-fired, otherwise `Canceled` when the watch channel fired **or** the token is
-cancelled.
+fired, otherwise `Canceled` when the watch channel fired, the token is
+cancelled, **or** a cancel held before Run was written.
 
 `run_via_helper` itself sends at most one cancel command per action, whichever
 of the timeout, a bare token cancel and a cancel held before Run comes first. As in the same-user loop,
 the timeout branch is disabled once a cancel has been delivered, so a cancel
 whose grace period outlasts the timeout still ends `Canceled`, and a later
 token cancel doesn't follow a timeout with a second command (which would reset
-the helper's escalation deadline). `cancel_action` / `SessionCancelHandle`
-always write their own command, so a later handle cancel can still shorten or
-reset the helper's deadline.
+the helper's escalation deadline). Once Run is written, `cancel_action` /
+`SessionCancelHandle` always write their own command, so a later handle cancel
+can still shorten or reset the helper's deadline; before Run the gate keeps only
+the latest one.
 
 `cancel_action` / `SessionCancelHandle` fire the watch channel and write the
 pipe command (or have the run gate hold it) before canceling the token, so the token branch
@@ -690,7 +693,16 @@ async fn run_via_helper(
     cancel_token: &CancellationToken,
 ) -> Result<SubprocessResult, SessionError> {
     // Run, then any cancel held for it (see "Cancel before Run").
-    run_gate.start_run(helper, |h| h.send_command(&cmd), |h, limit| send_held_cancel(h, limit))?;
+    match run_gate {
+        Some(gate) => gate.start_run(
+            helper,
+            |h| h.send_command(&cmd),
+            // helper_cancel_line(None, &config.cancel_method, limit), sent
+            // with h.send_command; a failure is logged, not returned.
+            |h, limit| { /* ... */ Ok(()) },
+        )?,
+        None => helper.send_command(&cmd)?,
+    }
 
     let timeout_fut = match config.timeout {
         Some(d) => tokio::time::sleep(d).boxed(),

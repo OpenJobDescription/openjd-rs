@@ -46,9 +46,10 @@ use crate::cross_user_helper::run_via_helper;
 use crate::embedded_files::{EmbeddedFiles, EmbeddedFilesScope};
 
 /// Notify period (in seconds) of the cross-user helper cancel command that
-/// [`Session::cancel_action`] or [`SessionCancelHandle::cancel`] sends when
-/// the running action's cancel method isn't recorded yet and no
-/// `time_limit` is given. An action's own default grace comes from its
+/// [`Session::cancel_action`] or [`SessionCancelHandle::cancel`] sends after
+/// the helper has the action's Run command, when the action's cancel method
+/// failed to resolve and no `time_limit` is given. A cancel before Run uses
+/// the runner's resolved method instead. An action's own default grace comes from its
 /// runner (120 s for `onRun`, 30 s for environment actions), not from this.
 pub const DEFAULT_CANCEL_NOTIFY_PERIOD_SECS: u64 = 5;
 
@@ -489,7 +490,8 @@ impl SessionCancelHandle {
 /// now.
 ///
 /// With no `writer` (a same-user session, or a handle whose dup of the pipe
-/// failed) nothing is written, but a cancel before Run is still held.
+/// failed) nothing is written. On a session with a helper a cancel before
+/// Run is still held, so the run loop writes it.
 fn deliver_helper_cancel(
     shared: &CancelShared,
     writer: Option<&std::fs::File>,
@@ -1262,8 +1264,8 @@ impl Session {
                 &self.session_id,
                 LogContent::PROCESS_CONTROL,
                 "Failed to duplicate the cross-user cancel pipe for a cancel \
-                 handle; cancels via this handle will not reach helper-run \
-                 processes"
+                 handle; a cancel via this handle after a helper-run process \
+                 has started will not reach it"
             );
         }
         SessionCancelHandle {
@@ -4929,5 +4931,56 @@ mod helper_cancel_command_tests {
             assert!(buf.ends_with(line.as_bytes()), "handle={via_handle}");
             let _ = watch.borrow_and_update();
         }
+    }
+    /// Two threads writing cancel commands to one pipe at once never mix
+    /// their lines: each is one write, under PIPE_BUF. The helper's runner
+    /// skips a line it can't parse, so a mixed line would lose both cancels.
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_cancel_lines_stay_whole() {
+        use std::io::BufRead;
+        let (reader, writer) = std::io::pipe().unwrap();
+        let writer = std::fs::File::from(std::os::fd::OwnedFd::from(writer));
+        const N: usize = 5000;
+        let writers: Vec<_> = (0..2u64)
+            .map(|i| {
+                let w = writer.try_clone().unwrap();
+                std::thread::spawn(move || {
+                    let method = CancelMethod::NotifyThenTerminate {
+                        terminate_delay: Duration::from_secs(10 + i),
+                    };
+                    for _ in 0..N {
+                        send_helper_cancel_command(&w, Some(TOKEN), None, Some(&method));
+                    }
+                })
+            })
+            .collect();
+        drop(writer);
+        let lines = std::thread::spawn(move || {
+            std::io::BufReader::new(reader)
+                .lines()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>()
+        });
+        for w in writers {
+            w.join().unwrap();
+        }
+        let lines = lines.join().unwrap();
+        assert_eq!(lines.len(), 2 * N);
+        for line in &lines {
+            serde_json::from_str::<crate::helper_protocol::Command>(line)
+                .unwrap_or_else(|e| panic!("mixed cancel line {line:?}: {e}"));
+        }
+    }
+
+    /// The runner's dup of the cancel pipe goes through
+    /// `runner_cancel_writer`, and the test seam makes it fail.
+    #[test]
+    fn runner_cancel_writer_honours_the_test_seam() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let (mut s, _path) = session(&tmp, None);
+        assert!(s.runner_cancel_writer().is_some());
+        s.fail_runner_cancel_writer_for_test();
+        assert!(s.runner_cancel_writer().is_none());
     }
 }

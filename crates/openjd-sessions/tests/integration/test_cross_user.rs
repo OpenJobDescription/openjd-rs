@@ -1222,9 +1222,9 @@ async fn test_cross_user_cancel_before_run_leaves_helper_ready_for_next_action()
 }
 
 /// If a runner's dup of the cancel pipe fails, a cancel before Run still
-/// reaches the action (the held cancel goes through the helper's own
-/// stdin), and so does a handle cancel after Run (the handle has its own
-/// dup).
+/// reaches a task, onEnter and onExit (the held cancel goes through the
+/// helper's own stdin), and so does a handle cancel after Run (the handle
+/// has its own dup).
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_cancel_without_runner_cancel_pipe() {
@@ -1242,6 +1242,69 @@ async fn test_cross_user_cancel_without_runner_cancel_pipe() {
     assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
     assert!(!r.stdout.contains("FINISHED"), "stdout: {}", r.stdout);
     assert!(elapsed < Duration::from_secs(3), "took {elapsed:?}");
+    session.cleanup();
+
+    // onEnter and onExit, before Run.
+    let env = |on_enter: bool| {
+        use openjd_expr::format_string::FormatString;
+        use openjd_model::job::{Action, Environment, EnvironmentActions, EnvironmentScript};
+        let action = || Action {
+            command: FormatString::new("bash").unwrap(),
+            args: Some(vec![
+                FormatString::new("-c").unwrap(),
+                FormatString::new("sleep 6; echo FINISHED").unwrap(),
+            ]),
+            timeout: None,
+            cancelation: None,
+        };
+        Environment {
+            name: "Env".into(),
+            description: None,
+            variables: None,
+            resolved_symtab: None,
+            script: Some(EnvironmentScript {
+                let_bindings: None,
+                embedded_files: None,
+                actions: EnvironmentActions {
+                    on_enter: on_enter.then(action),
+                    on_wrap_env_enter: None,
+                    on_wrap_task_run: None,
+                    on_wrap_env_exit: None,
+                    on_exit: (!on_enter).then(action),
+                },
+            }),
+        }
+    };
+    let mut session = make_session(require_target_user());
+    session.fail_runner_cancel_writer_for_test();
+    let delivered = cancel_before_run_once(&mut session, None);
+    let started = std::time::Instant::now();
+    let _ = session
+        .enter_environment(&env(true), None, None, None)
+        .await;
+    assert!(delivered.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(
+        session.action_status().map(|a| a.state),
+        Some(ActionState::Canceled)
+    );
+    assert!(started.elapsed() < Duration::from_secs(3), "onEnter");
+    session.cleanup();
+
+    let mut session = make_session(require_target_user());
+    session.fail_runner_cancel_writer_for_test();
+    let id = session
+        .enter_environment(&env(false), None, None, None)
+        .await
+        .unwrap();
+    let delivered = cancel_before_run_once(&mut session, None);
+    let started = std::time::Instant::now();
+    let _ = session.exit_environment(&id, None, false, None).await;
+    assert!(delivered.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(
+        session.action_status().map(|a| a.state),
+        Some(ActionState::Canceled)
+    );
+    assert!(started.elapsed() < Duration::from_secs(3), "onExit");
     session.cleanup();
 
     // After Run.
