@@ -220,7 +220,8 @@ so ruff still decodes every escape, including a backslash before the line break 
 continuation, or kept in a raw string). The expression's source isn't rewritten, so
 every AST offset and caret still points into the text as written. A CR from an escape
 (`'\r'`, `'\x0d'`, `'\15'`) isn't in the source, so it stays. A line break in a
-single-quoted string is ruff's "missing closing quote" error, as CPython rejects it.
+short (not triple-quoted) string is ruff's "missing closing quote" error, as
+CPython rejects it.
 
 ## Depth Limit
 

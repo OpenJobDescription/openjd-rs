@@ -897,8 +897,9 @@ fn normalize_string_line_breaks(expr: &mut ast::Expr, source: &str) -> Result<()
             let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
             // The part already lexed as a string literal, and making each
             // line break LF can't end it early or start an escape, so this
-            // parse doesn't fail. If it did, the value would be wrong, so
-            // report it rather than keep the CR.
+            // parse doesn't fail, and no test can reach the error below. It
+            // stays as a guard: if the parse did fail, keeping the CR would
+            // give a wrong value without saying so.
             match ruff_python_parser::parse_expression(&normalized).map(|p| p.into_expr()) {
                 Ok(ast::Expr::StringLiteral(s)) if !s.value.is_implicit_concatenated() => {
                     Ok(Some(s.value.to_str().into()))

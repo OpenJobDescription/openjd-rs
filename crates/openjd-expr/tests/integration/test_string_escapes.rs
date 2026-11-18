@@ -226,18 +226,26 @@ fn backslash_before_each_line_break() {
 /// CPython ends a short string at a line break, so a literal LF, CR LF or
 /// CR in one, raw or not, is a syntax error. CPython says "unterminated
 /// string literal" and ruff says "missing closing quote in string literal".
+/// The caret display splits lines at LF only, so it shows a CR LF line with
+/// its CR, and a lone CR inside the line it is on.
 #[test]
 fn literal_line_break_in_a_short_string_is_an_error() {
     for (name, br) in LINE_BREAKS {
-        for expr in [
-            format!("'ab{br}cd'"),
-            format!("\"ab{br}cd\""),
-            format!("r'ab{br}cd'"),
-        ] {
-            let e = err(&expr);
-            assert!(
-                e.starts_with("Syntax error: missing closing quote in string literal"),
-                "{name} in {expr:?}: {e}"
+        for (open, close) in [("'", "'"), ("\"", "\""), ("r'", "'")] {
+            let expr = format!("{open}ab{br}cd{close}");
+            let token = format!("{open}ab");
+            let line = match br {
+                "\n" => token.clone(),
+                "\r\n" => format!("{token}\r"),
+                _ => expr.clone(),
+            };
+            let caret = format!("^{}", "~".repeat(token.len() - 1));
+            assert_eq!(
+                err(&expr),
+                format!(
+                    "Syntax error: missing closing quote in string literal\n  {line}\n  {caret}"
+                ),
+                "{name} in {expr:?}"
             );
         }
     }
@@ -272,9 +280,14 @@ fn line_breaks_inside_larger_expressions() {
 /// offending text: no offset moves, because the source isn't rewritten.
 #[test]
 fn error_caret_after_a_string_with_a_line_break() {
-    let e = err("'''a\rb''' + '\\ud800'");
-    assert!(e.starts_with(SURROGATE_D800), "{e}");
-    assert!(e.ends_with("^~~~~~"), "{e}");
+    assert_err(
+        "'''a\rb''' + '\\ud800'",
+        &[
+            SURROGATE_D800,
+            "  '''a\rb''' + '\\ud800'\n",
+            "               ^~~~~~",
+        ],
+    );
     assert_err(
         "'''a\r\nb''' + '\\ud800'",
         // The caret display shows the line the escape is on.
