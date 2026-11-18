@@ -45,8 +45,11 @@ use crate::action_status::ActionStatus;
 use crate::cross_user_helper::run_via_helper;
 use crate::embedded_files::{EmbeddedFiles, EmbeddedFilesScope};
 
-/// Default notify period (in seconds) for `NOTIFY_THEN_TERMINATE` cancel when
-/// no explicit time_limit is provided. Matches the OpenJD spec default.
+/// Notify period (in seconds) of the cross-user helper cancel command that
+/// [`Session::cancel_action`] or [`SessionCancelHandle::cancel`] sends when
+/// the running action's cancel method isn't recorded yet and no
+/// `time_limit` is given. An action's own default grace comes from its
+/// runner (120 s for `onRun`, 30 s for environment actions), not from this.
 pub const DEFAULT_CANCEL_NOTIFY_PERIOD_SECS: u64 = 5;
 
 /// Maximum characters in a resolved environment variable value (Template
@@ -289,13 +292,13 @@ struct CancelShared {
     token: Option<CancellationToken>,
     /// Channel to send cancel requests (with optional time limit) to the subprocess.
     request_tx: Option<tokio::sync::watch::Sender<Option<Duration>>>,
-    /// The running action's declared NOTIFY_THEN_TERMINATE grace period,
-    /// recorded once the effective action is known so helper-pipe cancel
-    /// delivery can cap the notify period at it — mirroring the same-user
-    /// path, where the runner computes `time_limit.min(terminate_delay)`
-    /// (see `subprocess.rs`). `None` when the action does not declare
-    /// notifyThenTerminate cancelation.
-    terminate_delay: Option<Duration>,
+    /// The running action's cancel method, resolved by
+    /// [`crate::runner::cancel_method_for_action`] exactly as the runner
+    /// resolves it, and recorded once the effective action is known so a
+    /// helper-pipe cancel command follows the same method the same-user
+    /// path applies (see `subprocess.rs`). `None` until it is recorded, or
+    /// when resolution failed (the runner then fails the action itself).
+    cancel_method: Option<crate::runner::CancelMethod>,
     /// When true, a Canceled action result is reported as Failed.
     mark_failed: bool,
 }
@@ -314,7 +317,7 @@ impl CancelFields {
             shared: Arc::new(StdMutex::new(CancelShared {
                 token: None,
                 request_tx: None,
-                terminate_delay: None,
+                cancel_method: None,
                 mark_failed: false,
             })),
             parent_token,
@@ -337,25 +340,25 @@ impl CancelFields {
         let mut shared = self.lock();
         shared.token = Some(token);
         shared.request_tx = Some(request_tx);
-        // The effective action (and hence its declared grace period) is not
-        // known yet at registration time — an RFC 0008 wrap hook may still
+        // The effective action (and hence its cancel method) is not known
+        // yet at registration time — an RFC 0008 wrap hook may still
         // substitute the action. Cleared here; recorded by
-        // `set_terminate_delay` once the action to run is resolved.
-        shared.terminate_delay = None;
+        // `set_cancel_method` once the action to run is resolved.
+        shared.cancel_method = None;
     }
 
-    /// Record the effective action's declared NOTIFY_THEN_TERMINATE grace
-    /// period. Called after `set_action`, once any wrap-hook substitution
-    /// has resolved which action will actually run.
-    fn set_terminate_delay(&self, delay: Option<Duration>) {
-        self.lock().terminate_delay = delay;
+    /// Record the effective action's cancel method. Called after
+    /// `set_action`, once any wrap-hook substitution has resolved which
+    /// action will actually run.
+    fn set_cancel_method(&self, method: Option<crate::runner::CancelMethod>) {
+        self.lock().cancel_method = method;
     }
 
     fn reset(&self) {
         let mut shared = self.lock();
         shared.token = None;
         shared.request_tx = None;
-        shared.terminate_delay = None;
+        shared.cancel_method = None;
         shared.mark_failed = false;
     }
 }
@@ -419,7 +422,7 @@ impl SessionCancelHandle {
                 writer,
                 self.helper_auth_token.as_deref(),
                 time_limit,
-                shared.terminate_delay,
+                shared.cancel_method.as_ref(),
             );
         }
 
@@ -433,73 +436,43 @@ impl SessionCancelHandle {
 
 /// Write a tokenized cancel command to the cross-user helper's cancel pipe.
 /// Shared by [`Session::cancel_action`] and [`SessionCancelHandle::cancel`].
+///
+/// The command comes from [`crate::cross_user_helper::helper_cancel_line`],
+/// the same builder `run_via_helper` uses for a timeout or a bare token
+/// cancel, from the action's recorded cancel method and the caller's
+/// `time_limit`. So a `Terminate` action gets `TERMINATE`, and a
+/// `NotifyThenTerminate` action gets its declared grace capped at
+/// `time_limit`, as on the same-user path (`subprocess.rs`).
+///
+/// `cancel_method` is `None` when no method is recorded yet: the cancel
+/// landed after `set_action` but before the effective action was resolved,
+/// or resolution failed. That case keeps the behaviour it had before the
+/// shared builder: `NOTIFY_THEN_TERMINATE` with the `time_limit` as the
+/// grace, or [`DEFAULT_CANCEL_NOTIFY_PERIOD_SECS`] without one, and
+/// `TERMINATE` for a zero `time_limit`. The method isn't known, so there is
+/// no same-user answer to match.
 fn send_helper_cancel_command(
     mut writer: &std::fs::File,
     auth_token: Option<&str>,
     time_limit: Option<Duration>,
-    terminate_delay: Option<Duration>,
+    cancel_method: Option<&crate::runner::CancelMethod>,
 ) {
     use std::io::Write;
-    // The effective grace bound is the smaller of the caller's time_limit
-    // and the action's declared notifyThenTerminate period — mirroring the
-    // same-user path, where the runner computes
-    // `time_limit.min(terminate_delay)` (see `subprocess.rs`). Absent a
-    // time_limit, the declared period applies on its own; absent both, the
-    // legacy default is used.
-    let effective_limit = match (time_limit, terminate_delay) {
-        (Some(limit), Some(delay)) => Some(limit.min(delay)),
-        (limit, delay) => limit.or(delay),
+    let unknown_method;
+    let method = match cancel_method {
+        Some(method) => method,
+        None => {
+            unknown_method = crate::runner::CancelMethod::NotifyThenTerminate {
+                terminate_delay: time_limit
+                    .unwrap_or(Duration::from_secs(DEFAULT_CANCEL_NOTIFY_PERIOD_SECS)),
+            };
+            &unknown_method
+        }
     };
-    let is_terminate = matches!(effective_limit, Some(d) if d.is_zero());
-    let token_field = match auth_token {
-        Some(t) => format!(r#""token":"{t}","#),
-        None => String::new(),
-    };
-    let cmd = if is_terminate {
-        format!(r#"{{{token_field}"cancel":"TERMINATE"}}"#)
-    } else {
-        let notify_period = effective_limit
-            .unwrap_or(Duration::from_secs(DEFAULT_CANCEL_NOTIFY_PERIOD_SECS))
-            .as_secs();
-        format!(
-            r#"{{{token_field}"cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period}}}"#
-        )
-    };
-    let _ = writer.write_all(cmd.as_bytes());
+    let line = crate::cross_user_helper::helper_cancel_line(auth_token, method, time_limit);
+    let _ = writer.write_all(line.as_bytes());
     let _ = writer.write_all(b"\n");
     let _ = writer.flush();
-}
-
-/// The declared NOTIFY_THEN_TERMINATE grace period of an action, if any.
-///
-/// Derives through [`crate::runner::cancel_method_for_action`] so the value
-/// recorded for helper-pipe cancel delivery is exactly what the runner will
-/// enforce on the same-user path.
-fn declared_terminate_delay(
-    cancelation: &Option<openjd_model::job::CancelationMode>,
-    symtab: &SymbolTable,
-    library: Option<&FunctionLibrary>,
-    limits: &crate::limits::SessionLimits,
-    default_notify_period: Duration,
-) -> Option<Duration> {
-    match crate::runner::cancel_method_for_action(
-        cancelation,
-        symtab,
-        library,
-        limits,
-        default_notify_period,
-    ) {
-        Ok(crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay }) => {
-            Some(terminate_delay)
-        }
-        Ok(crate::runner::CancelMethod::Terminate) => None,
-        // Resolution failures are surfaced authoritatively by the runner's
-        // own cancel_method_for_action call when the action executes; this
-        // value is only an advisory cap for helper-pipe cancel delivery,
-        // so treat a failure as "no declared grace" rather than duplicating
-        // the error path here.
-        Err(_) => None,
-    }
 }
 
 /// Cross-user execution state.
@@ -1096,7 +1069,14 @@ impl Session {
         }
     }
 
-    /// Cancel the currently running async action.
+    /// Cancel the currently running async action, with the action's own
+    /// cancel method on same-user and cross-user sessions alike.
+    ///
+    /// A `TERMINATE` action (including one that declares no cancelation)
+    /// is killed at once, whatever `time_limit` is. A `NOTIFY_THEN_TERMINATE`
+    /// action is notified and killed after its declared grace, capped at
+    /// `time_limit`; `Some(Duration::ZERO)` kills it at once.
+    /// `mark_action_failed` reports the canceled action as Failed.
     pub fn cancel_action(
         &mut self,
         time_limit: Option<Duration>,
@@ -1126,7 +1106,7 @@ impl Session {
                 writer,
                 self.cross_user.helper_auth_token.as_deref(),
                 time_limit,
-                self.cancel.lock().terminate_delay,
+                self.cancel.lock().cancel_method.as_ref(),
             );
         }
 
@@ -1588,20 +1568,23 @@ impl Session {
             }
 
             // The effective action is now resolved (wrap hook or the env's
-            // own onEnter); record its declared cancel grace so helper-pipe
-            // cancel delivery can cap the notify period at it. The default
-            // matches EnvironmentScriptRunner's default_cancel_period.
-            self.cancel.set_terminate_delay(declared_terminate_delay(
-                &wrap_action
-                    .as_ref()
-                    .map(|(_, a)| a)
-                    .unwrap_or(inner_on_enter)
-                    .cancelation,
-                &action_symtab,
-                Some(&lib),
-                &self.limits,
-                Duration::from_secs(30),
-            ));
+            // own onEnter); record its cancel method so a helper-pipe cancel
+            // command follows it. The default matches
+            // EnvironmentScriptRunner's default_cancel_period.
+            self.cancel.set_cancel_method(
+                crate::runner::cancel_method_for_action(
+                    &wrap_action
+                        .as_ref()
+                        .map(|(_, a)| a)
+                        .unwrap_or(inner_on_enter)
+                        .cancelation,
+                    &action_symtab,
+                    Some(&lib),
+                    &self.limits,
+                    Duration::from_secs(30),
+                )
+                .ok(),
+            );
 
             // Box large locals — see run_task for rationale.
             let action_symtab = Box::new(action_symtab);
@@ -1998,19 +1981,22 @@ impl Session {
                 }
             }
 
-            // See the onEnter path: record the effective action's declared
-            // cancel grace once the wrap decision is made.
-            self.cancel.set_terminate_delay(declared_terminate_delay(
-                &wrap_action
-                    .as_ref()
-                    .map(|(_, a)| a)
-                    .unwrap_or(inner_on_exit)
-                    .cancelation,
-                &action_symtab,
-                Some(&lib),
-                &self.limits,
-                Duration::from_secs(30),
-            ));
+            // See the onEnter path: record the effective action's cancel
+            // method once the wrap decision is made.
+            self.cancel.set_cancel_method(
+                crate::runner::cancel_method_for_action(
+                    &wrap_action
+                        .as_ref()
+                        .map(|(_, a)| a)
+                        .unwrap_or(inner_on_exit)
+                        .cancelation,
+                    &action_symtab,
+                    Some(&lib),
+                    &self.limits,
+                    Duration::from_secs(30),
+                )
+                .ok(),
+            );
 
             // Box large locals — see run_task for rationale.
             let action_symtab = Box::new(action_symtab);
@@ -2318,16 +2304,19 @@ impl Session {
         };
 
         // The effective action is now resolved (wrap hook or the step's own
-        // onRun); record its declared cancel grace so helper-pipe cancel
-        // delivery can cap the notify period at it. The default matches
-        // StepScriptRunner's default_cancel_period.
-        self.cancel.set_terminate_delay(declared_terminate_delay(
-            &effective_script.actions.on_run.cancelation,
-            &action_symtab,
-            Some(&lib),
-            &self.limits,
-            Duration::from_secs(120),
-        ));
+        // onRun); record its cancel method so a helper-pipe cancel command
+        // follows it. The default matches StepScriptRunner's
+        // default_cancel_period.
+        self.cancel.set_cancel_method(
+            crate::runner::cancel_method_for_action(
+                &effective_script.actions.on_run.cancelation,
+                &action_symtab,
+                Some(&lib),
+                &self.limits,
+                Duration::from_secs(120),
+            )
+            .ok(),
+        );
 
         // See the note in the onEnter path about Box::pin and the Windows
         // 1 MB thread-stack limit on release builds.
@@ -2421,6 +2410,10 @@ impl Session {
         let cancel_token = self.new_action_cancel_token();
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
         self.cancel.set_action(cancel_token.clone(), cancel_tx);
+        // A bare subprocess has no cancelation field: it is a TERMINATE
+        // action. Record it as the task and environment paths do.
+        let cancel_method = crate::runner::CancelMethod::Terminate;
+        self.cancel.set_cancel_method(Some(cancel_method.clone()));
 
         let config = crate::subprocess::SubprocessConfig {
             args: cmd_args,
@@ -2428,7 +2421,7 @@ impl Session {
             working_dir: Some(self.working_directory.clone()),
             timeout,
             user: self.cross_user.user.clone(),
-            cancel_method: crate::runner::CancelMethod::Terminate,
+            cancel_method,
             cancel_request_rx: Some(cancel_rx),
             debug_collect_stdout: self.debug_collect_stdout,
         };
@@ -2481,6 +2474,11 @@ impl Session {
         let cancel_token = self.new_action_cancel_token();
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
         self.cancel.set_action(cancel_token.clone(), cancel_tx);
+        // A bare subprocess is a TERMINATE action. Recording it makes a
+        // `cancel_action` / `SessionCancelHandle` cancel send the helper
+        // TERMINATE, as the same-user path kills at once.
+        let cancel_method = crate::runner::CancelMethod::Terminate;
+        self.cancel.set_cancel_method(Some(cancel_method.clone()));
 
         let mut filter = crate::action_filter::ActionFilter::new(
             &self.session_id,
@@ -2500,7 +2498,7 @@ impl Session {
             working_dir: Some(self.working_directory.clone()),
             timeout: _timeout,
             user: self.cross_user.user.clone(),
-            cancel_method: crate::runner::CancelMethod::Terminate,
+            cancel_method,
             cancel_request_rx: Some(cancel_rx),
             debug_collect_stdout: self.debug_collect_stdout,
         };
@@ -4482,6 +4480,150 @@ mod stored_state_tests {
                 assert_eq!(s.state, stored, "{what}");
                 assert_eq!(s.ending_only, flag_after, "{what}");
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod helper_cancel_command_tests {
+    //! `cancel_action` and `SessionCancelHandle::cancel` write the same
+    //! helper cancel command as `run_via_helper`'s timeout and bare-token
+    //! branches, all through `cross_user_helper::helper_cancel_line`, from
+    //! the action's recorded cancel method.
+    use super::*;
+    use crate::cross_user_helper::helper_cancel_line;
+    use crate::runner::CancelMethod;
+    use std::io::Read;
+
+    const TOKEN: &str = "AbCdEfGhIjKlMnOpQrStUv";
+
+    /// A Running session with an injected cancel pipe (a file), the helper
+    /// token, a registered action and, if given, its recorded method.
+    fn session(
+        tmp: &tempfile::TempDir,
+        method: Option<CancelMethod>,
+    ) -> (Session, std::path::PathBuf) {
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        let path = tmp.path().join("cancel_writer.log");
+        let writer = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
+        s.set_cancel_writer_for_test(writer);
+        s.set_helper_auth_token_for_test(TOKEN.into());
+        s.set_state_for_test(SessionState::Running);
+        let (tx, _rx) = tokio::sync::watch::channel(None);
+        s.cancel.set_action(CancellationToken::new(), tx);
+        s.cancel.set_cancel_method(method);
+        (s, path)
+    }
+
+    fn written(path: &std::path::Path) -> String {
+        let mut buf = String::new();
+        std::fs::File::open(path)
+            .unwrap()
+            .read_to_string(&mut buf)
+            .unwrap();
+        buf
+    }
+
+    fn methods() -> Vec<CancelMethod> {
+        vec![
+            CancelMethod::Terminate,
+            CancelMethod::NotifyThenTerminate {
+                terminate_delay: Duration::from_millis(500),
+            },
+            CancelMethod::NotifyThenTerminate {
+                terminate_delay: Duration::from_secs(10),
+            },
+        ]
+    }
+
+    fn limits() -> Vec<Option<Duration>> {
+        vec![
+            None,
+            Some(Duration::ZERO),
+            Some(Duration::from_secs(3)),
+            Some(Duration::from_secs(60)),
+        ]
+    }
+
+    /// For each method and time limit, `cancel_action` and the handle write
+    /// exactly `helper_cancel_line(token, method, time_limit)`. With no time
+    /// limit that is also what `write_helper_cancel` sends for a timeout or
+    /// a bare token cancel, so one action gets one command.
+    #[test]
+    fn cancel_action_and_handle_write_the_shared_builder_line() {
+        for method in methods() {
+            for limit in limits() {
+                let expected = format!("{}\n", helper_cancel_line(Some(TOKEN), &method, limit));
+
+                let tmp = tempfile::TempDir::new().unwrap();
+                let (mut s, path) = session(&tmp, Some(method.clone()));
+                s.cancel_action(limit, false).unwrap();
+                assert_eq!(
+                    written(&path),
+                    expected,
+                    "cancel_action: {method} with time_limit {limit:?}"
+                );
+
+                let tmp = tempfile::TempDir::new().unwrap();
+                let (s, path) = session(&tmp, Some(method.clone()));
+                assert!(s.cancel_handle().cancel(limit, false));
+                assert_eq!(
+                    written(&path),
+                    expected,
+                    "handle: {method} with time_limit {limit:?}"
+                );
+            }
+        }
+    }
+
+    /// A TERMINATE action cancelled with no time limit gets
+    /// TERMINATE, not NOTIFY_THEN_TERMINATE with the 5 s default.
+    #[test]
+    fn cancel_action_on_terminate_action_writes_terminate() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let (mut s, path) = session(&tmp, Some(CancelMethod::Terminate));
+        s.cancel_action(None, false).unwrap();
+        assert_eq!(
+            written(&path),
+            format!("{{\"token\":\"{TOKEN}\",\"cancel\":\"TERMINATE\"}}\n")
+        );
+    }
+
+    /// With no method recorded yet, the command keeps its earlier form:
+    /// the time limit as the grace, the 5 s default without one, and
+    /// TERMINATE for a zero limit.
+    #[test]
+    fn cancel_action_without_recorded_method_keeps_the_legacy_command() {
+        for (limit, expected) in [
+            (
+                None,
+                format!(
+                    r#"{{"token":"{TOKEN}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{DEFAULT_CANCEL_NOTIFY_PERIOD_SECS}}}"#
+                ),
+            ),
+            (
+                Some(Duration::from_secs(60)),
+                format!(
+                    r#"{{"token":"{TOKEN}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":60}}"#
+                ),
+            ),
+            (
+                Some(Duration::ZERO),
+                format!(r#"{{"token":"{TOKEN}","cancel":"TERMINATE"}}"#),
+            ),
+        ] {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let (mut s, path) = session(&tmp, None);
+            s.cancel_action(limit, false).unwrap();
+            assert_eq!(
+                written(&path),
+                format!("{expected}\n"),
+                "time_limit {limit:?}"
+            );
         }
     }
 }

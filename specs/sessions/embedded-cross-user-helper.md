@@ -464,13 +464,12 @@ let raw_fd = child_stdin.as_raw_fd();
 let dup_fd = nix::unistd::dup(raw_fd)?;
 let cancel_writer = File::from_raw_fd(dup_fd);
 
-// In Session::cancel_action (token is the helper's 22-char auth_token):
-if let Some(ref mut writer) = self.cancel_writer {
-    writeln!(
-        writer,
-        r#"{{"token":"{token}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":5}}"#,
-        token = self.helper_auth_token,
-    )?;
+// In Session::cancel_action (token is the helper's 22-char auth_token;
+// method is the action's recorded cancel method):
+if let Some(ref writer) = self.cancel_writer {
+    let line = helper_cancel_line(token, method, time_limit);
+    writer.write_all(line.as_bytes())?;
+    writer.write_all(b"\n")?;
     writer.flush()?;
 }
 ```
@@ -480,6 +479,39 @@ cancel path doesn't depend on the helper struct (which may be moved into
 a runner). The token is copied once at helper spawn and never mutated.
 Because the alphabet excludes `"` and `\`, the token can be embedded
 verbatim in the JSON literal — no escaping required.
+
+### Choosing the cancel command
+
+Every cancel command the session writes comes from one builder,
+`cross_user_helper::helper_cancel_line(token, method, time_limit)`.
+`cancel_action` and `SessionCancelHandle::cancel` call it with the caller's
+`time_limit`; `run_via_helper`'s timeout and bare-token branches call it with
+no `time_limit`. It picks the wire method the way the same-user loop picks its
+signal (`subprocess.rs`):
+
+| Action's cancel method | Command |
+|---|---|
+| `Terminate` (including an action that declares no cancelation, and `run_subprocess`) | `TERMINATE`, whatever the `time_limit` |
+| `NotifyThenTerminate { terminate_delay }` | grace = the smaller of `time_limit` and `terminate_delay` (`terminate_delay` alone without a `time_limit`), truncated to whole seconds; `TERMINATE` if that is 0, else `NOTIFY_THEN_TERMINATE` with that many seconds |
+
+`notifyPeriodInSeconds` is a whole number of seconds, so a grace under one
+second (a sub-second `time_limit`, or `Some(0)`) gives `TERMINATE`: truncating
+never extends the grace past the caller's bound. The same-user loop keeps the
+sub-second grace (it notifies and kills after the exact `Duration`), which the
+wire can't express.
+
+The method is the one `runner::cancel_method_for_action` resolves for the
+action that will run, recorded in the shared cancel state once any wrap hook
+has been applied. Until it is recorded (a cancel that lands between the action
+registering and its method resolving, or a method that failed to resolve, in
+which case the runner fails the action), `cancel_action` and the handle keep
+the earlier command: `NOTIFY_THEN_TERMINATE` with the `time_limit` as the
+grace, or `DEFAULT_CANCEL_NOTIFY_PERIOD_SECS` (5) without one, and `TERMINATE`
+for a zero `time_limit`.
+
+A test-only `#[path]` include of `helper/src/protocol.rs` (as for
+`framer.rs`) parses every command the builder produces with the helper's own
+`Command` deserializer.
 
 ### Timeout
 
@@ -495,8 +527,9 @@ A cross-user action can also be canceled through the session-wide
 `run_via_helper` takes the per-action
 `CancellationToken` and awaits it in a third `select!` branch, mirroring the
 same-user loop. When that branch fires it writes a tokenized cancel command to
-the helper built from the action's configured cancel method, as the timeout
-branch does: `TERMINATE` for a `TERMINATE` action, `NOTIFY_THEN_TERMINATE`
+the helper built from the action's configured cancel method and no
+`time_limit`, as the timeout branch does (see
+[Choosing the cancel command](#choosing-the-cancel-command)): `TERMINATE` for a `TERMINATE` action, `NOTIFY_THEN_TERMINATE`
 with the declared grace period otherwise, which is what the same-user loop
 applies for a token cancel. The exit is classified `Timeout` if the timeout
 fired, otherwise `Canceled` when the watch channel fired **or** the token is

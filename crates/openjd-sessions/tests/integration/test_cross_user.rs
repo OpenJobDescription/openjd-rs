@@ -821,6 +821,191 @@ async fn test_cross_user_cancel_handle_then_timeout_stays_canceled() {
     .await;
 }
 
+// === One cancel method per action, whatever the entry point ===
+
+/// How a cross-user test cancels its task.
+#[derive(Debug, Clone, Copy)]
+enum CancelVia {
+    /// `SessionCancelHandle::cancel(time_limit, false)`, the same command
+    /// builder `Session::cancel_action` uses.
+    Handle(Option<Duration>),
+    /// A bare `SessionConfig.cancel_token.cancel()`.
+    Token,
+    /// The action's own timeout, in seconds.
+    Timeout(u32),
+}
+
+/// Run `trap_task(20, ntt, timeout)` cross-user and cancel it at 1.5s
+/// through `via`. Returns the result and the time the run took.
+async fn run_trap_task_and_cancel(
+    ntt: Option<u32>,
+    via: CancelVia,
+) -> (openjd_sessions::action::ActionResult, Duration) {
+    let user = require_target_user();
+    let (mut session, token) = make_session_with_token(user);
+    let timeout = match via {
+        CancelVia::Timeout(t) => Some(t),
+        _ => None,
+    };
+    let handle = session.cancel_handle();
+    let canceller = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        match via {
+            CancelVia::Handle(limit) => handle.cancel(limit, false),
+            CancelVia::Token => {
+                token.cancel();
+                true
+            }
+            CancelVia::Timeout(_) => true,
+        }
+    });
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &trap_task(20, ntt, timeout), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert!(
+        canceller.await.unwrap(),
+        "{via:?}: the handle must find the running task"
+    );
+    session.cleanup();
+    (r, elapsed)
+}
+
+/// A task that declares no cancelation is a TERMINATE action. The same-user
+/// loop kills it at once on any cancel (`subprocess.rs`), so cross-user must
+/// send the helper TERMINATE whichever way the cancel arrives: no TERM trap
+/// (`GOT_TERM`), and the task ends right after the 1.5s cancel. Before the
+/// shared command builder, the handle (and `cancel_action`) sent
+/// NOTIFY_THEN_TERMINATE with a 5s default grace, or with the time limit.
+async fn check_terminate_action_killed_at_once(via: CancelVia) {
+    let (r, elapsed) = run_trap_task_and_cancel(None, via).await;
+    let expected = match via {
+        CancelVia::Timeout(_) => ActionState::Timeout,
+        _ => ActionState::Canceled,
+    };
+    assert_eq!(r.state, expected, "{via:?}: stdout: {}", r.stdout);
+    assert!(
+        !r.stdout.contains("GOT_TERM"),
+        "{via:?}: a TERMINATE action must not get the notify signal; stdout: {}",
+        r.stdout
+    );
+    assert!(
+        elapsed < Duration::from_millis(4000),
+        "{via:?}: a TERMINATE action must be killed at once, took {elapsed:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_terminate_action_killed_at_once() {
+    check_terminate_action_killed_at_once(CancelVia::Handle(None)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_time_limit_terminate_action_killed_at_once() {
+    check_terminate_action_killed_at_once(CancelVia::Handle(Some(Duration::from_secs(10)))).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_token_terminate_action_killed_at_once() {
+    check_terminate_action_killed_at_once(CancelVia::Token).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_timeout_terminate_action_killed_at_once() {
+    check_terminate_action_killed_at_once(CancelVia::Timeout(1)).await;
+}
+
+/// `run_subprocess` through the helper is a TERMINATE action too: a handle
+/// cancel kills it at once, as on the same-user path.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_run_subprocess_killed_at_once() {
+    let mut session = make_session(require_target_user());
+    let handle = session.cancel_handle();
+    let canceller = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        handle.cancel(None, false)
+    });
+    let args = [
+        "-c".to_string(),
+        "trap 'echo GOT_TERM; sleep 20; exit 0' TERM; echo STARTED; sleep 60 & wait".to_string(),
+    ];
+    let started = std::time::Instant::now();
+    let r = session
+        .run_subprocess("bash", Some(&args), None, None, true, None)
+        .await
+        .expect("run_subprocess must return a result");
+    let elapsed = started.elapsed();
+    assert!(
+        canceller.await.unwrap(),
+        "the handle must find the subprocess"
+    );
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(
+        !r.stdout.contains("GOT_TERM"),
+        "run_subprocess must not get the notify signal; stdout: {}",
+        r.stdout
+    );
+    assert!(
+        elapsed < Duration::from_millis(4000),
+        "run_subprocess must be killed at once, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// A NOTIFY_THEN_TERMINATE(4s) task whose TERM trap never exits gets the
+/// notify signal and is killed when the grace ends, about 1.5 + `grace`
+/// seconds after the start, whichever way the cancel arrives.
+async fn check_notify_then_terminate_grace(via: CancelVia, grace: Duration) {
+    let (r, elapsed) = run_trap_task_and_cancel(Some(4), via).await;
+    assert_eq!(
+        r.state,
+        ActionState::Canceled,
+        "{via:?}: stdout: {}",
+        r.stdout
+    );
+    assert!(
+        r.stdout.contains("GOT_TERM"),
+        "{via:?}: a NOTIFY_THEN_TERMINATE cancel must notify first; stdout: {}",
+        r.stdout
+    );
+    let end = Duration::from_millis(1500) + grace;
+    assert!(
+        elapsed >= end - Duration::from_millis(500) && elapsed < end + Duration::from_millis(1500),
+        "{via:?}: the task must be killed when the {grace:?} grace ends (about {end:?}), \
+         took {elapsed:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_notify_then_terminate_uses_declared_grace() {
+    check_notify_then_terminate_grace(CancelVia::Handle(None), Duration::from_secs(4)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_notify_then_terminate_capped_by_time_limit() {
+    check_notify_then_terminate_grace(
+        CancelVia::Handle(Some(Duration::from_secs(2))),
+        Duration::from_secs(2),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_token_notify_then_terminate_uses_declared_grace() {
+    check_notify_then_terminate_grace(CancelVia::Token, Duration::from_secs(4)).await;
+}
+
 // === Cross-user brittle-session tests ===
 
 /// A subprocess that fails through the cross-user helper makes the session

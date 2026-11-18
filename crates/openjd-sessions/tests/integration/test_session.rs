@@ -3521,8 +3521,17 @@ mod cancel_escalation {
             *delivered_clone.lock().unwrap() = Some(handle.cancel(None, false));
         });
 
+        // A NOTIFY_THEN_TERMINATE(5) step: the handle's command carries the
+        // declared grace. (An undeclared step is TERMINATE; see
+        // `handle_cancel_on_terminate_action_writes_terminate`.)
         let r = s
-            .run_task("t", &step("sh", vec!["-c", "sleep 30"]), None, None, None)
+            .run_task(
+                "t",
+                &step_with_ntt_cancel("sh", vec!["-c", "sleep 30"], 5),
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(r.state, ActionState::Canceled);
@@ -3661,15 +3670,74 @@ mod cancel_escalation {
         );
     }
 
-    /// Actions that do not declare notifyThenTerminate keep the legacy
-    /// behavior: the caller's time_limit is used as-is.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn handle_cancel_without_declared_cancelation_passes_time_limit_through() {
+    /// An action that declares no cancelation is a TERMINATE action, and
+    /// the same-user path kills it at once whatever the time_limit
+    /// (`subprocess.rs`). The helper command must be TERMINATE too, not
+    /// NOTIFY_THEN_TERMINATE with the time_limit or a default grace.
+    async fn assert_terminate_action_writes_terminate(time_limit: Option<Duration>) {
         let script = step("sh", vec!["-c", "sleep 30"]);
-        let msgs = run_and_handle_cancel(&script, Some(Duration::from_secs(60))).await;
+        let msgs = run_and_handle_cancel(&script, time_limit).await;
+        assert_eq!(msgs.len(), 1, "time_limit {time_limit:?}: {msgs:?}");
+        assert_eq!(
+            msgs[0]["cancel"].as_str().unwrap(),
+            "TERMINATE",
+            "a TERMINATE action must get a TERMINATE command, time_limit {time_limit:?}"
+        );
+        assert!(
+            msgs[0].get("notifyPeriodInSeconds").is_none(),
+            "TERMINATE should not include notifyPeriodInSeconds"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_terminate_action_writes_terminate() {
+        assert_terminate_action_writes_terminate(None).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_terminate_action_ignores_time_limit() {
+        assert_terminate_action_writes_terminate(Some(Duration::from_secs(60))).await;
+    }
+
+    /// `run_subprocess` runs its command as a TERMINATE action, so a handle
+    /// cancel must write TERMINATE for it too.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_run_subprocess_writes_terminate() {
+        let tmp = TempDir::new().unwrap();
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        let writer_path = tmp.path().join("cancel_writer.log");
+        let writer = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&writer_path)
+            .unwrap();
+        s.set_cancel_writer_for_test(writer);
+
+        let handle = s.cancel_handle();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            handle.cancel(None, false);
+        });
+
+        let r = s
+            .run_subprocess("sleep", Some(&["30".to_string()]), None, None, true, None)
+            .await
+            .unwrap();
+        assert_eq!(r.state, ActionState::Canceled);
+        let msgs = read_cancel_messages(&writer_path);
+        assert_eq!(msgs.len(), 1, "{msgs:?}");
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "TERMINATE");
+    }
+
+    /// A time_limit under one second truncates to zero whole seconds on the
+    /// wire, so a NOTIFY_THEN_TERMINATE action gets TERMINATE rather than a
+    /// grace longer than the caller allowed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_sub_second_time_limit_writes_terminate() {
+        let script = step_with_ntt_cancel("sh", vec!["-c", "sleep 30"], 3);
+        let msgs = run_and_handle_cancel(&script, Some(Duration::from_millis(500))).await;
         assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "NOTIFY_THEN_TERMINATE");
-        assert_eq!(msgs[0]["notifyPeriodInSeconds"].as_u64().unwrap(), 60);
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "TERMINATE");
     }
 }
 

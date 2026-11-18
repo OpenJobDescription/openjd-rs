@@ -99,9 +99,11 @@ calling subprocess primitives directly.
 ## Constants
 
 ```rust
-/// Default notify period for `NOTIFY_THEN_TERMINATE` cancellation when
-/// the action itself does not specify a `notifyPeriodInSeconds`.
-/// Matches the OpenJD spec default.
+/// Notify period a cross-user cancel command uses when the running
+/// action's cancel method isn't known yet and the caller gave no
+/// `time_limit` (see embedded-cross-user-helper.md § Choosing the cancel
+/// command). Not the default grace of an action: that is 120 s for
+/// `onRun` and 30 s for environment actions (runners.md).
 pub const session::DEFAULT_CANCEL_NOTIFY_PERIOD_SECS: u64 = 5;
 ```
 
@@ -251,11 +253,12 @@ impl Session {
 
     // ── Cancellation and cleanup ──
 
-    /// Cancel the currently running action. `time_limit` controls
-    /// the cancel method: `Some(zero)` forces immediate terminate;
-    /// `Some(d)` sends a notify followed by terminate after `d`;
-    /// `None` uses the action's declared `notifyPeriodInSeconds` (or
-    /// `DEFAULT_CANCEL_NOTIFY_PERIOD_SECS` if not specified).
+    /// Cancel the currently running action with its own cancel
+    /// method. A `TERMINATE` action (including one that declares no
+    /// cancelation) is killed at once. A `NOTIFY_THEN_TERMINATE` action
+    /// is notified and killed after its declared grace, capped at
+    /// `time_limit`; `Some(zero)` kills at once. Same-user and
+    /// cross-user sessions follow the same rule.
     ///
     /// `mark_action_failed: true` reports a cancelled action as
     /// Failed rather than Canceled in the final `ActionResult`. This

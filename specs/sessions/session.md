@@ -603,13 +603,18 @@ Unset takes precedence over set within the same environment, matching the spec.
 
 1. Validates state is `Running`
 2. Sets state to `Canceling`
-3. Cancels the `CancellationToken` — the subprocess loop responds by sending the
-   appropriate cancel command to the helper (`NOTIFY_THEN_TERMINATE` with a notify
-   period for graceful cancel, or `TERMINATE` for immediate kill)
-4. If `mark_action_failed` is true, the action result is `Failed` instead of `Canceled`
+3. On a cross-user session, writes the cancel command to the helper. The command
+   follows the action's cancel method as the same-user loop does: `TERMINATE` for
+   a `TERMINATE` action, and `NOTIFY_THEN_TERMINATE` with the declared grace capped
+   at `time_limit` otherwise (see [Choosing the cancel command](embedded-cross-user-helper.md#choosing-the-cancel-command))
+4. Sends `time_limit` over the watch channel and cancels the `CancellationToken`;
+   the same-user subprocess loop then applies the action's cancel method
+5. If `mark_action_failed` is true, the action result is `Failed` instead of `Canceled`
 
-The `time_limit` parameter sets a deadline for the cancelation to complete. If the
-subprocess doesn't exit within the limit, it's forcefully killed.
+The `time_limit` parameter bounds a `NOTIFY_THEN_TERMINATE` action's grace period:
+the process is forcefully killed after the smaller of `time_limit` and the declared
+grace, and at once for a zero `time_limit`. A `TERMINATE` action is killed at once
+whatever the `time_limit`.
 
 ### SessionCancelHandle
 

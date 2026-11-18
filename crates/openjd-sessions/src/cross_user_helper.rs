@@ -759,15 +759,67 @@ pub(crate) async fn run_via_helper(
     }
 }
 
-/// Write a tokenized cancel command to the cross-user helper over
-/// `cancel_writer`, using the action's configured cancel method. Shared by
-/// the timeout and external-token `select!` branches of [`run_via_helper`].
+/// Build one cancel command for the cross-user helper, as a single JSON
+/// object without the trailing newline.
 ///
-/// `Terminate` (or a `NotifyThenTerminate` whose grace rounds to zero
-/// seconds) maps to `TERMINATE`; otherwise `NOTIFY_THEN_TERMINATE` with the
-/// declared grace period. This matches the method the same-user loop applies
-/// for the same cancel (`subprocess.rs`): `Terminate` kills immediately,
-/// `NotifyThenTerminate` signals then escalates after the grace period.
+/// This is the only place the session side writes a helper cancel command.
+/// [`run_via_helper`]'s timeout and bare-token branches (through
+/// [`write_helper_cancel`]) and `Session::cancel_action` /
+/// `SessionCancelHandle::cancel` (through `session.rs`'s
+/// `send_helper_cancel_command`) all call it, so one action gets one answer
+/// for the same `time_limit` whichever way the cancel arrives.
+///
+/// The wire method is chosen as the same-user loop chooses its signal
+/// (`subprocess.rs`):
+///
+/// - `Terminate` gives `TERMINATE`, whatever the `time_limit`.
+/// - `NotifyThenTerminate { terminate_delay }` uses the grace
+///   `time_limit.map_or(terminate_delay, |l| l.min(terminate_delay))`.
+///   The wire carries whole seconds (`notifyPeriodInSeconds` is a `u64`),
+///   so the grace is truncated to whole seconds, never rounded up past the
+///   caller's bound. A grace under one second, including `Some(0)`, gives
+///   `TERMINATE`; otherwise it gives `NOTIFY_THEN_TERMINATE` with that many
+///   seconds. The same-user loop keeps the sub-second grace (it sends the
+///   notify signal and kills after the exact `Duration`), which the wire
+///   can't express.
+///
+/// `token: None` omits the `"token"` field; only the test-only injection
+/// path in `session.rs` (a cancel writer with no helper) has no token. The
+/// token alphabet excludes `"` and `\`, so it is embedded without escaping.
+pub(crate) fn helper_cancel_line(
+    token: Option<&str>,
+    method: &crate::runner::CancelMethod,
+    time_limit: Option<std::time::Duration>,
+) -> String {
+    let notify_period_secs = match method {
+        crate::runner::CancelMethod::Terminate => 0,
+        crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay } => time_limit
+            .map_or(*terminate_delay, |limit| limit.min(*terminate_delay))
+            .as_secs(),
+    };
+    let token_field = match token {
+        Some(t) => format!(r#""token":"{t}","#),
+        None => String::new(),
+    };
+    if notify_period_secs == 0 {
+        format!(r#"{{{token_field}"cancel":"TERMINATE"}}"#)
+    } else {
+        format!(
+            r#"{{{token_field}"cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period_secs}}}"#
+        )
+    }
+}
+
+/// Write a tokenized cancel command to the cross-user helper over
+/// `cancel_writer`, built by [`helper_cancel_line`] from the action's
+/// configured cancel method with no `time_limit`. Shared by the timeout and
+/// external-token `select!` branches of [`run_via_helper`].
+///
+/// A bare token cancel carries no `time_limit` (the same-user loop reads
+/// `None` from the watch channel too), so it matches the same-user method.
+/// A timeout also uses the action's method here, while the same-user loop
+/// kills at once on a timeout; that difference is known and not changed by
+/// the shared builder.
 fn write_helper_cancel(
     writer: &std::fs::File,
     auth_token: &str,
@@ -777,24 +829,141 @@ fn write_helper_cancel(
     let mut w = writer.try_clone().map_err(|e| {
         SessionError::HelperCommunication(format!("Failed to clone cancel_writer: {e}"))
     })?;
-    let notify_period = match cancel_method {
-        crate::runner::CancelMethod::NotifyThenTerminate { terminate_delay } => {
-            terminate_delay.as_secs()
-        }
-        crate::runner::CancelMethod::Terminate => 0,
-    };
-    // The token alphabet excludes `"` and `\`, so no escaping is needed to
-    // embed it in a JSON literal.
-    if notify_period == 0 {
-        let _ = writeln!(w, r#"{{"token":"{auth_token}","cancel":"TERMINATE"}}"#);
-    } else {
-        let _ = writeln!(
-            w,
-            r#"{{"token":"{auth_token}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{notify_period}}}"#
-        );
-    }
+    let _ = writeln!(
+        w,
+        "{}",
+        helper_cancel_line(Some(auth_token), cancel_method, None)
+    );
     let _ = w.flush();
     Ok(())
+}
+
+#[cfg(test)]
+mod cancel_line_tests {
+    use super::helper_cancel_line;
+    use crate::helper_protocol::{CancelMethod as WireMethod, Command};
+    use crate::runner::CancelMethod;
+    use std::time::Duration;
+
+    const TOKEN: &str = "AbCdEfGhIjKlMnOpQrStUv";
+
+    /// What the helper must receive: `None` for TERMINATE, `Some(n)` for
+    /// NOTIFY_THEN_TERMINATE with `n` seconds.
+    type Wire = Option<u64>;
+
+    fn ntt(d: Duration) -> CancelMethod {
+        CancelMethod::NotifyThenTerminate { terminate_delay: d }
+    }
+
+    fn secs(n: u64) -> Duration {
+        Duration::from_secs(n)
+    }
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+
+    /// The full matrix: each method (Terminate, and NotifyThenTerminate with
+    /// 0 s, a sub-second, and n s), without a time limit and with one that
+    /// is zero, sub-second, smaller, equal and larger.
+    fn matrix() -> Vec<(CancelMethod, Option<Duration>, Wire)> {
+        vec![
+            // Terminate ignores the time limit.
+            (CancelMethod::Terminate, None, None),
+            (CancelMethod::Terminate, Some(secs(0)), None),
+            (CancelMethod::Terminate, Some(ms(500)), None),
+            (CancelMethod::Terminate, Some(secs(5)), None),
+            (CancelMethod::Terminate, Some(secs(600)), None),
+            // A zero grace has nothing to notify for.
+            (ntt(secs(0)), None, None),
+            (ntt(secs(0)), Some(secs(0)), None),
+            (ntt(secs(0)), Some(secs(5)), None),
+            // A sub-second grace truncates to zero whole seconds.
+            (ntt(ms(999)), None, None),
+            (ntt(ms(999)), Some(ms(500)), None),
+            (ntt(ms(999)), Some(ms(999)), None),
+            (ntt(ms(999)), Some(secs(5)), None),
+            // n s, truncated: 10.9 s goes out as 10.
+            (ntt(secs(10)), None, Some(10)),
+            (ntt(ms(10_900)), None, Some(10)),
+            (ntt(secs(10)), Some(secs(0)), None),
+            (ntt(secs(10)), Some(ms(500)), None),
+            (ntt(secs(10)), Some(ms(1500)), Some(1)),
+            (ntt(secs(10)), Some(secs(3)), Some(3)),
+            (ntt(secs(10)), Some(secs(10)), Some(10)),
+            (ntt(secs(10)), Some(secs(60)), Some(10)),
+        ]
+    }
+
+    #[test]
+    fn helper_cancel_line_matrix_exact_json() {
+        for (method, limit, wire) in matrix() {
+            let line = helper_cancel_line(Some(TOKEN), &method, limit);
+            let expected = match wire {
+                None => format!(r#"{{"token":"{TOKEN}","cancel":"TERMINATE"}}"#),
+                Some(n) => format!(
+                    r#"{{"token":"{TOKEN}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":{n}}}"#
+                ),
+            };
+            assert_eq!(line, expected, "{method} with time_limit {limit:?}");
+        }
+    }
+
+    #[test]
+    fn helper_cancel_line_without_token_omits_the_field() {
+        assert_eq!(
+            helper_cancel_line(None, &CancelMethod::Terminate, None),
+            r#"{"cancel":"TERMINATE"}"#
+        );
+        assert_eq!(
+            helper_cancel_line(None, &ntt(secs(7)), None),
+            r#"{"cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":7}"#
+        );
+    }
+
+    /// Every line the builder produces parses with the helper's own
+    /// deserializer (`helper/src/protocol.rs`) into the expected
+    /// `Command::Cancel`, carrying the token.
+    #[test]
+    fn helper_cancel_line_round_trips_through_helper_protocol() {
+        for (method, limit, wire) in matrix() {
+            let line = helper_cancel_line(Some(TOKEN), &method, limit);
+            let cmd: Command = serde_json::from_str(&line)
+                .unwrap_or_else(|e| panic!("helper rejected {line}: {e}"));
+            match (cmd, wire) {
+                (
+                    Command::Cancel {
+                        token,
+                        method: WireMethod::Terminate,
+                    },
+                    None,
+                ) => assert_eq!(token, TOKEN),
+                (
+                    Command::Cancel {
+                        token,
+                        method:
+                            WireMethod::NotifyThenTerminate {
+                                notify_period_in_seconds,
+                            },
+                    },
+                    Some(n),
+                ) => {
+                    assert_eq!(token, TOKEN);
+                    assert_eq!(notify_period_in_seconds, n, "{line}");
+                }
+                (other, _) => panic!(
+                    "{method} with time_limit {limit:?}: {line} parsed as {other:?}, \
+                     expected {wire:?}"
+                ),
+            }
+        }
+        // Without a token the helper still parses it (as an empty token,
+        // which its constant-time check then rejects).
+        let cmd: Command =
+            serde_json::from_str(&helper_cancel_line(None, &CancelMethod::Terminate, None))
+                .unwrap();
+        assert_eq!(cmd.token(), "");
+    }
 }
 
 #[cfg(test)]
