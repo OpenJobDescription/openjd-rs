@@ -792,7 +792,7 @@ Read-only accessors on `Session`:
 | `environments_entered()` | `&[EnvironmentIdentifier]` | Stack of entered environment IDs (entry order) |
 | `path_mapping_rules()` | `&[PathMappingRule]` | Current path mapping rules, in the order given |
 | `action_status()` | `Option<ActionStatus>` | Snapshot of the current/most-recent action status. `None` if no action has run. |
-| `clone_cancel_writer()` | `Option<std::fs::File>` | Clone the cancel-info file writer for the cross-user helper. Used by PyO3 bindings to send cancel commands from a background thread. |
+| `clone_cancel_writer()` | `Option<std::fs::File>` | Clone the cross-user helper's cancel pipe (a dup of its stdin). `cancel_handle()` uses it to deliver cancel commands from another thread; writing to it directly bypasses the cancel command builder, so callers should use `cancel_handle()`. |
 | `override_action_state(state)` | `()` | Override the action state. Used by PyO3 bindings to convert Failed → Canceled when cancel was requested externally. |
 
 ## enter_environment_with_output

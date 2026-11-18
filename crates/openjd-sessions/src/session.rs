@@ -1018,9 +1018,11 @@ impl Session {
         &self.environments_entered
     }
 
-    /// Clone the cancel_writer file handle, if one exists.
-    /// Used by Python bindings to send cancel commands when the session is
-    /// taken by a background thread.
+    /// Clone the cancel_writer file handle (a dup of the cross-user helper's
+    /// stdin), if one exists. [`Session::cancel_handle`] uses it to deliver
+    /// cancel commands from another thread. A caller that writes to it
+    /// directly bypasses the session's cancel command builder, so prefer
+    /// [`Session::cancel_handle`].
     pub fn clone_cancel_writer(&self) -> Option<std::fs::File> {
         self.cross_user
             .cancel_writer

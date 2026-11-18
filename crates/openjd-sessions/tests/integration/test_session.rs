@@ -3969,6 +3969,23 @@ mod cancel_escalation {
         }
     }
 
+    /// Once an action has ended, a handle reports that nothing is running
+    /// (session.md § SessionCancelHandle) and writes no command.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_after_action_ended_finds_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let (mut s, path) = session_and_pipe(&tmp);
+        let handle = s.cancel_handle();
+        s.run_subprocess("true", None, None, None, true, None)
+            .await
+            .unwrap();
+        assert!(
+            !handle.cancel(None, false),
+            "the handle reported a running action after it ended"
+        );
+        assert!(read_cancel_messages(&path).is_empty());
+    }
+
     /// A time_limit under one second truncates to zero whole seconds on the
     /// wire, so a NOTIFY_THEN_TERMINATE action gets TERMINATE rather than a
     /// grace longer than the caller allowed.
