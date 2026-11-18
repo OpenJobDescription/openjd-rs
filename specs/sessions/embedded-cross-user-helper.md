@@ -468,14 +468,13 @@ let cancel_writer = File::from_raw_fd(dup_fd);
 // method is the action's recorded cancel method). The action's run gate
 // writes now if the helper has the action's Run command, and otherwise
 // holds the cancel for run_via_helper (see "Cancel before Run" below):
-if let Some(ref writer) = self.cancel_writer {
-    run_gate.deliver_cancel(time_limit, || {
-        let line = helper_cancel_line(token, method, time_limit);
-        writer.write_all(line.as_bytes())?;
-        writer.write_all(b"\n")?;
+run_gate.deliver_cancel(time_limit, || {
+    if let Some(ref writer) = self.cancel_writer {
+        let line = format!("{}\n", helper_cancel_line(token, method, time_limit));
+        writer.write_all(line.as_bytes())?;  // one write per line
         writer.flush()?;
-    });
-}
+    }
+});
 ```
 
 The session stores the token string alongside the `cancel_writer` so the
@@ -549,9 +548,9 @@ once: by the canceller or by `run_via_helper`, never both. As on the same-user
 path, which spawns the process and then signals it, the action starts and is
 then cancelled by its own method. Refusing to send Run would also stop the
 work, but the action would then end without starting, unlike same-user.
-`run_via_helper` counts a held cancel as delivered: the exit is `Canceled`
-even before the canceller's watch send and token cancel, which follow its
-gate call, and neither the timeout nor the token branch sends a second
+`run_via_helper` counts a held cancel as delivered: it alone makes the exit
+`Canceled` (a guard, since the session's cancellers have already sent the
+watch value), and neither the timeout nor the token branch sends a second
 command. The canceller sends the watch value before it writes or holds the
 command, and cancels the token last, so a helper that kills the process and
 reports its exit at once still has the exit classified `Canceled`, and the
@@ -562,7 +561,10 @@ longer than the pipe's atomic write size. Each action has its own gate, so a
 held cancel for an action whose Run is never written (its setup failed) is
 dropped with it. The gate isn't closed when the action ends: a cancel that
 lands after the action exits is written to a helper with no command running,
-as before (dropped on Unix, queued for the next Run on Windows). Only a session with a helper uses the gate; a same-user session
+as before (dropped on Unix, queued for the next Run on Windows). A handle
+whose dup of the cancel pipe failed writes nothing, but still has a cancel
+before Run held, and the runner gets the gate with the helper, so a failed
+dup there doesn't stop a held cancel either. Only a session with a helper uses the gate; a same-user session
 writes a test-injected cancel pipe at once.
 
 A test-only hook (`Session::set_before_helper_run_hook_for_test`, feature
@@ -684,9 +686,11 @@ async fn run_via_helper(
     session_id: &str,
     message_tx: UnboundedSender<ActionMessage>,
     cancel_writer: Option<&File>,
+    run_gate: Option<&HelperRunGate>,
     cancel_token: &CancellationToken,
 ) -> Result<SubprocessResult, SessionError> {
-    helper.send_command(&cmd)?;
+    // Run, then any cancel held for it (see "Cancel before Run").
+    run_gate.start_run(helper, |h| h.send_command(&cmd), |h, limit| send_held_cancel(h, limit))?;
 
     let timeout_fut = match config.timeout {
         Some(d) => tokio::time::sleep(d).boxed(),

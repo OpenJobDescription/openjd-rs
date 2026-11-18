@@ -720,9 +720,10 @@ pub(crate) async fn run_via_helper(
                     // or the session-wide/per-action `CancellationToken` (an
                     // external `SessionConfig.cancel_token.cancel()`). Mirror
                     // the same-user loop and classify Canceled on either.
-                    // `pending_cancel_sent` covers a handle cancel whose
-                    // watch send and token cancel, which follow its gate
-                    // call, haven't happened yet when the action exits.
+                    // `pending_cancel_sent` makes a held cancel count on its
+                    // own. The canceller sends the watch value before its
+                    // gate call, so this is a guard for a canceller that
+                    // doesn't, not a case the session's cancellers produce.
                     let canceled = pending_cancel_sent
                         || config
                             .cancel_request_rx
@@ -804,10 +805,11 @@ pub(crate) async fn run_via_helper(
 ///
 /// This is the only place the session side writes a helper cancel command.
 /// [`run_via_helper`]'s timeout and bare-token branches (through
-/// [`write_helper_cancel`]) and `Session::cancel_action` /
-/// `SessionCancelHandle::cancel` (through `session.rs`'s
-/// `send_helper_cancel_command`) all call it, so one action gets one answer
-/// for the same `time_limit` whichever way the cancel arrives.
+/// [`write_helper_cancel`]), its write of a cancel [`HelperRunGate`] held
+/// until Run, and `Session::cancel_action` / `SessionCancelHandle::cancel`
+/// (through `session.rs`'s `send_helper_cancel_command`) all call it, so one
+/// action gets one answer for the same `time_limit` whichever way the cancel
+/// arrives.
 ///
 /// The wire method is chosen as the same-user loop chooses its signal
 /// (`subprocess.rs`):
@@ -823,8 +825,10 @@ pub(crate) async fn run_via_helper(
 ///   notify signal and kills after the exact `Duration`), which the wire
 ///   can't express.
 ///
-/// `token: None` omits the `"token"` field; only the test-only injection
-/// path in `session.rs` (a cancel writer with no helper) has no token. The
+/// `token: None` omits the `"token"` field. The held cancel passes `None`
+/// because `send_command` adds the token; otherwise only the test-only
+/// injection path in `session.rs` (a cancel writer with no helper) has no
+/// token. The
 /// token alphabet excludes `"` and `\`, so it is embedded without escaping.
 pub(crate) fn helper_cancel_line(
     token: Option<&str>,
@@ -1122,6 +1126,8 @@ mod run_via_helper_gate_tests {
     struct FakeHelper {
         reader: FakeReader,
         pipe: std::fs::File,
+        /// Fail every command after the Run command.
+        fail_after_run: bool,
     }
 
     impl AsyncHelper for FakeHelper {
@@ -1132,6 +1138,9 @@ mod run_via_helper_gate_tests {
         /// held cancel) as its JSON with the token added, as the real
         /// `send_command` sends it.
         fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
+            if self.fail_after_run && cmd.get("command").is_none() {
+                return Err(SessionError::HelperCommunication("broken pipe".into()));
+            }
             match cmd.get("command").and_then(|c| c.as_str()) {
                 Some(command) => writeln!(self.pipe, "RUN {command}").unwrap(),
                 None => writeln!(self.pipe, "{}", augment_with_token(cmd, TOKEN)?).unwrap(),
@@ -1169,6 +1178,7 @@ mod run_via_helper_gate_tests {
             helper: FakeHelper {
                 reader: FakeReader(rx),
                 pipe: open(),
+                fail_after_run: false,
             },
             writer: open(),
             config: crate::subprocess::SubprocessConfig {
@@ -1253,7 +1263,8 @@ mod run_via_helper_gate_tests {
 
     /// A cancel held before Run is written right after Run, once, from the
     /// runner's method and the cancel's time limit, and the exit counts as
-    /// Canceled even before the canceller's watch send and token cancel.
+    /// Canceled from the held cancel alone (here neither the watch nor the
+    /// token fires).
     #[tokio::test]
     async fn held_cancel_follows_run_with_the_runner_method_and_time_limit() {
         let mut s = setup(ntt(8), None);
@@ -1333,6 +1344,23 @@ mod run_via_helper_gate_tests {
         let mut written = false;
         gate.deliver_cancel(None, || written = true);
         assert!(written);
+    }
+
+    /// Run is written before the held cancel, so a failed held-cancel send
+    /// doesn't fail the action: the run loop goes on reading the helper's
+    /// responses to the end, and the helper's own stdin is where a broken
+    /// pipe would show.
+    #[tokio::test]
+    async fn failed_held_cancel_send_does_not_fail_the_action() {
+        let mut s = setup(CancelMethod::Terminate, None);
+        s.helper.fail_after_run = true;
+        let gate = HelperRunGate::new();
+        gate.deliver_cancel(None, || panic!("before Run"));
+        s.responses.send(serde_json::json!({"pid": 7})).unwrap();
+        s.responses.send(serde_json::json!({"exited": 0})).unwrap();
+        let r = run(&mut s, Some(&gate), &Default::default()).await;
+        assert_eq!(pipe(&s), [run_line()]);
+        assert_eq!(r.exit_code, Some(0));
     }
 
     /// With no cancel, only Run is written and the gate passes cancels

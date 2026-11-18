@@ -458,15 +458,15 @@ impl SessionCancelHandle {
         }
 
         // Cross-user sessions: also deliver the cancel command to the helper
-        // process over the dup'd pipe, mirroring Session::cancel_action.
-        if let Some(ref writer) = self.cancel_writer {
-            deliver_helper_cancel(
-                &shared,
-                writer,
-                self.helper_auth_token.as_deref(),
-                time_limit,
-            );
-        }
+        // process over the dup'd pipe, mirroring Session::cancel_action. A
+        // handle whose dup failed still has a cancel before Run held, since
+        // the run loop writes that one through the helper's own stdin.
+        deliver_helper_cancel(
+            &shared,
+            self.cancel_writer.as_ref(),
+            self.helper_auth_token.as_deref(),
+            time_limit,
+        );
 
         // The token goes last: the run loop's token branch skips its own
         // command when the watch channel has fired.
@@ -487,19 +487,24 @@ impl SessionCancelHandle {
 /// when no command is running. A session without a helper (only a test that
 /// injects the pipe writes one) has no gate, and the command is written
 /// now.
+///
+/// With no `writer` (a same-user session, or a handle whose dup of the pipe
+/// failed) nothing is written, but a cancel before Run is still held.
 fn deliver_helper_cancel(
     shared: &CancelShared,
-    writer: &std::fs::File,
+    writer: Option<&std::fs::File>,
     auth_token: Option<&str>,
     time_limit: Option<Duration>,
 ) {
     let write = || {
-        send_helper_cancel_command(
-            writer,
-            auth_token,
-            time_limit,
-            shared.cancel_method.as_ref(),
-        )
+        if let Some(writer) = writer {
+            send_helper_cancel_command(
+                writer,
+                auth_token,
+                time_limit,
+                shared.cancel_method.as_ref(),
+            )
+        }
     };
     match &shared.run_gate {
         Some(gate) => gate.deliver_cancel(time_limit, write),
@@ -566,6 +571,9 @@ struct CrossUserFields {
     /// struct because the cancel path needs to access it even when the
     /// helper has been moved into a runner.
     helper_auth_token: Option<String>,
+    /// Test-only: make the runner's dup of the cancel pipe fail.
+    #[cfg(any(test, feature = "test-utils"))]
+    fail_runner_cancel_writer_for_test: bool,
 }
 
 /// Build the session's function library from the session's
@@ -681,6 +689,8 @@ impl Session {
                 helper: None,
                 cancel_writer: None,
                 helper_auth_token: None,
+                #[cfg(any(test, feature = "test-utils"))]
+                fail_runner_cancel_writer_for_test: false,
             },
             callback: None,
             redacted_values: HashSet::new(),
@@ -707,6 +717,13 @@ impl Session {
     #[cfg(any(test, feature = "test-utils"))]
     pub fn set_before_helper_run_hook_for_test(&mut self, hook: Arc<dyn Fn() + Send + Sync>) {
         self.cancel.before_helper_run_hook = Some(hook);
+    }
+
+    /// Test-only: make each later cross-user runner's dup of the cancel pipe
+    /// fail, as if the process were out of file descriptors.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn fail_runner_cancel_writer_for_test(&mut self) {
+        self.cross_user.fail_runner_cancel_writer_for_test = true;
     }
 
     /// Test-only: override the session's caller-policy limits (caps and
@@ -941,6 +958,8 @@ impl Session {
                 helper,
                 cancel_writer,
                 helper_auth_token,
+                #[cfg(any(test, feature = "test-utils"))]
+                fail_runner_cancel_writer_for_test: false,
             },
             callback: config.callback,
             redacted_values: HashSet::new(),
@@ -1108,13 +1127,25 @@ impl Session {
     /// stdin), if one exists. [`Session::cancel_handle`] uses it to deliver
     /// cancel commands from another thread. A caller that writes to it
     /// directly bypasses the session's cancel command builder, and the
-    /// ordering against the action's Run command: a cancel written before
-    /// Run doesn't reach the action. Prefer [`Session::cancel_handle`].
+    /// ordering against the action's Run command: the Unix helper drops a
+    /// cancel written before Run. Prefer [`Session::cancel_handle`].
     pub fn clone_cancel_writer(&self) -> Option<std::fs::File> {
         self.cross_user
             .cancel_writer
             .as_ref()
             .and_then(|f| f.try_clone().ok())
+    }
+
+    /// The dup of the cancel pipe a cross-user runner gets for its timeout
+    /// and token branches. `None` if the dup fails; the runner then has no
+    /// cancel pipe, but its held-cancel write goes through the helper's own
+    /// stdin.
+    fn runner_cancel_writer(&self) -> Option<std::fs::File> {
+        #[cfg(any(test, feature = "test-utils"))]
+        if self.cross_user.fail_runner_cancel_writer_for_test {
+            return None;
+        }
+        self.clone_cancel_writer()
     }
 
     /// Get the current action status, if any action has been run.
@@ -1202,14 +1233,12 @@ impl Session {
             if let Some(tx) = &shared.request_tx {
                 let _ = tx.send(time_limit);
             }
-            if let Some(ref writer) = self.cross_user.cancel_writer {
-                deliver_helper_cancel(
-                    &shared,
-                    writer,
-                    self.cross_user.helper_auth_token.as_deref(),
-                    time_limit,
-                );
-            }
+            deliver_helper_cancel(
+                &shared,
+                self.cross_user.cancel_writer.as_ref(),
+                self.cross_user.helper_auth_token.as_deref(),
+                time_limit,
+            );
             shared.token.clone()
         };
         if let Some(token) = token {
@@ -1704,12 +1733,7 @@ impl Session {
             let mut runner = match self.cross_user.helper.take() {
                 Some(h) => {
                     let r = runner.with_helper(h).with_helper_run_gate(run_gate);
-                    match self
-                        .cross_user
-                        .cancel_writer
-                        .as_ref()
-                        .and_then(|f| f.try_clone().ok())
-                    {
+                    match self.runner_cancel_writer() {
                         Some(w) => r.with_cancel_writer(w),
                         None => r,
                     }
@@ -2115,12 +2139,7 @@ impl Session {
             let mut runner = match self.cross_user.helper.take() {
                 Some(h) => {
                     let r = runner.with_helper(h).with_helper_run_gate(run_gate);
-                    match self
-                        .cross_user
-                        .cancel_writer
-                        .as_ref()
-                        .and_then(|f| f.try_clone().ok())
-                    {
+                    match self.runner_cancel_writer() {
                         Some(w) => r.with_cancel_writer(w),
                         None => r,
                     }
@@ -2364,12 +2383,7 @@ impl Session {
         let mut runner = match self.cross_user.helper.take() {
             Some(h) => {
                 let r = runner.with_helper(h).with_helper_run_gate(run_gate);
-                match self
-                    .cross_user
-                    .cancel_writer
-                    .as_ref()
-                    .and_then(|f| f.try_clone().ok())
-                {
+                match self.runner_cancel_writer() {
                     Some(w) => r.with_cancel_writer(w),
                     None => r,
                 }
@@ -4789,6 +4803,33 @@ mod helper_cancel_command_tests {
                 );
             }
         }
+    }
+
+    /// A handle whose dup of the cancel pipe failed (no writer) still has a
+    /// cancel before Run held, so the run loop writes it through the
+    /// helper's own stdin.
+    #[test]
+    fn handle_without_a_pipe_still_holds_a_cancel_before_run() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let (s, path, gate) = session_before_run(&tmp, Some(CancelMethod::Terminate));
+        let handle = SessionCancelHandle {
+            shared: s.cancel.shared.clone(),
+            cancel_writer: None,
+            helper_auth_token: Some(TOKEN.into()),
+        };
+        assert!(handle.cancel(Some(Duration::from_secs(3)), false));
+        let mut held = Vec::new();
+        gate.start_run::<(), ()>(
+            &mut (),
+            |_| Ok(()),
+            |_, l| {
+                held.push(l);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(held, [Some(Duration::from_secs(3))]);
+        assert_eq!(written(&path), "");
     }
 
     /// Each action gets a new gate: a cancel held for one action that never

@@ -1191,9 +1191,10 @@ async fn test_cross_user_cancel_before_run_on_enter_and_on_exit() {
     session.cleanup();
 }
 
-/// A cancel held for an action doesn't reach the session's next action:
-/// after a task canceled before Run, the same helper runs a subprocess to
-/// Success. (These Docker tests don't check a NOTIFY_THEN_TERMINATE grace:
+/// After a task canceled before Run, the same helper runs the session's
+/// next action to Success. (On Unix a cancel can't carry over anyway, since
+/// the helper drops one with no command running; this checks the helper is
+/// still usable.) (These Docker tests don't check a NOTIFY_THEN_TERMINATE grace:
 /// a held cancel signals the process right after it starts, before a script
 /// could install a TERM trap. `cross_user_helper.rs`'s
 /// `run_via_helper_gate_tests` check the held command exactly.)
@@ -1217,6 +1218,50 @@ async fn test_cross_user_cancel_before_run_leaves_helper_ready_for_next_action()
         .expect("run_subprocess must return a result");
     assert_eq!(next.state, ActionState::Success, "stdout: {}", next.stdout);
     assert!(next.stdout.contains("FINISHED"), "stdout: {}", next.stdout);
+    session.cleanup();
+}
+
+/// If a runner's dup of the cancel pipe fails, a cancel before Run still
+/// reaches the action (the held cancel goes through the helper's own
+/// stdin), and so does a handle cancel after Run (the handle has its own
+/// dup).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_without_runner_cancel_pipe() {
+    // Before Run.
+    let mut session = make_session(require_target_user());
+    session.fail_runner_cancel_writer_for_test();
+    let delivered = cancel_before_run_once(&mut session, None);
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &sleep_then_finish_task(), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert!(delivered.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(!r.stdout.contains("FINISHED"), "stdout: {}", r.stdout);
+    assert!(elapsed < Duration::from_secs(3), "took {elapsed:?}");
+    session.cleanup();
+
+    // After Run.
+    let mut session = make_session(require_target_user());
+    session.fail_runner_cancel_writer_for_test();
+    let handle = session.cancel_handle();
+    let canceller = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        handle.cancel(None, false)
+    });
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &sleep_then_finish_task(), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert!(canceller.await.unwrap());
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(!r.stdout.contains("FINISHED"), "stdout: {}", r.stdout);
+    assert!(elapsed < Duration::from_secs(4), "took {elapsed:?}");
     session.cleanup();
 }
 
