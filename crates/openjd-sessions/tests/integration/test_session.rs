@@ -3752,6 +3752,17 @@ mod cancel_escalation {
         on_wrap_env_enter: Option<Action>,
         on_exit: Option<Action>,
     ) -> Environment {
+        wrap_env(name, on_enter, on_wrap_env_enter, None, None, on_exit)
+    }
+
+    fn wrap_env(
+        name: &str,
+        on_enter: Option<Action>,
+        on_wrap_env_enter: Option<Action>,
+        on_wrap_task_run: Option<Action>,
+        on_wrap_env_exit: Option<Action>,
+        on_exit: Option<Action>,
+    ) -> Environment {
         Environment {
             name: name.into(),
             description: None,
@@ -3760,8 +3771,8 @@ mod cancel_escalation {
                 actions: EnvironmentActions {
                     on_enter,
                     on_wrap_env_enter,
-                    on_wrap_task_run: None,
-                    on_wrap_env_exit: None,
+                    on_wrap_task_run,
+                    on_wrap_env_exit,
                     on_exit,
                 },
                 embedded_files: None,
@@ -3870,10 +3881,7 @@ mod cancel_escalation {
     /// the method recorded is the wrap action's, not the inner action's.
     #[tokio::test(flavor = "multi_thread")]
     async fn handle_cancel_on_wrapped_enter_follows_the_wrap_action() {
-        for (wrap_cancel, inner_cancel, expected) in [
-            (ntt_cancelation(Some(7)), None, Some(7)),
-            (None, ntt_cancelation(Some(7)), None),
-        ] {
+        for (wrap_cancel, inner_cancel, expected) in wrap_cases() {
             let tmp = TempDir::new().unwrap();
             let (mut s, path) = session_and_pipe(&tmp);
             let outer = env(
@@ -3886,6 +3894,78 @@ mod cancel_escalation {
             let inner = env("Inner", Some(sleep_action(inner_cancel)), None, None);
             let msg = env_enter_cancel_command(&mut s, &path, &inner).await;
             assert_command(&msg, expected);
+        }
+    }
+
+    /// The two cases each wrap test runs: a NOTIFY_THEN_TERMINATE(7) wrap
+    /// action over an inner action that declares nothing (expect NTT 7),
+    /// and a wrap action that declares nothing over an inner NTT(7)
+    /// (expect TERMINATE).
+    fn wrap_cases() -> [(
+        Option<CancelationMode>,
+        Option<CancelationMode>,
+        Option<u64>,
+    ); 2] {
+        [
+            (ntt_cancelation(Some(7)), None, Some(7)),
+            (None, ntt_cancelation(Some(7)), None),
+        ]
+    }
+
+    /// When onWrapEnvExit replaces an inner onExit, the recorded method is
+    /// the wrap action's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_wrapped_exit_follows_the_wrap_action() {
+        for (wrap_cancel, inner_cancel, expected) in wrap_cases() {
+            let tmp = TempDir::new().unwrap();
+            let (mut s, path) = session_and_pipe(&tmp);
+            let outer = wrap_env(
+                "Outer",
+                Some(action("true", vec![])),
+                None,
+                None,
+                Some(sleep_action(wrap_cancel)),
+                None,
+            );
+            s.enter_environment(&outer, None, None, None).await.unwrap();
+            let inner = env("Inner", None, None, Some(sleep_action(inner_cancel)));
+            let id = s.enter_environment(&inner, None, None, None).await.unwrap();
+            arm(&s, None);
+            let _ = s.exit_environment(&id, None, true, None).await;
+            let msgs = read_cancel_messages(&path);
+            assert_eq!(msgs.len(), 1, "{msgs:?}");
+            assert_command(&msgs[0], expected);
+        }
+    }
+
+    /// When onWrapTaskRun replaces a task's onRun, the recorded method is
+    /// the wrap action's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_wrapped_task_follows_the_wrap_action() {
+        for (wrap_cancel, inner_cancel, expected) in wrap_cases() {
+            let tmp = TempDir::new().unwrap();
+            let (mut s, path) = session_and_pipe(&tmp);
+            let outer = wrap_env(
+                "Outer",
+                Some(action("true", vec![])),
+                None,
+                Some(sleep_action(wrap_cancel)),
+                None,
+                None,
+            );
+            s.enter_environment(&outer, None, None, None).await.unwrap();
+            let script = StepScript {
+                let_bindings: None,
+                actions: StepActions {
+                    on_run: sleep_action(inner_cancel),
+                },
+                embedded_files: None,
+            };
+            arm(&s, None);
+            let _ = s.run_task("t", &script, None, None, None).await;
+            let msgs = read_cancel_messages(&path);
+            assert_eq!(msgs.len(), 1, "{msgs:?}");
+            assert_command(&msgs[0], expected);
         }
     }
 

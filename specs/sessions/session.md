@@ -614,7 +614,9 @@ Unset takes precedence over set within the same environment, matching the spec.
 The `time_limit` parameter bounds a `NOTIFY_THEN_TERMINATE` action's grace period:
 the process is forcefully killed after the smaller of `time_limit` and the declared
 grace, and at once for a zero `time_limit`. A `TERMINATE` action is killed at once
-whatever the `time_limit`.
+whatever the `time_limit`. Cross-user, the helper command carries the grace in whole
+seconds, truncated, so a grace under one second kills at once without the notify
+signal.
 
 ### SessionCancelHandle
 

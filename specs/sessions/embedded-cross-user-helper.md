@@ -509,11 +509,10 @@ cancelation fields at template scope; a job built through the API whose
 cancelation refers to a `let` binding fails to resolve in the session and gets
 the command below. Until a method is recorded (a cancel that lands between the
 action registering and its method resolving, or a method that failed to
-resolve), `cancel_action` and the handle keep the earlier command:
-`NOTIFY_THEN_TERMINATE` with the `time_limit` as the grace, or
-`DEFAULT_CANCEL_NOTIFY_PERIOD_SECS` (5) without one. A `time_limit` under one
-second gives `TERMINATE` (before the shared builder it gave
-`NOTIFY_THEN_TERMINATE` with 0 seconds).
+resolve), `cancel_action` and the handle pass the builder a
+`NotifyThenTerminate` whose grace is the `time_limit`, or
+`DEFAULT_CANCEL_NOTIFY_PERIOD_SECS` (5) without one; so a `time_limit` under
+one second gives `TERMINATE`.
 
 A test-only `#[path]` include of `helper/src/protocol.rs` (as for
 `framer.rs`) parses every command the builder produces with the helper's own

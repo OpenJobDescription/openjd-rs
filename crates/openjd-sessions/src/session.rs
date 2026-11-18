@@ -448,12 +448,10 @@ impl SessionCancelHandle {
 ///
 /// `cancel_method` is `None` when no method is recorded yet: the cancel
 /// landed after `set_action` but before the effective action was resolved,
-/// or resolution failed. That case keeps the command it had before the
-/// shared builder: `NOTIFY_THEN_TERMINATE` with the `time_limit` as the
-/// grace, or [`DEFAULT_CANCEL_NOTIFY_PERIOD_SECS`] without one. The one
-/// change is that a `time_limit` under one second now gives `TERMINATE`
-/// (it used to give `NOTIFY_THEN_TERMINATE` with 0 seconds). The method
-/// isn't known, so there is no same-user answer to match.
+/// or resolution failed. The builder then gets a `NotifyThenTerminate`
+/// whose grace is the `time_limit`, or [`DEFAULT_CANCEL_NOTIFY_PERIOD_SECS`]
+/// without one, so a `time_limit` under one second gives `TERMINATE`. The
+/// method isn't known, so there is no same-user answer to match.
 fn send_helper_cancel_command(
     mut writer: &std::fs::File,
     auth_token: Option<&str>,

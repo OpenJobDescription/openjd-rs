@@ -960,11 +960,13 @@ async fn test_cross_user_cancel_handle_run_subprocess_killed_at_once() {
     session.cleanup();
 }
 
-/// A NOTIFY_THEN_TERMINATE(4s) task whose TERM trap never exits gets the
+/// A NOTIFY_THEN_TERMINATE(8s) task whose TERM trap never exits gets the
 /// notify signal and is killed when the grace ends, about 1.5 + `grace`
-/// seconds after the start, whichever way the cancel arrives.
+/// seconds after the start, whichever way the cancel arrives. 8 s is far
+/// enough from the 5 s fallback grace that a command sent with the
+/// fallback lands outside the window.
 async fn check_notify_then_terminate_grace(via: CancelVia, grace: Duration) {
-    let (r, elapsed) = run_trap_task_and_cancel(Some(4), via).await;
+    let (r, elapsed) = run_trap_task_and_cancel(Some(8), via).await;
     assert_eq!(
         r.state,
         ActionState::Canceled,
@@ -987,7 +989,7 @@ async fn check_notify_then_terminate_grace(via: CancelVia, grace: Duration) {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_cancel_handle_notify_then_terminate_uses_declared_grace() {
-    check_notify_then_terminate_grace(CancelVia::Handle(None), Duration::from_secs(4)).await;
+    check_notify_then_terminate_grace(CancelVia::Handle(None), Duration::from_secs(8)).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1003,7 +1005,7 @@ async fn test_cross_user_cancel_handle_notify_then_terminate_capped_by_time_limi
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_token_notify_then_terminate_uses_declared_grace() {
-    check_notify_then_terminate_grace(CancelVia::Token, Duration::from_secs(4)).await;
+    check_notify_then_terminate_grace(CancelVia::Token, Duration::from_secs(8)).await;
 }
 
 // === Cross-user brittle-session tests ===
