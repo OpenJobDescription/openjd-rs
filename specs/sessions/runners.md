@@ -264,6 +264,8 @@ and expose identical builder methods:
 | `with_cancel_request_rx(Receiver<Option<Duration>>)` | Set the cancel request channel for time-limited cancellation |
 | `with_helper(CrossUserHelper)` | Transfer the cross-user helper process to this runner |
 | `take_helper() -> Option<CrossUserHelper>` | Take the helper back after the action completes |
+| `with_cancel_writer(File)` | A dup of the helper's cancel pipe, for the timeout and bare-token cancel commands (crate-private) |
+| `with_helper_run_gate(Arc<HelperRunGate>)` | The action's run gate, which orders a session-side cancel against the Run command ([Cancel before Run](embedded-cross-user-helper.md#cancel-before-run); crate-private) |
 
 The `with_helper` / `take_helper` pair transfers ownership of the persistent cross-user
 helper process between the session and the runner for each action, avoiding the need to

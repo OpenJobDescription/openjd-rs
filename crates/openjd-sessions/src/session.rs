@@ -549,7 +549,8 @@ fn send_helper_cancel_command(
         }
     };
     // One write of the whole line, so it can't interleave with a cancel line
-    // the run loop writes at the same moment (both are under PIPE_BUF).
+    // the run loop writes at the same moment (on Unix a write under
+    // PIPE_BUF is atomic; both are).
     let line = format!(
         "{}\n",
         crate::cross_user_helper::helper_cancel_line(auth_token, method, time_limit)
@@ -1256,9 +1257,10 @@ impl Session {
         let cancel_writer = self.clone_cancel_writer();
         if self.cross_user.cancel_writer.is_some() && cancel_writer.is_none() {
             // try_clone failed: the handle will still cancel same-user
-            // subprocesses via the token, but helper-routed processes
-            // would not receive the pipe command. Surface it rather than
-            // failing silently at cancel time.
+            // subprocesses via the token, and a cancel before a helper
+            // action's Run is still held and sent through the helper, but a
+            // cancel after Run would not reach the helper-run process.
+            // Surface it rather than failing silently at cancel time.
             session_log!(
                 warn,
                 &self.session_id,
@@ -4724,7 +4726,8 @@ mod helper_cancel_command_tests {
         );
     }
 
-    /// With no method recorded yet, the command keeps its earlier form:
+    /// With no method recorded (it failed to resolve), a cancel after Run
+    /// keeps the earlier form of the command:
     /// the time limit as the grace, and the 5 s default without one. A
     /// limit under one second (zero included) gives TERMINATE.
     #[test]
@@ -4933,7 +4936,7 @@ mod helper_cancel_command_tests {
         }
     }
     /// Two threads writing cancel commands to one pipe at once never mix
-    /// their lines: each is one write, under PIPE_BUF. The helper's runner
+    /// their lines: each is one write, under Unix's PIPE_BUF. The helper's runner
     /// skips a line it can't parse, so a mixed line would lose both cancels.
     #[cfg(unix)]
     #[test]

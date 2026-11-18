@@ -602,7 +602,8 @@ Unset takes precedence over set within the same environment, matching the spec.
 `cancel_action(time_limit, mark_action_failed)`:
 
 1. Validates state is `Running`
-2. Sets state to `Canceling`
+2. Sets state to `Canceling`, and records `mark_action_failed` (step 6) before
+   anything is delivered, so the result can't be reported first
 3. Sends `time_limit` over the watch channel
 4. On a cross-user session, writes the cancel command to the helper. The command
    follows the action's cancel method as the same-user loop does: `TERMINATE` for
@@ -636,10 +637,10 @@ channel, `mark_failed` flag, all behind one `Arc<Mutex<..>>`).
 `SessionCancelHandle::cancel(time_limit, mark_action_failed) -> bool`:
 
 - Returns `false` if no action is running (no per-action token installed).
-- Otherwise delivers exactly what `cancel_action` delivers — the helper pipe cancel
-  command (cross-user sessions; held until the helper has the action's Run command,
-  as for `cancel_action`), the `time_limit` over the watch channel, and the
-  token cancel — while holding the shared lock so the target action cannot change
+- Otherwise delivers exactly what `cancel_action` delivers, in the same order — the
+  `time_limit` over the watch channel, the helper pipe cancel command (cross-user
+  sessions; held until the helper has the action's Run command, as for
+  `cancel_action`), and the token cancel — while holding the shared lock so the target action cannot change
   mid-delivery.
 - Unlike `cancel_action`, it cannot set the session's transient `Canceling` state
   (the `Session` is owned elsewhere); the state moves directly to the terminal value

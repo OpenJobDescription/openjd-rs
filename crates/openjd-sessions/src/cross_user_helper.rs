@@ -874,7 +874,8 @@ fn write_helper_cancel(
         SessionError::HelperCommunication(format!("Failed to clone cancel_writer: {e}"))
     })?;
     // One write of the whole line, so it can't interleave with a cancel line
-    // another thread writes at the same moment (both are under PIPE_BUF).
+    // another thread writes at the same moment (on Unix a write under
+    // PIPE_BUF is atomic; both are).
     let line = format!(
         "{}\n",
         helper_cancel_line(Some(auth_token), cancel_method, None)
@@ -1090,23 +1091,27 @@ mod run_gate_tests {
     /// (which would leave the older time limit last).
     #[test]
     fn a_cancel_during_the_held_write_waits_for_it() {
-        use std::sync::{Arc, Barrier, Mutex};
+        use std::sync::mpsc;
+        use std::sync::{Arc, Mutex};
         let gate = Arc::new(HelperRunGate::new());
         let log = Arc::new(Mutex::new(Vec::<String>::new()));
         gate.deliver_cancel(Some(Duration::from_secs(3)), || panic!("before Run"));
-        let in_write = Arc::new(Barrier::new(2));
+        // A channel with timeouts rather than a barrier, so a gate that never
+        // writes the held cancel fails the test instead of hanging it.
+        let (in_write_tx, in_write_rx) = mpsc::channel::<()>();
         let canceller = {
-            let (gate, log, in_write) = (gate.clone(), log.clone(), in_write.clone());
+            let (gate, log) = (gate.clone(), log.clone());
             std::thread::spawn(move || {
-                in_write.wait();
-                gate.deliver_cancel(None, || log.lock().unwrap().push("later cancel".into()));
+                if in_write_rx.recv_timeout(Duration::from_secs(10)).is_ok() {
+                    gate.deliver_cancel(None, || log.lock().unwrap().push("later cancel".into()));
+                }
             })
         };
         gate.start_run::<(), ()>(
             &mut (),
             |_| Ok(()),
             |_, _| {
-                in_write.wait();
+                in_write_tx.send(()).unwrap();
                 // Give the canceller time to try; it must block on the lock.
                 std::thread::sleep(Duration::from_millis(100));
                 log.lock().unwrap().push("held cancel".into());
@@ -1114,6 +1119,7 @@ mod run_gate_tests {
             },
         )
         .unwrap();
+        drop(in_write_tx);
         canceller.join().unwrap();
         assert_eq!(*log.lock().unwrap(), ["held cancel", "later cancel"]);
     }
@@ -1123,11 +1129,14 @@ mod run_gate_tests {
         let gate = std::sync::Arc::new(std::sync::OnceLock::<HelperRunGate>::new());
         let in_hook = gate.clone();
         let hook: std::sync::Arc<dyn Fn() + Send + Sync> = std::sync::Arc::new(move || {
-            // Taking the lock here would deadlock if start_run held it.
-            in_hook
-                .get()
-                .unwrap()
-                .deliver_cancel(None, || panic!("Run is not written yet"));
+            let gate = in_hook.get().unwrap();
+            // try_lock, so a start_run that held the lock here fails the
+            // test instead of deadlocking it.
+            assert!(
+                gate.state.try_lock().is_ok(),
+                "the hook must run without the gate's lock"
+            );
+            gate.deliver_cancel(None, || panic!("Run is not written yet"));
         });
         let _ = gate.set(HelperRunGate::with_before_run_hook(Some(hook)));
         let log = RefCell::new(Vec::new());

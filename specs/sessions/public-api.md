@@ -1165,8 +1165,10 @@ backed by an embedded cross-user helper binary:
 
 - POSIX: a single `sudo -i <helper>` is spawned at session creation.
   Subsequent actions are dispatched through the helper's stdin/stdout
-  IPC, avoiding the ~1s sudo startup cost per action. Cancellation
-  flows through a separate `cancel_writer` stdin FD.
+  IPC, avoiding the ~1s sudo startup cost per action. Cancel commands
+  go through `cancel_writer`, a dup of the helper's stdin, or, for a
+  cancel that arrives before the action's Run command, through the
+  helper's own stdin right after Run.
 - Windows: similar design using `CreateProcessWithLogonW` or
   `CreateProcessAsUserW` depending on which `WindowsSessionUser` mode
   is in use.

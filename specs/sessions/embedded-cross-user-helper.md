@@ -48,6 +48,7 @@ Session::with_config(user=job-user)
 session.enter_environment(...)   ─── stdin JSON (+token) ──→ helper ──→ fork/exec onEnter
 session.run_task(...)            ─── stdin JSON (+token) ──→ helper ──→ fork/exec command
 session.cancel_action(...)       ─── cancel_writer (+token) ──→ helper stdin ──→ killpg child
+  (before Run: held by the run gate, then sent after Run through the helper's stdin)
 session.cleanup()                ─── {"shutdown":true, "token":...} ──→ helper exits
 ```
 
@@ -557,8 +558,9 @@ command. The canceller sends the watch value before it writes or holds the
 command, and cancels the token last, so a helper that kills the process and
 reports its exit at once still has the exit classified `Canceled`, and the
 token branch still sees the watch has fired. Each cancel command is one
-write of a whole line, so two cancel commands written at the same moment
-(a handle and the timeout or token branch) don't interleave. The lock also keeps a cancel line out of the middle of a Run line
+write of a whole line, so on Unix (a write under `PIPE_BUF` is atomic) two
+cancel commands written at the same moment (a handle and the timeout or
+token branch) don't interleave. The lock also keeps a cancel line out of the middle of a Run line
 longer than the pipe's atomic write size. Each action has its own gate, so a
 held cancel for an action whose Run is never written (its setup failed) is
 dropped with it. The gate isn't closed when the action ends: a cancel that
@@ -623,7 +625,8 @@ borrow conflicts with `&mut self` on Session:
 ```rust
 // In Session::enter_environment:
 let mut runner = EnvironmentScriptRunner::new(...)
-    .with_helper(self.helper.take().unwrap());
+    .with_helper(self.helper.take().unwrap())
+    .with_helper_run_gate(run_gate);  // from cancel.set_action
 
 let result = self.drive_action(runner.enter(...), &mut rx, &id).await?;
 
@@ -715,7 +718,8 @@ async fn run_via_helper(
             resp = helper.async_reader().next_response() => {
                 // process pid/out/exited/error, feed through ActionFilter;
                 // classify Timeout if the timeout fired, else Canceled when
-                // the watch channel fired OR the token is cancelled
+                // the watch channel fired, the token is cancelled, OR a
+                // cancel held before Run was written
             }
             _ = cancel_token.cancelled(), if !token_seen => {
                 // bare external token cancel: write cancel to helper via
