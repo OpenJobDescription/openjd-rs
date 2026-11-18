@@ -78,7 +78,7 @@ Total environments: 1
 }
 ```
 
-**YAML:** Same structured data as JSON, serialized via `serde_yaml::to_string()`:
+**YAML:** Same structured data as JSON, serialized via `serde_saphyr::to_string()`:
 ```yaml
 status: success
 message: Summary for 'MyJob'
@@ -137,19 +137,22 @@ tasks_run: 100
 
 ## Implementation Pattern
 JSON and YAML share the same code path — a `serde_json::Value` object is built once, then
-serialized with either `serde_json::to_string_pretty()` or `serde_yaml::to_string()`:
+serialized with either `serde_json::to_string_pretty()` or `serde_saphyr::to_string()`.
+Both commands call `print_cli_result` in `src/common.rs`:
 
 ```rust
-match args.output.as_str() {
-    "json" | "yaml" => {
-        let val = /* build serde_json::Value */;
-        if output_format == "json" {
-            println!("{}", serde_json::to_string_pretty(&val)?);
-        } else {
-            print!("{}", serde_yaml::to_string(&val)?);
-        }
+pub fn print_cli_result(result: &dyn CliResult, format: &str) {
+    match format {
+        "json" => println!(
+            "{}",
+            serde_json::to_string_pretty(&result.to_json_value()).unwrap()
+        ),
+        "yaml" => print!(
+            "{}",
+            serde_saphyr::to_string(&result.to_json_value()).unwrap()
+        ),
+        _ => println!("{result}"),
     }
-    _ => { /* human-readable println! */ }
 }
 ```
 

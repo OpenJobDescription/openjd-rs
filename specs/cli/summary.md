@@ -152,7 +152,7 @@ parameter definitions are arrays of `{"name", "type"}` objects. Optional fields
 ### YAML Format
 
 The YAML output contains the same structured data as JSON, serialized via
-`serde_yaml::to_string()`. Both formats share the same `serde_json::Value` construction
+`serde_saphyr::to_string()`. Both formats share the same `serde_json::Value` construction
 code, so they are always in sync.
 
 ## Step Summary Output

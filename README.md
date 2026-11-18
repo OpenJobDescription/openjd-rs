@@ -68,7 +68,7 @@ scripts/run_cross_user_tests.sh
 scripts/run_cross_user_tests.sh --ldap
 ```
 
-This runs 12 cross-user tests covering subprocess execution, signal delivery (SIGTERM/SIGKILL), process tree killing, session cleanup, and TempDir permissions. See [the proposal](docs/proposals/docker-based-cross-user-tests.md) for details.
+This runs 12 cross-user tests covering subprocess execution, signal delivery (SIGTERM/SIGKILL), process tree killing, session cleanup, and TempDir permissions. See [specs/sessions/cross-user-testing.md](specs/sessions/cross-user-testing.md) for details.
 
 ### Code coverage
 
@@ -98,7 +98,7 @@ Passes 100% of the [OpenJD conformance test suite](https://github.com/OpenJobDes
 
 ## Architecture
 
-The crate dependency graph:
+The crate dependency graph (normal dependencies between workspace crates):
 
 ```
 openjd-cli
@@ -106,26 +106,43 @@ openjd-cli
 │   ├── openjd-model
 │   │   └── openjd-expr
 │   └── openjd-expr
-└── openjd-model
+├── openjd-model
+└── openjd-expr
 
-openjd-snapshots (standalone)
+openjd-for-js (experimental)
+├── openjd-model
+└── openjd-expr
+
+openjd-snapshots (experimental, standalone)
 ```
 
-Design documents are in [`specs/`](specs/):
+Design documents are in [`specs/`](specs/). Start with
+[architecture.md](specs/architecture.md) for the project layout, then the crate's spec index:
 
 | Document | Topic |
 |----------|-------|
 | [architecture.md](specs/architecture.md) | Overall crate structure and design |
-| [sessions-architecture.md](specs/sessions-architecture.md) | Sessions runtime async design |
-| [action-message-streaming.md](specs/action-message-streaming.md) | Real-time stdout message streaming |
-| [parsing-walkthrough.md](specs/parsing-walkthrough.md) | Template parsing pipeline |
-| [template-validation.md](specs/template-validation.md) | Validation rules and error reporting |
-| [model-parameters.md](specs/model-parameters.md) | Parameter type system |
-| [job-creation.md](specs/job-creation.md) | Job instantiation from templates |
-| [format-string.md](specs/format-string.md) | Format string resolution |
-| [expr-implementation.md](specs/expr-implementation.md) | Expression language implementation |
-| [function-library.md](specs/function-library.md) | Built-in function library |
+| [expr/README.md](specs/expr/README.md) | `openjd-expr`: type system, parser, evaluator, format strings, function library |
+| [model/README.md](specs/model/README.md) | `openjd-model`: template types, parsing, validation, job creation |
+| [sessions/README.md](specs/sessions/README.md) | `openjd-sessions`: session runtime, subprocesses, cross-user execution |
+| [cli/README.md](specs/cli/README.md) | `openjd-cli`: commands and output formatting |
+| [snapshots/README.md](specs/snapshots/README.md) | `openjd-snapshots`: snapshot operations and manifest formats |
+| [openjd-for-js/spec.md](specs/openjd-for-js/spec.md) | `openjd-for-js`: ECMAScript/WebAssembly bindings |
 | [job-attachments-snapshots.md](specs/job-attachments-snapshots.md) | Snapshot file format and operations |
+
+Some frequently used crate documents:
+
+| Document | Topic |
+|----------|-------|
+| [sessions/architecture.md](specs/sessions/architecture.md) | Sessions runtime: modules, data flow, cancelation |
+| [sessions/action-messages.md](specs/sessions/action-messages.md) | Real-time stdout message streaming |
+| [model/parsing.md](specs/model/parsing.md) | Template parsing pipeline |
+| [model/validation.md](specs/model/validation.md) | Validation rules and error reporting |
+| [model/parameters.md](specs/model/parameters.md) | Parameter type system |
+| [model/job-creation.md](specs/model/job-creation.md) | Job instantiation from templates |
+| [expr/format-string.md](specs/expr/format-string.md) | Format string resolution |
+| [expr/architecture.md](specs/expr/architecture.md) | Expression language implementation |
+| [expr/function-library.md](specs/expr/function-library.md) | Built-in function library |
 
 ## Security
 
