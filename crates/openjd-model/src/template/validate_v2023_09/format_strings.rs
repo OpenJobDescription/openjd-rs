@@ -1707,6 +1707,23 @@ struct StepLetScope {
     names: HashSet<String>,
 }
 
+/// Most bytes of evaluated `let` values (and their names) that pass 8 keeps
+/// from host requirements for the steps' ranges and bodies, across all
+/// steps. Bounds the extra peak memory of sharing; real templates use a few
+/// kilobytes.
+const RETAINED_SCOPE_BUDGET: usize = 4 * 1024 * 1024;
+
+impl StepLetScope {
+    /// Approximate heap bytes of the bindings this scope adds to the base
+    /// symtab.
+    fn retained_bytes(&self) -> usize {
+        self.names
+            .iter()
+            .map(|n| n.len() + self.symtab.get_value(n).map_or(0, ExprValue::memory_size))
+            .sum()
+    }
+}
+
 /// The template-scope symtab for a step's job-creation-stage fields:
 /// Param.* (non-PATH), RawParam.*, and with EXPR Job.Name, Step.Name, and
 /// the step-level `let` bindings, evaluated with `validate_let_bindings`,
@@ -1856,33 +1873,27 @@ pub fn validate_format_strings(
     );
 
     // ── Host requirements: template scope + step let bindings ──
+    // A clean scope is kept for the step's ranges and body while the scopes
+    // kept so far stay within `RETAINED_SCOPE_BUDGET`; past it, those sites
+    // evaluate the bindings again.
+    let mut retained: Vec<Option<StepLetScope>> = Vec::with_capacity(jt.steps.len());
+    let mut retained_bytes = 0usize;
     for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
+        retained.push(None);
         if let Some(hr) = &step.host_requirements {
-            // Build a symtab with Param/RawParam + step let bindings
-            let mut hr_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
-            if expr_active {
-                hr_symtab
-                    .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                hr_symtab
-                    .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                if let Some(bindings) = &step.let_bindings {
-                    let let_path = path_field(&step_path, "let");
-                    let mut hr_let_names = HashSet::new();
-                    validate_let_bindings(
-                        bindings,
-                        &let_path,
-                        &HashSet::new(),
-                        &mut hr_let_names,
-                        &mut hr_symtab,
-                        &template_ev,
-                        &template_profile,
-                        errors,
-                    );
-                }
-            }
+            let before = errors.len();
+            let scope = step_let_scope(
+                jt,
+                step,
+                &step_path,
+                expr_active,
+                &template_ev,
+                &template_profile,
+                errors,
+            );
+            let clean = errors.len() == before;
+            let hr_symtab = &scope.symtab;
             let hr_path = path_field(&step_path, "hostRequirements");
             // §3.3.1.1 / §3.3.2.1: a capability name is `@fmtstring`, and its
             // constraints apply to the resolved name. The name's
@@ -1902,7 +1913,7 @@ pub fn validate_format_strings(
                     let amt_path = path_index(&amounts_path, j);
                     let sr = validate_fs_with(
                         &amt.name,
-                        &hr_symtab,
+                        hr_symtab,
                         &template_ev,
                         &path_field(&amt_path, "name"),
                         Some(&name_constraint),
@@ -1912,7 +1923,7 @@ pub fn validate_format_strings(
                     if let Some(min) = &amt.min {
                         validate_fs_with(
                             min,
-                            &hr_symtab,
+                            hr_symtab,
                             &template_ev,
                             &path_field(&amt_path, "min"),
                             Some(&ResolvedConstraint::Float {
@@ -1925,7 +1936,7 @@ pub fn validate_format_strings(
                     if let Some(max) = &amt.max {
                         validate_fs_with(
                             max,
-                            &hr_symtab,
+                            hr_symtab,
                             &template_ev,
                             &path_field(&amt_path, "max"),
                             Some(&ResolvedConstraint::Float {
@@ -1954,7 +1965,7 @@ pub fn validate_format_strings(
                     let attr_path = path_index(&attrs_path, j);
                     let sr = validate_fs_with(
                         &attr.name,
-                        &hr_symtab,
+                        hr_symtab,
                         &template_ev,
                         &path_field(&attr_path, "name"),
                         Some(&name_constraint),
@@ -1982,7 +1993,7 @@ pub fn validate_format_strings(
                         for (k, v) in any_of.iter().enumerate() {
                             validate_fs_with(
                                 v,
-                                &hr_symtab,
+                                hr_symtab,
                                 &template_ev,
                                 &path_index(&path_field(&attr_path, "anyOf"), k),
                                 Some(&attr_constraint),
@@ -1994,7 +2005,7 @@ pub fn validate_format_strings(
                         for (k, v) in all_of.iter().enumerate() {
                             validate_fs_with(
                                 v,
-                                &hr_symtab,
+                                hr_symtab,
                                 &template_ev,
                                 &path_index(&path_field(&attr_path, "allOf"), k),
                                 Some(&attr_constraint),
@@ -2010,6 +2021,13 @@ pub fn validate_format_strings(
                     &attrs_path,
                     errors,
                 );
+            }
+            if clean {
+                let bytes = scope.retained_bytes();
+                if retained_bytes + bytes <= RETAINED_SCOPE_BUDGET {
+                    retained_bytes += bytes;
+                    retained[i] = Some(scope);
+                }
             }
         }
     }
@@ -2082,24 +2100,25 @@ pub fn validate_format_strings(
         // Step-level let bindings are in template scope and must be visible
         // in parameterSpace range expressions. When they are clean, the
         // ranges and the step body below share one evaluation of them.
-        let mut shared_scope = None;
+        let mut shared_scope = retained[i].take();
         if let Some(ps) = &step.parameter_space {
             let ps_path = path_field(&step_path, "parameterSpace");
             let tpd_path = path_field(&ps_path, "taskParameterDefinitions");
             // Shared only when evaluating them reported nothing (also when
             // it did not run: no EXPR, or no bindings).
-            let mut let_errors = ValidationErrors::default();
-            let scope = step_let_scope(
-                jt,
-                step,
-                &step_path,
-                expr_active,
-                &template_ev,
-                &template_profile,
-                &mut let_errors,
-            );
-            shared_scope = let_errors.is_empty().then_some(scope);
-            drop(let_errors);
+            if shared_scope.is_none() {
+                let mut let_errors = ValidationErrors::default();
+                let scope = step_let_scope(
+                    jt,
+                    step,
+                    &step_path,
+                    expr_active,
+                    &template_ev,
+                    &template_profile,
+                    &mut let_errors,
+                );
+                shared_scope = let_errors.is_empty().then_some(scope);
+            }
             let unclean_range_symtab;
             let range_symtab = match &shared_scope {
                 Some(scope) => &scope.symtab,

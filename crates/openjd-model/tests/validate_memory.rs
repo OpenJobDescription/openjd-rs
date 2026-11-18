@@ -148,7 +148,8 @@ fn validation_peak_memory_stays_within_its_bounds() {
     // measured peak, which each limit exceeds by about 0.5, and what would
     // raise it, with the peak that caused.
     let cases = [
-        // 2.09. Keeping every step's values alive: 31.10.
+        // 3.09: origin/main's 2.09 plus one 4 MiB scope kept within
+        // RETAINED_SCOPE_BUDGET. Keeping every step's values alive: 31.10.
         (
             "30 steps",
             template(
@@ -160,7 +161,7 @@ fn validation_peak_memory_stays_within_its_bounds() {
                 }; 30],
                 None,
             ),
-            2.5,
+            3.6,
         ),
         // 2.01. Two copies of a failing step's values: 3.00.
         (
