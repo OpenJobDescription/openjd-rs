@@ -28,7 +28,7 @@ openjd-rs/
 │   │       └── functions/      # Built-in function implementations, one file per function family
 │   ├── openjd-model/           # Template parsing, validation, job creation
 │   │   └── src/                # lib.rs, error and shared types, capabilities, in-crate test modules
-│   │       ├── template/       # Template model types (revision-independent) and parsing (parse.rs)
+│   │       ├── template/       # The 2023-09 template model types and parsing (parse.rs)
 │   │       │   ├── validation/         # Revision-neutral validation entry points, limits and rules types
 │   │       │   └── validate_v2023_09/  # The 2023-09 validation passes
 │   │       └── job/            # Instantiated job types, parameter space iteration, step dependency graph
@@ -57,10 +57,11 @@ openjd-rs/
 ├── .github/                    # CI workflows (authoritative for the CI checks), PR and issue templates
 ├── skills/                     # Agent skills, including implement-change
 ├── fuzz/                       # Fuzz harness: a separate cargo workspace (see fuzz/README.md)
-├── scripts/                    # Dev and CI scripts: public API check, fuzz coverage gate, cross-user tests, table generators
+├── scripts/                    # Dev and CI scripts: public API, copyright header and fuzz coverage checks, coverage,
+│                               #   cross-user tests, generated-table and fixture generators
 ├── docs/
 │   └── dev/                    # Contributor docs, including quality-criteria.md
-├── reports/                    # Crate quality evaluation reports
+├── reports/                    # Crate quality evaluation and other engineering reports
 ├── samples/                    # Sample templates
 ├── testing_containers/         # Docker environments for the cross-user tests
 └── specs/                      # Design specs
@@ -105,7 +106,7 @@ member and depends on no workspace crate; `openjd-sessions`' build script builds
 ### openjd-expr
 Expression language implementation. No dependency on any other workspace crate. Provides:
 - Type system (`ExprType`, `TypeCode`) matching the EXPR extension spec
-- Runtime values (`ExprValue`) with truthiness, comparison, memory tracking
+- Runtime values (`ExprValue`) with comparison and memory tracking
 - Hierarchical symbol table for expression evaluation
 - Format string parsing and resolution (`{{Param.Name}}`, `FormatString`)
 - Expression parsing via `ruff_python_parser` (see `specs/expr/parser.md`)
