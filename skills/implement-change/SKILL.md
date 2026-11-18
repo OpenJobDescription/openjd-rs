@@ -79,7 +79,8 @@ current behavior follow quality-criteria §3: cite `file:line`, or run it.
   That output is the evidence for "this is fixed" (quality-criteria §3).
 - For any change to the public API surface (Q2), regenerate the listings
   with `bash scripts/check_public_api.sh --update`, review their diff, and
-  update `public-api.md` to describe the added or changed items. Give every
+  update `public-api.md` to describe the added or changed items, keeping
+  implementation detail in the other spec files (Q2). Give every
   new public item a `///` doc comment. The `missing_docs` lint enforces this,
   and a new `allow(missing_docs)` is not an option.
 - Search the whole repo for the concepts the change touches, not just the
