@@ -4601,3 +4601,56 @@ async fn test_runner_resolution_error_records_fail_message() {
         "fail_message should identify the unresolvable symbol, got: {msg}"
     );
 }
+
+/// Same-user counterpart of the cross-user cancel-before-Run tests in
+/// `test_cross_user.rs`: a canceller that spins on a `SessionCancelHandle`
+/// from before the task starts cancels it right after it registers. The
+/// same-user loop spawns the process and then kills it, so the 6 s task
+/// ends at once and never prints FINISHED. Three runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn spinning_cancel_handle_stops_task_at_once() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    for run in 0..3 {
+        let tmp = TempDir::new().unwrap();
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        let handle = s.cancel_handle();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_spinner = stop.clone();
+        let spinner = std::thread::spawn(move || {
+            while !stop_spinner.load(Ordering::Relaxed) {
+                if handle.cancel(None, false) {
+                    return true;
+                }
+                std::hint::spin_loop();
+            }
+            false
+        });
+        let started = std::time::Instant::now();
+        let r = s
+            .run_task(
+                "t",
+                &step("sh", vec!["-c", "sleep 6; echo FINISHED"]),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let elapsed = started.elapsed();
+        stop.store(true, Ordering::Relaxed);
+        assert!(
+            spinner.join().unwrap(),
+            "run {run}: the handle must find the task"
+        );
+        assert_eq!(r.state, ActionState::Canceled, "run {run}");
+        assert!(
+            !r.stdout.contains("FINISHED"),
+            "run {run}: stdout: {}",
+            r.stdout
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "run {run}: the task must be killed at once, took {elapsed:?}"
+        );
+    }
+}

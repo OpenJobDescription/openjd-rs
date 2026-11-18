@@ -301,6 +301,10 @@ struct CancelShared {
     /// any cancelation a template can declare (template scope only).
     /// `None` until it is recorded, or when resolution failed.
     cancel_method: Option<crate::runner::CancelMethod>,
+    /// The current action's gate, which holds a helper-pipe cancel until
+    /// the helper's Run command is written. See
+    /// [`crate::cross_user_helper::HelperRunGate`]. `None` with no action.
+    run_gate: Option<Arc<crate::cross_user_helper::HelperRunGate>>,
     /// When true, a Canceled action result is reported as Failed.
     mark_failed: bool,
 }
@@ -311,18 +315,32 @@ struct CancelFields {
     shared: Arc<StdMutex<CancelShared>>,
     /// External cancellation token from the caller; action tokens are children of this.
     parent_token: Option<CancellationToken>,
+    /// Whether actions run through a cross-user helper, so a helper-pipe
+    /// cancel goes through each action's
+    /// [`crate::cross_user_helper::HelperRunGate`]. Without a helper (a
+    /// same-user session, or a test that injects the cancel pipe) the
+    /// command is written at once.
+    helper_routed: bool,
+    /// Test-only hook given to each action's
+    /// [`crate::cross_user_helper::HelperRunGate`].
+    #[cfg(any(test, feature = "test-utils"))]
+    before_helper_run_hook: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl CancelFields {
-    fn new(parent_token: Option<CancellationToken>) -> Self {
+    fn new(parent_token: Option<CancellationToken>, helper_routed: bool) -> Self {
         Self {
             shared: Arc::new(StdMutex::new(CancelShared {
                 token: None,
                 request_tx: None,
                 cancel_method: None,
+                run_gate: None,
                 mark_failed: false,
             })),
             parent_token,
+            helper_routed,
+            #[cfg(any(test, feature = "test-utils"))]
+            before_helper_run_hook: None,
         }
     }
 
@@ -334,19 +352,32 @@ impl CancelFields {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    /// Register a new action. Returns its helper Run gate, which a
+    /// cross-user runner takes with its cancel writer. Cancels go through
+    /// the gate only on a helper-routed session.
     fn set_action(
         &self,
         token: CancellationToken,
         request_tx: tokio::sync::watch::Sender<Option<Duration>>,
-    ) {
+    ) -> Arc<crate::cross_user_helper::HelperRunGate> {
+        #[cfg(any(test, feature = "test-utils"))]
+        let run_gate = Arc::new(
+            crate::cross_user_helper::HelperRunGate::with_before_run_hook(
+                self.before_helper_run_hook.clone(),
+            ),
+        );
+        #[cfg(not(any(test, feature = "test-utils")))]
+        let run_gate = Arc::new(crate::cross_user_helper::HelperRunGate::new());
         let mut shared = self.lock();
         shared.token = Some(token);
         shared.request_tx = Some(request_tx);
+        shared.run_gate = self.helper_routed.then(|| run_gate.clone());
         // The effective action (and hence its cancel method) is not known
         // yet at registration time — an RFC 0008 wrap hook may still
         // substitute the action. Cleared here; recorded by
         // `set_cancel_method` once the action to run is resolved.
         shared.cancel_method = None;
+        run_gate
     }
 
     /// Record the effective action's cancel method. Called after
@@ -361,6 +392,7 @@ impl CancelFields {
         shared.token = None;
         shared.request_tx = None;
         shared.cancel_method = None;
+        shared.run_gate = None;
         shared.mark_failed = false;
     }
 }
@@ -420,11 +452,11 @@ impl SessionCancelHandle {
         // Cross-user sessions: also deliver the cancel command to the helper
         // process over the dup'd pipe, mirroring Session::cancel_action.
         if let Some(ref writer) = self.cancel_writer {
-            send_helper_cancel_command(
+            deliver_helper_cancel(
+                &shared,
                 writer,
                 self.helper_auth_token.as_deref(),
                 time_limit,
-                shared.cancel_method.as_ref(),
             );
         }
 
@@ -436,8 +468,40 @@ impl SessionCancelHandle {
     }
 }
 
-/// Write a tokenized cancel command to the cross-user helper's cancel pipe.
-/// Shared by [`Session::cancel_action`] and [`SessionCancelHandle::cancel`].
+/// Deliver a cancel to the cross-user helper through the current action's
+/// [`crate::cross_user_helper::HelperRunGate`]. Shared by
+/// [`Session::cancel_action`] and [`SessionCancelHandle::cancel`], which
+/// call it with the [`CancelShared`] lock held.
+///
+/// Once the helper's Run command is written, it writes the command now with
+/// [`send_helper_cancel_command`]. Before that, the gate holds the
+/// `time_limit` and `run_via_helper` writes the command right after Run,
+/// from the runner's cancel method, because a helper with no command
+/// running drops a cancel. A session without a helper (only a test that
+/// injects the pipe writes one) has no gate, and the command is written
+/// now.
+fn deliver_helper_cancel(
+    shared: &CancelShared,
+    writer: &std::fs::File,
+    auth_token: Option<&str>,
+    time_limit: Option<Duration>,
+) {
+    let write = || {
+        send_helper_cancel_command(
+            writer,
+            auth_token,
+            time_limit,
+            shared.cancel_method.as_ref(),
+        )
+    };
+    match &shared.run_gate {
+        Some(gate) => gate.deliver_cancel(time_limit, write),
+        None => write(),
+    }
+}
+
+/// Write a tokenized cancel command to the cross-user helper's cancel pipe,
+/// for [`deliver_helper_cancel`].
 ///
 /// The command comes from [`crate::cross_user_helper::helper_cancel_line`],
 /// the same builder `run_via_helper` uses for a timeout or a bare token
@@ -446,9 +510,9 @@ impl SessionCancelHandle {
 /// `NotifyThenTerminate` action gets its declared grace capped at
 /// `time_limit`, as on the same-user path (`subprocess.rs`).
 ///
-/// `cancel_method` is `None` when no method is recorded yet: the cancel
-/// landed after `set_action` but before the effective action was resolved,
-/// or resolution failed. The builder then gets a `NotifyThenTerminate`
+/// `cancel_method` is `None` when no method was recorded: resolution
+/// failed (a cancel before the method is recorded is also before Run, so
+/// [`deliver_helper_cancel`] holds it instead). The builder then gets a `NotifyThenTerminate`
 /// whose grace is the `time_limit`, or [`DEFAULT_CANCEL_NOTIFY_PERIOD_SECS`]
 /// without one, so a `time_limit` under one second gives `TERMINATE`. The
 /// method isn't known, so there is no same-user answer to match.
@@ -599,7 +663,7 @@ impl Session {
             path_mapper: Arc::new(PathMapper::default()),
             job_parameter_values: HashMap::new(),
             action: ActionStatusFields::new(),
-            cancel: CancelFields::new(None),
+            cancel: CancelFields::new(None, false),
             cross_user: CrossUserFields {
                 user: None,
                 helpers_dir: None,
@@ -621,6 +685,17 @@ impl Session {
     #[cfg(any(test, feature = "test-utils"))]
     pub fn set_cancel_writer_for_test(&mut self, writer: std::fs::File) {
         self.cross_user.cancel_writer = Some(writer);
+    }
+
+    /// Test-only: set a hook that each action calls on the session thread
+    /// after it is registered for cancellation and right before its Run
+    /// command is written to the cross-user helper. A test can cancel from
+    /// the hook to land a cancel in that window deterministically. Applies
+    /// to actions registered after the call; same-user actions never call
+    /// it.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub fn set_before_helper_run_hook_for_test(&mut self, hook: Arc<dyn Fn() + Send + Sync>) {
+        self.cancel.before_helper_run_hook = Some(hook);
     }
 
     /// Test-only: override the session's caller-policy limits (caps and
@@ -848,7 +923,7 @@ impl Session {
             path_mapper,
             job_parameter_values: config.job_parameter_values,
             action: ActionStatusFields::new(),
-            cancel: CancelFields::new(config.cancel_token),
+            cancel: CancelFields::new(config.cancel_token, helper.is_some()),
             cross_user: CrossUserFields {
                 user: config.user,
                 helpers_dir,
@@ -1108,11 +1183,11 @@ impl Session {
         // asserting whatever framing it expects; we still write a valid
         // tokenized command if we have a token.
         if let Some(ref writer) = self.cross_user.cancel_writer {
-            send_helper_cancel_command(
+            deliver_helper_cancel(
+                &self.cancel.lock(),
                 writer,
                 self.cross_user.helper_auth_token.as_deref(),
                 time_limit,
-                self.cancel.lock().cancel_method.as_ref(),
             );
         }
 
@@ -1497,7 +1572,7 @@ impl Session {
 
             let cancel_token = self.new_action_cancel_token();
             let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
-            self.cancel.set_action(cancel_token.clone(), cancel_tx);
+            let run_gate = self.cancel.set_action(cancel_token.clone(), cancel_tx);
 
             let env_vars = self.evaluate_env_vars(os_env_vars);
             let mut action_symtab = symtab.clone();
@@ -1621,7 +1696,7 @@ impl Session {
                         .as_ref()
                         .and_then(|f| f.try_clone().ok())
                     {
-                        Some(w) => r.with_cancel_writer(w),
+                        Some(w) => r.with_cancel_writer(w, run_gate),
                         None => r,
                     }
                 }
@@ -1913,7 +1988,7 @@ impl Session {
 
             let cancel_token = self.new_action_cancel_token();
             let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
-            self.cancel.set_action(cancel_token.clone(), cancel_tx);
+            let run_gate = self.cancel.set_action(cancel_token.clone(), cancel_tx);
 
             let mut action_symtab = symtab.clone();
             self.materialize_path_mapping(&mut action_symtab)
@@ -2032,7 +2107,7 @@ impl Session {
                         .as_ref()
                         .and_then(|f| f.try_clone().ok())
                     {
-                        Some(w) => r.with_cancel_writer(w),
+                        Some(w) => r.with_cancel_writer(w, run_gate),
                         None => r,
                     }
                 }
@@ -2145,7 +2220,7 @@ impl Session {
 
         let cancel_token = self.new_action_cancel_token();
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
-        self.cancel.set_action(cancel_token.clone(), cancel_tx);
+        let run_gate = self.cancel.set_action(cancel_token.clone(), cancel_tx);
 
         let env_vars = self.evaluate_env_vars(os_env_vars);
         let mut action_symtab = symtab.clone();
@@ -2281,7 +2356,7 @@ impl Session {
                     .as_ref()
                     .and_then(|f| f.try_clone().ok())
                 {
-                    Some(w) => r.with_cancel_writer(w),
+                    Some(w) => r.with_cancel_writer(w, run_gate),
                     None => r,
                 }
             }
@@ -2479,7 +2554,7 @@ impl Session {
         // helper subprocess would be misreported as Failed.
         let cancel_token = self.new_action_cancel_token();
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
-        self.cancel.set_action(cancel_token.clone(), cancel_tx);
+        let run_gate = self.cancel.set_action(cancel_token.clone(), cancel_tx);
         // A bare subprocess is a TERMINATE action. Recording it makes a
         // `cancel_action` / `SessionCancelHandle` cancel send the helper
         // TERMINATE, as the same-user path kills at once.
@@ -2521,6 +2596,7 @@ impl Session {
             &self.session_id,
             tx,
             self.cross_user.cancel_writer.as_ref(),
+            Some(&run_gate),
             &cancel_token,
         )
         .await;
@@ -4504,11 +4580,28 @@ mod helper_cancel_command_tests {
     const TOKEN: &str = "AbCdEfGhIjKlMnOpQrStUv";
 
     /// A Running session with an injected cancel pipe (a file), the helper
-    /// token, a registered action and, if given, its recorded method.
+    /// token, a registered action whose Run command counts as written and,
+    /// if given, its recorded method.
     fn session(
         tmp: &tempfile::TempDir,
         method: Option<CancelMethod>,
     ) -> (Session, std::path::PathBuf) {
+        let (s, path, gate) = session_before_run(tmp, method);
+        gate.start_run::<()>(|| Ok(()), |_| panic!("no cancel is held"))
+            .unwrap();
+        (s, path)
+    }
+
+    /// Like [`session`], but the action's Run command isn't written yet.
+    /// Returns the action's gate.
+    fn session_before_run(
+        tmp: &tempfile::TempDir,
+        method: Option<CancelMethod>,
+    ) -> (
+        Session,
+        std::path::PathBuf,
+        Arc<crate::cross_user_helper::HelperRunGate>,
+    ) {
         let mut s = Session::new_for_test(tmp.path().to_path_buf());
         let path = tmp.path().join("cancel_writer.log");
         let writer = std::fs::OpenOptions::new()
@@ -4519,10 +4612,12 @@ mod helper_cancel_command_tests {
         s.set_cancel_writer_for_test(writer);
         s.set_helper_auth_token_for_test(TOKEN.into());
         s.set_state_for_test(SessionState::Running);
+        // As on a session with a helper, so cancels go through the gate.
+        s.cancel.helper_routed = true;
         let (tx, _rx) = tokio::sync::watch::channel(None);
-        s.cancel.set_action(CancellationToken::new(), tx);
+        let gate = s.cancel.set_action(CancellationToken::new(), tx);
         s.cancel.set_cancel_method(method);
-        (s, path)
+        (s, path, gate)
     }
 
     fn written(path: &std::path::Path) -> String {
@@ -4641,5 +4736,60 @@ mod helper_cancel_command_tests {
                 "time_limit {limit:?}"
             );
         }
+    }
+    /// A cancel that lands before the helper's Run command is written (an
+    /// idle helper drops it) writes nothing. The gate holds it, and the Run
+    /// writer gets its time limit right after Run, once, from either
+    /// `cancel_action` or the handle.
+    #[test]
+    fn cancel_before_run_is_held_until_run_is_written() {
+        for limit in limits() {
+            for via_handle in [false, true] {
+                let tmp = tempfile::TempDir::new().unwrap();
+                let (mut s, path, gate) = session_before_run(&tmp, Some(CancelMethod::Terminate));
+                if via_handle {
+                    assert!(s.cancel_handle().cancel(limit, false));
+                } else {
+                    s.cancel_action(limit, false).unwrap();
+                }
+                assert_eq!(written(&path), "", "handle={via_handle} {limit:?}");
+                let mut held = Vec::new();
+                gate.start_run::<()>(
+                    || Ok(()),
+                    |l| {
+                        held.push(l);
+                        Ok(())
+                    },
+                )
+                .unwrap();
+                assert_eq!(held, [limit], "handle={via_handle}");
+                // Run is written now: a further cancel goes to the pipe.
+                assert!(s.cancel_handle().cancel(limit, false));
+                assert_eq!(
+                    written(&path),
+                    format!(
+                        "{}\n",
+                        helper_cancel_line(Some(TOKEN), &CancelMethod::Terminate, limit)
+                    ),
+                );
+            }
+        }
+    }
+
+    /// Each action gets a new gate: a cancel held for one action that never
+    /// wrote Run (for example, its setup failed) does not reach the next.
+    #[test]
+    fn held_cancel_does_not_carry_over_to_the_next_action() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let (s, _path, _old_gate) = session_before_run(&tmp, None);
+        assert!(s.cancel_handle().cancel(None, false));
+        s.cancel.reset();
+        let (tx, _rx) = tokio::sync::watch::channel(None);
+        let gate = s.cancel.set_action(CancellationToken::new(), tx);
+        gate.start_run::<()>(
+            || Ok(()),
+            |_| panic!("the earlier cancel must not carry over"),
+        )
+        .unwrap();
     }
 }

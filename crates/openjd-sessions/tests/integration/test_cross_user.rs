@@ -1008,6 +1008,268 @@ async fn test_cross_user_token_notify_then_terminate_uses_declared_grace() {
     check_notify_then_terminate_grace(CancelVia::Token, Duration::from_secs(8)).await;
 }
 
+// === Cancel before the helper's Run command ===
+//
+// A handle cancel finds an action once it is registered, which is before
+// the helper is sent its Run command, and a helper with no command running
+// drops a cancel. These tests cancel in that window: deterministically from
+// the session's before-Run test hook, and with a canceller that spins on the
+// handle (the auditor's probe). Before the fix the action ran to completion
+// (6 s, prints FINISHED) and was still reported Canceled.
+
+/// A TERMINATE task that sleeps 6 s and then prints FINISHED.
+fn sleep_then_finish_task() -> openjd_model::job::StepScript {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::{Action, StepActions, StepScript};
+    StepScript {
+        let_bindings: None,
+        actions: StepActions {
+            on_run: Action {
+                command: FormatString::new("bash").unwrap(),
+                args: Some(vec![
+                    FormatString::new("-c").unwrap(),
+                    FormatString::new("sleep 6; echo FINISHED").unwrap(),
+                ]),
+                timeout: None,
+                cancelation: None,
+            },
+        },
+        embedded_files: None,
+    }
+}
+
+/// Install a before-Run hook that cancels through a handle with
+/// `time_limit`, once. Returns a flag the hook sets when the handle found
+/// the action.
+fn cancel_before_run_once(
+    session: &mut Session,
+    time_limit: Option<Duration>,
+) -> Arc<std::sync::atomic::AtomicBool> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let handle = session.cancel_handle();
+    let fired = Arc::new(AtomicBool::new(false));
+    let delivered = Arc::new(AtomicBool::new(false));
+    let delivered_in_hook = delivered.clone();
+    session.set_before_helper_run_hook_for_test(Arc::new(move || {
+        if !fired.swap(true, Ordering::SeqCst) {
+            delivered_in_hook.store(handle.cancel(time_limit, false), Ordering::SeqCst);
+        }
+    }));
+    delivered
+}
+
+/// A handle cancel before Run must still cancel a task: the TERMINATE task
+/// is killed at once instead of running its 6 s and printing FINISHED.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_before_run_task_killed_at_once() {
+    let mut session = make_session(require_target_user());
+    let delivered = cancel_before_run_once(&mut session, None);
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &sleep_then_finish_task(), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert!(
+        delivered.load(std::sync::atomic::Ordering::SeqCst),
+        "the hook's handle must find the registered task"
+    );
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(
+        !r.stdout.contains("FINISHED"),
+        "a cancel before Run must stop the task; stdout: {}",
+        r.stdout
+    );
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "the task must be killed at once, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// `run_subprocess` through the helper, cancelled before its Run command.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_before_run_subprocess_killed_at_once() {
+    let mut session = make_session(require_target_user());
+    let delivered = cancel_before_run_once(&mut session, None);
+    let args = ["-c".to_string(), "sleep 6; echo FINISHED".to_string()];
+    let started = std::time::Instant::now();
+    let r = session
+        .run_subprocess("bash", Some(&args), None, None, true, None)
+        .await
+        .expect("run_subprocess must return a result");
+    let elapsed = started.elapsed();
+    assert!(delivered.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(!r.stdout.contains("FINISHED"), "stdout: {}", r.stdout);
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "the subprocess must be killed at once, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// `onEnter` and `onExit` take the same gate as a task: a 6 s action
+/// canceled before its Run command ends at once with Canceled.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_before_run_on_enter_and_on_exit() {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::{Action, Environment, EnvironmentActions, EnvironmentScript};
+
+    let sleep_action = || Action {
+        command: FormatString::new("bash").unwrap(),
+        args: Some(vec![
+            FormatString::new("-c").unwrap(),
+            FormatString::new("sleep 6; echo FINISHED").unwrap(),
+        ]),
+        timeout: None,
+        cancelation: None,
+    };
+    let env = |on_enter: bool| Environment {
+        name: "Env".into(),
+        description: None,
+        variables: None,
+        resolved_symtab: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            embedded_files: None,
+            actions: EnvironmentActions {
+                on_enter: on_enter.then(sleep_action),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
+                on_exit: (!on_enter).then(sleep_action),
+            },
+        }),
+    };
+
+    // onEnter
+    let mut session = make_session(require_target_user());
+    let delivered = cancel_before_run_once(&mut session, None);
+    let started = std::time::Instant::now();
+    let _ = session
+        .enter_environment(&env(true), None, None, None)
+        .await;
+    let elapsed = started.elapsed();
+    assert!(delivered.load(std::sync::atomic::Ordering::SeqCst));
+    let status = session.action_status();
+    assert_eq!(
+        status.as_ref().map(|a| a.state),
+        Some(ActionState::Canceled),
+        "{status:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "onEnter must be killed at once, took {elapsed:?}"
+    );
+    session.cleanup();
+
+    // onExit: enter with no onEnter, then cancel the exit before its Run.
+    let mut session = make_session(require_target_user());
+    let id = session
+        .enter_environment(&env(false), None, None, None)
+        .await
+        .unwrap();
+    let delivered = cancel_before_run_once(&mut session, None);
+    let started = std::time::Instant::now();
+    let _ = session.exit_environment(&id, None, false, None).await;
+    let elapsed = started.elapsed();
+    assert!(delivered.load(std::sync::atomic::Ordering::SeqCst));
+    let status = session.action_status();
+    assert_eq!(
+        status.as_ref().map(|a| a.state),
+        Some(ActionState::Canceled),
+        "{status:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "onExit must be killed at once, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// A cancel held for an action doesn't reach the session's next action:
+/// after a task canceled before Run, the same helper runs a subprocess to
+/// Success. (Which grace a held cancel gets is checked exactly, against the
+/// pipe, by `cross_user_helper.rs`'s `run_via_helper_gate_tests`: here the
+/// notify signal lands before a script could install a TERM trap.)
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_before_run_leaves_helper_ready_for_next_action() {
+    let mut session = make_session(require_target_user());
+    let _delivered = cancel_before_run_once(&mut session, None);
+    let r = session
+        .run_task("t", &sleep_then_finish_task(), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    // A canceled action makes the session ending-only (session.md § Brittle
+    // Sessions); clear it to run the next action.
+    session.clear_ending_only().unwrap();
+    let args = ["-c".to_string(), "sleep 1; echo FINISHED".to_string()];
+    let next = session
+        .run_subprocess("bash", Some(&args), None, None, true, None)
+        .await
+        .expect("run_subprocess must return a result");
+    assert_eq!(next.state, ActionState::Success, "stdout: {}", next.stdout);
+    assert!(next.stdout.contains("FINISHED"), "stdout: {}", next.stdout);
+    session.cleanup();
+}
+
+/// The auditor's probe, without the hook: a canceller thread spins on the
+/// handle from before the task starts, so its cancel lands right after the
+/// task registers. Three runs, each must end at once.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_spinning_cancel_handle_stops_task() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    for run in 0..3 {
+        let mut session = make_session(require_target_user());
+        let handle = session.cancel_handle();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_spinner = stop.clone();
+        let spinner = std::thread::spawn(move || {
+            while !stop_spinner.load(Ordering::Relaxed) {
+                if handle.cancel(None, false) {
+                    return true;
+                }
+                std::hint::spin_loop();
+            }
+            false
+        });
+        let started = std::time::Instant::now();
+        let r = session
+            .run_task("t", &sleep_then_finish_task(), None, None, None)
+            .await
+            .expect("run_task must return a result");
+        let elapsed = started.elapsed();
+        stop.store(true, Ordering::Relaxed);
+        assert!(
+            spinner.join().unwrap(),
+            "run {run}: the handle must find the task"
+        );
+        assert_eq!(
+            r.state,
+            ActionState::Canceled,
+            "run {run}: stdout: {}",
+            r.stdout
+        );
+        assert!(
+            !r.stdout.contains("FINISHED"),
+            "run {run}: stdout: {}",
+            r.stdout
+        );
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "run {run}: the task must be killed at once, took {elapsed:?}"
+        );
+        session.cleanup();
+    }
+}
+
 // === Cross-user brittle-session tests ===
 
 /// A subprocess that fails through the cross-user helper makes the session

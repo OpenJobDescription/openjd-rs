@@ -374,6 +374,10 @@ impl Session {
     pub fn set_job_parameter_values_for_test(&mut self, values: JobParameterValues);
     pub fn set_cancel_writer_for_test(&mut self, writer: std::fs::File);
     pub fn set_helper_auth_token_for_test(&mut self, token: String);
+    /// Called on the session thread after each later action registers for
+    /// cancellation and right before its Run command goes to the
+    /// cross-user helper, so a test can cancel in that window.
+    pub fn set_before_helper_run_hook_for_test(&mut self, hook: Arc<dyn Fn() + Send + Sync>);
     pub fn clone_cancel_writer(&self) -> Option<std::fs::File>;
 }
 ```

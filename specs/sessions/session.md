@@ -606,7 +606,11 @@ Unset takes precedence over set within the same environment, matching the spec.
 3. On a cross-user session, writes the cancel command to the helper. The command
    follows the action's cancel method as the same-user loop does: `TERMINATE` for
    a `TERMINATE` action, and `NOTIFY_THEN_TERMINATE` with the declared grace capped
-   at `time_limit` otherwise (see [Choosing the cancel command](embedded-cross-user-helper.md#choosing-the-cancel-command))
+   at `time_limit` otherwise (see [Choosing the cancel command](embedded-cross-user-helper.md#choosing-the-cancel-command)).
+   If the helper doesn't have the action's Run command yet, the action's run gate
+   holds the cancel and the run loop writes it right after Run, once, because a
+   helper with no command running drops a cancel (see
+   [Cancel before Run](embedded-cross-user-helper.md#cancel-before-run))
 4. Sends `time_limit` over the watch channel and cancels the `CancellationToken`;
    the same-user subprocess loop then applies the action's cancel method
 5. If `mark_action_failed` is true, the action result is `Failed` instead of `Canceled`
@@ -630,7 +634,8 @@ channel, `mark_failed` flag, all behind one `Arc<Mutex<..>>`).
 
 - Returns `false` if no action is running (no per-action token installed).
 - Otherwise delivers exactly what `cancel_action` delivers — the helper pipe cancel
-  command (cross-user sessions), the `time_limit` over the watch channel, and the
+  command (cross-user sessions; held until the helper has the action's Run command,
+  as for `cancel_action`), the `time_limit` over the watch channel, and the
   token cancel — while holding the shared lock so the target action cannot change
   mid-delivery.
 - Unlike `cancel_action`, it cannot set the session's transient `Canceling` state

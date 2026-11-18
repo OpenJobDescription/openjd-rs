@@ -135,8 +135,15 @@ impl StepScriptRunner {
         self.base.helper.take()
     }
 
-    pub(crate) fn with_cancel_writer(mut self, writer: std::fs::File) -> Self {
+    /// Attach the cross-user helper's cancel pipe and the action's
+    /// [`crate::cross_user_helper::HelperRunGate`].
+    pub(crate) fn with_cancel_writer(
+        mut self,
+        writer: std::fs::File,
+        run_gate: std::sync::Arc<crate::cross_user_helper::HelperRunGate>,
+    ) -> Self {
         self.base.cancel_writer = Some(writer);
+        self.base.helper_run_gate = Some(run_gate);
         self
     }
 
