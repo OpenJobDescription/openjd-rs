@@ -117,6 +117,37 @@ fn template(steps: &[Step], job_env_lets: Option<&[&str]>) -> serde_json::Value 
     t
 }
 
+/// `steps` steps with literal host requirements and the `let` block `lets`,
+/// over `params` STRING job parameters.
+fn hr_template(steps: usize, params: usize, expr: bool, lets: &[String]) -> serde_json::Value {
+    let params: Vec<_> = (0..params)
+        .map(|k| serde_json::json!({"name": format!("P{k}"), "type": "STRING", "default": "v"}))
+        .collect();
+    let steps: Vec<_> = (0..steps)
+        .map(|i| {
+            let mut s = serde_json::json!({
+                "name": format!("S{i}"),
+                "hostRequirements": {"amounts": [{"name": "amount.worker.vcpu", "min": 1}]},
+                "script": {"actions": {"onRun": {"command": "echo"}}}
+            });
+            if !lets.is_empty() {
+                s["let"] = serde_json::json!(lets);
+            }
+            s
+        })
+        .collect();
+    let mut t = serde_json::json!({
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "M",
+        "parameterDefinitions": params,
+        "steps": steps,
+    });
+    if expr {
+        t["extensions"] = serde_json::json!(["EXPR", "FEATURE_BUNDLE_1"]);
+    }
+    t
+}
+
 fn validate(t: serde_json::Value) {
     let _ = decode_job_template(
         t,
@@ -143,6 +174,7 @@ fn validation_peak_memory_stays_within_its_bounds() {
     let hr_huge = format!("{{{{ len('C' * {}) % 4 + 1 }}}}", 20 * V);
     let fails = [x.as_str(), "y = int('nope')"];
     let fails_large = [x.as_str(), "y = int(x)"];
+    let small_lets: Vec<String> = (0..50).map(|k| format!("v{k} = {k}")).collect();
 
     // (name, template, limit in multiples of V). Each comment gives the
     // measured peak, which each limit exceeds by about 0.5, and what would
@@ -302,6 +334,20 @@ fn validation_peak_memory_stays_within_its_bounds() {
                 None,
             ),
             20.5,
+        ),
+        // 0.61. Keeping each step's whole symtab (Param.* entries
+        // included) for its body: 3.57.
+        (
+            "1000 host-requirement steps, 50 parameters, no let",
+            hr_template(1000, 50, false, &[]),
+            0.9,
+        ),
+        // 1.47, origin/main 0.52: the kept bindings, within
+        // RETAINED_SCOPE_BUDGET (1.05V). Keeping whole symtabs: 2.54.
+        (
+            "1000 host-requirement steps, 50 small bindings each",
+            hr_template(1000, 0, true, &small_lets),
+            1.7,
         ),
     ];
     let mut report = Vec::new();

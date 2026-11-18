@@ -1700,43 +1700,87 @@ fn check_embedded_files_data(
 }
 
 /// A step's template-scope symtab with its step-level `let` bindings
-/// evaluated in, built by [`step_let_scope`] for the step body and shared
-/// with the parameterSpace ranges when evaluating them reported nothing.
+/// evaluated in, built by [`step_let_scope`] (or from [`RetainedBindings`])
+/// and shared by the sites of one step when evaluating them reported
+/// nothing.
 struct StepLetScope {
     symtab: SymbolTable,
     names: HashSet<String>,
 }
 
-/// Most bytes of evaluated `let` values (and their names) that pass 8 keeps
-/// from host requirements for the steps' ranges and bodies, across all
-/// steps. Bounds the extra peak memory of sharing; real templates use a few
-/// kilobytes.
+/// Most bytes [`RetainedBindings`] may hold across all steps at once. This
+/// is the extra peak memory sharing with host requirements costs; real
+/// templates keep a few kilobytes.
 const RETAINED_SCOPE_BUDGET: usize = 4 * 1024 * 1024;
 
-impl StepLetScope {
-    /// Approximate heap bytes of the bindings this scope adds to the base
-    /// symtab.
-    fn retained_bytes(&self) -> usize {
-        self.names
-            .iter()
-            .map(|n| n.len() + self.symtab.get_value(n).map_or(0, ExprValue::memory_size))
-            .sum()
+/// A step's clean `let` values, kept from the host-requirements loop for the
+/// step's ranges and body. Only the bindings are kept, not the symtab, and
+/// only values whose heap size is known exactly, so [`Self::bytes`] is what
+/// they occupy.
+struct RetainedBindings {
+    step: usize,
+    bindings: Vec<(String, ExprValue)>,
+    bytes: usize,
+}
+
+impl RetainedBindings {
+    /// The scope's bindings, or `None` when there are none (nothing to save)
+    /// or a value's heap size is not known exactly.
+    fn from_scope(step: usize, scope: StepLetScope) -> Option<Self> {
+        if scope.names.is_empty() {
+            return None;
+        }
+        // The deque holding entries may have twice the capacity it uses.
+        let mut bytes = 2 * std::mem::size_of::<Self>()
+            + scope.names.len() * std::mem::size_of::<(String, ExprValue)>();
+        let mut bindings = Vec::with_capacity(scope.names.len());
+        for name in scope.names {
+            let value = scope.symtab.get_value(&name)?.clone();
+            bytes += name.capacity() + exact_heap_size(&value)?;
+            bindings.push((name, value));
+        }
+        Some(Self {
+            step,
+            bindings,
+            bytes,
+        })
+    }
+
+    /// Heap bytes held: this entry, the bindings vector, and each name's and
+    /// value's allocation.
+    fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    /// The step's scope again: the base symtab with the bindings set in.
+    fn into_scope(self, base: SymbolTable) -> StepLetScope {
+        let mut symtab = base;
+        let mut names = HashSet::with_capacity(self.bindings.len());
+        for (name, value) in self.bindings {
+            let _ = symtab.set(&name, value);
+            names.insert(name);
+        }
+        StepLetScope { symtab, names }
     }
 }
 
-/// The template-scope symtab for a step's job-creation-stage fields:
-/// Param.* (non-PATH), RawParam.*, and with EXPR Job.Name, Step.Name, and
-/// the step-level `let` bindings, evaluated with `validate_let_bindings`,
-/// which reports into `errors`.
-fn step_let_scope(
-    jt: &JobTemplate,
-    step: &StepTemplate,
-    step_path: &[PathElement],
-    expr_active: bool,
-    ev: &FsEval<'_>,
-    profile: &openjd_expr::ExprProfile,
-    errors: &mut ValidationErrors,
-) -> StepLetScope {
+/// Heap bytes a scalar value owns, or `None` for lists, ranges, and any
+/// variant added later, whose allocation this crate cannot measure.
+fn exact_heap_size(value: &ExprValue) -> Option<usize> {
+    match value {
+        ExprValue::Null | ExprValue::Bool(_) | ExprValue::Int(_) => Some(0),
+        // A parameterless type (`unresolved[int]`) owns no heap.
+        ExprValue::Unresolved(t) if t.params().is_empty() => Some(0),
+        // `memory_size` counts a float's preserved spelling exactly.
+        ExprValue::Float(_) => Some(value.memory_size() - std::mem::size_of::<ExprValue>()),
+        ExprValue::String(s) | ExprValue::Path { value: s, .. } => Some(s.capacity()),
+        _ => None,
+    }
+}
+
+/// The template-scope base symtab for a step: Param.* (non-PATH), RawParam.*,
+/// and with EXPR Job.Name and Step.Name.
+fn step_base_symtab(jt: &JobTemplate, expr_active: bool) -> SymbolTable {
     let mut symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
     if expr_active {
         symtab
@@ -1746,6 +1790,22 @@ fn step_let_scope(
             .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
             .expect("symtab");
     }
+    symtab
+}
+
+/// The template-scope symtab for a step's job-creation-stage fields:
+/// [`step_base_symtab`] with the step-level `let` bindings, evaluated with
+/// `validate_let_bindings`, which reports into `errors`.
+fn step_let_scope(
+    jt: &JobTemplate,
+    step: &StepTemplate,
+    step_path: &[PathElement],
+    expr_active: bool,
+    ev: &FsEval<'_>,
+    profile: &openjd_expr::ExprProfile,
+    errors: &mut ValidationErrors,
+) -> StepLetScope {
+    let mut symtab = step_base_symtab(jt, expr_active);
     let mut names = HashSet::new();
     if let (true, Some(bindings)) = (expr_active, &step.let_bindings) {
         validate_let_bindings(
@@ -1873,14 +1933,13 @@ pub fn validate_format_strings(
     );
 
     // ── Host requirements: template scope + step let bindings ──
-    // A clean scope is kept for the step's ranges and body while the scopes
-    // kept so far stay within `RETAINED_SCOPE_BUDGET`; past it, those sites
-    // evaluate the bindings again.
-    let mut retained: Vec<Option<StepLetScope>> = Vec::with_capacity(jt.steps.len());
+    // A clean scope's bindings are kept for the step's ranges and body while
+    // all kept bindings stay within `RETAINED_SCOPE_BUDGET`; past it, those
+    // sites evaluate the bindings again.
+    let mut retained: std::collections::VecDeque<RetainedBindings> = Default::default();
     let mut retained_bytes = 0usize;
     for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
-        retained.push(None);
         if let Some(hr) = &step.host_requirements {
             let before = errors.len();
             let scope = step_let_scope(
@@ -2023,10 +2082,12 @@ pub fn validate_format_strings(
                 );
             }
             if clean {
-                let bytes = scope.retained_bytes();
-                if retained_bytes + bytes <= RETAINED_SCOPE_BUDGET {
-                    retained_bytes += bytes;
-                    retained[i] = Some(scope);
+                if let Some(kept) = RetainedBindings::from_scope(i, scope) {
+                    let bytes = kept.bytes();
+                    if retained_bytes + bytes <= RETAINED_SCOPE_BUDGET {
+                        retained_bytes += bytes;
+                        retained.push_back(kept);
+                    }
                 }
             }
         }
@@ -2100,7 +2161,12 @@ pub fn validate_format_strings(
         // Step-level let bindings are in template scope and must be visible
         // in parameterSpace range expressions. When they are clean, the
         // ranges and the step body below share one evaluation of them.
-        let mut shared_scope = retained[i].take();
+        let mut shared_scope = match retained.front() {
+            Some(kept) if kept.step == i => retained
+                .pop_front()
+                .map(|kept| kept.into_scope(step_base_symtab(jt, expr_active))),
+            _ => None,
+        };
         if let Some(ps) = &step.parameter_space {
             let ps_path = path_field(&step_path, "parameterSpace");
             let tpd_path = path_field(&ps_path, "taskParameterDefinitions");

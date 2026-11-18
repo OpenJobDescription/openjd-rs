@@ -1667,3 +1667,40 @@ fn step_let_failure_timeout_sees_step_name() {
         .join("\n")
     );
 }
+
+/// A step's body sees its own bindings, not those of a later step whose
+/// host requirements were checked with its bindings.
+#[test]
+fn step_let_body_sees_only_its_own_bindings() {
+    let s = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "steps": [
+            {
+                "name": "A",
+                "let": ["c = 1"],
+                "script": {"actions": {"onRun": {"command": "echo", "args": ["{{ b }}"]}}}
+            },
+            {
+                "name": "B",
+                "let": ["b = 1"],
+                "hostRequirements": {
+                    "amounts": [{"name": "amount.worker.vcpu", "min": "{{ b }}"}]
+                },
+                "script": {"actions": {"onRun": {"command": "echo"}}}
+            }
+        ]
+    }"#;
+    assert_eq!(
+        full_err(s),
+        [
+            "Model validation error: 1 validation error for JobTemplate",
+            "steps[0] -> script -> actions -> onRun -> args[0]:",
+            "\tFailed to parse interpolation expression at [0, 7]. Undefined variable: 'b'. Did you mean: c",
+            "  b",
+            "  ^",
+        ]
+        .join("\n")
+    );
+}
