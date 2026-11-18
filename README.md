@@ -113,7 +113,7 @@ openjd-for-js (experimental)
 ├── openjd-model
 └── openjd-expr
 
-openjd-snapshots (experimental, standalone)
+openjd-snapshots (experimental, no workspace dependencies)
 ```
 
 Design documents are in [`specs/`](specs/). Start with

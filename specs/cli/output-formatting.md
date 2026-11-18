@@ -161,13 +161,15 @@ is the serialization format.
 
 ### JSON/YAML Construction
 
-Output values are built using `serde_json::Map` and `serde_json::json!()` macro rather than
-serializing a dedicated struct. This avoids defining output-specific structs but means the
-output schema is implicit in the code rather than enforced by types.
+Each command builds a result struct that implements the `CliResult` trait in `src/common.rs`:
+`JobSummaryResult` and `StepSummaryResult` in `src/summary.rs`, and `RunResult` in
+`src/run/result.rs`. Its `Display` impl gives the human-readable output, and its
+`to_json_value` builds the `serde_json::Value` by hand with `serde_json::Map` and the
+`serde_json::json!()` macro rather than `#[derive(Serialize)]`. So the output field names and
+which fields are omitted are set in `to_json_value`, not by the struct's field types.
 
-The Python CLI uses dataclass-based result types (`OpenJDCliResult`, `OpenJDJobSummaryResult`,
-etc.) that are serialized via the `@print_cli_result` decorator. This is more type-safe
-but requires maintaining parallel type hierarchies (domain types + output types).
+This mirrors the Python CLI, whose result dataclasses (`OpenJDCliResult`,
+`OpenJDJobSummaryResult`, etc.) are rendered by the `@print_cli_result` decorator.
 
 ## Conditional Fields
 
@@ -183,13 +185,12 @@ Both JSON and human-readable formats omit empty optional fields:
 
 | Aspect | Python | Rust |
 |--------|--------|------|
-| Output dispatch | `@print_cli_result` decorator | Inline `match` per command |
-| Result types | Dedicated dataclasses per command | No output types; inline construction |
+| Output dispatch | `@print_cli_result` decorator | `print_cli_result` function, called by each command |
+| Result types | Dedicated dataclasses per command | A struct per result implementing `CliResult`, with a hand-built JSON value |
 | JSON/YAML parity | Full structured output in both formats | Identical — same value, different serializer |
 | Error output | Structured error in chosen format | Plain text to stderr |
 | Check command | Supports `--output` | No `--output` support |
 
-The Python CLI's decorator pattern is more DRY — output formatting logic is written once
-and applied to all commands. The Rust CLI's inline approach is simpler but requires each
-command to handle formatting independently. If more commands are added, extracting a shared
-output formatting utility would reduce duplication.
+In both CLIs the output formatting is written once and shared by every command that takes
+`--output`. A new command gets JSON, YAML and human-readable output by returning a
+`CliResult` and calling `print_cli_result`.

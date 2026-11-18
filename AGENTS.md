@@ -182,7 +182,7 @@ specs/
 └── windows-cross-user-helper.md # Cross-cutting Windows design
 ```
 
-Start with `specs/<crate>/README.md` for any crate, or `specs/openjd-for-js/spec.md` for `openjd-for-js`. It indexes all spec documents for that crate and explains the relationships between them.
+Start with `specs/<crate>/README.md` for any crate. Each README indexes all spec documents for its crate and explains the relationships between them. `openjd-for-js` has a single spec, `specs/openjd-for-js/spec.md`.
 
 ### Report-driven development
 
