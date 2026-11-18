@@ -449,6 +449,14 @@ impl SessionCancelHandle {
             shared.mark_failed = true;
         }
 
+        // The watch value goes first: once the pipe command is written the
+        // helper can kill the process and report its exit, and the run loop
+        // classifies that exit Canceled only if the watch channel has fired
+        // or the token is cancelled.
+        if let Some(tx) = &shared.request_tx {
+            let _ = tx.send(time_limit);
+        }
+
         // Cross-user sessions: also deliver the cancel command to the helper
         // process over the dup'd pipe, mirroring Session::cancel_action.
         if let Some(ref writer) = self.cancel_writer {
@@ -460,9 +468,8 @@ impl SessionCancelHandle {
             );
         }
 
-        if let Some(tx) = &shared.request_tx {
-            let _ = tx.send(time_limit);
-        }
+        // The token goes last: the run loop's token branch skips its own
+        // command when the watch channel has fired.
         token.cancel();
         true
     }
@@ -476,8 +483,8 @@ impl SessionCancelHandle {
 /// Once the helper's Run command is written, it writes the command now with
 /// [`send_helper_cancel_command`]. Before that, the gate holds the
 /// `time_limit` and `run_via_helper` writes the command right after Run,
-/// from the runner's cancel method, because a helper with no command
-/// running drops a cancel. A session without a helper (only a test that
+/// from the runner's cancel method, because the Unix helper drops a cancel
+/// when no command is running. A session without a helper (only a test that
 /// injects the pipe writes one) has no gate, and the command is written
 /// now.
 fn deliver_helper_cancel(
@@ -534,9 +541,13 @@ fn send_helper_cancel_command(
             &unknown_method
         }
     };
-    let line = crate::cross_user_helper::helper_cancel_line(auth_token, method, time_limit);
+    // One write of the whole line, so it can't interleave with a cancel line
+    // the run loop writes at the same moment (both are under PIPE_BUF).
+    let line = format!(
+        "{}\n",
+        crate::cross_user_helper::helper_cancel_line(auth_token, method, time_limit)
+    );
     let _ = writer.write_all(line.as_bytes());
-    let _ = writer.write_all(b"\n");
     let _ = writer.flush();
 }
 
@@ -1096,8 +1107,9 @@ impl Session {
     /// Clone the cancel_writer file handle (a dup of the cross-user helper's
     /// stdin), if one exists. [`Session::cancel_handle`] uses it to deliver
     /// cancel commands from another thread. A caller that writes to it
-    /// directly bypasses the session's cancel command builder, so prefer
-    /// [`Session::cancel_handle`].
+    /// directly bypasses the session's cancel command builder, and the
+    /// ordering against the action's Run command: a cancel written before
+    /// Run doesn't reach the action. Prefer [`Session::cancel_handle`].
     pub fn clone_cancel_writer(&self) -> Option<std::fs::File> {
         self.cross_user
             .cancel_writer
@@ -1182,22 +1194,24 @@ impl Session {
         // via `set_cancel_writer_for_test`), the test is responsible for
         // asserting whatever framing it expects; we still write a valid
         // tokenized command if we have a token.
-        if let Some(ref writer) = self.cross_user.cancel_writer {
-            deliver_helper_cancel(
-                &self.cancel.lock(),
-                writer,
-                self.cross_user.helper_auth_token.as_deref(),
-                time_limit,
-            );
-        }
-
-        let (token, request_tx) = {
+        //
+        // The order is the handle's (`SessionCancelHandle::cancel`): the
+        // watch value, then the helper command, then the token.
+        let token = {
             let shared = self.cancel.lock();
-            (shared.token.clone(), shared.request_tx.clone())
+            if let Some(tx) = &shared.request_tx {
+                let _ = tx.send(time_limit);
+            }
+            if let Some(ref writer) = self.cross_user.cancel_writer {
+                deliver_helper_cancel(
+                    &shared,
+                    writer,
+                    self.cross_user.helper_auth_token.as_deref(),
+                    time_limit,
+                );
+            }
+            shared.token.clone()
         };
-        if let Some(tx) = request_tx {
-            let _ = tx.send(time_limit);
-        }
         if let Some(token) = token {
             token.cancel();
         }
@@ -1689,14 +1703,14 @@ impl Session {
             }
             let mut runner = match self.cross_user.helper.take() {
                 Some(h) => {
-                    let r = runner.with_helper(h);
+                    let r = runner.with_helper(h).with_helper_run_gate(run_gate);
                     match self
                         .cross_user
                         .cancel_writer
                         .as_ref()
                         .and_then(|f| f.try_clone().ok())
                     {
-                        Some(w) => r.with_cancel_writer(w, run_gate),
+                        Some(w) => r.with_cancel_writer(w),
                         None => r,
                     }
                 }
@@ -2100,14 +2114,14 @@ impl Session {
             }
             let mut runner = match self.cross_user.helper.take() {
                 Some(h) => {
-                    let r = runner.with_helper(h);
+                    let r = runner.with_helper(h).with_helper_run_gate(run_gate);
                     match self
                         .cross_user
                         .cancel_writer
                         .as_ref()
                         .and_then(|f| f.try_clone().ok())
                     {
-                        Some(w) => r.with_cancel_writer(w, run_gate),
+                        Some(w) => r.with_cancel_writer(w),
                         None => r,
                     }
                 }
@@ -2349,14 +2363,14 @@ impl Session {
         }
         let mut runner = match self.cross_user.helper.take() {
             Some(h) => {
-                let r = runner.with_helper(h);
+                let r = runner.with_helper(h).with_helper_run_gate(run_gate);
                 match self
                     .cross_user
                     .cancel_writer
                     .as_ref()
                     .and_then(|f| f.try_clone().ok())
                 {
-                    Some(w) => r.with_cancel_writer(w, run_gate),
+                    Some(w) => r.with_cancel_writer(w),
                     None => r,
                 }
             }
@@ -4587,7 +4601,7 @@ mod helper_cancel_command_tests {
         method: Option<CancelMethod>,
     ) -> (Session, std::path::PathBuf) {
         let (s, path, gate) = session_before_run(tmp, method);
-        gate.start_run::<()>(|| Ok(()), |_| panic!("no cancel is held"))
+        gate.start_run::<(), ()>(&mut (), |_| Ok(()), |_, _| panic!("no cancel is held"))
             .unwrap();
         (s, path)
     }
@@ -4737,8 +4751,8 @@ mod helper_cancel_command_tests {
             );
         }
     }
-    /// A cancel that lands before the helper's Run command is written (an
-    /// idle helper drops it) writes nothing. The gate holds it, and the Run
+    /// A cancel that lands before the helper's Run command is written (the
+    /// Unix helper would drop it) writes nothing. The gate holds it, and the Run
     /// writer gets its time limit right after Run, once, from either
     /// `cancel_action` or the handle.
     #[test]
@@ -4754,9 +4768,10 @@ mod helper_cancel_command_tests {
                 }
                 assert_eq!(written(&path), "", "handle={via_handle} {limit:?}");
                 let mut held = Vec::new();
-                gate.start_run::<()>(
-                    || Ok(()),
-                    |l| {
+                gate.start_run::<(), ()>(
+                    &mut (),
+                    |_| Ok(()),
+                    |_, l| {
                         held.push(l);
                         Ok(())
                     },
@@ -4786,10 +4801,92 @@ mod helper_cancel_command_tests {
         s.cancel.reset();
         let (tx, _rx) = tokio::sync::watch::channel(None);
         let gate = s.cancel.set_action(CancellationToken::new(), tx);
-        gate.start_run::<()>(
-            || Ok(()),
-            |_| panic!("the earlier cancel must not carry over"),
+        gate.start_run::<(), ()>(
+            &mut (),
+            |_| Ok(()),
+            |_, _| panic!("the earlier cancel must not carry over"),
         )
         .unwrap();
+    }
+    /// A pipe whose buffer is full, so the next write to `writer` blocks
+    /// until `reader` is drained.
+    #[cfg(unix)]
+    fn full_pipe() -> (std::io::PipeReader, std::fs::File) {
+        use nix::fcntl::{fcntl, FcntlArg, OFlag};
+        use std::io::Write;
+        let (reader, writer) = std::io::pipe().unwrap();
+        let mut writer = std::fs::File::from(std::os::fd::OwnedFd::from(writer));
+        fcntl(&writer, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)).unwrap();
+        let chunk = [b'x'; 4096];
+        loop {
+            match writer.write(&chunk) {
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
+                Err(e) => panic!("{e}"),
+            }
+        }
+        fcntl(&writer, FcntlArg::F_SETFL(OFlag::empty())).unwrap();
+        (reader, writer)
+    }
+
+    /// `cancel_action` and the handle send the watch value before they write
+    /// the helper command: once the command is written the helper can kill
+    /// the process and report its exit, and the run loop classifies it
+    /// Canceled only if the watch channel fired or the token is cancelled.
+    /// The test blocks the command write on a full pipe and checks that the
+    /// watch has already fired.
+    #[cfg(unix)]
+    #[test]
+    fn cancel_sends_the_watch_value_before_the_helper_command() {
+        use std::io::Read;
+        for via_handle in [false, true] {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let (mut s, _path) = session(&tmp, Some(CancelMethod::Terminate));
+            let (mut reader, writer) = full_pipe();
+            s.set_cancel_writer_for_test(writer);
+            let mut watch = s.cancel.lock().request_tx.as_ref().unwrap().subscribe();
+            let token = s.cancel.lock().token.clone().unwrap();
+            let canceller = if via_handle {
+                let handle = s.cancel_handle();
+                std::thread::spawn(move || {
+                    assert!(handle.cancel(None, false));
+                    s
+                })
+            } else {
+                std::thread::spawn(move || {
+                    s.cancel_action(None, false).unwrap();
+                    s
+                })
+            };
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !watch.has_changed().unwrap() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "handle={via_handle}: the watch value must be sent before the \
+                     helper command, which is blocked"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(
+                !token.is_cancelled(),
+                "handle={via_handle}: the token is cancelled after the command"
+            );
+            // Drain the pipe so the blocked write finishes.
+            let drain = std::thread::spawn(move || {
+                let mut buf = Vec::new();
+                let _ = reader.read_to_end(&mut buf);
+                buf
+            });
+            let s = canceller.join().unwrap();
+            assert!(token.is_cancelled());
+            drop(s);
+            let buf = drain.join().unwrap();
+            let line = format!(
+                "{}\n",
+                helper_cancel_line(Some(TOKEN), &CancelMethod::Terminate, None)
+            );
+            assert!(buf.ends_with(line.as_bytes()), "handle={via_handle}");
+            let _ = watch.borrow_and_update();
+        }
     }
 }

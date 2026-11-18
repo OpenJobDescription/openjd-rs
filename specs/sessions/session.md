@@ -603,17 +603,20 @@ Unset takes precedence over set within the same environment, matching the spec.
 
 1. Validates state is `Running`
 2. Sets state to `Canceling`
-3. On a cross-user session, writes the cancel command to the helper. The command
+3. Sends `time_limit` over the watch channel
+4. On a cross-user session, writes the cancel command to the helper. The command
    follows the action's cancel method as the same-user loop does: `TERMINATE` for
    a `TERMINATE` action, and `NOTIFY_THEN_TERMINATE` with the declared grace capped
    at `time_limit` otherwise (see [Choosing the cancel command](embedded-cross-user-helper.md#choosing-the-cancel-command)).
    If the helper doesn't have the action's Run command yet, the action's run gate
-   holds the cancel and the run loop writes it right after Run, once, because a
-   helper with no command running drops a cancel (see
+   holds the cancel and the run loop writes it right after Run, once, because the
+   Unix helper drops a cancel when no command is running (see
    [Cancel before Run](embedded-cross-user-helper.md#cancel-before-run))
-4. Sends `time_limit` over the watch channel and cancels the `CancellationToken`;
-   the same-user subprocess loop then applies the action's cancel method
-5. If `mark_action_failed` is true, the action result is `Failed` instead of `Canceled`
+5. Cancels the `CancellationToken`; the same-user subprocess loop then applies the
+   action's cancel method. The watch value goes first so the run loops classify the
+   exit `Canceled` however soon the process ends, and the token last so the
+   cross-user token branch knows the command is already handled
+6. If `mark_action_failed` is true, the action result is `Failed` instead of `Canceled`
 
 The `time_limit` parameter bounds a `NOTIFY_THEN_TERMINATE` action's grace period:
 the process is forcefully killed after the smaller of `time_limit` and the declared
@@ -797,7 +800,7 @@ Read-only accessors on `Session`:
 | `environments_entered()` | `&[EnvironmentIdentifier]` | Stack of entered environment IDs (entry order) |
 | `path_mapping_rules()` | `&[PathMappingRule]` | Current path mapping rules, in the order given |
 | `action_status()` | `Option<ActionStatus>` | Snapshot of the current/most-recent action status. `None` if no action has run. |
-| `clone_cancel_writer()` | `Option<std::fs::File>` | Clone the cross-user helper's cancel pipe (a dup of its stdin). `cancel_handle()` uses it to deliver cancel commands from another thread; writing to it directly bypasses the cancel command builder, so callers should use `cancel_handle()`. |
+| `clone_cancel_writer()` | `Option<std::fs::File>` | Clone the cross-user helper's cancel pipe (a dup of its stdin). `cancel_handle()` uses it to deliver cancel commands from another thread; writing to it directly bypasses the cancel command builder and the ordering against the action's Run command (a cancel written before Run doesn't reach the action), so callers should use `cancel_handle()`. |
 | `override_action_state(state)` | `()` | Override the action state. Used by PyO3 bindings to convert Failed → Canceled when cancel was requested externally. |
 
 ## enter_environment_with_output

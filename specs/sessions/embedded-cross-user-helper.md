@@ -512,7 +512,7 @@ every cancelation a template can declare, because validation keeps
 cancelation fields at template scope; a job built through the API whose
 cancelation refers to a `let` binding fails to resolve in the session and gets
 the command below. When no method is recorded because it failed to resolve,
-`cancel_action` and the handle pass the builder a `NotifyThenTerminate` whose
+a cancel after Run from `cancel_action` or the handle passes the builder a `NotifyThenTerminate` whose
 grace is the `time_limit`, or `DEFAULT_CANCEL_NOTIFY_PERIOD_SECS` (5) without
 one; so a `time_limit` under one second gives `TERMINATE`. A cancel that lands
 before the method is recorded is also before Run, so the run gate holds it and
@@ -520,10 +520,13 @@ before the method is recorded is also before Run, so the run gate holds it and
 
 ### Cancel before Run
 
-The helper applies a cancel only while it runs a command: an idle helper reads
-a cancel line and drops it (`helper/src/main.rs`). `cancel_action` and
+The helper applies a cancel only while it runs a command. With no command
+running, the Unix helper reads a cancel line and drops it (`helper/src/main.rs`
+`run_unix`); the Windows helper's stdin thread queues it, and the next Run
+applies it (`run_windows`, `runner_win.rs`). `cancel_action` and
 `SessionCancelHandle` find an action as soon as it registers, which is before
-`run_via_helper` writes the Run command. So each action registers a
+`run_via_helper` writes the Run command, so a cancel in that window was lost on
+Unix. Each action registers a
 `cross_user_helper::HelperRunGate`, which orders these cancels against Run
 under one lock:
 
@@ -536,7 +539,10 @@ under one lock:
   then the held cancel, if any, before it releases the lock. That command is
   `helper_cancel_line(token, config.cancel_method, time_limit)`, the
   runner's method with the held `time_limit`, which is what the same-user
-  loop applies.
+  loop applies. It goes through the helper's own stdin (`send_command`), so
+  it is written even when the runner's dup of the cancel pipe failed. If
+  that write fails, the action isn't failed: the run loop goes on reading
+  the helper's responses.
 
 So every one of these cancels follows Run in pipe order, and it is written
 once: by the canceller or by `run_via_helper`, never both. As on the same-user
@@ -546,12 +552,17 @@ work, but the action would then end without starting, unlike same-user.
 `run_via_helper` counts a held cancel as delivered: the exit is `Canceled`
 even before the canceller's watch send and token cancel, which follow its
 gate call, and neither the timeout nor the token branch sends a second
-command. The lock also keeps a cancel line out of the middle of a Run line
+command. The canceller sends the watch value before it writes or holds the
+command, and cancels the token last, so a helper that kills the process and
+reports its exit at once still has the exit classified `Canceled`, and the
+token branch still sees the watch has fired. Each cancel command is one
+write of a whole line, so two cancel commands written at the same moment
+(a handle and the timeout or token branch) don't interleave. The lock also keeps a cancel line out of the middle of a Run line
 longer than the pipe's atomic write size. Each action has its own gate, so a
 held cancel for an action whose Run is never written (its setup failed) is
 dropped with it. The gate isn't closed when the action ends: a cancel that
-lands after the action exits is written to an idle helper and dropped, as
-before. Only a session with a helper uses the gate; a same-user session
+lands after the action exits is written to a helper with no command running,
+as before (dropped on Unix, queued for the next Run on Windows). Only a session with a helper uses the gate; a same-user session
 writes a test-injected cancel pipe at once.
 
 A test-only hook (`Session::set_before_helper_run_hook_for_test`, feature

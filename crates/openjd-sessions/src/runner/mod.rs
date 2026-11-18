@@ -122,8 +122,8 @@ pub(crate) struct ScriptRunnerBase {
     pub helper: Option<crate::cross_user_helper::CrossUserHelperWin>,
     pub cancel_writer: Option<std::fs::File>,
     /// The action's [`crate::cross_user_helper::HelperRunGate`], set with
-    /// `cancel_writer`, so a cancel that arrives before the helper's Run
-    /// command is written right after it.
+    /// `helper`, so a cancel that arrives before the helper's Run command is
+    /// written right after it.
     pub helper_run_gate: Option<Arc<crate::cross_user_helper::HelperRunGate>>,
 }
 

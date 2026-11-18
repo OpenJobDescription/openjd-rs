@@ -596,20 +596,36 @@ pub(crate) async fn run_via_helper(
 
     // Write Run through the action's gate, so a `cancel_action` /
     // `SessionCancelHandle` cancel that arrived before it is written to the
-    // helper right after it (an idle helper drops a cancel). See
-    // [`HelperRunGate`]. `pending_cancel_sent` records that one was.
+    // helper right after it. See [`HelperRunGate`]. The held cancel goes
+    // through `send_command` (the helper's own stdin, which adds the token),
+    // so it doesn't depend on `cancel_writer`. `pending_cancel_sent` records
+    // that it was written.
     let mut pending_cancel_sent = false;
-    match (run_gate, cancel_writer) {
-        (Some(gate), Some(writer)) => {
-            gate.start_run(
-                || helper.send_command(&cmd),
-                |time_limit| {
-                    pending_cancel_sent = true;
-                    write_helper_cancel(writer, &auth_token, &config.cancel_method, time_limit)
-                },
-            )?;
-        }
-        _ => helper.send_command(&cmd)?,
+    match run_gate {
+        Some(gate) => gate.start_run(
+            helper,
+            |helper| helper.send_command(&cmd),
+            |helper, time_limit| {
+                let line = helper_cancel_line(None, &config.cancel_method, time_limit);
+                // Run is already written, so a failure here doesn't fail the
+                // action: the run loop goes on reading the helper's
+                // responses, and a broken pipe surfaces there.
+                let sent = serde_json::from_str::<serde_json::Value>(&line)
+                    .map_err(|e| SessionError::HelperCommunication(e.to_string()))
+                    .and_then(|held| helper.send_command(&held));
+                match sent {
+                    Ok(()) => pending_cancel_sent = true,
+                    Err(e) => session_log!(
+                        warn,
+                        session_id,
+                        LogContent::PROCESS_CONTROL,
+                        "Failed to send a cancel held for the run command: {e}"
+                    ),
+                }
+                Ok(())
+            },
+        )?,
+        None => helper.send_command(&cmd)?,
     }
 
     // Log the actual command (not the helper protocol)
@@ -762,7 +778,7 @@ pub(crate) async fn run_via_helper(
                     .is_some_and(|rx| rx.has_changed().unwrap_or(false));
                 if !cancel_delivered && !watch_fired {
                     if let Some(writer) = cancel_writer {
-                        write_helper_cancel(writer, &auth_token, &config.cancel_method, None)?;
+                        write_helper_cancel(writer, &auth_token, &config.cancel_method)?;
                     }
                 }
                 cancel_delivered = true;
@@ -776,7 +792,7 @@ pub(crate) async fn run_via_helper(
                 cancel_delivered = true;
                 // Send cancel to helper via the cancel_writer
                 if let Some(writer) = cancel_writer {
-                    write_helper_cancel(writer, &auth_token, &config.cancel_method, None)?;
+                    write_helper_cancel(writer, &auth_token, &config.cancel_method)?;
                 }
             }
         }
@@ -836,10 +852,8 @@ pub(crate) fn helper_cancel_line(
 
 /// Write a tokenized cancel command to the cross-user helper over
 /// `cancel_writer`, built by [`helper_cancel_line`] from the action's
-/// configured cancel method. Shared by the timeout and external-token
-/// `select!` branches of [`run_via_helper`], which pass no `time_limit`, and
-/// by its write of a cancel that [`HelperRunGate`] held until Run, which
-/// passes that cancel's `time_limit`.
+/// configured cancel method and no `time_limit`. Shared by the timeout and
+/// external-token `select!` branches of [`run_via_helper`].
 ///
 /// A bare token cancel carries no `time_limit` (the same-user loop reads
 /// `None` from the watch channel too), so it matches the same-user method.
@@ -850,17 +864,18 @@ fn write_helper_cancel(
     writer: &std::fs::File,
     auth_token: &str,
     cancel_method: &crate::runner::CancelMethod,
-    time_limit: Option<std::time::Duration>,
 ) -> Result<(), SessionError> {
     use std::io::Write;
     let mut w = writer.try_clone().map_err(|e| {
         SessionError::HelperCommunication(format!("Failed to clone cancel_writer: {e}"))
     })?;
-    let _ = writeln!(
-        w,
-        "{}",
-        helper_cancel_line(Some(auth_token), cancel_method, time_limit)
+    // One write of the whole line, so it can't interleave with a cancel line
+    // another thread writes at the same moment (both are under PIPE_BUF).
+    let line = format!(
+        "{}\n",
+        helper_cancel_line(Some(auth_token), cancel_method, None)
     );
+    let _ = w.write_all(line.as_bytes());
     let _ = w.flush();
     Ok(())
 }
@@ -868,12 +883,14 @@ fn write_helper_cancel(
 /// Orders a session-side cancel against one action's Run command on the
 /// cross-user helper.
 ///
-/// The helper applies a cancel only while it runs a command. An idle helper
-/// reads and drops it (`helper/src/main.rs`, `Command::Cancel { .. } => {}`).
+/// The helper applies a cancel only while it runs a command. With none
+/// running, the Unix helper reads and drops it (`helper/src/main.rs`,
+/// `Command::Cancel { .. } => {}`); the Windows helper queues it for the
+/// next Run.
 /// `Session::cancel_action` and `SessionCancelHandle::cancel` find an action
 /// as soon as it is registered (`CancelFields::set_action`), which is before
 /// [`run_via_helper`] writes its Run command. A cancel written in that
-/// window used to reach an idle helper and be lost, while
+/// window used to be lost on Unix, while
 /// [`run_via_helper`]'s token branch saw the watch channel had fired and
 /// sent nothing, so the action ran to completion.
 ///
@@ -896,7 +913,7 @@ fn write_helper_cancel(
 /// than the pipe's atomic write size.
 ///
 /// The gate is never closed after Run: a cancel that lands after the action
-/// exits is written to an idle helper and dropped, as before.
+/// exits is written to a helper with no command running, as before.
 pub(crate) struct HelperRunGate {
     state: std::sync::Mutex<RunGateState>,
     /// Test-only: called by [`start_run`](Self::start_run) before it takes
@@ -959,25 +976,26 @@ impl HelperRunGate {
 
     /// [`run_via_helper`] side: write the Run command with `write_run`, then,
     /// if a cancel was held, write it with `write_cancel(time_limit)`, both
-    /// under the lock. If `write_run` fails, the gate stays before Run and
-    /// any held cancel is kept.
-    pub(crate) fn start_run<E>(
+    /// under the lock and both given `ctx` (the helper). If `write_run`
+    /// fails, the gate stays before Run and any held cancel is kept.
+    pub(crate) fn start_run<C: ?Sized, E>(
         &self,
-        write_run: impl FnOnce() -> Result<(), E>,
-        write_cancel: impl FnOnce(Option<std::time::Duration>) -> Result<(), E>,
+        ctx: &mut C,
+        write_run: impl FnOnce(&mut C) -> Result<(), E>,
+        write_cancel: impl FnOnce(&mut C, Option<std::time::Duration>) -> Result<(), E>,
     ) -> Result<(), E> {
         #[cfg(any(test, feature = "test-utils"))]
         if let Some(hook) = &self.before_run {
             hook();
         }
         let mut state = self.lock();
-        write_run()?;
+        write_run(ctx)?;
         let held = match std::mem::replace(&mut *state, RunGateState::RunWritten) {
             RunGateState::BeforeRun(held) => held,
             RunGateState::RunWritten => None,
         };
         match held {
-            Some(time_limit) => write_cancel(time_limit),
+            Some(time_limit) => write_cancel(ctx, time_limit),
             None => Ok(()),
         }
     }
@@ -991,12 +1009,13 @@ mod run_gate_tests {
 
     /// Records the order of writes the gate makes.
     fn run(gate: &HelperRunGate, log: &RefCell<Vec<String>>) {
-        gate.start_run::<()>(
-            || {
+        gate.start_run::<(), ()>(
+            &mut (),
+            |_| {
                 log.borrow_mut().push("run".into());
                 Ok(())
             },
-            |limit| {
+            |_, limit| {
                 log.borrow_mut().push(format!("held cancel {limit:?}"));
                 Ok(())
             },
@@ -1051,7 +1070,11 @@ mod run_gate_tests {
         let gate = HelperRunGate::new();
         cancel(&gate, None, &log);
         assert_eq!(
-            gate.start_run(|| Err("broken pipe"), |_| panic!("no cancel without Run")),
+            gate.start_run(
+                &mut (),
+                |_| Err("broken pipe"),
+                |_, _| panic!("no cancel without Run")
+            ),
             Err("broken pipe")
         );
         run(&gate, &log);
@@ -1105,8 +1128,14 @@ mod run_via_helper_gate_tests {
         fn async_reader(&mut self) -> &mut dyn AsyncHelperReader {
             &mut self.reader
         }
+        /// A Run command is logged as `RUN <command>`; anything else (a
+        /// held cancel) as its JSON with the token added, as the real
+        /// `send_command` sends it.
         fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
-            writeln!(self.pipe, "RUN {}", cmd["command"].as_str().unwrap()).unwrap();
+            match cmd.get("command").and_then(|c| c.as_str()) {
+                Some(command) => writeln!(self.pipe, "RUN {command}").unwrap(),
+                None => writeln!(self.pipe, "{}", augment_with_token(cmd, TOKEN)?).unwrap(),
+            }
             Ok(())
         }
         fn auth_token(&self) -> &str {
@@ -1164,6 +1193,15 @@ mod run_via_helper_gate_tests {
         gate: Option<&HelperRunGate>,
         token: &tokio_util::sync::CancellationToken,
     ) -> crate::subprocess::SubprocessResult {
+        run_with_writer(s, gate, token, true).await
+    }
+
+    async fn run_with_writer(
+        s: &mut Setup,
+        gate: Option<&HelperRunGate>,
+        token: &tokio_util::sync::CancellationToken,
+        with_writer: bool,
+    ) -> crate::subprocess::SubprocessResult {
         let mut filter = crate::action_filter::ActionFilter::new("s", true, false);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
         run_via_helper(
@@ -1172,7 +1210,7 @@ mod run_via_helper_gate_tests {
             &mut filter,
             "s",
             tx,
-            Some(&s.writer),
+            with_writer.then_some(&s.writer),
             gate,
             token,
         )
@@ -1180,12 +1218,31 @@ mod run_via_helper_gate_tests {
         .unwrap()
     }
 
-    fn pipe(s: &Setup) -> Vec<String> {
+    /// The pipe's lines, with each cancel command parsed so key order
+    /// doesn't matter.
+    fn pipe(s: &Setup) -> Vec<Line> {
         std::fs::read_to_string(&s.path)
             .unwrap()
             .lines()
-            .map(str::to_string)
+            .map(|l| match l.strip_prefix("RUN ") {
+                Some(command) => Line::Run(command.to_string()),
+                None => Line::Cancel(serde_json::from_str(l).unwrap()),
+            })
             .collect()
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum Line {
+        Run(String),
+        Cancel(serde_json::Value),
+    }
+
+    fn cancel(method: &CancelMethod, limit: Option<Duration>) -> Line {
+        Line::Cancel(serde_json::from_str(&helper_cancel_line(Some(TOKEN), method, limit)).unwrap())
+    }
+
+    fn run_line() -> Line {
+        Line::Run("work".into())
     }
 
     fn ntt(secs: u64) -> CancelMethod {
@@ -1209,10 +1266,7 @@ mod run_via_helper_gate_tests {
         let r = run(&mut s, Some(&gate), &Default::default()).await;
         assert_eq!(
             pipe(&s),
-            [
-                "RUN work".to_string(),
-                helper_cancel_line(Some(TOKEN), &ntt(8), Some(Duration::from_secs(2))),
-            ]
+            [run_line(), cancel(&ntt(8), Some(Duration::from_secs(2)))]
         );
         assert_eq!(r.state, ActionState::Canceled);
     }
@@ -1235,10 +1289,7 @@ mod run_via_helper_gate_tests {
         let r = run(&mut s, Some(&gate), &token).await;
         assert_eq!(
             pipe(&s),
-            [
-                "RUN work".to_string(),
-                helper_cancel_line(Some(TOKEN), &CancelMethod::Terminate, None),
-            ]
+            [run_line(), cancel(&CancelMethod::Terminate, None)]
         );
         assert_eq!(r.state, ActionState::Canceled);
     }
@@ -1257,14 +1308,31 @@ mod run_via_helper_gate_tests {
             responses.send(serde_json::json!({"exited": 143})).unwrap();
         });
         let r = run(&mut s, Some(&gate), &Default::default()).await;
+        assert_eq!(pipe(&s), [run_line(), cancel(&ntt(8), None)]);
+        assert_eq!(r.state, ActionState::Canceled);
+    }
+
+    /// A runner whose cancel-pipe dup failed has no `cancel_writer` but
+    /// still has the gate: the held cancel goes through the helper's own
+    /// stdin, and the gate opens so later cancels are written by the
+    /// canceller's own pipe.
+    #[tokio::test]
+    async fn held_cancel_needs_no_cancel_writer() {
+        let mut s = setup(CancelMethod::Terminate, None);
+        let gate = HelperRunGate::new();
+        gate.deliver_cancel(None, || panic!("before Run"));
+        s.responses
+            .send(serde_json::json!({"exited": 137}))
+            .unwrap();
+        let r = run_with_writer(&mut s, Some(&gate), &Default::default(), false).await;
         assert_eq!(
             pipe(&s),
-            [
-                "RUN work".to_string(),
-                helper_cancel_line(Some(TOKEN), &ntt(8), None),
-            ]
+            [run_line(), cancel(&CancelMethod::Terminate, None)]
         );
         assert_eq!(r.state, ActionState::Canceled);
+        let mut written = false;
+        gate.deliver_cancel(None, || written = true);
+        assert!(written);
     }
 
     /// With no cancel, only Run is written and the gate passes cancels
@@ -1275,7 +1343,7 @@ mod run_via_helper_gate_tests {
         let gate = HelperRunGate::new();
         s.responses.send(serde_json::json!({"exited": 0})).unwrap();
         let r = run(&mut s, Some(&gate), &Default::default()).await;
-        assert_eq!(pipe(&s), ["RUN work"]);
+        assert_eq!(pipe(&s), [run_line()]);
         assert_eq!(r.state, ActionState::Success);
         let mut written = false;
         gate.deliver_cancel(None, || written = true);

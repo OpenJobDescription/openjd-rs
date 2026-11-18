@@ -1193,9 +1193,10 @@ async fn test_cross_user_cancel_before_run_on_enter_and_on_exit() {
 
 /// A cancel held for an action doesn't reach the session's next action:
 /// after a task canceled before Run, the same helper runs a subprocess to
-/// Success. (Which grace a held cancel gets is checked exactly, against the
-/// pipe, by `cross_user_helper.rs`'s `run_via_helper_gate_tests`: here the
-/// notify signal lands before a script could install a TERM trap.)
+/// Success. (These Docker tests don't check a NOTIFY_THEN_TERMINATE grace:
+/// a held cancel signals the process right after it starts, before a script
+/// could install a TERM trap. `cross_user_helper.rs`'s
+/// `run_via_helper_gate_tests` check the held command exactly.)
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_cancel_before_run_leaves_helper_ready_for_next_action() {
