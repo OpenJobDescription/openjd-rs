@@ -196,9 +196,9 @@ CPython 3.13 for the names §1.1.5 requires but rejects some it lets implementat
 differ on, such as `TANGUT IDEOGRAPH-17000`. It also accepts
 `CJK UNIFIED IDEOGRAPH-04E00`, with a leading zero, which CPython 3.13 rejects.
 
-One difference needs a pass of its own. For a `\u` or `\U` escape with a surrogate
-value (U+D800 to U+DFFF), CPython keeps the surrogate in the string and ruff silently
-substitutes U+FFFD. §1.1.5 makes it a syntax error, since a Rust string can't hold a
+Two differences need a pass of their own. The first is surrogates: for a `\u` or `\U`
+escape with a surrogate value (U+D800 to U+DFFF), CPython keeps the surrogate in the
+string and ruff silently substitutes U+FFFD. §1.1.5 makes it a syntax error, since a Rust string can't hold a
 surrogate. During AST validation, `reject_surrogate_escapes` scans the source text of
 each non-raw string literal part (an implicitly concatenated literal has several) for
 `\u` and `\U` escapes, skipping every other escape by its first two bytes, and
@@ -209,6 +209,18 @@ as the evaluator does. It doesn't walk a comprehension's loop target, but any ta
 other than a plain name is rejected at evaluation. The lexer has already checked each escape's syntax, so
 the scan only needs to find where escapes start. Raw strings have no escapes and are
 skipped.
+
+A second difference is in line breaks. CPython reads source with universal newlines,
+so a CR LF or a lone CR written inside a string literal is one LF before any escape is
+decoded, in raw strings too, and §1.1.5 says the same. ruff's lexer keeps the CR. After
+AST validation, when the expression holds a CR, `normalize_string_line_breaks` walks
+the AST and decodes again each string literal part whose source text holds one: it
+makes every CR LF and lone CR in that part's text an LF and parses the part alone,
+so ruff still decodes every escape, including a backslash before the line break (a
+continuation, or kept in a raw string). The expression's source isn't rewritten, so
+every AST offset and caret still points into the text as written. A CR from an escape
+(`'\r'`, `'\x0d'`, `'\15'`) isn't in the source, so it stays. A line break in a
+single-quoted string is ruff's "missing closing quote" error, as CPython rejects it.
 
 ## Depth Limit
 

@@ -703,13 +703,20 @@ fn parse_inner(
         }
         _ => ruff_python_parser::parse_expression(&source),
     };
-    let expr_node = match parsed {
+    let mut expr_node = match parsed {
         Ok(parsed) => parsed.into_expr(),
         Err(e) => return Err(syntax_error(&e, expr_str)),
     };
 
     // Structural validation (matches Python implementation)
     validate_structure(&expr_node, expr_str, profile)?;
+    // Only a CR needs this pass, so skip the AST walk without one. It runs
+    // after `validate_structure`, which bounds the AST's depth.
+    // The keyword renames don't touch string literals, so the text as
+    // written serves for both the literals and any caret.
+    if expr_str.contains('\r') {
+        normalize_string_line_breaks(&mut expr_node, expr_str)?;
+    }
     let mut accessed_symbols = HashSet::new();
     let mut called_functions = HashSet::new();
     let mut local_bindings = HashSet::new();
@@ -851,6 +858,104 @@ fn reject_surrogate_escapes(
         i = escape_end;
     }
     Ok(())
+}
+
+/// Give every string literal the value CPython gives it when a CR LF or a
+/// lone CR is written inside it (Expression Language §1.1.5): CPython reads
+/// source with universal newlines, so each of those line breaks is one LF
+/// before any escape is decoded. ruff's lexer keeps them as written. A CR
+/// that an escape produces (`'\r'`, `'\x0d'`) isn't a line break in the
+/// source, so it stays.
+///
+/// The source text isn't rewritten, so every offset the parser reported,
+/// and every caret built from one, still points into the text as written.
+/// Instead each literal part whose source holds a CR is decoded again, by
+/// parsing that part alone with its line breaks made LF. That keeps ruff's
+/// decoding of every escape, including a backslash before the line break,
+/// which continues the line in a non-raw string and stays in a raw one.
+fn normalize_string_line_breaks(expr: &mut ast::Expr, source: &str) -> Result<(), ExpressionError> {
+    use ast::visitor::transformer::{walk_expr, Transformer};
+    use std::cell::RefCell;
+
+    struct Normalizer<'s> {
+        source: &'s str,
+        error: RefCell<Option<ExpressionError>>,
+    }
+
+    impl Normalizer<'_> {
+        /// The part's value with its source line breaks read as LF, or
+        /// `None` if its source has no CR.
+        fn decode(&self, part: &ast::StringLiteral) -> Result<Option<Box<str>>, ExpressionError> {
+            let start = part.range.start().to_usize();
+            let end = part.range.end().to_usize();
+            let Some(text) = self.source.get(start..end) else {
+                return Ok(None);
+            };
+            if !text.contains('\r') {
+                return Ok(None);
+            }
+            let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+            // The part already lexed as a string literal, and making each
+            // line break LF can't end it early or start an escape, so this
+            // parse doesn't fail. If it did, the value would be wrong, so
+            // report it rather than keep the CR.
+            match ruff_python_parser::parse_expression(&normalized).map(|p| p.into_expr()) {
+                Ok(ast::Expr::StringLiteral(s)) if !s.value.is_implicit_concatenated() => {
+                    Ok(Some(s.value.to_str().into()))
+                }
+                _ => Err(ExpressionError::new(
+                    "Internal error: a string literal with a line break in it could not be decoded",
+                )
+                .with_span(self.source, start, end)),
+            }
+        }
+    }
+
+    impl Transformer for Normalizer<'_> {
+        fn visit_expr(&self, expr: &mut ast::Expr) {
+            if self.error.borrow().is_some() {
+                return;
+            }
+            let ast::Expr::StringLiteral(s) = expr else {
+                walk_expr(self, expr);
+                return;
+            };
+            let mut parts: Vec<ast::StringLiteral> = s.value.iter().cloned().collect();
+            let mut changed = false;
+            for part in &mut parts {
+                match self.decode(part) {
+                    Ok(Some(value)) => {
+                        part.value = value;
+                        changed = true;
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        *self.error.borrow_mut() = Some(e);
+                        return;
+                    }
+                }
+            }
+            // Rebuild the value rather than edit its parts in place: an
+            // implicitly concatenated value caches the joined string.
+            if changed {
+                s.value = if parts.len() == 1 {
+                    ast::StringLiteralValue::single(parts.remove(0))
+                } else {
+                    ast::StringLiteralValue::concatenated(parts)
+                };
+            }
+        }
+    }
+
+    let normalizer = Normalizer {
+        source,
+        error: RefCell::new(None),
+    };
+    normalizer.visit_expr(expr);
+    match normalizer.error.into_inner() {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 /// Validate structural constraints on the AST that can't be caught by the parser.

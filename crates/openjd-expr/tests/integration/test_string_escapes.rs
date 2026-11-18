@@ -141,6 +141,148 @@ fn backslash_crlf_is_a_line_continuation() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// A line break inside a string literal is one LF
+// ══════════════════════════════════════════════════════════════
+
+/// The line breaks that §1.1.5 reads as one LF, written literally.
+const LINE_BREAKS: [(&str, &str); 3] = [("LF", "\n"), ("CR LF", "\r\n"), ("CR", "\r")];
+
+/// CPython reads source with universal newlines, so a literal LF, CR LF or
+/// lone CR inside a triple-quoted string, raw or not, is one LF.
+#[test]
+fn literal_line_break_in_a_triple_quoted_string_is_lf() {
+    for (name, br) in LINE_BREAKS {
+        for (open, close) in [
+            ("'''", "'''"),
+            ("\"\"\"", "\"\"\""),
+            ("r'''", "'''"),
+            ("R\"\"\"", "\"\"\""),
+        ] {
+            let expr = format!("{open}ab{br}cd{close}");
+            assert_eq!(eval_str(&expr), "ab\ncd", "{name} in {expr:?}");
+        }
+    }
+}
+
+/// Each line break is its own LF: CR CR is two, and so is LF CR, which a
+/// pairwise reading might take as one.
+#[test]
+fn adjacent_line_breaks_are_separate_lfs() {
+    let cases: &[(&str, &str)] = &[
+        ("'''ab\r\rcd'''", "ab\n\ncd"),
+        ("'''ab\r\r\ncd'''", "ab\n\ncd"),
+        ("'''ab\n\rcd'''", "ab\n\ncd"),
+        ("'''ab\r\n\r\ncd'''", "ab\n\ncd"),
+        ("r'''ab\r\r\ncd'''", "ab\n\ncd"),
+        ("'''\r\nab\r\n'''", "\nab\n"),
+    ];
+    for (expr, want) in cases {
+        assert_eq!(eval_str(expr), *want, "{expr:?}");
+    }
+}
+
+/// Only literal line breaks change. A `\r` escape still gives CR, beside a
+/// literal CR LF or not.
+#[test]
+fn escaped_cr_still_gives_cr() {
+    let cases: &[(&str, &str)] = &[
+        ("'''a\\r\r\nb'''", "a\r\nb"),
+        ("'''a\r\n\\rb'''", "a\n\rb"),
+        ("'''a\\r\\nb'''", "a\r\nb"),
+        ("'''a\\x0d\rb'''", "a\r\nb"),
+        ("'''a\\15\r\nb'''", "a\r\nb"),
+        ("'a\\r'", "a\r"),
+        // In a raw string `\r` is two characters, and the line break after
+        // it is still one LF.
+        ("r'''a\\r\r\nb'''", "a\\r\nb"),
+    ];
+    for (expr, want) in cases {
+        assert_eq!(eval_str(expr), *want, "{expr:?}");
+    }
+}
+
+/// A backslash before a line break still continues the line, in a short or
+/// triple-quoted string. In a raw string the backslash stays and the line
+/// break after it is one LF, as CPython gives.
+#[test]
+fn backslash_before_each_line_break() {
+    for (name, br) in LINE_BREAKS {
+        for expr in [
+            format!("'ab\\{br}cd'"),
+            format!("'''ab\\{br}cd'''"),
+            format!("\"\"\"ab\\{br}cd\"\"\""),
+        ] {
+            assert_eq!(eval_str(&expr), "abcd", "{name} in {expr:?}");
+        }
+        for expr in [format!("r'ab\\{br}cd'"), format!("r'''ab\\{br}cd'''")] {
+            assert_eq!(eval_str(&expr), "ab\\\ncd", "{name} in {expr:?}");
+        }
+        // An escaped backslash doesn't continue the line.
+        let expr = format!("'''ab\\\\{br}cd'''");
+        assert_eq!(eval_str(&expr), "ab\\\ncd", "{name} in {expr:?}");
+    }
+}
+
+/// CPython ends a short string at a line break, so a literal LF, CR LF or
+/// CR in one, raw or not, is a syntax error. CPython says "unterminated
+/// string literal" and ruff says "missing closing quote in string literal".
+#[test]
+fn literal_line_break_in_a_short_string_is_an_error() {
+    for (name, br) in LINE_BREAKS {
+        for expr in [
+            format!("'ab{br}cd'"),
+            format!("\"ab{br}cd\""),
+            format!("r'ab{br}cd'"),
+        ] {
+            let e = err(&expr);
+            assert!(
+                e.starts_with("Syntax error: missing closing quote in string literal"),
+                "{name} in {expr:?}: {e}"
+            );
+        }
+    }
+}
+
+/// Each part of an implicit concatenation is decoded on its own, and a part
+/// with no line break is left as it is.
+#[test]
+fn line_breaks_in_concatenated_parts() {
+    let cases: &[(&str, &str)] = &[
+        ("'''a\rb''' '''c\r\nd'''", "a\nbc\nd"),
+        ("'x\\r' '''a\r\nb''' 'y'", "x\ra\nby"),
+        ("r'''a\r''' '\\r'", "a\n\r"),
+    ];
+    for (expr, want) in cases {
+        assert_eq!(eval_str(expr), *want, "{expr:?}");
+    }
+}
+
+/// A string with a line break in it still works in the rest of an
+/// expression: as an argument, in a list, and in a multi-line expression.
+#[test]
+fn line_breaks_inside_larger_expressions() {
+    assert_eq!(eval_str("'''a\r\nb'''.upper()"), "A\nB");
+    assert_eq!(eval_str("len('''a\r\nb''') == 3 and 'x' or 'y'"), "x");
+    assert_eq!(eval_str("['''a\rb''', '''c\r\nd'''][1]"), "c\nd");
+    assert_eq!(eval_str("(\n'''a\r\nb'''\n)"), "a\nb");
+    assert_eq!(eval_str("[s for s in ['''a\r\nb''']][0]"), "a\nb");
+}
+
+/// An error after a string with a CR LF in it keeps its caret on the
+/// offending text: no offset moves, because the source isn't rewritten.
+#[test]
+fn error_caret_after_a_string_with_a_line_break() {
+    let e = err("'''a\rb''' + '\\ud800'");
+    assert!(e.starts_with(SURROGATE_D800), "{e}");
+    assert!(e.ends_with("^~~~~~"), "{e}");
+    assert_err(
+        "'''a\r\nb''' + '\\ud800'",
+        // The caret display shows the line the escape is on.
+        &[SURROGATE_D800, "  b''' + '\\ud800'\n", "          ^~~~~~"],
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
 // Unrecognized escapes keep their backslash, permanently
 // ══════════════════════════════════════════════════════════════
 
