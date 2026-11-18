@@ -53,8 +53,8 @@ for the full comparison table.
 
 ## Normative References
 
-- [2023-09-Template-Schemas](../../../openjd-specifications/wiki/2023-09-Template-Schemas.md) — Formal specification (sessions, environments, actions, embedded files)
-- [How-Jobs-Are-Run](../../../openjd-specifications/wiki/How-Jobs-Are-Run.md) — Runtime behavior specification
+- [2023-09-Template-Schemas](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas) — Formal specification (sessions, environments, actions, embedded files)
+- [How-Jobs-Are-Run](https://github.com/OpenJobDescription/openjd-specifications/wiki/How-Jobs-Are-Run) — Runtime behavior specification
 
 ## Specification Version Coverage
 
