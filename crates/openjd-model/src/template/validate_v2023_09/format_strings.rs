@@ -1701,25 +1701,16 @@ fn check_embedded_files_data(
 
 /// A step's template-scope symtab with its step-level `let` bindings
 /// evaluated in, built by [`step_let_scope`] for the step body and shared
-/// with the parameterSpace ranges when it is `clean`.
+/// with the parameterSpace ranges when evaluating them reported nothing.
 struct StepLetScope {
     symtab: SymbolTable,
     names: HashSet<String>,
-    errors: ValidationErrors,
-}
-
-impl StepLetScope {
-    /// `validate_let_bindings` reported nothing (also when it did not run:
-    /// no EXPR, or no bindings). Only then do the ranges see the same
-    /// symtab as the body.
-    fn clean(&self) -> bool {
-        self.errors.is_empty()
-    }
 }
 
 /// The template-scope symtab for a step's job-creation-stage fields:
 /// Param.* (non-PATH), RawParam.*, and with EXPR Job.Name, Step.Name, and
-/// the step-level `let` bindings, evaluated with `validate_let_bindings`.
+/// the step-level `let` bindings, evaluated with `validate_let_bindings`,
+/// which reports into `errors`.
 fn step_let_scope(
     jt: &JobTemplate,
     step: &StepTemplate,
@@ -1727,6 +1718,7 @@ fn step_let_scope(
     expr_active: bool,
     ev: &FsEval<'_>,
     profile: &openjd_expr::ExprProfile,
+    errors: &mut ValidationErrors,
 ) -> StepLetScope {
     let mut symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
     if expr_active {
@@ -1738,7 +1730,6 @@ fn step_let_scope(
             .expect("symtab");
     }
     let mut names = HashSet::new();
-    let mut errors = ValidationErrors::default();
     if let (true, Some(bindings)) = (expr_active, &step.let_bindings) {
         validate_let_bindings(
             bindings,
@@ -1748,14 +1739,10 @@ fn step_let_scope(
             &mut symtab,
             ev,
             profile,
-            &mut errors,
+            errors,
         );
     }
-    StepLetScope {
-        symtab,
-        names,
-        errors,
-    }
+    StepLetScope { symtab, names }
 }
 
 /// The parameterSpace range symtab when the step's bindings are not clean.
@@ -2099,15 +2086,20 @@ pub fn validate_format_strings(
         if let Some(ps) = &step.parameter_space {
             let ps_path = path_field(&step_path, "parameterSpace");
             let tpd_path = path_field(&ps_path, "taskParameterDefinitions");
-            shared_scope = Some(step_let_scope(
+            // Shared only when evaluating them reported nothing (also when
+            // it did not run: no EXPR, or no bindings).
+            let mut let_errors = ValidationErrors::default();
+            let scope = step_let_scope(
                 jt,
                 step,
                 &step_path,
                 expr_active,
                 &template_ev,
                 &template_profile,
-            ))
-            .filter(StepLetScope::clean);
+                &mut let_errors,
+            );
+            shared_scope = let_errors.is_empty().then_some(scope);
+            drop(let_errors);
             let unclean_range_symtab;
             let range_symtab = match &shared_scope {
                 Some(scope) => &scope.symtab,
@@ -2272,19 +2264,20 @@ pub fn validate_format_strings(
         let StepLetScope {
             symtab: step_template_symtab,
             names: step_let_names,
-            errors: let_errors,
-        } = shared_scope.unwrap_or_else(|| {
-            step_let_scope(
+        } = match shared_scope {
+            Some(scope) => scope,
+            None => step_let_scope(
                 jt,
                 step,
                 &step_path,
                 expr_active,
                 &template_ev,
                 &template_profile,
-            )
-        });
+                errors,
+            ),
+        };
 
-        // Let bindings: report what evaluating them found if EXPR, reject if not.
+        // Let bindings: evaluated above if EXPR, rejected if not.
         // Step-level let bindings are TEMPLATE scope (template_lib, no Session.*, no PATH Param.*).
         // Script-level let bindings are TASK scope (host_lib).
         if step.let_bindings.is_some() {
@@ -2292,7 +2285,6 @@ pub fn validate_format_strings(
             if !expr_active {
                 errors.add(&let_path, "'let' requires the EXPR extension.");
             } else {
-                errors.errors.extend(let_errors.errors);
                 // Copy evaluated let bindings into task_symtab so script-level code can use them
                 for name in &step_let_names {
                     if let Some(val) = step_template_symtab.get_value(name) {
