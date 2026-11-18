@@ -19,7 +19,7 @@ use openjd_expr::types::ExprType;
 use openjd_expr::value::ExprValue;
 use openjd_expr::FormatString;
 
-use crate::error::{path_field, path_index, PathElement, ValidationError, ValidationErrors};
+use crate::error::{path_field, path_index, PathElement, ValidationErrors};
 use crate::template::*;
 use crate::types::{ModelExtension, ValidationContext};
 
@@ -1700,33 +1700,43 @@ fn check_embedded_files_data(
 }
 
 /// A step's template-scope symtab with its step-level `let` bindings
-/// evaluated in.
-///
-/// Built once per step by [`step_let_scope`]. When the bindings are `clean`
-/// it is shared by the three pass-8 sites that need it (host requirements,
-/// parameterSpace ranges, the step body), so they are evaluated once.
-/// Otherwise each site evaluates them as it needs, as the range site must
-/// anyway, so at most one copy of a step's values and errors is alive.
+/// evaluated in, built by [`step_let_scope`] for the step body and shared
+/// with the parameterSpace ranges when it is `clean`.
 struct StepLetScope {
     symtab: SymbolTable,
     names: HashSet<String>,
-    errors: Vec<ValidationError>,
-    /// `validate_let_bindings` reported nothing (also when it did not run:
-    /// no EXPR, or no bindings).
-    clean: bool,
+    errors: ValidationErrors,
 }
 
-/// Evaluate `step`'s `let` bindings (EXPR only) into a copy of `base`, the
-/// template-scope symtab (with `Job.Name` and `Step.Name` under EXPR).
+impl StepLetScope {
+    /// `validate_let_bindings` reported nothing (also when it did not run:
+    /// no EXPR, or no bindings). Only then do the ranges see the same
+    /// symtab as the body.
+    fn clean(&self) -> bool {
+        self.errors.is_empty()
+    }
+}
+
+/// The template-scope symtab for a step's job-creation-stage fields:
+/// Param.* (non-PATH), RawParam.*, and with EXPR Job.Name, Step.Name, and
+/// the step-level `let` bindings, evaluated with `validate_let_bindings`.
 fn step_let_scope(
+    jt: &JobTemplate,
     step: &StepTemplate,
     step_path: &[PathElement],
-    base: &SymbolTable,
     expr_active: bool,
     ev: &FsEval<'_>,
     profile: &openjd_expr::ExprProfile,
 ) -> StepLetScope {
-    let mut symtab = base.clone();
+    let mut symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
+    if expr_active {
+        symtab
+            .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
+            .expect("symtab");
+        symtab
+            .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
+            .expect("symtab");
+    }
     let mut names = HashSet::new();
     let mut errors = ValidationErrors::default();
     if let (true, Some(bindings)) = (expr_active, &step.let_bindings) {
@@ -1744,8 +1754,7 @@ fn step_let_scope(
     StepLetScope {
         symtab,
         names,
-        clean: errors.is_empty(),
-        errors: errors.errors,
+        errors,
     }
 }
 
@@ -1755,36 +1764,50 @@ fn step_let_scope(
 /// reported at the step as `let binding '<name>'`. For clean bindings the
 /// result equals [`StepLetScope::symtab`], so this runs only for the others,
 /// to keep their diagnostics.
-fn range_symtab_after_let_failure(
-    bindings: &[String],
+fn range_symtab_for_unclean_lets(
+    jt: &JobTemplate,
+    step: &StepTemplate,
     step_path: &[PathElement],
-    base: &SymbolTable,
-    ev: &FsEval<'_>,
-    profile: &openjd_expr::ExprProfile,
+    expr_active: bool,
+    template_ev: &FsEval<'_>,
+    template_profile: &openjd_expr::ExprProfile,
     errors: &mut ValidationErrors,
 ) -> SymbolTable {
-    let mut range_symtab = base.clone();
-    for binding in bindings {
-        if let Some(eq_pos) = binding.find('=') {
-            let name = binding[..eq_pos].trim();
-            let expr_str = binding[eq_pos + 1..].trim();
-            if !name.is_empty() && !expr_str.is_empty() {
-                match ParsedExpression::with_profile(expr_str, profile) {
-                    Ok(parsed) => {
-                        match ev
-                            .budgeted(parsed.with_library(ev.lib))
-                            .evaluate(&[&range_symtab as &SymbolTable])
-                        {
-                            Ok(val) => {
-                                let _ = range_symtab.set(name, val);
+    let mut range_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
+    if expr_active {
+        range_symtab
+            .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
+            .expect("symtab");
+        range_symtab
+            .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
+            .expect("symtab");
+        if let Some(bindings) = &step.let_bindings {
+            for binding in bindings {
+                if let Some(eq_pos) = binding.find('=') {
+                    let name = binding[..eq_pos].trim();
+                    let expr_str = binding[eq_pos + 1..].trim();
+                    if !name.is_empty() && !expr_str.is_empty() {
+                        match openjd_expr::eval::ParsedExpression::with_profile(
+                            expr_str,
+                            template_profile,
+                        ) {
+                            Ok(parsed) => {
+                                match template_ev
+                                    .budgeted(parsed.with_library(template_ev.lib))
+                                    .evaluate(&[&range_symtab as &SymbolTable])
+                                {
+                                    Ok(val) => {
+                                        let _ = range_symtab.set(name, val);
+                                    }
+                                    Err(e) => {
+                                        errors.add(step_path, format!("let binding '{name}': {e}"));
+                                    }
+                                }
                             }
                             Err(e) => {
                                 errors.add(step_path, format!("let binding '{name}': {e}"));
                             }
                         }
-                    }
-                    Err(e) => {
-                        errors.add(step_path, format!("let binding '{name}': {e}"));
                     }
                 }
             }
@@ -1847,12 +1870,167 @@ pub fn validate_format_strings(
         errors,
     );
 
+    // ── Host requirements: template scope + step let bindings ──
+    for (i, step) in jt.steps.iter().enumerate() {
+        let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
+        if let Some(hr) = &step.host_requirements {
+            // Build a symtab with Param/RawParam + step let bindings
+            let mut hr_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
+            if expr_active {
+                hr_symtab
+                    .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
+                    .expect("symtab");
+                hr_symtab
+                    .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
+                    .expect("symtab");
+                if let Some(bindings) = &step.let_bindings {
+                    let let_path = path_field(&step_path, "let");
+                    let mut hr_let_names = HashSet::new();
+                    validate_let_bindings(
+                        bindings,
+                        &let_path,
+                        &HashSet::new(),
+                        &mut hr_let_names,
+                        &mut hr_symtab,
+                        &template_ev,
+                        &template_profile,
+                        errors,
+                    );
+                }
+            }
+            let hr_path = path_field(&step_path, "hostRequirements");
+            // §3.3.1.1 / §3.3.2.1: a capability name is `@fmtstring`, and its
+            // constraints apply to the resolved name. The name's
+            // expressions are checked against the symbols available when it
+            // is resolved at job creation, and the `CapabilityName`
+            // constraint runs the full name check when the name is fully
+            // static. Structure checks literal names, and job creation
+            // checks the resolved name.
+            if let Some(amounts) = &hr.amounts {
+                let amounts_path = path_field(&hr_path, "amounts");
+                let name_constraint = ResolvedConstraint::CapabilityName {
+                    kind: helpers::CapabilityKind::Amount,
+                    standard: standard_amounts,
+                };
+                let mut known_names = Vec::with_capacity(amounts.len());
+                for (j, amt) in amounts.iter().enumerate() {
+                    let amt_path = path_index(&amounts_path, j);
+                    let sr = validate_fs_with(
+                        &amt.name,
+                        &hr_symtab,
+                        &template_ev,
+                        &path_field(&amt_path, "name"),
+                        Some(&name_constraint),
+                        errors,
+                    );
+                    known_names.push(known_capability_name(&amt.name, sr.as_ref()));
+                    if let Some(min) = &amt.min {
+                        validate_fs_with(
+                            min,
+                            &hr_symtab,
+                            &template_ev,
+                            &path_field(&amt_path, "min"),
+                            Some(&ResolvedConstraint::Float {
+                                positive: false,
+                                msg: "must be non-negative.",
+                            }),
+                            errors,
+                        );
+                    }
+                    if let Some(max) = &amt.max {
+                        validate_fs_with(
+                            max,
+                            &hr_symtab,
+                            &template_ev,
+                            &path_field(&amt_path, "max"),
+                            Some(&ResolvedConstraint::Float {
+                                positive: true,
+                                msg: "must be positive.",
+                            }),
+                            errors,
+                        );
+                    }
+                }
+                check_known_names_unique(
+                    &known_names,
+                    helpers::CapabilityKind::Amount,
+                    &amounts_path,
+                    errors,
+                );
+            }
+            if let Some(attrs) = &hr.attributes {
+                let attrs_path = path_field(&hr_path, "attributes");
+                let name_constraint = ResolvedConstraint::CapabilityName {
+                    kind: helpers::CapabilityKind::Attribute,
+                    standard: &standard_attr_names,
+                };
+                let mut known_names = Vec::with_capacity(attrs.len());
+                for (j, attr) in attrs.iter().enumerate() {
+                    let attr_path = path_index(&attrs_path, j);
+                    let sr = validate_fs_with(
+                        &attr.name,
+                        &hr_symtab,
+                        &template_ev,
+                        &path_field(&attr_path, "name"),
+                        Some(&name_constraint),
+                        errors,
+                    );
+                    let known = known_capability_name(&attr.name, sr.as_ref());
+                    // The values are checked against the name when it is
+                    // known here, and against the resolved name at job
+                    // creation otherwise.
+                    let capability_name = known.as_ref().map_or("", |k| k.name.as_str());
+                    if let Some(k) = known.as_ref().filter(|k| !k.literal) {
+                        check_values_for_static_name(
+                            &k.name,
+                            attr,
+                            standard_attrs,
+                            &attr_path,
+                            errors,
+                        );
+                    }
+                    let attr_constraint = ResolvedConstraint::AttributeValue {
+                        capability_name,
+                        standard: standard_attrs,
+                    };
+                    if let Some(any_of) = &attr.any_of {
+                        for (k, v) in any_of.iter().enumerate() {
+                            validate_fs_with(
+                                v,
+                                &hr_symtab,
+                                &template_ev,
+                                &path_index(&path_field(&attr_path, "anyOf"), k),
+                                Some(&attr_constraint),
+                                errors,
+                            );
+                        }
+                    }
+                    if let Some(all_of) = &attr.all_of {
+                        for (k, v) in all_of.iter().enumerate() {
+                            validate_fs_with(
+                                v,
+                                &hr_symtab,
+                                &template_ev,
+                                &path_index(&path_field(&attr_path, "allOf"), k),
+                                Some(&attr_constraint),
+                                errors,
+                            );
+                        }
+                    }
+                    known_names.push(known);
+                }
+                check_known_names_unique(
+                    &known_names,
+                    helpers::CapabilityKind::Attribute,
+                    &attrs_path,
+                    errors,
+                );
+            }
+        }
+    }
+
     // ── Job environments: session scope (timeouts: template scope) ──
-    // Validated before the steps, which keeps one pass's large values alive
-    // at a time, and reported after the steps' host requirements.
-    let mut env_errors = ValidationErrors::default();
     if let Some(envs) = &jt.job_environments {
-        let errors = &mut env_errors;
         let envs_path = path_field(&[], "jobEnvironments");
         // Job-creation-scope symtab for env `timeout`/`notifyPeriodInSeconds`:
         // Param.* (non-PATH), RawParam.*, and Job.Name with EXPR. No
@@ -1911,197 +2089,41 @@ pub fn validate_format_strings(
         }
     }
 
-    // ── Steps: host requirements, then the remaining checks ──
-    // Each step's `let` bindings are evaluated into the template-scope symtab
-    // (Param.* non-PATH, RawParam.*, and with EXPR Job.Name and Step.Name).
-    // When they report no error, that one scope serves the step's host
-    // requirements, parameterSpace ranges, and body (see `StepLetScope`).
-    let mut step_base_symtab = template_symtab.clone();
-    if expr_active {
-        step_base_symtab
-            .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-            .expect("symtab");
-        step_base_symtab
-            .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
-            .expect("symtab");
-    }
-    // Every step's host-requirement errors come before the job environments'
-    // errors, and the steps' other errors after them, so the latter collect
-    // in `step_errors`.
-    let mut step_errors = ValidationErrors::default();
+    // ── Steps ──
     for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
-        let mut scope = step_let_scope(
-            step,
-            &step_path,
-            &step_base_symtab,
-            expr_active,
-            &template_ev,
-            &template_profile,
-        );
-        if let Some(hr) = &step.host_requirements {
-            // The step body reports these errors again: from this scope when
-            // it is clean (they are empty), from its own evaluation otherwise.
-            errors.errors.append(&mut scope.errors);
-            let hr_symtab = &scope.symtab;
-            let hr_path = path_field(&step_path, "hostRequirements");
-            // §3.3.1.1 / §3.3.2.1: a capability name is `@fmtstring`, and its
-            // constraints apply to the resolved name. The name's
-            // expressions are checked against the symbols available when it
-            // is resolved at job creation, and the `CapabilityName`
-            // constraint runs the full name check when the name is fully
-            // static. Structure checks literal names, and job creation
-            // checks the resolved name.
-            if let Some(amounts) = &hr.amounts {
-                let amounts_path = path_field(&hr_path, "amounts");
-                let name_constraint = ResolvedConstraint::CapabilityName {
-                    kind: helpers::CapabilityKind::Amount,
-                    standard: standard_amounts,
-                };
-                let mut known_names = Vec::with_capacity(amounts.len());
-                for (j, amt) in amounts.iter().enumerate() {
-                    let amt_path = path_index(&amounts_path, j);
-                    let sr = validate_fs_with(
-                        &amt.name,
-                        hr_symtab,
-                        &template_ev,
-                        &path_field(&amt_path, "name"),
-                        Some(&name_constraint),
-                        errors,
-                    );
-                    known_names.push(known_capability_name(&amt.name, sr.as_ref()));
-                    if let Some(min) = &amt.min {
-                        validate_fs_with(
-                            min,
-                            hr_symtab,
-                            &template_ev,
-                            &path_field(&amt_path, "min"),
-                            Some(&ResolvedConstraint::Float {
-                                positive: false,
-                                msg: "must be non-negative.",
-                            }),
-                            errors,
-                        );
-                    }
-                    if let Some(max) = &amt.max {
-                        validate_fs_with(
-                            max,
-                            hr_symtab,
-                            &template_ev,
-                            &path_field(&amt_path, "max"),
-                            Some(&ResolvedConstraint::Float {
-                                positive: true,
-                                msg: "must be positive.",
-                            }),
-                            errors,
-                        );
-                    }
-                }
-                check_known_names_unique(
-                    &known_names,
-                    helpers::CapabilityKind::Amount,
-                    &amounts_path,
-                    errors,
-                );
-            }
-            if let Some(attrs) = &hr.attributes {
-                let attrs_path = path_field(&hr_path, "attributes");
-                let name_constraint = ResolvedConstraint::CapabilityName {
-                    kind: helpers::CapabilityKind::Attribute,
-                    standard: &standard_attr_names,
-                };
-                let mut known_names = Vec::with_capacity(attrs.len());
-                for (j, attr) in attrs.iter().enumerate() {
-                    let attr_path = path_index(&attrs_path, j);
-                    let sr = validate_fs_with(
-                        &attr.name,
-                        hr_symtab,
-                        &template_ev,
-                        &path_field(&attr_path, "name"),
-                        Some(&name_constraint),
-                        errors,
-                    );
-                    let known = known_capability_name(&attr.name, sr.as_ref());
-                    // The values are checked against the name when it is
-                    // known here, and against the resolved name at job
-                    // creation otherwise.
-                    let capability_name = known.as_ref().map_or("", |k| k.name.as_str());
-                    if let Some(k) = known.as_ref().filter(|k| !k.literal) {
-                        check_values_for_static_name(
-                            &k.name,
-                            attr,
-                            standard_attrs,
-                            &attr_path,
-                            errors,
-                        );
-                    }
-                    let attr_constraint = ResolvedConstraint::AttributeValue {
-                        capability_name,
-                        standard: standard_attrs,
-                    };
-                    if let Some(any_of) = &attr.any_of {
-                        for (k, v) in any_of.iter().enumerate() {
-                            validate_fs_with(
-                                v,
-                                hr_symtab,
-                                &template_ev,
-                                &path_index(&path_field(&attr_path, "anyOf"), k),
-                                Some(&attr_constraint),
-                                errors,
-                            );
-                        }
-                    }
-                    if let Some(all_of) = &attr.all_of {
-                        for (k, v) in all_of.iter().enumerate() {
-                            validate_fs_with(
-                                v,
-                                hr_symtab,
-                                &template_ev,
-                                &path_index(&path_field(&attr_path, "allOf"), k),
-                                Some(&attr_constraint),
-                                errors,
-                            );
-                        }
-                    }
-                    known_names.push(known);
-                }
-                check_known_names_unique(
-                    &known_names,
-                    helpers::CapabilityKind::Attribute,
-                    &attrs_path,
-                    errors,
-                );
-            }
-        }
 
-        // Bindings that are not clean can carry large values in their errors,
-        // so the remaining sites evaluate them as they need and the scope is
-        // dropped here. The body can take it as is when no site ran before.
-        let scope = (scope.clean
-            || (step.host_requirements.is_none() && step.parameter_space.is_none()))
-        .then_some(scope);
-
-        let errors = &mut step_errors;
-
-        // Task parameter ranges use TEMPLATE scope (no PATH Param.*)
+        // Task parameter ranges use TEMPLATE scope (no PATH Param.*).
+        // Step-level let bindings are in template scope and must be visible
+        // in parameterSpace range expressions. When they are clean, the
+        // ranges and the step body below share one evaluation of them.
+        let mut shared_scope = None;
         if let Some(ps) = &step.parameter_space {
             let ps_path = path_field(&step_path, "parameterSpace");
             let tpd_path = path_field(&ps_path, "taskParameterDefinitions");
-            // Step-level let bindings are in template scope and must be
-            // visible in parameterSpace range expressions.
-            let failed_range_symtab;
-            let range_symtab = match &scope {
+            shared_scope = Some(step_let_scope(
+                jt,
+                step,
+                &step_path,
+                expr_active,
+                &template_ev,
+                &template_profile,
+            ))
+            .filter(StepLetScope::clean);
+            let unclean_range_symtab;
+            let range_symtab = match &shared_scope {
                 Some(scope) => &scope.symtab,
                 None => {
-                    failed_range_symtab = range_symtab_after_let_failure(
-                        step.let_bindings.as_deref().unwrap_or_default(),
+                    unclean_range_symtab = range_symtab_for_unclean_lets(
+                        jt,
+                        step,
                         &step_path,
-                        &step_base_symtab,
+                        expr_active,
                         &template_ev,
                         &template_profile,
                         errors,
                     );
-                    &failed_range_symtab
+                    &unclean_range_symtab
                 }
             };
             for (j, tp) in ps.task_parameter_definitions.iter().enumerate() {
@@ -2247,25 +2269,23 @@ pub fn validate_format_strings(
         // Template-scope symtab for the step's job-creation-stage fields:
         // Param.* (non-PATH), RawParam.*, and with EXPR Job.Name, Step.Name,
         // and step-level let bindings — no Session.*, no Task.*. Used for
-        // `timeout`/`notifyPeriodInSeconds` (plain @fmtstring: resolved at
-        // job creation, before any session exists).
-        let scope = match scope {
-            Some(scope) => scope,
-            None => step_let_scope(
-                step,
-                &step_path,
-                &step_base_symtab,
-                expr_active,
-                &template_ev,
-                &template_profile,
-            ),
-        };
+        // step let bindings and for `timeout`/`notifyPeriodInSeconds`
+        // (plain @fmtstring: resolved at job creation, before any session
+        // exists).
         let StepLetScope {
             symtab: step_template_symtab,
             names: step_let_names,
             errors: let_errors,
-            ..
-        } = scope;
+        } = shared_scope.unwrap_or_else(|| {
+            step_let_scope(
+                jt,
+                step,
+                &step_path,
+                expr_active,
+                &template_ev,
+                &template_profile,
+            )
+        });
 
         // Let bindings: report what evaluating them found if EXPR, reject if not.
         // Step-level let bindings are TEMPLATE scope (template_lib, no Session.*, no PATH Param.*).
@@ -2275,7 +2295,7 @@ pub fn validate_format_strings(
             if !expr_active {
                 errors.add(&let_path, "'let' requires the EXPR extension.");
             } else {
-                errors.errors.extend(let_errors);
+                errors.errors.extend(let_errors.errors);
                 // Copy evaluated let bindings into task_symtab so script-level code can use them
                 for name in &step_let_names {
                     if let Some(val) = step_template_symtab.get_value(name) {
@@ -2421,9 +2441,6 @@ pub fn validate_format_strings(
             }
         }
     }
-
-    errors.errors.extend(env_errors.errors);
-    errors.errors.extend(step_errors.errors);
 
     // Environment script comprehension validation (EXPR only)
     if expr_active {

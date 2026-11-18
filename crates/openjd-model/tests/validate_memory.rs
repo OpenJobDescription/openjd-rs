@@ -77,15 +77,17 @@ struct Step<'a> {
     arg: Option<&'a str>,
 }
 
-/// A job template with `steps` copies of `step`, and a job environment with
-/// `job_env_lets` when given.
-fn template(steps: usize, step: Step, job_env_lets: Option<&[&str]>) -> serde_json::Value {
-    let one = |i: usize| {
+/// A job template with `steps`, and a job environment with `job_env_lets`
+/// when given.
+fn template(steps: &[Step], job_env_lets: Option<&[&str]>) -> serde_json::Value {
+    let one = |(i, step): (usize, &Step)| {
         let mut s = serde_json::json!({
             "name": format!("S{i}"),
-            "let": step.lets,
             "script": {"actions": {"onRun": {"command": "echo", "args": step.arg.into_iter().collect::<Vec<_>>()}}}
         });
+        if !step.lets.is_empty() {
+            s["let"] = serde_json::json!(step.lets);
+        }
         if let Some(min) = step.hr_min {
             s["hostRequirements"] =
                 serde_json::json!({"amounts": [{"name": "amount.worker.vcpu", "min": min}]});
@@ -101,7 +103,7 @@ fn template(steps: usize, step: Step, job_env_lets: Option<&[&str]>) -> serde_js
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
         "name": "M",
-        "steps": (0..steps).map(one).collect::<Vec<_>>(),
+        "steps": steps.iter().enumerate().map(one).collect::<Vec<_>>(),
     });
     if let Some(env_lets) = job_env_lets {
         t["jobEnvironments"] = serde_json::json!([{
@@ -123,9 +125,9 @@ fn validate(t: serde_json::Value) {
     );
 }
 
-/// Template validation holds at most one copy of a step's evaluated `let`
-/// values and `let` errors at a time, on every path, and does not keep
-/// earlier steps' errors alive while it evaluates the job environments.
+/// Peak heap use of template validation stays within fixed multiples of the
+/// large values its templates evaluate, for valid and invalid `let` blocks
+/// and for large values at every site that evaluates one.
 #[test]
 fn validation_peak_memory_stays_within_its_bounds() {
     let x = format!("x = 'A' * {V}");
@@ -138,128 +140,154 @@ fn validation_peak_memory_stays_within_its_bounds() {
     let range_big = format!("1-{{{{ {big} % 3 + 1 }}}}");
     let hr_big = format!("{{{{ {big} % 4 + 1 }}}}");
     let arg_big = format!("{{{{ {big} }}}}");
+    let hr_huge = format!("{{{{ len('C' * {}) % 4 + 1 }}}}", 20 * V);
     let fails = [x.as_str(), "y = int('nope')"];
     let fails_large = [x.as_str(), "y = int(x)"];
 
-    // (name, template, limit in multiples of V). Each limit is origin/main's
-    // peak plus 0.5; the comment gives that peak and what each regression
-    // this guards measured.
+    // (name, template, limit in multiples of V). Each comment gives the
+    // measured peak, which each limit exceeds by about 0.5, and what would
+    // raise it, with the peak that caused.
     let cases = [
-        // 2.09. Keeping every step's values: 31.10.
+        // 2.09. Keeping every step's values alive: 31.10.
         (
             "30 steps",
             template(
-                30,
-                Step {
+                &[Step {
                     lets: &[&x],
                     hr_min: hr_x,
                     range: range_x,
                     ..Default::default()
-                },
+                }; 30],
                 None,
             ),
             2.5,
         ),
-        // 2.01. A second copy of a failing step's values: 3.00.
+        // 2.01. Two copies of a failing step's values: 3.00.
         (
             "3 steps, a binding fails",
             template(
-                3,
-                Step {
+                &[Step {
                     lets: &fails,
                     hr_min: hr_x,
                     range: range_x,
                     ..Default::default()
-                },
+                }; 3],
                 None,
             ),
             2.5,
         ),
-        // 17.01. Step errors alive during the job environment: 18.00.
+        // 17.01. Step errors alive while the job environment evaluates: 18.00.
         (
             "3 steps, large errors, large job environment",
             template(
-                3,
-                Step {
+                &[Step {
                     lets: &fails_large,
                     hr_min: hr_x,
                     range: range_x,
                     ..Default::default()
-                },
+                }; 3],
                 Some(&[&env_z, "w = len(z)"]),
             ),
             17.5,
         ),
-        // 11.00. Structural errors kept through the ranges: 14.00.
+        // 11.00. Keeping a not-clean scope through the ranges: 14.00.
         (
             "long binding name, large range temporary",
             template(
-                1,
-                Step {
+                &[Step {
                     lets: &[&long_name],
                     range: Some(&range_big),
                     ..Default::default()
-                },
+                }; 1],
                 None,
             ),
             11.5,
         ),
-        // 10.00. Structural errors kept through the ranges: 12.00.
+        // 10.00. Keeping a not-clean scope through the ranges: 12.00.
         (
             "binding without '=', large range temporary",
             template(
-                1,
-                Step {
+                &[Step {
                     lets: &[&no_eq],
                     range: Some(&range_big),
                     ..Default::default()
-                },
+                }; 1],
                 None,
             ),
             10.5,
         ),
-        // 15.00. A failed scope kept through the body's evaluation: 17.00.
+        // 15.00. Keeping a failed scope through the body's evaluation: 17.00.
         (
             "large errors, range, large body temporary",
             template(
-                1,
-                Step {
+                &[Step {
                     lets: &fails_large,
                     range: Some("1-3"),
                     arg: Some(&arg_big),
                     ..Default::default()
-                },
+                }; 1],
                 None,
             ),
             15.5,
         ),
-        // 12.00. Errors copied rather than moved at host requirements: 13.00.
+        // 12.00. A second copy of the errors at host requirements: 13.00.
         (
             "large errors, large host-requirement temporary",
             template(
-                1,
-                Step {
+                &[Step {
                     lets: &fails_large,
                     hr_min: Some(&hr_big),
                     ..Default::default()
-                },
+                }; 1],
                 None,
             ),
             12.5,
         ),
-        // 13.00. The body takes the scope as is when no site ran before it.
+        // 13.00. A step with only a body.
         (
             "large errors, large body temporary",
             template(
-                1,
-                Step {
+                &[Step {
                     lets: &fails_large,
                     arg: Some(&arg_big),
                     ..Default::default()
-                },
+                }; 1],
                 None,
             ),
             13.5,
+        ),
+        // 20.00. Job-environment errors alive while host requirements
+        // evaluate: 23.00.
+        (
+            "large job-environment errors, large host-requirement temporary",
+            template(
+                &[Step {
+                    hr_min: Some(&hr_huge),
+                    ..Default::default()
+                }],
+                Some(&[&env_z, "w = int(z)"]),
+            ),
+            20.5,
+        ),
+        // 20.00. An earlier step's errors alive while a later step's host
+        // requirements evaluate: 23.00.
+        (
+            "large errors, then a later step's large host-requirement temporary",
+            template(
+                &[
+                    Step {
+                        lets: &fails_large,
+                        range: Some("1-3"),
+                        ..Default::default()
+                    },
+                    Step {
+                        hr_min: Some(&hr_huge),
+                        ..Default::default()
+                    },
+                ],
+                None,
+            ),
+            20.5,
         ),
     ];
     let mut report = Vec::new();
