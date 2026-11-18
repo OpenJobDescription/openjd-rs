@@ -193,7 +193,8 @@ and about octal above `\377`, and this crate has no warnings, so it accepts both
 silently. A malformed escape (`\x4g`, `\u12`, an unknown `\N{...}`, `\U00110000`) is
 a ruff lexical error. `\N{...}` looks names up in ruff's own table, which matches
 CPython 3.13 for the names §1.1.5 requires but rejects some it lets implementations
-differ on, such as `TANGUT IDEOGRAPH-17000`.
+differ on, such as `TANGUT IDEOGRAPH-17000`. It also accepts
+`CJK UNIFIED IDEOGRAPH-04E00`, with a leading zero, which CPython 3.13 rejects.
 
 One difference needs a pass of its own. For a `\u` or `\U` escape with a surrogate
 value (U+D800 to U+DFFF), CPython keeps the surrogate in the string and ruff silently

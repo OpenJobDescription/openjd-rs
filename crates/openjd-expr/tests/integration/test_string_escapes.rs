@@ -240,6 +240,20 @@ fn surrogate_escape_found_in_every_string_form() {
     );
 }
 
+/// Two `\u` escapes are never combined, so a surrogate pair is an error
+/// that names the first half (audit round 4: no test had a pair).
+#[test]
+fn surrogate_pair_is_an_error() {
+    assert_err(
+        r"'\uD83D\uDE00'",
+        &[
+            "Syntax error: \\uD83D is a surrogate code point, which a string can't hold\n",
+            "  '\\uD83D\\uDE00'\n",
+            "   ^~~~~~",
+        ],
+    );
+}
+
 /// A literal in a slice bound is checked like any other (audit round 1:
 /// slice bounds weren't walked by AST validation).
 #[test]

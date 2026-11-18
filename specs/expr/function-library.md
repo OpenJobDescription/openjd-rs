@@ -725,8 +725,9 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   (Python's `$` ≈ Rust's `(?:\n?\z)`); the intersection dialect allows `$`,
   so results differ on newline-terminated input.
 - **`re_sub` replacements** are literal text (§2.2.5). `validate_regex_replacement`
-  rejects a group reference (`\1`-`\9`, `\g<...>`, `$` followed by a digit or `{`)
-  with "Group references in replacement strings are not supported", and then a
+  rejects a group reference (a backslash followed by a digit, `\g<...>`, or `$`
+  followed by a digit or `{`) with "Group references in replacement strings are not
+  supported", and then a
   control character with "Control characters in replacement strings are not
   supported (U+0001)", naming the first one. A control character is one in Unicode
   general category `Cc` (`char::is_control`: U+0000 to U+001F and U+007F to U+009F)
