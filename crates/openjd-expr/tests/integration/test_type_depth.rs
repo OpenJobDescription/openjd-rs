@@ -477,7 +477,7 @@ fn the_deepest_comprehension_nesting_types_below_the_limit() {
         ExprValue::unresolved(ExprType::parse("list[list[int]]").unwrap()),
     )
     .unwrap();
-    for iterable in ["[1]", "L"] {
+    for (iterable, expected) in [("[1]", 125), ("L", 127)] {
         let mut expr = "N".to_string();
         let mut deepest = 0;
         for i in 0.. {
@@ -492,10 +492,9 @@ fn the_deepest_comprehension_nesting_types_below_the_limit() {
             deepest = deepest.max(depth(&t));
             expr = next;
         }
-        assert!(
-            (120..MAX_TYPE_DEPTH).contains(&deepest),
-            "over {iterable}: {deepest}"
-        );
+        // The deepest is the figure the docs give for the depth limit's
+        // margin (127, over a bare name).
+        assert_eq!(deepest, expected, "over {iterable}");
     }
 }
 
@@ -760,8 +759,8 @@ fn library_typing_past_the_limit_is_an_error() {
 /// wrapping comprehension bodies in `([x] if C else 1)` adds two levels a
 /// wrap, compounding along the chain. Such an expression fails typing
 /// with the limit's error (a deliberate hardening limit, see
-/// type-system.md § Depth limit), quickly and without overflowing a 2 MiB
-/// stack, while a run of it succeeds. Three comprehensions with 26 wraps
+/// type-system.md § Depth limit) on a 2 MiB stack, while a run of it
+/// succeeds. Three comprehensions with 26 wraps
 /// each type below the limit and with 27 past it; ten with 25 type as
 /// about 500 deep without the limit.
 #[test]

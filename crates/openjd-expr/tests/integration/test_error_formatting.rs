@@ -1614,9 +1614,16 @@ fn type_at_the_limit() -> SymbolTable {
     st
 }
 
+/// The whole error, compared exactly: a caret on the wrong node or one
+/// character too long fails.
+fn assert_err_exact(expr: &str, st: &SymbolTable, expected: &[&str]) {
+    let e = eval_err_with(expr, st);
+    assert_eq!(e, expected.concat());
+}
+
 #[test]
 fn type_too_deep_points_at_the_list() {
-    assert_err_with(
+    assert_err_exact(
         "1 + len([X])",
         &type_at_the_limit(),
         &[
@@ -1629,13 +1636,15 @@ fn type_too_deep_points_at_the_list() {
 
 #[test]
 fn type_too_deep_in_a_conditional_branch() {
-    assert_err_with(
-        "[X] if C else 1",
+    // The else branch, so the caret can't be mistaken for one over the
+    // whole conditional.
+    assert_err_exact(
+        "1 if C else [X]",
         &type_at_the_limit(),
         &[
             "Type nesting depth exceeded limit (160)\n",
-            "  [X] if C else 1\n",
-            "  ^~~",
+            "  1 if C else [X]\n",
+            "              ^~~",
         ],
     );
 }

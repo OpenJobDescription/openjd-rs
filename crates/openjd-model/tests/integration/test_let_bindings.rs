@@ -1816,11 +1816,51 @@ fn let_chain_past_the_type_depth_limit_fails_at_that_binding() {
             "Invalid expression in let binding 'a3': Type nesting depth exceeded limit (160)",
         ],
     );
-    // Without the limit this chain took minutes to validate.
+    // A chain of this length validated in about a second without the
+    // limit, which grows to minutes over a longer chain (the next test).
     assert!(
         start.elapsed() < std::time::Duration::from_secs(10),
         "{:?}",
         start.elapsed()
+    );
+}
+
+/// A format string field (here a command's argument) whose expression
+/// types past the limit fails validation at that field, with the
+/// expression and a caret, as a `let` binding does.
+#[test]
+fn format_string_past_the_type_depth_limit_fails_at_that_field() {
+    let template = |arg: &str| {
+        format!(
+            r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [
+            {{"name": "N", "type": "INT", "default": 1}},
+            {{"name": "C", "type": "BOOL", "default": false}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "script": {{
+                "let": [{}, {}],
+                "actions": {{"onRun": {{"command": "foo", "args": ["{arg}"]}}}}
+            }}
+        }}]
+    }}"#,
+            serde_json::to_string(&format!("b1 = {}", nested_comprehensions("Param.N", 60)))
+                .unwrap(),
+            serde_json::to_string(&format!("b2 = {}", nested_comprehensions("b1", 19))).unwrap(),
+        )
+    };
+    // `b2` is 159 deep, so `[b2]` is at the limit and `[[b2]]` past it.
+    decode_ok(&template("{{ len([b2]) }}"));
+    check_err(
+        &template("{{ len([[b2]]) }}"),
+        &[
+            "steps[0] -> script -> actions -> onRun -> args[0]:\n",
+            "Type nesting depth exceeded limit (160)\n  len([[b2]])\n      ^~~~~~",
+        ],
     );
 }
 

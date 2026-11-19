@@ -107,8 +107,10 @@ release build between 128 KiB and 256 KiB. Before the limit, a type built
 aborted the process.
 
 `parse` stops at 10 levels of nesting (a parsed type is at most 11 deep), the
-function library's signatures are at most 4 deep, and list values nest at most
-two lists, so no parsed type and no value's type comes near the limit. Static
+function library's signatures are at most 4 deep, and list values a template
+builds nest at most two lists, so no parsed type and no concrete value an
+evaluation builds comes near the limit. (A value built through the Rust API,
+such as an unresolved value of a deep type, can.) Static
 typing builds deeper types, because the type of an unresolved value keeps
 every form a run might produce. A comprehension over an unresolved value is
 `list[T | nulltype]` (§1.3.7), two levels over its element, so nesting
@@ -124,7 +126,9 @@ type as 176 deep, and within the expression depth and input length limits one
 expression can type as about 1,860 deep. A chain of `let` bindings each
 nesting the one before goes further. Such a template now fails validation
 with `TypeTooDeep` at the expression or binding that passes the limit, while
-a run of it would succeed. This is a deliberate Rust-only hardening limit,
+a run of it would succeed. (Whole-field FLOAT, STRING and PATH task parameter
+range expressions are the exception: validation doesn't type them at all, so
+this limit doesn't apply to them there.) This is a deliberate Rust-only hardening limit,
 like `MAX_EXPRESSION_DEPTH` and `MAX_PARSE_INPUT_LEN`, which also reject
 input the specification allows. Without it, the same templates took seconds
 to minutes to validate, and the deepest overflowed a 2 MiB stack (a type
