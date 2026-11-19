@@ -75,6 +75,8 @@ mod test_range_expr_canonical;
 mod test_regex_validation;
 #[path = "integration/test_repr_pwsh_roundtrip.rs"]
 mod test_repr_pwsh_roundtrip;
+#[path = "integration/test_repr_sh_shell_words.rs"]
+mod test_repr_sh_shell_words;
 #[path = "integration/test_rfc_examples.rs"]
 mod test_rfc_examples;
 #[path = "integration/test_round_cpython.rs"]

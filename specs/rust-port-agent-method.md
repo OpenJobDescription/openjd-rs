@@ -97,11 +97,11 @@ end, while passing the suite, was quite far from production-ready.
 
 > Look closely at the Python implementation of the URI path to understand the detailed logic
 
-#### (Still unresolved) Rust and Python shlex are different
+#### Rust and Python shlex are different
 
 > How should we change the conformance tests so that we can accept both Python and Rust's shlex? They make different choices, but both are valid
 
-TODO
+Addressed for [issue 313](https://github.com/OpenJobDescription/openjd-rs/issues/313): Expression Language §2.2.6 defines `repr_sh` by the words a POSIX shell reads back from its output rather than by Python's exact bytes, and the conformance test runs each output through `sh` and checks those words.
 
 #### To refactor the list[] implementation
 

@@ -740,6 +740,25 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   comma for a one-element outer list (`@(,@(1, 2))`) since `@(@(1, 2))`
   flattens in PowerShell. `repr_sh` and `repr_cmd` reject nested lists at
   signature dispatch.
+- **`repr_sh` output contract.** Expression Language §2.2.6 defines `repr_sh`
+  by what a POSIX shell reads back, not by its bytes: unquoted in a command's
+  arguments in a non-interactive shell (the spec lists the cases outside the
+  property), a `string` or `path` (in its string form) is read as exactly one
+  word equal to the input, and a list of N items, quoted and joined with single
+  spaces, as N words in order. An empty string gives `''`, an empty list the
+  empty string, and a NUL anywhere in the input is an evaluation error
+  (`Cannot shell-quote string: ...` or `Cannot shell-quote list: ...`).
+  `bool`, `int`, `float`, `nulltype`, `range_expr`, nested lists and lists of
+  anything other than strings or paths have no signature. Quoting is the `shlex` crate's `try_quote`, which differs in bytes
+  from Python's `shlex.quote` on some inputs, and both conform: `it's` is
+  `"it's"` here and `'it'"'"'s'` in Python, `a\b` is `"a\\b"` here, and
+  `a=b` is `'a=b'` here where Python leaves it bare. The spec requires no
+  particular form, so this crate's bytes may change with the `shlex` crate.
+  `tests/integration/test_repr_sh_shell_words.rs` (Unix only) runs every
+  output through `sh` and checks the words it reads back, over each ASCII
+  character, quotes, expansions, globs, operators, whitespace, non-ASCII
+  input, paths and lists. The byte-level tests in `test_strings.rs` pin the
+  current quoting.
 - **Path operations** are format-aware (POSIX/Windows/URI) without using `std::path` (§2.3)
 - **`path(list[string])` constructor** follows Python `PurePosixPath(*parts)` /
   `PureWindowsPath(*parts)` semantics: an absolute component in the list resets the
