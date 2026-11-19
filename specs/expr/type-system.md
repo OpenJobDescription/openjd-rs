@@ -136,7 +136,11 @@ about three times what lists need.
 `ExprValue::expr_type` stays infallible. An `Unresolved(T)` value is
 `unresolved[T]`, as deep as `T`. A `ListList` whose element type hint is
 already at the limit has no list type one level up, so it is `list[any]`; only
-a value built through the API with such a hint gets that.
+a value built through the API with such a hint gets that. Static typing reads
+such a value as `list[any]`, so typing can accept an expression on it that a
+run rejects: with `LL` such a value and `U` an `unresolved[list[int]]`,
+`LL + U` types as `unresolved[list[any]]`, while a run with `U = []` fails
+with `TypeTooDeep`.
 
 Fixed types written from constants (`list[string]`, `int | nulltype`) use
 crate-private helpers, `ExprType::fixed` in openjd-expr, `types::fixed_type`

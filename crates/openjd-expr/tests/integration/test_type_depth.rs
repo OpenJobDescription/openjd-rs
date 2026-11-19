@@ -907,12 +907,16 @@ fn coercing_an_unresolved_value_past_the_limit_is_an_error() {
 fn nested_joins_and_merges_past_the_limit_are_errors() {
     // `merge_list_union` recurses into a list's element: the
     // comprehension `[[x] for x in U]` over a union of lists of every
-    // depth from 2 to 6 and one of strings a level below the limit.
-    let mut members: Vec<ExprType> = (0..64).map(|i| deep_list((i % 5) + 2)).collect();
-    members.push(deep_strings(MAX_TYPE_DEPTH - 1));
-    let mut st = SymbolTable::new();
-    st.set("U", ExprValue::unresolved(u(members))).unwrap();
-    assert_eval_too_deep("[[x] for x in U]", None, &st);
+    // depth from 2 to 6 and one of strings 1 to 6 levels below the limit.
+    // At 3 levels below, only the recursive merge's error makes the type
+    // too deep: the later checks would accept it.
+    for below in 1..=6 {
+        let mut members: Vec<ExprType> = (0..64).map(|i| deep_list((i % 5) + 2)).collect();
+        members.push(deep_strings(MAX_TYPE_DEPTH - below));
+        let mut st = SymbolTable::new();
+        st.set("U", ExprValue::unresolved(u(members))).unwrap();
+        assert_eval_too_deep("[[x] for x in U]", None, &st);
+    }
 
     // A concatenation typed past the form cap refines its return type
     // by the operands' join.

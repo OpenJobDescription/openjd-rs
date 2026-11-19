@@ -1689,7 +1689,9 @@ impl ExprValue {
     /// and the `ListList` is `list[any]`: still a list, with the elements'
     /// type read as unknown. No list the language builds has such a hint
     /// (list values nest at most two lists), so only a `ListList` built
-    /// through the Rust API with one gets the fallback.
+    /// through the Rust API with one gets the fallback. Static typing then
+    /// reads such a value as `list[any]`, so it can accept an expression on
+    /// it that a run rejects with `TypeTooDeep`.
     pub fn expr_type(&self) -> ExprType {
         match self {
             Self::Null => ExprType::NULLTYPE,

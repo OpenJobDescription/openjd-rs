@@ -708,6 +708,9 @@ fn concat_return_type(
     if unknown(&left) || unknown(&right) {
         return Ok(ExprType::fixed(ExprType::list(ExprType::ANY)));
     }
+    // No input is known to reach a `TypeTooDeep` here: the joins known to
+    // add a level need an unknown element, which returned above. The `?`
+    // keeps the error if one does.
     Ok(crate::types::join_list_element(&left, &right)?.unwrap_or(ret))
 }
 
