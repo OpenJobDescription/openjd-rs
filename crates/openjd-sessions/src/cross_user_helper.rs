@@ -1135,7 +1135,7 @@ mod send_command_concurrency_tests {
     //! each other's lines, with `cat` standing in for the helper.
     use super::*;
     use crate::runner::CancelMethod;
-    use std::os::unix::io::{AsFd, FromRawFd, IntoRawFd};
+    use std::os::unix::io::AsFd;
     use std::time::Duration;
 
     const TOKEN: &str = "AbCdEfGhIjKlMnOpQrStUv";
@@ -1149,9 +1149,7 @@ mod send_command_concurrency_tests {
             .spawn()
             .unwrap();
         let child_stdin = child.stdin.take().unwrap();
-        let dup_fd = nix::unistd::dup(child_stdin.as_fd()).unwrap();
-        // SAFETY: `dup_fd` is a fresh, owned descriptor.
-        let raw: std::fs::File = unsafe { FromRawFd::from_raw_fd(dup_fd.into_raw_fd()) };
+        let raw = std::fs::File::from(nix::unistd::dup(child_stdin.as_fd()).unwrap());
         let async_reader = UnixAsyncHelperReader::new(child.stdout.take().unwrap()).unwrap();
         let helper = CrossUserHelper {
             child,
@@ -1448,6 +1446,23 @@ mod run_via_helper_gate_tests {
             [run_line(), cancel(&CancelMethod::Terminate, None)]
         );
         assert_eq!(r.state, ActionState::Timeout);
+    }
+
+    /// A bare token cancel disarms the timeout: one command, and the action
+    /// stays Canceled.
+    #[tokio::test]
+    async fn token_cancel_disarms_the_timeout() {
+        let mut s = setup(ntt(8), Some(Duration::from_millis(100)));
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let responses = s.responses.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            responses.send(serde_json::json!({"exited": 143})).unwrap();
+        });
+        let r = run(&mut s, Some(&HelperRunGate::new()), &token).await;
+        assert_eq!(pipe(&s), [run_line(), cancel(&ntt(8), None)]);
+        assert_eq!(r.state, ActionState::Canceled);
     }
 
     /// When the canceller has fired the watch channel it writes the command
