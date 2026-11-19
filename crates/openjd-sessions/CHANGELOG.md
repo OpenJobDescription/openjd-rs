@@ -5,6 +5,13 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.11.0...openjd-sessions-v0.11.1) - 2026-11-19
+
+### Bug fixes
+
+- Honour an external cancel_token on cross-user sessions ([#563](https://github.com/OpenJobDescription/openjd-rs/pull/563)) ([#563](https://github.com/OpenJobDescription/openjd-rs/pull/563))
+
+
 ## [0.11.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.10.0...openjd-sessions-v0.11.0) - 2026-11-17
 
 ### Bug fixes
