@@ -1126,6 +1126,95 @@ mod run_gate_tests {
     }
 }
 
+#[cfg(all(test, unix))]
+mod send_command_concurrency_tests {
+    //! The run loop's cancel commands go through the real
+    //! [`CrossUserHelper::send_command`] (a `BufWriter` over the helper's
+    //! stdin) while `cancel_action` and handles write theirs over the
+    //! session's raw dup of the same pipe. This checks the two never tear
+    //! each other's lines, with `cat` standing in for the helper.
+    use super::*;
+    use crate::runner::CancelMethod;
+    use std::os::unix::io::{AsFd, FromRawFd, IntoRawFd};
+    use std::time::Duration;
+
+    const TOKEN: &str = "AbCdEfGhIjKlMnOpQrStUv";
+
+    /// A `CrossUserHelper` over `cat`, and a raw dup of its stdin, as
+    /// `spawn` makes for the session.
+    fn helper_over_cat() -> (CrossUserHelper, std::sync::Arc<std::fs::File>) {
+        let mut child = std::process::Command::new("cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let child_stdin = child.stdin.take().unwrap();
+        let dup_fd = nix::unistd::dup(child_stdin.as_fd()).unwrap();
+        // SAFETY: `dup_fd` is a fresh, owned descriptor.
+        let raw: std::fs::File = unsafe { FromRawFd::from_raw_fd(dup_fd.into_raw_fd()) };
+        let async_reader = UnixAsyncHelperReader::new(child.stdout.take().unwrap()).unwrap();
+        let helper = CrossUserHelper {
+            child,
+            stdin: std::io::BufWriter::new(child_stdin),
+            async_reader,
+            auth_token: TOKEN.into(),
+        };
+        (helper, std::sync::Arc::new(raw))
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn send_command_and_raw_cancel_lines_stay_whole() {
+        const N: usize = 5000;
+        let (mut helper, raw) = helper_over_cat();
+        let handles: Vec<_> = (0..2u64)
+            .map(|i| {
+                let raw = raw.clone();
+                std::thread::spawn(move || {
+                    let method = CancelMethod::NotifyThenTerminate {
+                        terminate_delay: Duration::from_secs(30 + i),
+                    };
+                    for _ in 0..N {
+                        crate::session::send_helper_cancel_command(
+                            &raw,
+                            Some(TOKEN),
+                            Some(Duration::from_secs(7)),
+                            Some(&method),
+                        );
+                    }
+                })
+            })
+            .collect();
+        let run_loop = std::thread::spawn(move || {
+            let method = CancelMethod::NotifyThenTerminate {
+                terminate_delay: Duration::from_secs(99),
+            };
+            for _ in 0..N {
+                assert!(send_cancel_command(&mut helper, &method, None, "s"));
+            }
+            helper
+        });
+        for h in handles {
+            h.join().unwrap();
+        }
+        let mut helper = run_loop.join().unwrap();
+        let mut lines = 0;
+        while lines < 3 * N {
+            let line = tokio::time::timeout(
+                Duration::from_secs(30),
+                helper.async_reader().next_response(),
+            )
+            .await
+            .expect("cat must echo every line")
+            .expect("cat must not close stdout early")
+            .unwrap_or_else(|e| panic!("torn cancel line: {e}"));
+            serde_json::from_value::<crate::helper_protocol::Command>(line.clone())
+                .unwrap_or_else(|e| panic!("mixed cancel line {line}: {e}"));
+            lines += 1;
+        }
+        // Dropping the helper kills `cat`.
+    }
+}
+
 #[cfg(test)]
 mod run_via_helper_gate_tests {
     //! [`run_via_helper`] with a fake helper whose commands go to a file,
@@ -1401,6 +1490,12 @@ mod run_via_helper_gate_tests {
             let r = run(&mut s, Some(&HelperRunGate::new()), &token).await;
             assert_eq!(pipe(&s), [run_line()], "via_timeout={via_timeout}");
             assert_eq!(r.exit_code, Some(0), "via_timeout={via_timeout}");
+            let expected = if via_timeout {
+                ActionState::Timeout
+            } else {
+                ActionState::Canceled
+            };
+            assert_eq!(r.state, expected, "via_timeout={via_timeout}");
         }
     }
 

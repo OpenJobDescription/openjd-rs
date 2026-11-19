@@ -530,7 +530,7 @@ fn deliver_helper_cancel(
 /// whose grace is the `time_limit`, or [`DEFAULT_CANCEL_NOTIFY_PERIOD_SECS`]
 /// without one, so a `time_limit` under one second gives `TERMINATE`. The
 /// method isn't known, so there is no same-user answer to match.
-fn send_helper_cancel_command(
+pub(crate) fn send_helper_cancel_command(
     mut writer: &std::fs::File,
     auth_token: Option<&str>,
     time_limit: Option<Duration>,
@@ -4651,8 +4651,9 @@ mod helper_cancel_command_tests {
 
     /// For each method and time limit, `cancel_action` and the handle write
     /// exactly `helper_cancel_line(token, method, time_limit)`. With no time
-    /// limit that is also what `write_helper_cancel` sends for a timeout or
-    /// a bare token cancel, so one action gets one command.
+    /// limit that is also what `run_via_helper`'s `send_cancel_command`
+    /// sends for a timeout or a bare token cancel, so one action gets one
+    /// command.
     #[test]
     fn cancel_action_and_handle_write_the_shared_builder_line() {
         for method in methods() {
