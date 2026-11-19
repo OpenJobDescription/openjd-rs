@@ -489,7 +489,7 @@ fn the_deepest_comprehension_nesting_types_below_the_limit() {
                 .evaluate(&st)
                 .unwrap_or_else(|e| panic!("{} nested comprehensions: {e}", i + 1))
                 .expr_type();
-            deepest = depth(&t);
+            deepest = deepest.max(depth(&t));
             expr = next;
         }
         assert!(
@@ -899,10 +899,6 @@ fn coercing_an_unresolved_value_past_the_limit_is_an_error() {
     }
 }
 
-/// More paths whose join or merge recurses and can add a level below the
-/// top: a comprehension's list type merging an iterable's list members at
-/// depth, concatenation typing past the form cap, and the list-element
-/// join of union members inside a list.
 /// A list type of irregular shape: a spine of `depth` lists from a scalar
 /// leaf, with a third of the levels a union of the list and one or two
 /// scalars or `list[nulltype]`, picked by a fixed xorshift sequence.
@@ -947,7 +943,13 @@ fn concatenation_join_past_the_limit_is_an_error() {
     // The regular shapes tried (a union at every level, every other level,
     // and so on) stay within it: this shape was found by search.
     let a0 = irregular_list_type(817_566_216_853, 120);
-    assert_eq!(a0.to_string().len(), 1195, "the generator changed");
+    let fnv1a = a0
+        .to_string()
+        .bytes()
+        .fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+        });
+    assert_eq!(fnv1a, 0x32e7_1301_10a2_92d9, "the generator changed");
     let mut st = SymbolTable::new();
     st.set("A", ExprValue::unresolved(l(a0))).unwrap();
     st.set(
@@ -962,6 +964,10 @@ fn concatenation_join_past_the_limit_is_an_error() {
     }
 }
 
+/// More paths whose join or merge recurses and can add a level below the
+/// top: a comprehension's list type merging an iterable's list members at
+/// depth, concatenation typing past the form cap, and the list-element
+/// join of union members inside a list.
 #[test]
 fn nested_joins_and_merges_past_the_limit_are_errors() {
     // `merge_list_union` recurses into a list's element: the

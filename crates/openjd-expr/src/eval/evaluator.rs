@@ -2443,9 +2443,9 @@ fn unresolved_list_from_elements(
     for e in elements {
         let t = unwrap_unresolved(&e.expr_type());
         match crate::types::list_element_contribution(&t)? {
+            Some(c) => types.push(c),
             // A concrete `null` has type `nulltype`, which contributes
             // nothing.
-            Some(c) => types.push(c),
             None => return Err(null_error()),
         }
     }

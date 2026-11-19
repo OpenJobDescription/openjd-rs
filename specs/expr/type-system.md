@@ -113,7 +113,7 @@ typing builds deeper types, because the type of an unresolved value keeps
 every form a run might produce. A comprehension over an unresolved value is
 `list[T | nulltype]` (§1.3.7), two levels over its element, so nesting
 comprehensions as deep as `MAX_EXPRESSION_DEPTH` (64) allows types as at most
-126 deep; `test_type_depth.rs` and the model's `test_let_bindings.rs` check
+127 deep; `test_type_depth.rs` and the model's `test_let_bindings.rs` check
 the deepest such nesting, which stays below the limit.
 
 Static typing can be made to go past any fixed limit, though. Wrapping a

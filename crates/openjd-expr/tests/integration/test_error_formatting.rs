@@ -1598,3 +1598,44 @@ fn membership_type_mismatch_caret_inside_larger_expression() {
         ],
     );
 }
+
+// === Type nesting depth ===
+
+/// A symbol table with `X`, an unresolved list type at `MAX_TYPE_DEPTH`,
+/// and `C`, an unresolved bool.
+fn type_at_the_limit() -> SymbolTable {
+    let mut t = ExprType::INT;
+    for _ in 1..MAX_TYPE_DEPTH {
+        t = ExprType::list(t).unwrap();
+    }
+    let mut st = SymbolTable::new();
+    st.set("X", ExprValue::unresolved(t)).unwrap();
+    st.set("C", ExprValue::unresolved(ExprType::BOOL)).unwrap();
+    st
+}
+
+#[test]
+fn type_too_deep_points_at_the_list() {
+    assert_err_with(
+        "1 + len([X])",
+        &type_at_the_limit(),
+        &[
+            "Type nesting depth exceeded limit (160)\n",
+            "  1 + len([X])\n",
+            "          ^~~",
+        ],
+    );
+}
+
+#[test]
+fn type_too_deep_in_a_conditional_branch() {
+    assert_err_with(
+        "[X] if C else 1",
+        &type_at_the_limit(),
+        &[
+            "Type nesting depth exceeded limit (160)\n",
+            "  [X] if C else 1\n",
+            "  ^~~",
+        ],
+    );
+}
