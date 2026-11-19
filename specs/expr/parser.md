@@ -192,10 +192,16 @@ or `\8` keeps its backslash, as §1.1.5 says; CPython 3.12 warns about it
 and about octal above `\377`, and this crate has no warnings, so it accepts both
 silently. §1.1.5 notes that the next major revision of the expression language
 specification should consider rejecting both forms. A malformed escape (`\x4g`, `\u12`, an unknown `\N{...}`, `\U00110000`) is
-a ruff lexical error. `\N{...}` looks names up in ruff's own table, which matches
-CPython 3.13 for the names §1.1.5 requires but rejects some it lets implementations
-differ on, such as `TANGUT IDEOGRAPH-17000`. It also accepts
-`CJK UNIFIED IDEOGRAPH-04E00`, with a leading zero, which CPython 3.13 rejects.
+a ruff lexical error. `\N{...}` looks names up in ruff's own table. It accepts every
+name §1.1.5 requires, in any case, including lower-case `CJK UNIFIED IDEOGRAPH` and
+`HANGUL SYLLABLE` names. It rejects some names §1.1.5 lets implementations differ on,
+such as `TANGUT IDEOGRAPH-17000`, and it accepts `CJK UNIFIED IDEOGRAPH-04E00`, with a
+leading zero. CPython changed on all three
+([python/cpython#80667](https://github.com/python/cpython/issues/80667)): 3.13.13 and
+later 3.13 releases, and 3.14.4 and later, accept any case and `TANGUT IDEOGRAPH-17000`,
+and reject the leading zero. CPython 3.12 and earlier, 3.13.0 to 3.13.12, and 3.14.0 to
+3.14.3 behave like ruff on the last two, but require upper case for
+`CJK UNIFIED IDEOGRAPH` and `HANGUL SYLLABLE` names.
 
 Two differences need a pass of their own. The first is surrogates: for a `\u` or `\U`
 escape with a surrogate value (U+D800 to U+DFFF), CPython keeps the surrogate in the
