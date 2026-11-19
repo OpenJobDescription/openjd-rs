@@ -65,7 +65,10 @@ fn sequence_form_matches_the_released_shape() {
     );
     let err =
         serde_json::from_str::<TaskParameter>(r#"{"int":[{"list":[4]},{"x":1}]}"#).unwrap_err();
-    assert_eq!(err.to_string(), INT_WITH_CHUNKS);
+    assert_eq!(
+        err.to_string(),
+        format!("{INT_WITH_CHUNKS} at line 1 column 21")
+    );
 }
 
 #[test]
@@ -112,14 +115,19 @@ fn chunks_on_int_is_rejected() {
     // the configuration without a signal.
     for chunks in [
         r#"{"defaultTaskCount":2,"targetRuntimeSeconds":null,"rangeConstraint":"CONTIGUOUS"}"#,
-        // Rejected without being parsed: the value is not a valid chunk
-        // configuration, and the error is still the one about the shape.
+        // Rejected without being read: these are not valid chunk configurations,
+        // and the error is still the one about the shape.
         r#"{}"#,
         r#"0"#,
     ] {
         let doc = format!(r#"{{"int":{{"range":{{"list":[1,2]}},"chunks":{chunks}}}}}"#);
         let err = serde_json::from_str::<TaskParameter>(&doc).unwrap_err();
-        assert_eq!(err.to_string(), INT_WITH_CHUNKS, "chunks = {chunks}");
+        // The position is where the `chunks` value starts.
+        assert_eq!(
+            err.to_string(),
+            format!("{INT_WITH_CHUNKS} at line 1 column 40"),
+            "chunks = {chunks}"
+        );
     }
 }
 
@@ -169,5 +177,247 @@ fn other_unknown_keys_on_int_are_still_ignored() {
         TaskParameter::Int {
             range: TaskParamRange::List(vec![7]),
         }
+    );
+}
+
+/// The serde calls that formats see but JSON hides: the type name, the
+/// variant index and the field count. Positional formats encode the index, so
+/// these must stay as the released derive made them.
+mod wire_shape {
+    use serde::de::{self, Deserializer, EnumAccess, IntoDeserializer, VariantAccess, Visitor};
+    use serde::ser::{self, Impossible, Serialize, Serializer};
+    use std::fmt;
+
+    /// The error both probes stop with, carrying what they saw.
+    #[derive(Debug)]
+    pub struct Seen(pub String);
+    impl fmt::Display for Seen {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(&self.0)
+        }
+    }
+    impl std::error::Error for Seen {}
+    impl ser::Error for Seen {
+        fn custom<T: fmt::Display>(msg: T) -> Self {
+            Seen(msg.to_string())
+        }
+    }
+    impl de::Error for Seen {
+        fn custom<T: fmt::Display>(msg: T) -> Self {
+            Seen(msg.to_string())
+        }
+    }
+
+    /// Records the `serialize_struct_variant` call a value makes, as
+    /// `name/index/variant/fields`. Any other top-level call is an error.
+    pub fn struct_variant_of<T: Serialize>(value: &T) -> String {
+        match value.serialize(StructVariantOf) {
+            Ok(()) => unreachable!("StructVariantOf never succeeds"),
+            Err(Seen(s)) => s,
+        }
+    }
+
+    struct StructVariantOf;
+
+    macro_rules! not_a_struct_variant {
+        ($($method:ident($($arg:ty),*) -> $ret:ty;)*) => {$(
+            fn $method(self, $(_: $arg),*) -> Result<$ret, Seen> {
+                Err(Seen(concat!("not a struct variant: ", stringify!($method)).into()))
+            }
+        )*};
+    }
+
+    impl Serializer for StructVariantOf {
+        type Ok = ();
+        type Error = Seen;
+        type SerializeSeq = Impossible<(), Seen>;
+        type SerializeTuple = Impossible<(), Seen>;
+        type SerializeTupleStruct = Impossible<(), Seen>;
+        type SerializeTupleVariant = Impossible<(), Seen>;
+        type SerializeMap = Impossible<(), Seen>;
+        type SerializeStruct = Impossible<(), Seen>;
+        type SerializeStructVariant = Impossible<(), Seen>;
+
+        not_a_struct_variant! {
+            serialize_bool(bool) -> ();
+            serialize_i8(i8) -> ();
+            serialize_i16(i16) -> ();
+            serialize_i32(i32) -> ();
+            serialize_i64(i64) -> ();
+            serialize_u8(u8) -> ();
+            serialize_u16(u16) -> ();
+            serialize_u32(u32) -> ();
+            serialize_u64(u64) -> ();
+            serialize_f32(f32) -> ();
+            serialize_f64(f64) -> ();
+            serialize_char(char) -> ();
+            serialize_str(&str) -> ();
+            serialize_bytes(&[u8]) -> ();
+            serialize_none() -> ();
+            serialize_unit() -> ();
+            serialize_unit_struct(&'static str) -> ();
+            serialize_unit_variant(&'static str, u32, &'static str) -> ();
+            serialize_seq(Option<usize>) -> Self::SerializeSeq;
+            serialize_tuple(usize) -> Self::SerializeTuple;
+            serialize_tuple_struct(&'static str, usize) -> Self::SerializeTupleStruct;
+            serialize_tuple_variant(&'static str, u32, &'static str, usize)
+                -> Self::SerializeTupleVariant;
+            serialize_map(Option<usize>) -> Self::SerializeMap;
+            serialize_struct(&'static str, usize) -> Self::SerializeStruct;
+        }
+
+        fn serialize_some<T: ?Sized + Serialize>(self, _: &T) -> Result<(), Seen> {
+            Err(Seen("not a struct variant: serialize_some".into()))
+        }
+        fn serialize_newtype_struct<T: ?Sized + Serialize>(
+            self,
+            _: &'static str,
+            _: &T,
+        ) -> Result<(), Seen> {
+            Err(Seen(
+                "not a struct variant: serialize_newtype_struct".into(),
+            ))
+        }
+        fn serialize_newtype_variant<T: ?Sized + Serialize>(
+            self,
+            _: &'static str,
+            _: u32,
+            _: &'static str,
+            _: &T,
+        ) -> Result<(), Seen> {
+            Err(Seen(
+                "not a struct variant: serialize_newtype_variant".into(),
+            ))
+        }
+        fn serialize_struct_variant(
+            self,
+            name: &'static str,
+            index: u32,
+            variant: &'static str,
+            len: usize,
+        ) -> Result<Self::SerializeStructVariant, Seen> {
+            Err(Seen(format!("{name}/{index}/{variant}/{len}")))
+        }
+    }
+
+    /// Deserializes `T` from an enum whose variant is given by index, as a
+    /// positional format does, and reports the struct variant and fields that
+    /// index selects (or the error for an index out of range).
+    pub fn struct_variant_at<T: de::DeserializeOwned>(index: u32) -> String {
+        match T::deserialize(VariantAt(index)) {
+            Ok(_) => unreachable!("VariantAt never succeeds"),
+            Err(Seen(s)) => s,
+        }
+    }
+
+    struct VariantAt(u32);
+
+    impl<'de> Deserializer<'de> for VariantAt {
+        type Error = Seen;
+        fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value, Seen> {
+            Err(Seen("not an enum".into()))
+        }
+        fn deserialize_enum<V: Visitor<'de>>(
+            self,
+            _: &'static str,
+            _: &'static [&'static str],
+            visitor: V,
+        ) -> Result<V::Value, Seen> {
+            visitor.visit_enum(self)
+        }
+        serde::forward_to_deserialize_any! {
+            bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
+            bytes byte_buf option unit unit_struct newtype_struct seq tuple
+            tuple_struct map struct identifier ignored_any
+        }
+    }
+
+    impl<'de> EnumAccess<'de> for VariantAt {
+        type Error = Seen;
+        type Variant = Self;
+        fn variant_seed<S: de::DeserializeSeed<'de>>(
+            self,
+            seed: S,
+        ) -> Result<(S::Value, Self), Seen> {
+            let variant = seed.deserialize(self.0.into_deserializer())?;
+            Ok((variant, self))
+        }
+    }
+
+    impl<'de> VariantAccess<'de> for VariantAt {
+        type Error = Seen;
+        fn unit_variant(self) -> Result<(), Seen> {
+            Err(Seen("unit variant".into()))
+        }
+        fn newtype_variant_seed<S: de::DeserializeSeed<'de>>(self, _: S) -> Result<S::Value, Seen> {
+            Err(Seen("newtype variant".into()))
+        }
+        fn tuple_variant<V: Visitor<'de>>(self, _: usize, _: V) -> Result<V::Value, Seen> {
+            Err(Seen("tuple variant".into()))
+        }
+        fn struct_variant<V: Visitor<'de>>(
+            self,
+            fields: &'static [&'static str],
+            visitor: V,
+        ) -> Result<V::Value, Seen> {
+            // The visitor's `expecting` names the variant it was built for.
+            let err: Seen = de::Error::invalid_type(de::Unexpected::Unit, &visitor);
+            Err(Seen(format!("{fields:?}: {err}")))
+        }
+    }
+}
+
+#[test]
+fn positional_wire_shape_is_the_released_one() {
+    // The released derive's order: Int, Float, String, Path, ChunkInt, with
+    // `int` carrying two fields (`range`, `chunks`).
+    let chunks = openjd_model::job::ResolvedChunks {
+        default_task_count: 1,
+        target_runtime_seconds: None,
+        range_constraint: openjd_model::template::RangeConstraint::Contiguous,
+    };
+    let cases = [
+        (
+            TaskParameter::Int {
+                range: TaskParamRange::List(vec![1]),
+            },
+            "TaskParameter/0/int/2",
+            r#"["range", "chunks"]: invalid type: unit value, expected struct variant TaskParameter::Int"#,
+        ),
+        (
+            TaskParameter::Float { range: vec![] },
+            "TaskParameter/1/float/1",
+            r#"["range"]: invalid type: unit value, expected struct variant TaskParameter::Float"#,
+        ),
+        (
+            TaskParameter::String { range: vec![] },
+            "TaskParameter/2/string/1",
+            r#"["range"]: invalid type: unit value, expected struct variant TaskParameter::String"#,
+        ),
+        (
+            TaskParameter::Path { range: vec![] },
+            "TaskParameter/3/path/1",
+            r#"["range"]: invalid type: unit value, expected struct variant TaskParameter::Path"#,
+        ),
+        (
+            TaskParameter::ChunkInt {
+                range: TaskParamRange::List(vec![1]),
+                chunks,
+            },
+            "TaskParameter/4/chunkInt/2",
+            r#"["range", "chunks"]: invalid type: unit value, expected struct variant TaskParameter::ChunkInt"#,
+        ),
+    ];
+    for (index, (param, written, read)) in (0u32..).zip(cases) {
+        assert_eq!(wire_shape::struct_variant_of(&param), written);
+        assert_eq!(
+            wire_shape::struct_variant_at::<TaskParameter>(index),
+            read,
+            "variant index {index}"
+        );
+    }
+    assert_eq!(
+        wire_shape::struct_variant_at::<TaskParameter>(5),
+        "invalid value: integer `5`, expected variant index 0 <= i < 5"
     );
 }

@@ -690,9 +690,9 @@ pub struct job::ResolvedChunks {
 
 A chunked parameter is `ChunkInt` and nothing else; `Int` has no chunk
 configuration. The serialized form is unchanged: `int` is still written
-with `"chunks": null`, as when `Int` had a `chunks` field. Deserializing
-an `int` parameter accepts `"chunks": null` or no `chunks`, and rejects
-any other value with `an \`int\` task parameter cannot have \`chunks\`;
+with `"chunks": null`, with the same serializer calls as when `Int` had a
+`chunks` field. Deserializing an `int` parameter accepts `"chunks": null`
+or no `chunks`, and rejects any other value with `an \`int\` task parameter cannot have \`chunks\`;
 a chunked parameter is \`chunkInt\` (CHUNK[INT])` (see job-types.md
 "TaskParameter").
 

@@ -1494,8 +1494,9 @@ impl StepParameterSpaceIterator {
         // value of magnitude 2^62 or more (CHUNK_INT_VALUE_BOUND, which keeps the
         // chunking arithmetic exact), but `StepParameterSpace` is publicly constructible
         // and deserializable, so check both here. A second CHUNK[INT] has nowhere to go:
-        // the chunk metadata below describes one parameter, so its chunk size and any
-        // `targetRuntimeSeconds` would be dropped without a signal.
+        // the chunk metadata below describes one parameter, so a second would be chunked
+        // statically, missing from that metadata, with its `targetRuntimeSeconds`
+        // dropped without a signal.
         let mut chunked: Option<(&String, &job::ResolvedChunks)> = None;
         for (name, param) in &space.task_parameter_definitions {
             if let job::TaskParameter::ChunkInt { range, chunks } = param {
@@ -1695,9 +1696,10 @@ impl StepParameterSpaceIterator {
         self.chunks_param_name.as_deref()
     }
 
-    /// The effective chunk size of the chunked parameter, if any: the chunk
-    /// override, else its `defaultTaskCount`, at least 1. For adaptive chunking,
-    /// the current size, which `set_chunks_default_task_count` may have changed.
+    /// The chunk size of the chunked parameter, if any: the chunk override, else its
+    /// `defaultTaskCount`, raised to at least 1. For adaptive chunking, the current
+    /// size as last set by `set_chunks_default_task_count`, which may be 0 (chunking
+    /// treats 0 as 1).
     pub fn chunks_default_task_count(&self) -> Option<u64> {
         match &self.adaptive_chunk_size {
             // Adaptive: read the live value, which `set_chunks_default_task_count` may
@@ -3082,9 +3084,9 @@ mod tests {
     fn test_second_chunk_int_parameter_is_rejected() {
         // Template validation rejects two CHUNK[INT] parameters per step, and
         // StepParameterSpace is publicly constructible, so the iterator rejects them
-        // too. The chunk metadata describes one parameter: accepting a second would
-        // drop its chunk size and its targetRuntimeSeconds without a signal, which is
-        // what happened before.
+        // too. The chunk metadata describes one parameter: before, a second was
+        // chunked statically and missing from that metadata, and its
+        // targetRuntimeSeconds was dropped without a signal.
         let space = make_space(
             vec![
                 ("StaticFrame", noncontiguous_static_chunk_param("1-10", 5)),

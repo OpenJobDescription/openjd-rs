@@ -38,8 +38,8 @@ A space has at most one `CHUNK[INT]` parameter, as a template step does. `create
 never emits more, and `new` rejects a hand-built or deserialized space with two, with
 `ModelError::DecodeValidation`: `Task parameters '<first>' and '<second>' are both
 CHUNK[INT]: only one CHUNK[INT] parameter is allowed per step.` The chunk metadata below
-describes that one parameter, so a second would lose its chunk size and any
-`targetRuntimeSeconds` without a signal. The check runs in definition order, before the
+describes that one parameter. Before, a second was chunked statically with its own size,
+missing from that metadata, and its `targetRuntimeSeconds` was dropped without a signal. The check runs in definition order, before the
 second parameter's value bound (see "Chunking").
 
 **Divergence from the Python reference:** openjd-model-for-python's `StepParameterSpace`

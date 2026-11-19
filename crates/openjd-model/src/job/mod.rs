@@ -394,13 +394,13 @@ impl Hash for StepParameterSpace {
 ///
 /// The serialized form is the one released versions wrote when `Int` had a
 /// `chunks: Option<ResolvedChunks>` field that was never set: an `int` parameter is
-/// written with `"chunks": null`, so documents read the same in both directions,
-/// in self-describing and positional formats alike. Deserializing an `int`
+/// written with `"chunks": null`, making the same serializer calls as before, so a
+/// document reads as a released version's did in any format. Deserializing an `int`
 /// parameter accepts `"chunks": null` or no `chunks`, and rejects any other value
 /// rather than dropping it, because the chunk configuration it holds would
 /// otherwise be lost silently.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[serde(try_from = "wire::TaskParameter")]
+#[serde(from = "wire::TaskParameter")]
 #[allow(
     missing_docs,
     reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
@@ -466,35 +466,40 @@ impl Serialize for TaskParameter {
     }
 }
 
-impl TryFrom<wire::TaskParameter> for TaskParameter {
-    type Error = &'static str;
-
-    fn try_from(wire: wire::TaskParameter) -> Result<Self, Self::Error> {
-        Ok(match wire {
-            wire::TaskParameter::Int {
-                chunks: Some(_), ..
-            } => return Err(INT_WITH_CHUNKS),
-            wire::TaskParameter::Int {
-                range,
-                chunks: None,
-            } => Self::Int { range },
+impl From<wire::TaskParameter> for TaskParameter {
+    fn from(wire: wire::TaskParameter) -> Self {
+        match wire {
+            // `chunks` is `None` here: a non-null one fails in `RejectChunks`.
+            wire::TaskParameter::Int { range, .. } => Self::Int { range },
             wire::TaskParameter::Float { range } => Self::Float { range },
             wire::TaskParameter::String { range } => Self::String { range },
             wire::TaskParameter::Path { range } => Self::Path { range },
             wire::TaskParameter::ChunkInt { range, chunks } => Self::ChunkInt { range, chunks },
-        })
+        }
     }
 }
-
-/// The error for an `int` task parameter whose `chunks` is not null.
-const INT_WITH_CHUNKS: &str =
-    "an `int` task parameter cannot have `chunks`; a chunked parameter is `chunkInt` (CHUNK[INT])";
 
 /// The wire form of [`TaskParameter`]: its shape when `Int` still had
 /// `chunks: Option<ResolvedChunks>`, so the serialized form is unchanged.
 mod wire {
     use super::{Float64, ResolvedChunks, TaskParamRange};
-    use serde::{Deserialize, Serialize};
+    use serde::{Deserialize, Deserializer, Serialize};
+
+    /// The error for an `int` task parameter whose `chunks` is not null.
+    const INT_WITH_CHUNKS: &str = "an `int` task parameter cannot have `chunks`; a chunked \
+                                   parameter is `chunkInt` (CHUNK[INT])";
+
+    /// The value of a non-null `chunks` on an `int` parameter, which is always an
+    /// error. As the `T` of an `Option<T>` field, a null or missing `chunks` is `None`
+    /// without reaching it, and any other value fails here, where the format can
+    /// give its position, and without the format having to describe the value.
+    pub(super) enum RejectChunks {}
+
+    impl<'de> Deserialize<'de> for RejectChunks {
+        fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+            Err(serde::de::Error::custom(INT_WITH_CHUNKS))
+        }
+    }
 
     /// Deserialization form. Named `TaskParameter` because serde puts the Rust
     /// type name in its error messages ("expected struct variant
@@ -504,9 +509,9 @@ mod wire {
     pub(super) enum TaskParameter {
         Int {
             range: TaskParamRange<i64>,
-            /// Tells `"chunks": null` (accepted) from a chunk configuration
-            /// (rejected); the value itself is never read.
-            chunks: Option<serde::de::IgnoredAny>,
+            /// Always `None` once read: see `RejectChunks`.
+            #[expect(dead_code, reason = "only read to accept a null `chunks`, never used")]
+            chunks: Option<RejectChunks>,
         },
         Float {
             range: Vec<Float64>,

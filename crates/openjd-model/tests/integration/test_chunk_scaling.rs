@@ -685,8 +685,8 @@ fn walking_every_chunk_of_a_range_with_many_runs_stays_linear() {
 fn a_second_chunk_int_parameter_is_rejected() {
     // Templates allow one CHUNK[INT] per step, and a `StepParameterSpace` built
     // through the public API is held to the same rule: the iterator's chunk
-    // metadata describes one parameter, so a second would lose its chunk size
-    // and any `targetRuntimeSeconds`. (A static NONCONTIGUOUS node walked by its
+    // metadata describes one parameter, so a second would be missing from it and
+    // lose any `targetRuntimeSeconds`. (A static NONCONTIGUOUS node walked by its
     // own iterator, which this shape used to reach, is covered by a unit test in
     // `step_param_space.rs`.)
     let mut defs = IndexMap::new();
