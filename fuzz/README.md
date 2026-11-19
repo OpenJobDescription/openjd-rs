@@ -100,12 +100,15 @@ formats, and requires:
   cause; or when it refuses to order operands the library orders. A value
   folded around a symbol doesn't count: `Param.X < 0 < 0` folds to `False`,
   though a run evaluates `Param.X < 0` first and can fail there;
-- static typing must not reject an expression that a run accepts. Only
-  generated input (`expr_eval_gen`) is checked, since it is well-typed by
-  construction. Two documented exceptions remain: a name error in a branch no
-  run takes is rejected on purpose (specs/expr/evaluator.md), and the generator
-  never emits one; and a budget error in a branch the static pass evaluated
-  speculatively, which is the known issue `expr-speculative-budget-rejection`;
+- static typing must not reject an expression that a run accepts, whatever
+  the static error. Only generated input (`expr_eval_gen`) is checked, since
+  it is well-typed by construction. The documented exceptions: a name error in
+  a branch no run takes is rejected on purpose (specs/expr/evaluator.md), and
+  the generator never emits one; a budget error in a sub-expression the static
+  pass evaluated speculatively (a conditional branch, an `and` / `or` operand,
+  a comprehension), the known issue `expr-speculative-budget-rejection`; and a
+  rejection in the host's path format of an expression that runs in the other
+  format, the known issue `expr-static-fold-host-path-format`;
 - determinism; evaluation metrics within their limits; a target-typed result
   satisfies its target; the result survives the template → session transport
   boundary unchanged;

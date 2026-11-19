@@ -422,34 +422,147 @@ fn negative_step_slices() {
     }
 }
 
-/// The rejected-statically-but-runs oracle counts run-time dispatch
-/// failures, which the library reports as `Other`, as type rejections, and
-/// value errors as not.
+/// Run `check_expression` on `src` in an environment whose static and
+/// concrete tables say different things, which simulates a library bug, and
+/// return the oracle violation it reports, if any.
+fn simulated_violation(
+    src: &str,
+    statics: &[(&str, openjd_expr::ExprType)],
+    values: &[(&str, openjd_expr::ExprValue)],
+    generated: Option<bool>,
+) -> Option<String> {
+    use openjd_expr::{ExprValue, ParsedExpression, SymbolTable};
+    use openjd_fuzz::gen::expr::Symbol;
+    use openjd_fuzz::targets::expr::{check_expression, Env};
+    install_hook();
+    let mut unresolved = SymbolTable::new();
+    let mut symbols = Vec::new();
+    for (name, ty) in statics {
+        unresolved
+            .set(name, ExprValue::unresolved(ty.clone()))
+            .unwrap();
+        symbols.push(Symbol {
+            name: name.to_string(),
+            ty: ty.clone(),
+        });
+    }
+    let mut concrete = SymbolTable::new();
+    for (name, v) in values {
+        concrete.set(name, v.clone()).unwrap();
+    }
+    let env = Env {
+        symbols,
+        concrete,
+        unresolved,
+        rules: Vec::new(),
+    };
+    let parsed = ParsedExpression::new(src).unwrap();
+    IN_REPLAY.with(|r| r.set(true));
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        check_expression(
+            &parsed,
+            &env,
+            &mut arbitrary::Unstructured::new(&[0; 16]),
+            generated,
+        )
+    }));
+    IN_REPLAY.with(|r| r.set(false));
+    outcome
+        .is_err()
+        .then(|| LAST_PANIC.with(|p| p.borrow().clone()))
+}
+
+/// Each hard oracle of `check_expression` fires on the disagreement it
+/// guards against, and the allowed direction passes.
 #[test]
-fn type_rejections() {
-    use openjd_expr::{ExprProfile, FunctionLibrary, ParsedExpression, SymbolTable};
-    use openjd_fuzz::targets::expr::is_type_rejection;
+fn expression_oracles_fire() {
+    use openjd_expr::{ExprType, ExprValue};
+    let s = ExprType::STRING;
+    let int = |i| ExprValue::Int(i);
+    // A run-time value outside its static type.
+    let v = simulated_violation(
+        "Param.X",
+        &[("Param.X", s.clone())],
+        &[("Param.X", int(1))],
+        None,
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static type string")),
+        "{v:?}"
+    );
+    // Rejected statically, but the (well-typed) expression runs.
+    let v = simulated_violation(
+        "Param.X + 1",
+        &[("Param.X", s.clone())],
+        &[("Param.X", int(1))],
+        Some(false),
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static checking rejects it")),
+        "{v:?}"
+    );
+    // The same in a conditional, where the static error is compound.
+    let v = simulated_violation(
+        "(Param.X + 1) if Param.B else (Param.X + 2)",
+        &[("Param.X", s.clone()), ("Param.B", ExprType::BOOL)],
+        &[("Param.X", int(1)), ("Param.B", ExprValue::Bool(true))],
+        Some(false),
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static checking rejects it")),
+        "{v:?}"
+    );
+    // Accepted statically, then a failure no value can cause.
+    let v = simulated_violation("Param.Y", &[("Param.Y", s.clone())], &[], None);
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("accepted statically")),
+        "{v:?}"
+    );
+    // Accepted statically, then a value-dependent failure: allowed.
+    let v = simulated_violation(
+        "upper(Param.X)",
+        &[("Param.X", s.clone())],
+        &[("Param.X", int(1))],
+        None,
+    );
+    assert!(v.is_none(), "{v:?}");
+}
+
+/// After static acceptance, a run-time failure is a violation exactly when
+/// the static pass folded a value, or no value could cause it.
+#[test]
+fn accepted_then_fails_rule() {
+    use openjd_expr::{ExprProfile, ExprValue, FunctionLibrary, ParsedExpression, SymbolTable};
+    use openjd_fuzz::targets::expr::check_accepted_then_fails;
+    install_hook();
     let lib = FunctionLibrary::for_profile(&ExprProfile::latest());
     let err = |src: &str| {
         ParsedExpression::new(src)
             .unwrap()
             .with_library(&lib)
-            .with_operation_limit(1000)
-            .with_memory_limit(10_000)
             .evaluate(&[&SymbolTable::new()])
             .expect_err(src)
     };
-    for yes in [
-        "upper(1)",
-        "'a' - 1",
-        "[1, 'a']",
-        "nosuch(1)",
-        "Nope.X",
-        "(1).nosuch",
-    ] {
-        assert!(is_type_rejection(&err(yes)), "{yes}: {:?}", err(yes));
+    let fires = |e: &openjd_expr::ExpressionError, folded: Option<&ExprValue>| {
+        IN_REPLAY.with(|r| r.set(true));
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            check_accepted_then_fails(e, folded, || "msg".to_string())
+        }));
+        IN_REPLAY.with(|r| r.set(false));
+        r.is_err()
+    };
+    for value_independent in ["nosuch(1)", "Nope.X", "(1).nosuch"] {
+        assert!(fires(&err(value_independent), None), "{value_independent}");
     }
-    for no in ["int('x')", "1 // 0", "re_findall('x', '')", "'a' * 100000"] {
-        assert!(!is_type_rejection(&err(no)), "{no}");
+    for allowed in ["upper(1)", "'a' - 1", "int('x')", "1 // 0"] {
+        assert!(!fires(&err(allowed), None), "{allowed}");
+        assert!(
+            fires(&err(allowed), Some(&ExprValue::Int(1))),
+            "{allowed} folded"
+        );
     }
 }

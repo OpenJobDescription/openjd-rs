@@ -116,12 +116,14 @@ pub mod known {
         ),
         (
             "expr-speculative-budget-rejection",
-            "With an unresolved test, the static pass evaluates both branches of a \
-             conditional, and a budget error in either is never absorbed \
-             (specs/expr/evaluator.md), so an expression whose expensive branch no run takes \
-             is rejected: `1.0 if Param.S not in [] else round(1e16, 4611686018427387903)` \
-             fails validation with an operation-limit error and evaluates to 1.0 for every \
-             value of `Param.S`.",
+            "The static pass evaluates speculatively what it can't decide (both branches of \
+             a conditional with an unresolved test, an `and` / `or` operand after an \
+             unresolved one, a comprehension over an unresolved list), and a budget error \
+             there is never absorbed (specs/expr/evaluator.md), so an expression whose \
+             expensive part no run evaluates is rejected: \
+             `1.0 if Param.S not in [] else round(1e16, 4611686018427387903)` fails \
+             validation with an operation-limit error and evaluates to 1.0 for every value \
+             of `Param.S`.",
         ),
         (
             "expr-range-slice-static-type",

@@ -14,7 +14,8 @@
 //!   unknown member, or unsupported syntax), or refuse to order operands the
 //!   library orders, when its actions, `let` bindings, and embedded files are
 //!   resolved the way the session resolves them. A type error that depends
-//!   on the parameter values is allowed.
+//!   on the parameter values is allowed, and a value the static pass folded
+//!   is not compared with the run.
 //! - **Preprocess idempotence**: feeding
 //!   `preprocess_job_parameters` its own output yields the same values.
 //! - **Determinism and Eq/Hash agreement** on created jobs.

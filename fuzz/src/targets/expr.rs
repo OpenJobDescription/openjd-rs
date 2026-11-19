@@ -181,6 +181,54 @@ pub fn has_negative_step_slice(code: &str) -> bool {
     false
 }
 
+/// The known issues that can explain a run-time value `cv` outside its
+/// static type `st`, for expression code `code` (string literals blanked).
+/// `unbound_return`: the expression went through a signature whose return
+/// type variable no parameter binds.
+fn type_gap_known_issues(
+    code: &str,
+    st: &ExprType,
+    cv: &ExprValue,
+    unbound_return: bool,
+) -> Vec<&'static str> {
+    // Only a negative step gives a list: it descends.
+    let descending = matches!(cv, ExprValue::ListInt(xs) if xs.windows(2).all(|w| w[0] > w[1]));
+    if st.to_string().contains("range_expr") && descending && has_negative_step_slice(code) {
+        // The precise cause; the broader gate below doesn't also claim it.
+        return vec!["expr-range-slice-static-type"];
+    }
+    // The signature loses a list's element type, so only a list value in a
+    // list type counts.
+    if (unbound_return || has_type_var(st)) && cv.is_list() && st.code() == TypeCode::List {
+        return vec!["expr-unbound-return-typevar"];
+    }
+    Vec::new()
+}
+
+/// Does `code` (string literals blanked) use a construct the static pass
+/// evaluates speculatively when it can't resolve the deciding value: a
+/// conditional, `and` / `or`, or a comprehension?
+fn has_speculative_construct(code: &str) -> bool {
+    [" if ", " and ", " or ", " for "]
+        .iter()
+        .any(|w| code.contains(w))
+}
+
+/// The `{{ ... }}` bodies of format string `text`, string literals
+/// blanked, joined into one piece of code (the literal text between them is
+/// not code).
+fn interpolation_code(text: &str) -> String {
+    let mut bodies = Vec::new();
+    let mut rest = text;
+    while let Some(a) = rest.find("{{") {
+        let after = &rest[a + 2..];
+        let Some(z) = after.find("}}") else { break };
+        bodies.push(blank_string_literals(&after[..z]));
+        rest = &after[z + 2..];
+    }
+    bodies.join(" , ")
+}
+
 /// An expression the static pass accepted failed at run time with `e`.
 ///
 /// Static typing may accept an expression that a run with particular values
@@ -198,7 +246,7 @@ pub fn has_negative_step_slice(code: &str) -> bool {
 ///   unsupported syntax, which don't depend on values;
 /// - an ordering of operands the library orders, which is a run-time bug
 ///   whatever the static pass said.
-pub(crate) fn check_accepted_then_fails(
+pub fn check_accepted_then_fails(
     e: &ExpressionError,
     folded: Option<&ExprValue>,
     msg: impl FnOnce() -> String,
@@ -239,25 +287,6 @@ fn is_budget_error(e: &ExpressionError) -> bool {
         ExpressionErrorKind::MemoryLimitExceeded { .. }
             | ExpressionErrorKind::OperationLimitExceeded { .. }
     ) || e.sub_errors().iter().any(is_budget_error)
-}
-
-/// Is `e` a type rejection: a name, function, member, or syntax the static
-/// pass doesn't know, or operand types no signature accepts? Run-time
-/// dispatch reports a missing signature as `Other`.
-pub fn is_type_rejection(e: &ExpressionError) -> bool {
-    match e.kind() {
-        ExpressionErrorKind::UndefinedVariable { .. }
-        | ExpressionErrorKind::UnknownFunction { .. }
-        | ExpressionErrorKind::UnknownMember { .. }
-        | ExpressionErrorKind::UnsupportedSyntax { .. }
-        | ExpressionErrorKind::TypeError { .. } => true,
-        ExpressionErrorKind::Other(m) => {
-            m.starts_with("No matching signature for ")
-                || (m.starts_with("Cannot use '") && m.contains("' operator with "))
-                || m.starts_with("List literal contains incompatible types")
-        }
-        _ => false,
-    }
 }
 
 /// The evaluation environment: each symbol with a concrete value and the
@@ -523,19 +552,8 @@ pub fn check_expression(
                 // explains is a new bug.
                 let mut explained: Vec<&'static str> = Vec::new();
                 if mismatch {
-                    // Only a negative step gives a list: it descends.
-                    let descending =
-                        matches!(cv, ExprValue::ListInt(xs) if xs.windows(2).all(|w| w[0] > w[1]));
-                    let range_slice = st.to_string().contains("range_expr")
-                        && descending
-                        && has_negative_step_slice(&blank_string_literals(src));
-                    if range_slice {
-                        // The precise cause; the broader gate below doesn't
-                        // also claim it.
-                        explained.push("expr-range-slice-static-type");
-                    } else if unbound_return || has_type_var(&st) {
-                        explained.push("expr-unbound-return-typevar");
-                    }
+                    explained =
+                        type_gap_known_issues(&blank_string_literals(src), &st, cv, unbound_return);
                     // The static pass folds path operations in the host's
                     // format; in the other format a folded condition can go
                     // the other way. Only when the fold is the cause: the
@@ -583,20 +601,7 @@ pub fn check_expression(
                 });
             }
             // Static typing must not reject an expression that runs.
-            // The static pass evaluates both branches of a conditional whose
-            // test it can't resolve, and a budget error in either is never
-            // absorbed (specs/expr/evaluator.md, speculative evaluation), so
-            // a branch no run takes can reject the expression.
-            (Err(e), Ok(cv)) if well_typed && is_budget_error(e) => known_issue!(
-                "expr-speculative-budget-rejection",
-                false,
-                "well-typed {src:?} evaluates to {cv:?} but static checking rejects it: {e}"
-            ),
-            // Other value errors (an invalid regex, `int('x')`) in a branch
-            // the static pass evaluated speculatively are absorbed there. One
-            // reaches the top level only from a branch the static pass took
-            // for certain, which a run in the host's format takes too.
-            (Err(e), Ok(cv)) if well_typed && is_type_rejection(e) => {
+            (Err(e), Ok(cv)) if well_typed => {
                 if fmt != PathFormat::host() && involves_paths(src, env) && static_pass(fmt).is_ok()
                 {
                     // The static pass folded a path operation in the host's
@@ -604,6 +609,16 @@ pub fn check_expression(
                     // take; checked in this run's format, it accepts.
                     crate::known::hit("expr-static-fold-host-path-format", || {
                         format!("well-typed {src:?} evaluates to {cv:?} ({fmt:?}) but static checking in the host's format rejects it: {e}")
+                    });
+                } else if is_budget_error(e)
+                    && has_speculative_construct(&blank_string_literals(src))
+                {
+                    // A budget error in a sub-expression the static pass
+                    // evaluated speculatively is never absorbed
+                    // (specs/expr/evaluator.md), so one no run evaluates can
+                    // reject the expression.
+                    crate::known::hit("expr-speculative-budget-rejection", || {
+                        format!("well-typed {src:?} evaluates to {cv:?} but static checking rejects it: {e}")
                     });
                 } else {
                     oracle!(
@@ -1080,11 +1095,22 @@ pub fn format_string(data: &[u8]) {
                 }
             }
             match &resolved {
-                Ok(rv) => oracle!(
-                    fits(rv, &sr.resolved_type) || matches!(rv, ExprValue::Null),
-                    "{text:?}: static resolved_type {} but resolution gives {rv:?}",
-                    sr.resolved_type
-                ),
+                Ok(rv) => {
+                    let st = &sr.resolved_type;
+                    let msg = || {
+                        format!("{text:?}: static resolved_type {st} but resolution gives {rv:?}")
+                    };
+                    if fits(rv, st) || matches!(rv, ExprValue::Null) {
+                    } else {
+                        let code = interpolation_code(text);
+                        let explained =
+                            type_gap_known_issues(&code, st, rv, unbound_return_in_text(&code));
+                        oracle!(!explained.is_empty(), "{}", msg());
+                        for id in explained {
+                            crate::known::hit(id, msg);
+                        }
+                    }
+                }
                 Err(e) => check_accepted_then_fails(
                     e,
                     sr.resolved_value
