@@ -6,6 +6,7 @@
 //!
 //! Mirrors Python `_create_job.py` and `_merge_job_parameter.py`.
 
+mod host_requirements;
 mod instantiate;
 pub mod parameters;
 mod ranges;
