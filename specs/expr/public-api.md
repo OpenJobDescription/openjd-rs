@@ -243,7 +243,7 @@ Additional per-module caps (see each module section below):
 - `range_expr::MAX_RANGE_EXPR_CHUNKS` (50,000 — elements parsed, and runs in the canonical form of every value)
 - `range_expr::MAX_RANGE_EXPR_LEN` (`i64::MAX` — bound on the number of values, not a heap cap)
 - `symbol_table::MAX_SYMBOL_TABLE_ENTRIES` (100,000 — transport-only)
-- `types::MAX_TYPE_DEPTH` (64 — the deepest an `ExprType` can be; a parsed type is at most 11 deep, 31 nested comprehensions over an unresolved value type as 63; deeper contrived types fail validation)
+- `types::MAX_TYPE_DEPTH` (64 — the deepest an `ExprType` can be; a parsed type is at most 11 deep, 31 comprehensions over an unresolved value, each the body of the next, type as 63; deeper contrived types fail validation)
 
 All caps are orders of magnitude above any legitimate usage and exist to
 reject pathological inputs early, before they allocate.
@@ -550,8 +550,9 @@ Constructors + queries:
 ```rust
 /// The deepest an `ExprType` can be. Lists, unions and signatures count a
 /// level each; `unresolved[T]` is as deep as `T`. Equal to
-/// `MAX_EXPRESSION_DEPTH`; 31 nested comprehensions over an unresolved
-/// value (63 levels) are the most that validate, and a contrived template
+/// `MAX_EXPRESSION_DEPTH`; 31 comprehensions over an unresolved value, each
+/// the body of the next (63 levels), are the most that validate, and a
+/// contrived template
 /// that types deeper fails validation (type-system.md § Depth limit).
 /// Re-exported at the crate root.
 pub const MAX_TYPE_DEPTH: usize = 64;

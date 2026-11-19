@@ -102,8 +102,8 @@ type (`==`, `Hash`, `Display`, `Debug`, `Serialize`, the derived `Drop`,
 `satisfies`, `match_type`, `substitute`, coercion) is bounded by it.
 `tests/integration/test_type_depth.rs` runs each of them on types at the limit
 on a 2 MiB thread. Measured on Linux x86-64, a debug build needs between
-384 KiB and 416 KiB for them, and a release build passes even on a thread that
-asks for 8 KiB (the platform's minimum thread stack then applies). Before the
+384 KiB and 416 KiB for them, and a release build about 80 KiB, less than the
+128 KiB minimum thread stack there, so no requested stack size fails. Before the
 limit, a type built 50,000 deep through the Rust API overflowed the stack in
 those walks and aborted the process.
 
@@ -115,14 +115,15 @@ API, such as an unresolved value of a deep type, can, and so can the values an
 evaluation derives from it.) Static
 typing builds deeper types, because the type of an unresolved value keeps
 every form a run might produce. A comprehension over an unresolved value is
-`list[T | nulltype]` (§1.3.7), two levels over its element: 31 nested
-comprehensions over an unresolved value type as 63 deep and validate, and
-nesting more than 31 is rejected with `TypeTooDeep`, although
-`MAX_EXPRESSION_DEPTH` allows about twice as many. Templates don't nest
-comprehensions like that; the deepest static type in the specification's
-samples and conformance templates is far below the limit.
-`test_type_depth.rs` and the model's `test_let_bindings.rs` pin the deepest
-nesting that validates and the first that is rejected.
+`list[T | nulltype]` (§1.3.7), two levels over its element: 31 comprehensions
+over an unresolved value, each the body of the next, type as 63 deep and
+validate, and nesting more than 31 that way is rejected with `TypeTooDeep`,
+although `MAX_EXPRESSION_DEPTH` allows about twice as many. A comprehension
+in another's iterable doesn't deepen the type, and the specification's
+samples and conformance templates build no type deeper than 4, the depth of
+the library's own signatures. `test_type_depth.rs` and the model's
+`test_let_bindings.rs` pin the deepest nesting that validates and the first
+that is rejected.
 
 Static typing can be made to go past any fixed limit. Wrapping a
 comprehension body in `([x] if C else 1)` adds two levels per wrap, and the

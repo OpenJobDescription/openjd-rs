@@ -44,7 +44,8 @@ use crate::error::{ExpressionError, ExpressionErrorKind};
 /// through the Rust API, and values an evaluation derives from it, can.)
 /// Static typing builds deeper types: a list comprehension over an
 /// unresolved value is `list[T | nulltype]`, two levels over its element,
-/// so 31 nested comprehensions type as 63 deep, and nesting more fails,
+/// so 31 comprehensions, each the body of the next, type as 63 deep, and
+/// nesting more that way fails,
 /// although [`MAX_EXPRESSION_DEPTH`](crate::MAX_EXPRESSION_DEPTH) (also 64)
 /// allows about twice as many. Comprehension bodies wrapped in many
 /// `([x] if C else 1)`, and chains of `let` bindings, can type deeper than
