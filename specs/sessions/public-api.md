@@ -378,8 +378,9 @@ impl Session {
     /// cancellation and right before its Run command goes to the
     /// cross-user helper, so a test can cancel in that window.
     pub fn set_before_helper_run_hook_for_test(&mut self, hook: Arc<dyn Fn() + Send + Sync>);
-    /// Makes each later cross-user runner's dup of the cancel pipe fail.
-    pub fn fail_runner_cancel_writer_for_test(&mut self);
+    /// Makes every later dup of the cross-user cancel pipe fail, so
+    /// `clone_cancel_writer` returns `None`; no cancel path needs a dup.
+    pub fn fail_cancel_pipe_dup_for_test(&mut self);
     pub fn clone_cancel_writer(&self) -> Option<std::fs::File>;
 }
 ```
@@ -1166,9 +1167,10 @@ backed by an embedded cross-user helper binary:
 - POSIX: a single `sudo -i <helper>` is spawned at session creation.
   Subsequent actions are dispatched through the helper's stdin/stdout
   IPC, avoiding the ~1s sudo startup cost per action. Cancel commands
-  go through `cancel_writer`, a dup of the helper's stdin, or, for a
-  cancel that arrives before the action's Run command, through the
-  helper's own stdin right after Run.
+  from `cancel_action` and `SessionCancelHandle` go through
+  `cancel_writer`, a dup of the helper's stdin made at setup and shared
+  by every handle. A cancel that arrives before the action's Run command,
+  a timeout and a bare token cancel go through the helper's own stdin.
 - Windows: similar design using `CreateProcessWithLogonW` or
   `CreateProcessAsUserW` depending on which `WindowsSessionUser` mode
   is in use.

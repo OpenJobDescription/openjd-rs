@@ -144,11 +144,6 @@ impl EnvironmentScriptRunner {
         self.base.helper.take()
     }
 
-    pub(crate) fn with_cancel_writer(mut self, writer: std::fs::File) -> Self {
-        self.base.cancel_writer = Some(writer);
-        self
-    }
-
     /// Attach the action's [`crate::cross_user_helper::HelperRunGate`],
     /// with the helper.
     pub(crate) fn with_helper_run_gate(
