@@ -616,3 +616,211 @@ fn walks_over_types_at_the_limit_fit_a_2_mib_stack() {
         .join()
         .unwrap();
 }
+
+// ── Every type-building path that can pass the limit ──
+
+fn deep_strings(depth: usize) -> ExprType {
+    (1..depth).fold(ExprType::STRING, |t, _| ExprType::list(t).unwrap())
+}
+
+fn l(t: ExprType) -> ExprType {
+    ExprType::list(t).unwrap()
+}
+
+fn u(types: Vec<ExprType>) -> ExprType {
+    ExprType::union(types).unwrap()
+}
+
+/// `list[A | B]` at the limit, whose forms `list[A]` and `list[B]` are a
+/// level below it.
+fn list_of_union_at_the_limit() -> ExprType {
+    l(u(vec![
+        deep_list(MAX_TYPE_DEPTH - 2),
+        deep_strings(MAX_TYPE_DEPTH - 2),
+    ]))
+}
+
+/// A union of 65 members, past the 64 form combinations a call expands,
+/// one of them a level below the limit.
+fn union_past_the_form_cap() -> ExprType {
+    let mut members: Vec<ExprType> = (1..=64).map(deep_list).collect();
+    members.push(deep_strings(MAX_TYPE_DEPTH - 1));
+    u(members)
+}
+
+/// `list[list[B]] | list[int | list[A]]` at the limit, which merges into
+/// `list[list[B] | int | list[A]]`, a level deeper.
+fn list_union_that_merges_past_the_limit() -> ExprType {
+    u(vec![
+        l(l(deep_list(MAX_TYPE_DEPTH - 3))),
+        l(u(vec![ExprType::INT, l(deep_strings(MAX_TYPE_DEPTH - 4))])),
+    ])
+}
+
+fn reach_symbols() -> SymbolTable {
+    let members = ExprType::parse("list[nulltype] | list[any]").unwrap();
+    let mut st = SymbolTable::new();
+    for (name, t) in [
+        ("W", list_union_that_merges_past_the_limit()),
+        ("LAB", list_of_union_at_the_limit()),
+        ("U65", union_past_the_form_cap()),
+        ("C", ExprType::BOOL),
+    ] {
+        st.set(name, ExprValue::unresolved(t)).unwrap();
+    }
+    for (name, hint) in [
+        ("LL", deep_list(MAX_TYPE_DEPTH)),
+        ("LM", members),
+        ("LX", deep_list(MAX_TYPE_DEPTH - 1)),
+    ] {
+        st.set(name, ExprValue::ListList(vec![], hint, 0)).unwrap();
+    }
+    st
+}
+
+fn identity_lib(sigs: &[(&str, &str)]) -> FunctionLibrary {
+    let mut lib = FunctionLibrary::new();
+    for (name, sig) in sigs {
+        lib.register_sig(name, sig, identity).unwrap();
+    }
+    lib
+}
+
+fn assert_eval_too_deep(expr: &str, lib: Option<&FunctionLibrary>, st: &SymbolTable) {
+    let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
+    let r = match lib {
+        Some(lib) => parsed.with_library(lib).evaluate(&[st]),
+        None => parsed.evaluate(st),
+    };
+    match r {
+        Err(e) => assert!(
+            matches!(e.kind(), ExpressionErrorKind::TypeTooDeep { limit: 160 }),
+            "{expr}: {}",
+            e.message()
+        ),
+        Ok(v) => panic!("{expr}: Ok({})", v.expr_type()),
+    }
+}
+
+/// Concatenations build `list[hint]` for either operand, a `range_expr`
+/// operand included, and join the operands' element types.
+#[test]
+fn concatenation_past_the_limit_is_an_error() {
+    let st = reach_symbols();
+    for expr in [
+        "[] + LL",
+        "LL + range_expr('1-3')",
+        "range_expr('1-3') + LL",
+        // `list[nulltype] | list[any]` joined with a list a level below
+        // the limit is a union of two lists, one level over it.
+        "LM + LX",
+        // The union arm of `merge_list_union` builds a list a level
+        // deeper than its input.
+        "W + []",
+    ] {
+        assert_eval_too_deep(expr, None, &st);
+    }
+}
+
+#[test]
+fn comprehension_over_a_merging_union_past_the_limit_is_an_error() {
+    assert_eval_too_deep("[W for x in [1] if C]", None, &reach_symbols());
+}
+
+/// Type-only calls through the library: per-form returns, the union of
+/// several forms' returns, the fallback past the form cap, and a signature
+/// whose return adds two levels.
+#[test]
+fn library_typing_past_the_limit_is_an_error() {
+    let st = reach_symbols();
+    let wrap = identity_lib(&[("wrap", "(T1) -> list[T1]")]);
+    let wrap2 = identity_lib(&[("wrap2", "(T1) -> list[list[T1]]")]);
+    for (lib, name, arg) in [
+        (&wrap, "wrap", list_of_union_at_the_limit()),
+        (&wrap, "wrap", union_past_the_form_cap()),
+        (&wrap2, "wrap2", list_of_union_at_the_limit()),
+        (&wrap2, "wrap2", union_past_the_form_cap()),
+    ] {
+        assert_too_deep(
+            lib.derive_return_type(name, std::slice::from_ref(&arg))
+                .map(Option::unwrap),
+        );
+    }
+    for (lib, expr) in [
+        (&wrap, "wrap(LAB)"),
+        (&wrap, "wrap(U65)"),
+        (&wrap2, "wrap2(LAB)"),
+        (&wrap2, "wrap2(U65)"),
+    ] {
+        assert_eval_too_deep(expr, Some(lib), &st);
+    }
+}
+
+/// Static typing can be driven past the limit by a contrived expression:
+/// wrapping comprehension bodies in `([x] if C else 1)` adds two levels a
+/// wrap, compounding along the chain. Such an expression fails typing
+/// with the limit's error (a deliberate hardening limit, see
+/// type-system.md § Depth limit), quickly and without overflowing a 2 MiB
+/// stack, while a run of it succeeds. Three comprehensions with 26 wraps
+/// each type below the limit and with 27 past it; ten with 25 type as
+/// about 500 deep without the limit.
+#[test]
+fn contrived_expression_past_the_limit_fails_typing_but_runs() {
+    fn wrap(x: &str, w: usize) -> String {
+        (0..w).fold(x.to_string(), |e, _| format!("([{e}] if C else 1)"))
+    }
+    fn chain(n: usize, w: usize) -> String {
+        (0..n).fold("[N]".to_string(), |e, k| {
+            format!("[{} for y{k} in {e}]", wrap(&format!("y{k}"), w))
+        })
+    }
+    std::thread::Builder::new()
+        .stack_size(2 * 1024 * 1024)
+        .spawn(|| {
+            let mut typing = SymbolTable::new();
+            typing
+                .set("N", ExprValue::unresolved(ExprType::INT))
+                .unwrap();
+            typing
+                .set("C", ExprValue::unresolved(ExprType::BOOL))
+                .unwrap();
+            let mut run = SymbolTable::new();
+            run.set("N", ExprValue::Int(1)).unwrap();
+            run.set("C", ExprValue::Bool(false)).unwrap();
+            // Below the limit, typing succeeds.
+            let below = openjd_expr::ParsedExpression::new(&chain(3, 26)).unwrap();
+            assert!(below.evaluate(&typing).is_ok());
+            for (n, w) in [(3, 27), (10, 25)] {
+                let parsed = openjd_expr::ParsedExpression::new(&chain(n, w)).unwrap();
+                let start = std::time::Instant::now();
+                let err = parsed.evaluate(&typing).expect_err("types past the limit");
+                assert!(
+                    start.elapsed() < std::time::Duration::from_secs(10),
+                    "n={n} w={w}: {:?}",
+                    start.elapsed()
+                );
+                assert!(
+                    matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 160 }),
+                    "n={n} w={w}: {:?}",
+                    err.kind()
+                );
+                assert_eq!(
+                    parsed.evaluate(&run).unwrap().expr_type(),
+                    ExprType::parse("list[int]").unwrap()
+                );
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}
+
+/// The cached depth sits in padding: an `ExprType` is no larger than its
+/// code and parameters alone.
+#[test]
+fn the_cached_depth_does_not_grow_expr_type() {
+    assert_eq!(
+        std::mem::size_of::<ExprType>(),
+        std::mem::size_of::<(TypeCode, Vec<ExprType>)>()
+    );
+}

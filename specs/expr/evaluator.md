@@ -252,7 +252,7 @@ its value's type, or on a misused member, keeps its own error), and a failed pro
 available for string" (or "is a method, not a property", or "Cannot access
 attribute"; the last two, when no type has the property, are `UnknownMember`, and
 "Cannot access attribute" for a property only a generic receiver has stays a plain error). Budget errors are
-(and `TypeTooDeep`) are not replaced; they propagate unchanged. A replaced
+and `TypeTooDeep` are not replaced; they propagate unchanged. A replaced
 budget error would be a
 value error that an enclosing construct may absorb (see
 [Speculative evaluation](#speculative-evaluation)), and the memory and

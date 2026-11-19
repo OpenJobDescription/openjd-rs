@@ -225,6 +225,17 @@ impl ScriptRunnerBase {
     }
 }
 
+/// The target type `t?` (`t | nulltype`) of an optional field, for a
+/// scalar `t`.
+///
+/// `t?` is 2 deep, far below
+/// [`MAX_TYPE_DEPTH`](openjd_expr::MAX_TYPE_DEPTH), so the union cannot
+/// fail and the panic is unreachable.
+fn nullable(t: openjd_expr::ExprType) -> openjd_expr::ExprType {
+    openjd_expr::ExprType::union(vec![t, openjd_expr::ExprType::NULLTYPE])
+        .expect("a scalar's `t | nulltype` is 2 deep, far below MAX_TYPE_DEPTH")
+}
+
 fn state_from_action(action_state: ActionState) -> ScriptRunnerState {
     match action_state {
         ActionState::Success => ScriptRunnerState::Success,
@@ -294,11 +305,7 @@ pub(crate) fn resolve_effective_cancelation(
             // Single whole-field expressions resolve with target type
             // `string?` (Template Schemas §5.3, FEATURE_BUNDLE_1 deferred
             // mode): a null result drops the whole cancelation object.
-            let target = openjd_expr::ExprType::union(vec![
-                openjd_expr::ExprType::STRING,
-                openjd_expr::ExprType::NULLTYPE,
-            ])
-            .expect("string | nulltype is 2 deep, far below MAX_TYPE_DEPTH");
+            let target = nullable(openjd_expr::ExprType::STRING);
             let value = mode
                 .resolve_with(
                     symtab,
@@ -399,11 +406,7 @@ pub(crate) fn resolve_action_timeout(
 ) -> Result<Option<Duration>, SessionError> {
     match &action.timeout {
         Some(fmt) => {
-            let target = openjd_expr::ExprType::union(vec![
-                openjd_expr::ExprType::INT,
-                openjd_expr::ExprType::NULLTYPE,
-            ])
-            .expect("int | nulltype is 2 deep, far below MAX_TYPE_DEPTH");
+            let target = nullable(openjd_expr::ExprType::INT);
             let value = fmt
                 .resolve_with(
                     symtab,
@@ -482,11 +485,7 @@ pub(crate) fn resolve_notify_period_seconds(
     // Single whole-field expressions resolve with target type `int?`
     // (Template Schemas §5.3.2); multi-segment strings concatenate and
     // are parsed below.
-    let target = openjd_expr::ExprType::union(vec![
-        openjd_expr::ExprType::INT,
-        openjd_expr::ExprType::NULLTYPE,
-    ])
-    .expect("int | nulltype is 2 deep, far below MAX_TYPE_DEPTH");
+    let target = nullable(openjd_expr::ExprType::INT);
     let value = fs
         .resolve_with(
             symtab,

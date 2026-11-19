@@ -459,8 +459,8 @@ impl ExprValue {
     /// non-empty list, the join of the element types computed by
     /// [`make_list`](Self::make_list) (`[[], [1]]` holds `list[int]`
     /// elements whichever comes first).
-    /// The `ListList` of `v` with element type `elem_type`, or
-    /// `TypeTooDeep` when `list[elem_type]` would be deeper than
+    ///
+    /// Returns `TypeTooDeep` when `list[elem_type]` would be deeper than
     /// [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH): such a list would have no
     /// type.
     fn make_list_list(

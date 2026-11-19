@@ -1772,8 +1772,8 @@ fn job_with_params_and_script_let(let_bindings: &[String]) -> String {
 }
 
 /// The deepest comprehension nesting one expression allows (62 levels
-/// inside `len`, within the 64-level expression depth limit, typed about
-/// 126 deep) validates: the type depth limit is above it.
+/// inside `len`, within the 64-level expression depth limit, typed 124
+/// deep) validates: the type depth limit is above it.
 #[test]
 fn deepest_single_expression_comprehension_validates() {
     let decode = |n: usize| {
@@ -1808,11 +1808,47 @@ fn let_chain_past_the_type_depth_limit_fails_at_that_binding() {
             nested_comprehensions(&format!("a{}", i - 1), 30)
         ));
     }
+    let start = std::time::Instant::now();
     check_err(
         &job_with_params_and_script_let(&bindings),
         &[
             "steps[0] -> script -> let[3]:",
             "Invalid expression in let binding 'a3': Type nesting depth exceeded limit (160)",
         ],
+    );
+    // Without the limit this chain took minutes to validate.
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(10),
+        "{:?}",
+        start.elapsed()
+    );
+}
+
+/// A chain as long as `let` allows (50 bindings), each nesting the one
+/// before in 30 comprehensions, also fails at the first binding past the
+/// limit. Each later binding is typed too (a failed one is rebound as
+/// `unresolved[any]`), which takes about 10 s in a debug build; without the
+/// limit a release build took over 5 minutes.
+#[test]
+fn longest_let_chain_past_the_type_depth_limit_fails_at_that_binding() {
+    let mut bindings = vec!["a0 = Param.N".to_string()];
+    for i in 1..50 {
+        bindings.push(format!(
+            "a{i} = {}",
+            nested_comprehensions(&format!("a{}", i - 1), 30)
+        ));
+    }
+    let start = std::time::Instant::now();
+    check_err(
+        &job_with_params_and_script_let(&bindings),
+        &[
+            "steps[0] -> script -> let[3]:",
+            "Invalid expression in let binding 'a3': Type nesting depth exceeded limit (160)",
+        ],
+    );
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
     );
 }

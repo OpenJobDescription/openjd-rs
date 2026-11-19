@@ -84,8 +84,8 @@ and every operation that builds a type from other types: `substitute`,
 `resolve_call`, `FunctionLibrary::derive_return_type` and `get_property_type`,
 and inside the crate the list-element join, `merge_list_union`, list forms,
 comprehension typing and the type-level coercion. `ExprValue::make_list` and
-`make_list_checked` return the error for an element type hint already at the
-limit. Several of those can build a
+`make_list_checked` return the error for a list of lists whose element type
+(the elements' join, or the hint of an empty list) is already at the limit. Several of those can build a
 type deeper than their inputs (substituting into `list[T1]`, merging
 `int | list[A] | list[B]` into `int | list[A | B]`, joining union members), so
 they are fallible too. Type variable unification (behind `match_type` and
@@ -106,16 +106,30 @@ release build between 128 KiB and 256 KiB. Before the limit, a type built
 50,000 deep through the Rust API overflowed the stack in those walks and
 aborted the process.
 
-The limit is set above every type one expression builds from a template.
 `parse` stops at 10 levels of nesting (a parsed type is at most 11 deep), the
 function library's signatures are at most 4 deep, and list values nest at most
-two lists. Static typing builds deeper types: a comprehension over an
-unresolved value is `list[T | nulltype]` (§1.3.7), two levels over its element,
-so the 63 comprehensions an expression can nest within `MAX_EXPRESSION_DEPTH`
-(64) type as about 128 deep (`test_type_depth.rs` checks the deepest nesting
-the parser accepts). A chain of `let` bindings, each nesting the one before,
-can build deeper types; such a template fails validation with `TypeTooDeep` at
-the binding that passes the limit.
+two lists, so no parsed type and no value's type comes near the limit. Static
+typing builds deeper types, because the type of an unresolved value keeps
+every form a run might produce. A comprehension over an unresolved value is
+`list[T | nulltype]` (§1.3.7), two levels over its element, so nesting
+comprehensions as deep as `MAX_EXPRESSION_DEPTH` (64) allows types as at most
+126 deep; `test_type_depth.rs` and the model's `test_let_bindings.rs` check
+the deepest such nesting, which stays below the limit.
+
+Static typing can be made to go past any fixed limit, though. Wrapping a
+comprehension body in `([x] if C else 1)` adds two levels per wrap, and the
+levels compound along a chain of comprehensions each iterating over the one
+before: three comprehensions with 29 wraps each (about 2 KB of source) type
+as 176 deep, and within the expression depth and input length limits one
+expression can type as about 1,860 deep. A chain of `let` bindings each
+nesting the one before goes further. Such a template now fails validation
+with `TypeTooDeep` at the expression or binding that passes the limit, while
+a run of it would succeed. This is a deliberate Rust-only hardening limit,
+like `MAX_EXPRESSION_DEPTH` and `MAX_PARSE_INPUT_LEN`, which also reject
+input the specification allows. Without it, the same templates took seconds
+to minutes to validate, and the deepest overflowed a 2 MiB stack (a type
+about 1,640 deep in a debug build). Raising the limit to cover them would
+need 2 to 4 MiB of stack for the walks in a debug build.
 
 `ExprValue::expr_type` stays infallible. An `Unresolved(T)` value is
 `unresolved[T]`, as deep as `T`. A `ListList` whose element type hint is
@@ -123,9 +137,10 @@ already at the limit has no list type one level up, so it is `list[any]`; only
 a value built through the API with such a hint gets that.
 
 Fixed types written from constants (`list[string]`, `int | nulltype`) use
-crate-private helpers, `ExprType::fixed` in openjd-expr and
-`types::fixed_type` in openjd-model, which unwrap the constructor's `Result`:
-such a type is at most 3 deep, so the constructor cannot fail. Types derived
+crate-private helpers, `ExprType::fixed` in openjd-expr, `types::fixed_type`
+in openjd-model and `runner::nullable` in openjd-sessions, which unwrap the
+constructor's `Result`: such a type is at most 3 deep, so the constructor
+cannot fail. Types derived
 from a caller's or a template's types use `?`.
 
 ## Type Matching and Substitution

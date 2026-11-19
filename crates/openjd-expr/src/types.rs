@@ -37,16 +37,18 @@ use crate::error::{ExpressionError, ExpressionErrorKind};
 /// stack and abort the process on a type built deep enough through this
 /// API.
 ///
-/// The limit is set above every type one expression can build from a
-/// template. [`ExprType::parse`] stops at 10 levels of nesting (11 deep),
-/// the function library's signatures are at most 4 deep, and list values
-/// nest at most two lists. Static typing builds deeper types: a list
-/// comprehension over an unresolved value is `list[T | nulltype]`, two
-/// levels over its element, so the 63 comprehensions an expression can nest
-/// within [`MAX_EXPRESSION_DEPTH`](crate::MAX_EXPRESSION_DEPTH) type as
-/// about 128 deep. `let` bindings that each nest the one before can go
-/// deeper; such a chain fails with [`ExpressionErrorKind::TypeTooDeep`]
-/// at the binding that passes the limit.
+/// [`ExprType::parse`] stops at 10 levels of nesting (11 deep), the function
+/// library's signatures are at most 4 deep, and list values nest at most
+/// two lists, so no parsed type or value type comes near the limit. Static
+/// typing builds deeper types: a list comprehension over an unresolved
+/// value is `list[T | nulltype]`, two levels over its element, so the
+/// deepest comprehension nesting
+/// [`MAX_EXPRESSION_DEPTH`](crate::MAX_EXPRESSION_DEPTH) allows types as at
+/// most 126 deep, below the limit. Contrived expressions (comprehension
+/// bodies wrapped in many `([x] if C else 1)`) and chains of `let` bindings
+/// can type deeper than any fixed limit; they fail validation with
+/// [`ExpressionErrorKind::TypeTooDeep`], a deliberate hardening limit like
+/// `MAX_EXPRESSION_DEPTH` (see `specs/expr/type-system.md` § Depth limit).
 pub const MAX_TYPE_DEPTH: usize = 160;
 
 /// Type codes for expression values.
