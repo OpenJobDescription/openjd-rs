@@ -805,6 +805,8 @@ impl ExprValue {
     /// variables, `noreturn`, `unresolved[T]`, signatures) are rejected.
     /// In an unresolved source constraint, unbound type variables read as
     /// wildcards: `unresolved[list[T1]]` coerces as `unresolved[list[any]]`.
+    /// An unresolved result type past `MAX_TYPE_DEPTH` (only a target that
+    /// deep can make one) is the `TypeTooDeep` message.
     /// See `specs/expr/values.md` § Coercion.
     pub fn coerce(
         self, target: &ExprType, path_format: PathFormat,

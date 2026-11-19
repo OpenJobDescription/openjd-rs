@@ -898,3 +898,55 @@ fn coercing_an_unresolved_value_past_the_limit_is_an_error() {
         );
     }
 }
+
+/// More paths whose join or merge recurses and can add a level below the
+/// top: a comprehension's list type merging an iterable's list members at
+/// depth, concatenation typing past the form cap, and the list-element
+/// join of union members inside a list.
+#[test]
+fn nested_joins_and_merges_past_the_limit_are_errors() {
+    // `merge_list_union` recurses into a list's element: the
+    // comprehension `[[x] for x in U]` over a union of lists of every
+    // depth from 2 to 6 and one of strings a level below the limit.
+    let mut members: Vec<ExprType> = (0..64).map(|i| deep_list((i % 5) + 2)).collect();
+    members.push(deep_strings(MAX_TYPE_DEPTH - 1));
+    let mut st = SymbolTable::new();
+    st.set("U", ExprValue::unresolved(u(members))).unwrap();
+    assert_eval_too_deep("[[x] for x in U]", None, &st);
+
+    // A concatenation typed past the form cap refines its return type
+    // by the operands' join.
+    let lib = openjd_expr::FunctionLibrary::for_profile(&openjd_expr::ExprProfile::latest());
+    let u65 = union_past_the_form_cap();
+    assert_too_deep(
+        lib.derive_return_type("__add__", &[l(ExprType::INT), u65.clone()])
+            .map(Option::unwrap),
+    );
+    let mut st = SymbolTable::new();
+    st.set("U", ExprValue::unresolved(u65)).unwrap();
+    st.set("L", ExprValue::unresolved(l(ExprType::INT)))
+        .unwrap();
+    assert_eval_too_deep("U + L", None, &st);
+
+    // Joining `list[nulltype] | list[list[nulltype] | list[list[nulltype]
+    // | list[any]]]` with `list[list^d[int]]`: the members' joins inside
+    // the lists build a union of lists a level deeper at each depth.
+    let nl = ExprType::parse("list[nulltype]").unwrap();
+    let la = ExprType::parse("list[any]").unwrap();
+    let a = u(vec![nl.clone(), l(u(vec![nl.clone(), la]))]);
+    let hint_a = u(vec![nl, l(a)]);
+    for d in [MAX_TYPE_DEPTH - 3, MAX_TYPE_DEPTH - 2] {
+        let hint_b = l(deep_list(d));
+        let mut st = SymbolTable::new();
+        st.set("A", ExprValue::ListList(vec![], hint_a.clone(), 0))
+            .unwrap();
+        st.set("B", ExprValue::ListList(vec![], hint_b.clone(), 0))
+            .unwrap();
+        st.set("UA", ExprValue::unresolved(l(hint_a.clone())))
+            .unwrap();
+        st.set("UB", ExprValue::unresolved(l(hint_b))).unwrap();
+        for expr in ["A + B", "[UA, UB]"] {
+            assert_eval_too_deep(expr, None, &st);
+        }
+    }
+}

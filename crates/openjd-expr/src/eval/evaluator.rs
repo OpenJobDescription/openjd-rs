@@ -1472,8 +1472,11 @@ impl<'a> Evaluator<'a> {
                 match types.len() {
                     0 => None,
                     1 => Some(types.pop().unwrap()),
-                    // A union too deep to build leaves the position
-                    // unconstrained: this is only a coercion hint.
+                    // Each candidate is a parameter of a signature, so at
+                    // most a level below the limit, and the union of them
+                    // (flattened) is within it. `ok()` keeps this hint
+                    // total; a failure would only leave the position
+                    // unconstrained.
                     _ => ExprType::union(types).ok(),
                 }
             })

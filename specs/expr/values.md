@@ -751,7 +751,10 @@ target is accepted for the same reason: the value could resolve to the empty
 list, which coerces to every list type, so element compatibility can only be
 checked once the payload is known. A source and target with no type-level
 coercion rule at all, such as `unresolved[list[int]]` against `int`, is
-rejected during validation.
+rejected during validation. A result type deeper than `MAX_TYPE_DEPTH`, which
+only a target about that deep can produce, is the `TypeTooDeep` error ("Type
+nesting depth exceeded limit (160)"; type-system.md § Depth limit), and the
+evaluator keeps its kind so static typing does not absorb it.
 
 A source constraint may contain unbound type variables. Generic return
 types can leave one unbound when an argument is unresolved — list
