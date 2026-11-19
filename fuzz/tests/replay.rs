@@ -390,6 +390,7 @@ fn unbound_return_text_ignores_string_literals() {
     use openjd_fuzz::targets::expr::unbound_return_in_text as unbound;
     assert!(unbound("max(y) + 1"));
     assert!(unbound("1 + sum (L)"));
+    assert!(unbound("L + range_expr('1-3')"));
     assert!(!unbound("upper(Param.S + ' sum(1) ')"));
     assert!(!unbound("my_max(x) + 1"));
 }
@@ -418,5 +419,37 @@ fn negative_step_slices() {
         "R[g(1:2)]",
     ] {
         assert!(!neg(not), "{not}");
+    }
+}
+
+/// The rejected-statically-but-runs oracle counts run-time dispatch
+/// failures, which the library reports as `Other`, as type rejections, and
+/// value errors as not.
+#[test]
+fn type_rejections() {
+    use openjd_expr::{ExprProfile, FunctionLibrary, ParsedExpression, SymbolTable};
+    use openjd_fuzz::targets::expr::is_type_rejection;
+    let lib = FunctionLibrary::for_profile(&ExprProfile::latest());
+    let err = |src: &str| {
+        ParsedExpression::new(src)
+            .unwrap()
+            .with_library(&lib)
+            .with_operation_limit(1000)
+            .with_memory_limit(10_000)
+            .evaluate(&[&SymbolTable::new()])
+            .expect_err(src)
+    };
+    for yes in [
+        "upper(1)",
+        "'a' - 1",
+        "[1, 'a']",
+        "nosuch(1)",
+        "Nope.X",
+        "(1).nosuch",
+    ] {
+        assert!(is_type_rejection(&err(yes)), "{yes}: {:?}", err(yes));
+    }
+    for no in ["int('x')", "1 // 0", "re_findall('x', '')", "'a' * 100000"] {
+        assert!(!is_type_rejection(&err(no)), "{no}");
     }
 }

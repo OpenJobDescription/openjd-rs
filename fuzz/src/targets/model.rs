@@ -10,9 +10,11 @@
 //! Oracles beyond "never panics":
 //! - **Validation implies runnable**: a
 //!   template that decodes and instantiates must not fail at run time with
-//!   an undefined-symbol / unknown-function / syntax error when its actions,
-//!   `let` bindings, and embedded files are resolved the way the session
-//!   resolves them.
+//!   an error no value can cause (an undefined symbol, unknown function,
+//!   unknown member, or unsupported syntax), or refuse to order operands the
+//!   library orders, when its actions, `let` bindings, and embedded files are
+//!   resolved the way the session resolves them. A type error that depends
+//!   on the parameter values is allowed.
 //! - **Preprocess idempotence**: feeding
 //!   `preprocess_job_parameters` its own output yields the same values.
 //! - **Determinism and Eq/Hash agreement** on created jobs.

@@ -115,6 +115,15 @@ pub mod known {
              `list[float]` statically and `[1, 2, 3]` at run time.",
         ),
         (
+            "expr-speculative-budget-rejection",
+            "With an unresolved test, the static pass evaluates both branches of a \
+             conditional, and a budget error in either is never absorbed \
+             (specs/expr/evaluator.md), so an expression whose expensive branch no run takes \
+             is rejected: `1.0 if Param.S not in [] else round(1e16, 4611686018427387903)` \
+             fails validation with an operation-limit error and evaluates to 1.0 for every \
+             value of `Param.S`.",
+        ),
+        (
             "expr-range-slice-static-type",
             "A stepped slice of an unresolved `range_expr` is typed `range_expr` whatever the \
              step (evaluator.rs, the unresolved slice path), but a negative step gives \

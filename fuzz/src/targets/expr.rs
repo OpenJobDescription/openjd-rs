@@ -115,8 +115,13 @@ fn involves_paths(src: &str, env: &Env) -> bool {
 pub fn unbound_return_in_text(src: &str) -> bool {
     // Match constructs in the code, not in string literals:
     // `upper(Param.S + 'sum(1)')` calls no `sum`.
+    // `min`/`max`/`sum` of an unbound list, or `+` with a `range_expr`
+    // operand (`(list[T1], range_expr) -> list[T2]`).
     let code = blank_string_literals(src);
-    code.contains(" + ") && ["min", "max", "sum"].iter().any(|f| calls_fn(&code, f))
+    code.contains(" + ")
+        && ["min", "max", "sum", "range_expr"]
+            .iter()
+            .any(|f| calls_fn(&code, f))
 }
 
 /// Does `src` call `name`, as a function or a method (`name(` or
@@ -189,8 +194,8 @@ pub fn has_negative_step_slice(code: &str) -> bool {
 ///   value folded around an unresolved symbol doesn't count: `Param.S and
 ///   False` folds to `False` statically, though a run evaluates `Param.S`
 ///   first and can fail there;
-/// - an undefined symbol, an unknown function, or unsupported syntax, which
-///   don't depend on values;
+/// - an undefined symbol, an unknown function, a member no type has, or
+///   unsupported syntax, which don't depend on values;
 /// - an ordering of operands the library orders, which is a run-time bug
 ///   whatever the static pass said.
 pub(crate) fn check_accepted_then_fails(
@@ -211,24 +216,35 @@ pub(crate) fn is_static_miss(e: &ExpressionError) -> bool {
 }
 
 /// Is `e` (or a compound sub-error of it) a failure that no value can
-/// cause: an undefined symbol, an unknown function, or unsupported syntax?
-/// The static pass sees every name and every construct, so it reports these
-/// rather than absorbing them (the evaluator's `contains_name_error`).
-/// Unknown members are not here: whether a member exists depends on the
-/// receiver's run-time type.
+/// cause: an undefined symbol, an unknown function, a method or property no
+/// type has, or unsupported syntax? The static pass sees every name and
+/// every construct, so it reports these rather than absorbing them (the
+/// evaluator's `contains_name_error`). A member that some other type has is
+/// reported as `Other`, not `UnknownMember`.
 fn is_value_independent_error(e: &ExpressionError) -> bool {
     matches!(
         e.kind(),
         ExpressionErrorKind::UndefinedVariable { .. }
             | ExpressionErrorKind::UnknownFunction { .. }
+            | ExpressionErrorKind::UnknownMember { .. }
             | ExpressionErrorKind::UnsupportedSyntax { .. }
     ) || e.sub_errors().iter().any(is_value_independent_error)
+}
+
+/// Is `e` (or a compound sub-error of it) a memory or operation budget
+/// exceedance?
+fn is_budget_error(e: &ExpressionError) -> bool {
+    matches!(
+        e.kind(),
+        ExpressionErrorKind::MemoryLimitExceeded { .. }
+            | ExpressionErrorKind::OperationLimitExceeded { .. }
+    ) || e.sub_errors().iter().any(is_budget_error)
 }
 
 /// Is `e` a type rejection: a name, function, member, or syntax the static
 /// pass doesn't know, or operand types no signature accepts? Run-time
 /// dispatch reports a missing signature as `Other`.
-fn is_type_rejection(e: &ExpressionError) -> bool {
+pub fn is_type_rejection(e: &ExpressionError) -> bool {
     match e.kind() {
         ExpressionErrorKind::UndefinedVariable { .. }
         | ExpressionErrorKind::UnknownFunction { .. }
@@ -566,10 +582,20 @@ pub fn check_expression(
                     format!("{src:?}: accepted statically ({sv:?}) but run-time evaluation fails with {e}")
                 });
             }
-            // Static typing must not reject an expression that runs. A
-            // value-dependent failure of a branch the static pass evaluated
-            // from literals (a regex that doesn't compile, a budget) is not
-            // a type rejection, and is not checked here.
+            // Static typing must not reject an expression that runs.
+            // The static pass evaluates both branches of a conditional whose
+            // test it can't resolve, and a budget error in either is never
+            // absorbed (specs/expr/evaluator.md, speculative evaluation), so
+            // a branch no run takes can reject the expression.
+            (Err(e), Ok(cv)) if well_typed && is_budget_error(e) => known_issue!(
+                "expr-speculative-budget-rejection",
+                false,
+                "well-typed {src:?} evaluates to {cv:?} but static checking rejects it: {e}"
+            ),
+            // Other value errors (an invalid regex, `int('x')`) in a branch
+            // the static pass evaluated speculatively are absorbed there. One
+            // reaches the top level only from a branch the static pass took
+            // for certain, which a run in the host's format takes too.
             (Err(e), Ok(cv)) if well_typed && is_type_rejection(e) => {
                 if fmt != PathFormat::host() && involves_paths(src, env) && static_pass(fmt).is_ok()
                 {

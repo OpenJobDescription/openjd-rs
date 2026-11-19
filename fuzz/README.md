@@ -91,13 +91,21 @@ formats, and requires:
 - the concrete value belongs to the static type, and a statically folded value
   equals the run-time value (type soundness);
 - static typing may accept an expression that a run with particular values
-  rejects, because the static pass can't see those values, but it must not
-  reject an expression that every run accepts. So after static acceptance a
-  run-time type error or dispatch miss is allowed when the static result is
-  unresolved. A run-time failure is still a violation when the static pass
-  folded the expression to a value (the run must agree with it), when it is an
-  undefined symbol, an unknown function, or unsupported syntax (no value can
-  cause one), or when it refuses to order operands the library orders;
+  rejects, because the static pass can't see those values. So after static
+  acceptance a run-time type error or dispatch miss is allowed. A run-time
+  failure is still a violation when the static pass folded the expression from
+  literals alone (no symbols), in the host's path format, to a value, since the
+  run must agree with it; when it is an undefined symbol, an unknown function, a
+  method or property no type has, or unsupported syntax, which no value can
+  cause; or when it refuses to order operands the library orders. A value
+  folded around a symbol doesn't count: `Param.X < 0 < 0` folds to `False`,
+  though a run evaluates `Param.X < 0` first and can fail there;
+- static typing must not reject an expression that a run accepts. Only
+  generated input (`expr_eval_gen`) is checked, since it is well-typed by
+  construction. Two documented exceptions remain: a name error in a branch no
+  run takes is rejected on purpose (specs/expr/evaluator.md), and the generator
+  never emits one; and a budget error in a branch the static pass evaluated
+  speculatively, which is the known issue `expr-speculative-budget-rejection`;
 - determinism; evaluation metrics within their limits; a target-typed result
   satisfies its target; the result survives the template → session transport
   boundary unchanged;
@@ -112,10 +120,12 @@ preprocessing is idempotent; `create_job` is deterministic and
 Eq/Hash agree; `len()` matches iteration, `get(i)` equals the i-th iterated
 set, and every iterated set passes `contains`/`validate_containment`; topological order respects every dependency; and **a template that
 validates and instantiates never fails at run time with an error no value can
-cause** (an undefined symbol, an unknown function, or unsupported syntax) when
-its actions, `let` bindings, and embedded files are resolved the way the
-session resolves them. As for expressions, a type error that depends on the
-parameter values is allowed.
+cause** (an undefined symbol, an unknown function, a method or property no type
+has, or unsupported syntax), or with a refusal to order operands the library
+orders, when its actions, `let` bindings, and embedded files are resolved the
+way the session resolves them. As for expressions, a type error that depends on
+the parameter values is allowed. Unlike `check_expression`, the pipeline does
+not check folded values against the run.
 
 ## Enforcement
 
