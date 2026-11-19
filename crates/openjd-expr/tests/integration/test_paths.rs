@@ -2064,6 +2064,33 @@ fn path_list_posix_root_then_empty() {
     );
 }
 
+#[test]
+fn path_list_empty_list_is_dot() {
+    // PurePosixPath() == PureWindowsPath() == '.': `path([])` takes the
+    // `list[nulltype]` signature and gives the empty relative path in
+    // every format, and joining onto it gives the joined part.
+    for fmt in [PathFormat::Posix, PathFormat::Windows] {
+        let st = SymbolTable::new();
+        let v = eval_with_fmt("path([])", &st, fmt);
+        assert_eq!(v, ExprValue::new_path(".".to_string(), fmt), "{fmt:?}");
+        assert_eq!(
+            eval_with_fmt("path([]) / 'a'", &st, fmt).to_display_string(),
+            "a",
+            "{fmt:?}"
+        );
+        assert_eq!(
+            eval_with_fmt("path([]) == path('.')", &st, fmt).to_display_string(),
+            "true",
+            "{fmt:?}"
+        );
+        assert_eq!(
+            eval_with_fmt("len(path([]).parts)", &st, fmt).to_display_string(),
+            eval_with_fmt("len(path('.').parts)", &st, fmt).to_display_string(),
+            "{fmt:?}"
+        );
+    }
+}
+
 // ── Windows simple ──
 
 #[test]

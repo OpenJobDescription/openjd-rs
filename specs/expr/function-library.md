@@ -310,7 +310,7 @@ nothing to `int`.
 
 An overload with a `list[nulltype]` parameter (this one, `sum(list[nulltype])`,
 `min`/`max(list[nulltype])`, `flatten(list[nulltype])`, `join(list[nulltype],
-string)`, …) specializes a general overload for the empty list. Signature
+string)`, `path(list[nulltype])`, …) specializes a general overload for the empty list. Signature
 matching lets an argument of unknown element type (`list[T3]`, `list[any]`,
 `any`) match it, but at run time only an empty list selects it, so for the
 type-only dispatch above (and `derive_return_type`) it applies only to an
@@ -771,6 +771,11 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   least two characters), all elements are joined with `/` verbatim and no
   normalization is applied — `path(["s3://bucket", "a", "", "b"])` is
   `s3://bucket/a//b`.
+  An empty list of parts takes the `(list[nulltype]) -> path` overload and is
+  `path('.')` in every format, as `PurePosixPath()` and `PureWindowsPath()`
+  are, so `path([]) / 'a'` is `a`. Every function with a concrete `list[X]`
+  parameter has such an overload, because a `list[nulltype]` argument matches
+  only a `list[nulltype]` parameter (2026-02 Expression Language §1.3).
 - **Slicing a `range_expr`** returns `range_expr` for positive step, `list[int]` for
   negative step (§2.1.8)
 - **`sum` of an empty `list[float]`** is the float `0.0`, as its
