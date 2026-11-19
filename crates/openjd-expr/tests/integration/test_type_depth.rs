@@ -903,6 +903,65 @@ fn coercing_an_unresolved_value_past_the_limit_is_an_error() {
 /// top: a comprehension's list type merging an iterable's list members at
 /// depth, concatenation typing past the form cap, and the list-element
 /// join of union members inside a list.
+/// A list type of irregular shape: a spine of `depth` lists from a scalar
+/// leaf, with a third of the levels a union of the list and one or two
+/// scalars or `list[nulltype]`, picked by a fixed xorshift sequence.
+fn irregular_list_type(seed: u64, depth: usize) -> ExprType {
+    let mut state = seed;
+    let mut next = |k: u64| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        (state % k) as usize
+    };
+    let scalars = [
+        ExprType::INT,
+        ExprType::FLOAT,
+        ExprType::BOOL,
+        ExprType::PATH,
+        ExprType::STRING,
+        ExprType::RANGE_EXPR,
+        l(ExprType::NULLTYPE),
+    ];
+    let mut t = scalars[next(7)].clone();
+    for _ in 0..depth {
+        let list = l(t);
+        t = if next(3) == 0 {
+            let mut members = vec![list];
+            for _ in 0..1 + next(2) {
+                members.push(scalars[next(7)].clone());
+            }
+            u(members)
+        } else {
+            list
+        };
+    }
+    t
+}
+
+#[test]
+fn concatenation_join_past_the_limit_is_an_error() {
+    // Typing `A[0] + B` joins the operands' element types. Against
+    // `list[list[nulltype]] | list[nulltype]`, joining the union members
+    // with an irregular operand 155 deep builds a type past the limit.
+    // The regular shapes tried (a union at every level, every other level,
+    // and so on) stay within it: this shape was found by search.
+    let a0 = irregular_list_type(817_566_216_853, 120);
+    assert_eq!(a0.to_string().len(), 1195, "the generator changed");
+    let mut st = SymbolTable::new();
+    st.set("A", ExprValue::unresolved(l(a0))).unwrap();
+    st.set(
+        "B",
+        ExprValue::unresolved(
+            ExprType::parse("list[list[list[nulltype]] | list[nulltype]]").unwrap(),
+        ),
+    )
+    .unwrap();
+    for expr in ["A[0] + B", "B + A[0]"] {
+        assert_eval_too_deep(expr, None, &st);
+    }
+}
+
 #[test]
 fn nested_joins_and_merges_past_the_limit_are_errors() {
     // `merge_list_union` recurses into a list's element: the

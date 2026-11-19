@@ -708,9 +708,9 @@ fn concat_return_type(
     if unknown(&left) || unknown(&right) {
         return Ok(ExprType::fixed(ExprType::list(ExprType::ANY)));
     }
-    // No input is known to reach a `TypeTooDeep` here: the joins known to
-    // add a level need an unknown element, which returned above. The `?`
-    // keeps the error if one does.
+    // Joining two lists' element types can build a type deeper than either
+    // side, past the limit for operands below it
+    // (`concatenation_join_past_the_limit_is_an_error`).
     Ok(crate::types::join_list_element(&left, &right)?.unwrap_or(ret))
 }
 
