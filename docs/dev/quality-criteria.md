@@ -143,7 +143,10 @@ text remain allowed:
 
 The listed words are signals to check, not banned words. "After the new DACL
 is applied, the file no longer inherits ACEs" describes what the code does at
-run time, and is fine.
+run time, and is fine. So is a comparison with how the Python reference
+implementation behaves. A document whose stated purpose is a plan or a record
+of how work was done, such as a migration plan, is not a description of the
+code and is outside Q10.
 
 For example, a spec that says "(Before this change, the runner and each
 handle took their own dup of the pipe, and a failed dup left that handle

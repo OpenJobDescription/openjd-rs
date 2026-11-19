@@ -508,9 +508,9 @@ fn control_characters_in_arg_reported_at_authored_index() {
 
 #[test]
 fn static_script_over_data_cap_fails_check() {
-    // Follow-up item 4's motivating case: a 500-char `bash:` body under
-    // `max_resolved_data_len: 100` used to pass `check` and fail only at
-    // `create_job`, at `steps[0] -> script -> embeddedFiles[0] -> data`.
+    // A 500-char `bash:` body under `max_resolved_data_len: 100` must fail
+    // `check`, not pass it and fail only at `create_job`, at
+    // `steps[0] -> script -> embeddedFiles[0] -> data`.
     let s = format!(
         r#"{{
         "specificationVersion": "jobtemplate-2023-09",

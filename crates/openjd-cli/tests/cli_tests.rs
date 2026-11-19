@@ -3786,7 +3786,7 @@ steps:
     #[test]
     fn test_summary_rejects_a_step_beyond_u64() {
         // 9 chunks x 3 values is a valid job, but one task per value is
-        // about 2.77e19 tasks, past u64::MAX. The count used to read 1.
+        // about 2.77e19 tasks, past u64::MAX. The count must not wrap to 1.
         let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
         write!(
             f,
