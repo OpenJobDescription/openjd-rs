@@ -630,7 +630,8 @@ fn path_ops() -> FunctionLibrary {
     )
     .expect("bad builtin signature");
     // The empty list of parts is `path('.')`, as `PurePosixPath()` is
-    // (§2.3). Without this overload, `path([])` matches no signature.
+    // (§2.3). Dispatch does not coerce `list[nulltype]` to `list[string]`,
+    // so without this overload `path([])` matches no signature.
     lib.register_sig(
         "path",
         "(list[nulltype]) -> path",
@@ -869,10 +870,11 @@ mod tests {
 
     #[test]
     fn every_concrete_list_parameter_has_an_empty_list_overload() {
-        // A `list[nulltype]` argument (the empty list) matches only a
-        // `list[nulltype]` parameter (2026-02 Expression Language §1.3), so a
-        // function taking a concrete `list[X]` needs an empty-list overload
-        // too, or `f([])` and a comprehension that keeps nothing match no
+        // Dispatch does not apply the `list[nulltype]` -> `list[T]`
+        // coercion (2026-02 Expression Language §1.2.3) to arguments, so a
+        // function taking a concrete `list[X]` needs an overload with
+        // `list[nulltype]` in that position, and the other parameters the
+        // same, or `f([])` and a comprehension that keeps nothing match no
         // signature (`path([])` did).
         let lib = FunctionLibrary::for_profile(
             &crate::ExprProfile::latest().with_host_context(crate::HostContext::Unresolved),
@@ -889,7 +891,14 @@ mod tests {
                     }
                     let covered = sigs.iter().any(|o| {
                         let op = o.signature.sig_params();
-                        op.len() == params.len() && op[i] == empty
+                        op.len() == params.len()
+                            && op.iter().zip(params).enumerate().all(|(j, (a, b))| {
+                                if j == i {
+                                    *a == empty
+                                } else {
+                                    a == b
+                                }
+                            })
                     });
                     if !covered {
                         missing.push(format!("{name}{}", e.signature));

@@ -774,8 +774,11 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   An empty list of parts takes the `(list[nulltype]) -> path` overload and is
   `path('.')` in every format, as `PurePosixPath()` and `PureWindowsPath()`
   are, so `path([]) / 'a'` is `a`. Every function with a concrete `list[X]`
-  parameter has such an overload, because a `list[nulltype]` argument matches
-  only a `list[nulltype]` parameter (2026-02 Expression Language §1.3).
+  parameter has such an overload (a unit test in `default_library.rs` checks
+  this). Dispatch coerces arguments only INT→FLOAT and PATH→STRING (see
+  [Three-Phase Dispatch](#three-phase-dispatch)), not by the 2026-02
+  Expression Language §1.2.3 `list[nulltype]` → `list[T]` rule, so without
+  the overload `f([])` matches no signature.
 - **Slicing a `range_expr`** returns `range_expr` for positive step, `list[int]` for
   negative step (§2.1.8)
 - **`sum` of an empty `list[float]`** is the float `0.0`, as its

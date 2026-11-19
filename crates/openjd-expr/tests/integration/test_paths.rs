@@ -2069,7 +2069,7 @@ fn path_list_empty_list_is_dot() {
     // PurePosixPath() == PureWindowsPath() == '.': `path([])` takes the
     // `list[nulltype]` signature and gives the empty relative path in
     // every format, and joining onto it gives the joined part.
-    for fmt in [PathFormat::Posix, PathFormat::Windows] {
+    for fmt in [PathFormat::Posix, PathFormat::Windows, PathFormat::Uri] {
         let st = SymbolTable::new();
         let v = eval_with_fmt("path([])", &st, fmt);
         assert_eq!(v, ExprValue::new_path(".".to_string(), fmt), "{fmt:?}");
