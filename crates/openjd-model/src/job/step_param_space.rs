@@ -1695,7 +1695,9 @@ impl StepParameterSpaceIterator {
         self.chunks_param_name.as_deref()
     }
 
-    /// Current default_task_count for adaptive chunking.
+    /// The effective chunk size of the chunked parameter, if any: the chunk
+    /// override, else its `defaultTaskCount`, at least 1. For adaptive chunking,
+    /// the current size, which `set_chunks_default_task_count` may have changed.
     pub fn chunks_default_task_count(&self) -> Option<u64> {
         match &self.adaptive_chunk_size {
             // Adaptive: read the live value, which `set_chunks_default_task_count` may
@@ -3037,6 +3039,35 @@ mod tests {
             assert_eq!(by_index.len() as u64, node.len());
             assert!(node.len() >= 3, "{range:?} should give several chunks");
         }
+    }
+
+    #[test]
+    fn test_zero_target_runtime_is_not_adaptive() {
+        // `targetRuntimeSeconds: 0` is valid (§3.4.1.5 allows >= 0) and means static
+        // chunking: only a positive target is adaptive.
+        let mut param = adaptive_chunk_param((1..=10).collect(), 4);
+        if let job::TaskParameter::ChunkInt { chunks, .. } = &mut param {
+            chunks.target_runtime_seconds = Some(0);
+        }
+        let space = make_space(vec![("Frame", param)], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert!(!iter.chunks_adaptive());
+        assert_eq!(iter.len(), 3);
+        assert_eq!(iter.chunks_default_task_count(), Some(4));
+    }
+
+    #[test]
+    fn test_chunk_size_is_at_least_one() {
+        // A zero override or `defaultTaskCount` is read as 1, in the reported size
+        // and in the chunks.
+        let space = make_space(vec![("Frame", static_chunk_param("1-3", 0))], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert_eq!(iter.chunks_default_task_count(), Some(1));
+        assert_eq!(iter.len(), 3);
+        let space = make_space(vec![("Frame", static_chunk_param("1-3", 2))], None);
+        let iter = StepParameterSpaceIterator::new_with_chunk_override(&space, Some(0)).unwrap();
+        assert_eq!(iter.chunks_default_task_count(), Some(1));
+        assert_eq!(iter.len(), 3);
     }
 
     /// The error a space with CHUNK[INT] parameters `first` and `second` gets.

@@ -6,10 +6,11 @@
 //!
 //! `TaskParameter::Int` used to carry `chunks: Option<ResolvedChunks>`, which
 //! nothing set and which serialized as `"chunks": null` on every `int`
-//! parameter. A chunked parameter is `chunkInt` only. These tests pin that a
-//! document written before the field was removed still reads back, and that an
-//! `int` parameter holding a chunk configuration is rejected rather than read
-//! as an unchunked parameter.
+//! parameter. A chunked parameter is `chunkInt` only, but the wire form is
+//! unchanged: `int` is still written with `"chunks": null`, so documents read
+//! the same in both directions. These tests pin that form, that a document
+//! without the key still reads, and that an `int` parameter holding a chunk
+//! configuration is rejected rather than read as an unchunked parameter.
 
 use openjd_model::job::{StepParameterSpace, TaskParamRange, TaskParameter};
 use openjd_model::StepParameterSpaceIterator;
@@ -19,14 +20,74 @@ const INT_WITH_CHUNKS: &str =
     "an `int` task parameter cannot have `chunks`; a chunked parameter is `chunkInt` (CHUNK[INT])";
 
 #[test]
-fn int_serializes_without_chunks() {
+fn int_serializes_with_null_chunks_as_released_versions_did() {
     let param = TaskParameter::Int {
         range: TaskParamRange::List(vec![1, 2]),
     };
     let json = serde_json::to_string(&param).unwrap();
-    assert_eq!(json, r#"{"int":{"range":{"list":[1,2]}}}"#);
+    assert_eq!(json, r#"{"int":{"range":{"list":[1,2]},"chunks":null}}"#);
     let back: TaskParameter = serde_json::from_str(&json).unwrap();
     assert_eq!(back, param);
+}
+
+#[test]
+fn every_variant_round_trips_and_keeps_its_wire_form() {
+    let chunks =
+        r#"{"defaultTaskCount":3,"targetRuntimeSeconds":null,"rangeConstraint":"NONCONTIGUOUS"}"#;
+    for doc in [
+        r#"{"int":{"range":{"list":[1,2]},"chunks":null}}"#.to_string(),
+        r#"{"float":{"range":[1.5,"2.50"]}}"#.to_string(),
+        r#"{"string":{"range":["a","b"]}}"#.to_string(),
+        r#"{"path":{"range":["/x"]}}"#.to_string(),
+        format!(r#"{{"chunkInt":{{"range":{{"list":[1,2,3]}},"chunks":{chunks}}}}}"#),
+    ] {
+        let param: TaskParameter = serde_json::from_str(&doc).unwrap();
+        assert_eq!(serde_json::to_string(&param).unwrap(), doc);
+    }
+}
+
+#[test]
+fn sequence_form_matches_the_released_shape() {
+    // A struct variant can also be written as a sequence of its fields, which
+    // is how positional formats see it. `int` still has two fields there, so
+    // what is written reads back, and a one-field `int` is rejected as before.
+    let param: TaskParameter = serde_json::from_str(r#"{"int":[{"list":[4]},null]}"#).unwrap();
+    assert_eq!(
+        param,
+        TaskParameter::Int {
+            range: TaskParamRange::List(vec![4]),
+        }
+    );
+    let err = serde_json::from_str::<TaskParameter>(r#"{"int":[{"list":[4]}]}"#).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "invalid length 1, expected struct variant TaskParameter::Int with 2 elements at line 1 column 21"
+    );
+    let err =
+        serde_json::from_str::<TaskParameter>(r#"{"int":[{"list":[4]},{"x":1}]}"#).unwrap_err();
+    assert_eq!(err.to_string(), INT_WITH_CHUNKS);
+}
+
+#[test]
+fn shape_errors_name_the_public_type() {
+    // The wire type is private; serde's messages name `TaskParameter`.
+    for (doc, want) in [
+        (
+            r#"{"float":5}"#,
+            "invalid type: integer `5`, expected struct variant TaskParameter::Float at line 1 column 10",
+        ),
+        (
+            r#"{"int":null}"#,
+            "invalid type: null, expected struct variant TaskParameter::Int at line 1 column 11",
+        ),
+        (
+            r#"{"chunkInt":{"range":{"list":[1]}}}"#,
+            "missing field `chunks` at line 1 column 34",
+        ),
+    ] {
+        let err = serde_json::from_str::<TaskParameter>(doc).unwrap_err();
+        assert_eq!(err.to_string(), want, "{doc}");
+    }
 }
 
 #[test]

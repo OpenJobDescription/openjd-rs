@@ -392,13 +392,15 @@ impl Hash for StepParameterSpace {
 /// A chunked parameter has exactly one representation, [`TaskParameter::ChunkInt`].
 /// `Int` carries no chunk configuration.
 ///
-/// Deserialization reads the same externally tagged form serialization writes. For
-/// documents written before `Int` lost its `chunks` field, an `int` parameter may
-/// carry `"chunks": null`, which is accepted and ignored; a non-null `chunks` on an
-/// `int` parameter is an error rather than being dropped, because the chunk
-/// configuration it holds would otherwise be lost silently.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", try_from = "TaskParameterWire")]
+/// The serialized form is the one released versions wrote when `Int` had a
+/// `chunks: Option<ResolvedChunks>` field that was never set: an `int` parameter is
+/// written with `"chunks": null`, so documents read the same in both directions,
+/// in self-describing and positional formats alike. Deserializing an `int`
+/// parameter accepts `"chunks": null` or no `chunks`, and rejects any other value
+/// rather than dropping it, because the chunk configuration it holds would
+/// otherwise be lost silently.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(try_from = "wire::TaskParameter")]
 #[allow(
     missing_docs,
     reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
@@ -448,52 +450,101 @@ impl Hash for TaskParameter {
     }
 }
 
-/// The deserialization form of [`TaskParameter`]: the same shape, except that an
-/// `int` parameter may carry the `chunks` key that versions before its removal
-/// always wrote (as `null`).
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-enum TaskParameterWire {
-    Int {
-        range: TaskParamRange<i64>,
-        /// Present only to tell `"chunks": null` (accepted) from a chunk
-        /// configuration (rejected); the value itself is never read.
-        #[serde(default)]
-        chunks: Option<serde::de::IgnoredAny>,
-    },
-    Float {
-        range: Vec<Float64>,
-    },
-    String {
-        range: Vec<String>,
-    },
-    Path {
-        range: Vec<String>,
-    },
-    ChunkInt {
-        range: TaskParamRange<i64>,
-        chunks: ResolvedChunks,
-    },
+impl Serialize for TaskParameter {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let wire = match self {
+            Self::Int { range } => wire::TaskParameterRef::Int {
+                range,
+                chunks: None,
+            },
+            Self::Float { range } => wire::TaskParameterRef::Float { range },
+            Self::String { range } => wire::TaskParameterRef::String { range },
+            Self::Path { range } => wire::TaskParameterRef::Path { range },
+            Self::ChunkInt { range, chunks } => wire::TaskParameterRef::ChunkInt { range, chunks },
+        };
+        wire.serialize(serializer)
+    }
 }
 
-impl TryFrom<TaskParameterWire> for TaskParameter {
+impl TryFrom<wire::TaskParameter> for TaskParameter {
     type Error = &'static str;
 
-    fn try_from(wire: TaskParameterWire) -> Result<Self, Self::Error> {
+    fn try_from(wire: wire::TaskParameter) -> Result<Self, Self::Error> {
         Ok(match wire {
-            TaskParameterWire::Int {
+            wire::TaskParameter::Int {
                 chunks: Some(_), ..
-            } => {
-                return Err(
-                    "an `int` task parameter cannot have `chunks`; a chunked parameter is `chunkInt` (CHUNK[INT])",
-                )
-            }
-            TaskParameterWire::Int { range, chunks: None } => Self::Int { range },
-            TaskParameterWire::Float { range } => Self::Float { range },
-            TaskParameterWire::String { range } => Self::String { range },
-            TaskParameterWire::Path { range } => Self::Path { range },
-            TaskParameterWire::ChunkInt { range, chunks } => Self::ChunkInt { range, chunks },
+            } => return Err(INT_WITH_CHUNKS),
+            wire::TaskParameter::Int {
+                range,
+                chunks: None,
+            } => Self::Int { range },
+            wire::TaskParameter::Float { range } => Self::Float { range },
+            wire::TaskParameter::String { range } => Self::String { range },
+            wire::TaskParameter::Path { range } => Self::Path { range },
+            wire::TaskParameter::ChunkInt { range, chunks } => Self::ChunkInt { range, chunks },
         })
+    }
+}
+
+/// The error for an `int` task parameter whose `chunks` is not null.
+const INT_WITH_CHUNKS: &str =
+    "an `int` task parameter cannot have `chunks`; a chunked parameter is `chunkInt` (CHUNK[INT])";
+
+/// The wire form of [`TaskParameter`]: its shape when `Int` still had
+/// `chunks: Option<ResolvedChunks>`, so the serialized form is unchanged.
+mod wire {
+    use super::{Float64, ResolvedChunks, TaskParamRange};
+    use serde::{Deserialize, Serialize};
+
+    /// Deserialization form. Named `TaskParameter` because serde puts the Rust
+    /// type name in its error messages ("expected struct variant
+    /// TaskParameter::Float"), which therefore read as they did before.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(super) enum TaskParameter {
+        Int {
+            range: TaskParamRange<i64>,
+            /// Tells `"chunks": null` (accepted) from a chunk configuration
+            /// (rejected); the value itself is never read.
+            chunks: Option<serde::de::IgnoredAny>,
+        },
+        Float {
+            range: Vec<Float64>,
+        },
+        String {
+            range: Vec<String>,
+        },
+        Path {
+            range: Vec<String>,
+        },
+        ChunkInt {
+            range: TaskParamRange<i64>,
+            chunks: ResolvedChunks,
+        },
+    }
+
+    /// Serialization form, borrowing from the [`super::TaskParameter`] it writes.
+    #[derive(Serialize)]
+    #[serde(rename = "TaskParameter", rename_all = "camelCase")]
+    pub(super) enum TaskParameterRef<'a> {
+        Int {
+            range: &'a TaskParamRange<i64>,
+            /// Always `None`, written as `null` as released versions did.
+            chunks: Option<&'a ResolvedChunks>,
+        },
+        Float {
+            range: &'a Vec<Float64>,
+        },
+        String {
+            range: &'a Vec<String>,
+        },
+        Path {
+            range: &'a Vec<String>,
+        },
+        ChunkInt {
+            range: &'a TaskParamRange<i64>,
+            chunks: &'a ResolvedChunks,
+        },
     }
 }
 

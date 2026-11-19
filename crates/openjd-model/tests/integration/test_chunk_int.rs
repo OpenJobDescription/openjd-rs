@@ -983,9 +983,10 @@ fn chunks_parameter_name() {
     );
     let ps = job.steps[0].parameter_space.as_ref().unwrap();
     let iter = StepParameterSpaceIterator::new(ps).unwrap();
-    // Non-adaptive chunking doesn't set chunks_parameter_name in the same way
-    // Just verify the iterator works
+    // Non-adaptive chunking reports the chunked parameter and its size too.
     assert!(!iter.chunks_adaptive());
+    assert_eq!(iter.chunks_parameter_name(), Some("MyChunked"));
+    assert_eq!(iter.chunks_default_task_count(), Some(1));
     let tasks: Vec<_> = iter.collect();
     assert_eq!(tasks.len(), 2);
 }

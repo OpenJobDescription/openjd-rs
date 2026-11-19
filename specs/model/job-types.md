@@ -4,7 +4,9 @@ The `job` module contains types produced by `create_job()`. These represent a fu
 job where template-scope format strings have been resolved to concrete values. Session-scope and
 task-scope fields remain as `FormatString` for evaluation at runtime.
 
-All types derive `Debug, Clone, Serialize` with `#[serde(rename_all = "camelCase")]`.
+All types derive `Debug, Clone, Serialize` with `#[serde(rename_all = "camelCase")]`, except
+`CancelationMode` and `TaskParameter`, whose serde impls are written by hand to keep a
+wire form (see each below).
 
 ## Resolution Scopes
 
@@ -228,15 +230,19 @@ pub enum TaskParameter {
 A chunked parameter has one representation, `ChunkInt`; `Int` carries no chunk
 configuration. `Int` used to have `chunks: Option<ResolvedChunks>`, which nothing set and
 which made a second, unsupported spelling of a chunked parameter that the iterator's chunk
-metadata did not see. Released versions serialized it as `"chunks": null` on every `int`
-parameter, so `TaskParameter` deserializes through a private wire enum
-(`#[serde(try_from = "TaskParameterWire")]`) that accepts `"chunks": null` (or no `chunks`)
-on `int` and rejects any other `chunks` value with `an \`int\` task parameter cannot have
-\`chunks\`; a chunked parameter is \`chunkInt\` (CHUNK[INT])`. Rejecting it, rather than
-dropping it, keeps a chunk configuration from being lost silently; accepting `null`, rather
-than adding `deny_unknown_fields`, keeps documents written by released versions readable.
-Other unknown keys are ignored, as before. Serialization writes `int` without `chunks`,
-which released versions read as `chunks: None`.
+metadata did not see.
+
+The wire form is unchanged by the removal. `TaskParameter`'s serde impls go through a
+private `wire` module whose types have the old shape: serialization writes `int` with
+`"chunks": null`, as released versions did, so documents read the same in both directions
+and in positional formats too, where `int` still has two fields. Deserialization
+(`#[serde(try_from = "wire::TaskParameter")]`) accepts `"chunks": null` or no `chunks` on
+`int`, and rejects any other value with `an \`int\` task parameter cannot have \`chunks\`;
+a chunked parameter is \`chunkInt\` (CHUNK[INT])`. Rejecting it, rather than dropping it,
+keeps a chunk configuration from being lost silently; accepting `null`, rather than adding
+`deny_unknown_fields`, keeps documents written by released versions readable. Other
+unknown keys are ignored, as before. The wire type is named `TaskParameter` so that serde's
+messages ("expected struct variant TaskParameter::Float") read as before.
 
 `Int` and `ChunkInt` ranges may be either a materialized list or a `RangeExpr` (from
 `openjd-expr`) for compact representation of large integer sequences. A `RangeExpr`

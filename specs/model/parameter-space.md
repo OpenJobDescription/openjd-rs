@@ -42,13 +42,19 @@ describes that one parameter, so a second would lose its chunk size and any
 `targetRuntimeSeconds` without a signal. The check runs in definition order, before the
 second parameter's value bound (see "Chunking").
 
+**Divergence from the Python reference:** openjd-model-for-python's `StepParameterSpace`
+(the job-side model) does not check the count, and its `StepParameterSpaceIterator` takes
+its chunk metadata from the first `CHUNK[INT]` and iterates such a space. Neither
+implementation's `create_job` produces one: the template's `StepParameterSpaceDefinition`
+rejects a second `CHUNK[INT]` in both.
+
 `chunks_parameter_name` and `chunks_default_task_count` report for *any* chunked space,
 adaptive or not: both values are in the template, and a chunk override replaces the size.
 Only `set_chunks_default_task_count` is adaptive-specific, because only an adaptive size
 is mutable mid-walk.
 
 `new_with_chunk_override` accepts an optional chunk size that overrides the template's
-`defaultTaskCount` for all chunk nodes. When `Some(n)`, it also suppresses adaptive
+`defaultTaskCount` of the chunked parameter. When `Some(n)`, it also suppresses adaptive
 chunking (the parameter is treated as static with chunk size `n`).
 
 `reset` rewinds the iterator so a fresh `Iterator::next` walk yields the same elements
@@ -369,8 +375,8 @@ CLI's `--task-params`).
 
 ### Chunk Override
 
-`new_with_chunk_override(space, Some(n))` overrides the `defaultTaskCount` for all chunk
-nodes. The override value is threaded through `make_leaf_node` → `make_chunk_node` and
+`new_with_chunk_override(space, Some(n))` overrides the `defaultTaskCount` of the chunked
+parameter. The override value is threaded through `make_leaf_node` → `make_chunk_node` and
 used in place of `chunks.default_task_count`. When an override is provided, adaptive
 chunking is suppressed (the parameter uses static chunking with the override size).
 
