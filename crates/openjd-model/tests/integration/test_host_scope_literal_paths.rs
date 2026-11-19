@@ -12,8 +12,8 @@ use openjd_model::template::JobTemplate;
 use openjd_model::{create_job, decode_job_template, CallerLimits, ModelError};
 use std::collections::HashMap;
 
-/// Host-scope expressions a Windows worker runs that a POSIX fold
-/// rejected (openjd-rs#377).
+/// Host-scope expressions that a Windows worker runs and that fail when
+/// folded in POSIX.
 const WINDOWS_RUNS: &[&str] = &[
     r#"int(path("C:\\a\\5").name)"#,
     r#""ok" if path("C:\\a").is_absolute() else fail("relative")"#,
@@ -21,9 +21,9 @@ const WINDOWS_RUNS: &[&str] = &[
     r#"range(len(path("C:\\a\\b").parts))[2]"#,
     r#"path(["C:\\a", "b"]).parts[2]"#,
     r#"with_number("C:\\#################################\\b", 1)"#,
-    // The POSIX parent of C:\a\b is "." (1 character), so the POSIX bound
-    // was 2049 characters, over the 2048 limit on an environment variable
-    // value; a Windows worker resolves 2046.
+    // The POSIX parent of C:\a\b is "." (1 character), which would bound
+    // the value at 2049 characters, over the 2048 limit on an environment
+    // variable value; a Windows worker resolves 2046.
     r#""x" * (2050 - len(path("C:\\a\\b").parent))"#,
 ];
 

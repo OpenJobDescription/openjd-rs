@@ -140,7 +140,9 @@ impl FunctionLibrary {
 
     /// Replace the implementation of every overload of `name` whose
     /// signature satisfies `matches` with one that returns
-    /// `unresolved[R]`, `R` being that overload's return type. The
+    /// `unresolved[R]`, `R` being that overload's return type. Use it only
+    /// for overloads with a concrete return type: a type variable in `R`
+    /// would not be bound. The
     /// signatures stay as they are, so type checking is unchanged; only a
     /// call with concrete arguments, which would otherwise be evaluated,
     /// gives an unresolved value instead. A name with no overloads is left

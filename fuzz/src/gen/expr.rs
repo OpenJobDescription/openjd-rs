@@ -52,7 +52,10 @@ fn signatures() -> &'static [(String, ExprType)] {
 }
 
 /// The validation-time library: every function, host-context functions as
-/// `Unresolved` stubs.
+/// `Unresolved` stubs, and the functions that read a literal string as a
+/// path (`path`, `with_number(string, int)`) returning `unresolved[T]`
+/// (see `register_unresolved_host_context_functions`). The static-fold
+/// oracle in `targets::expr::check_expression` relies on the last part.
 pub fn validation_library() -> Arc<FunctionLibrary> {
     FunctionLibrary::for_profile(&ExprProfile::latest().with_host_context(HostContext::Unresolved))
 }

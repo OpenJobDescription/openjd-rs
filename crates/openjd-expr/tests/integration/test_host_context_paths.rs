@@ -31,8 +31,8 @@ fn unresolved(expr: &str) -> ExprValue {
     eval_in(expr, &lib, PathFormat::Posix).unwrap_or_else(|e| panic!("{expr}: {e}"))
 }
 
-/// The expressions a POSIX fold used to reject, though a Windows worker
-/// runs each of them, with the value it gives there.
+/// Expressions that fail when folded in POSIX but that a Windows worker
+/// runs, with the value it gives there.
 const WINDOWS_RUNS: &[(&str, &str)] = &[
     (r"int(path('C:\\a\\5').name)", "5"),
     (
@@ -53,13 +53,13 @@ fn host_check_accepts_what_a_windows_worker_runs() {
     let unresolved_lib = library(HostContext::Unresolved);
     let runtime = library(HostContext::with_rules(Vec::new()).unwrap());
     for (expr, windows_value) in WINDOWS_RUNS {
-        // Before this fix the host-scope check folded in POSIX and failed.
+        // A POSIX fold fails.
         let posix_run = eval_in(expr, &runtime, PathFormat::Posix);
         assert!(posix_run.is_err(), "{expr} runs on POSIX: {posix_run:?}");
         // A Windows worker runs it.
         let win = eval_in(expr, &runtime, PathFormat::Windows).unwrap();
         assert_eq!(win.to_display_string(), *windows_value, "{expr}");
-        // The host check, in either format, now leaves it unresolved.
+        // The host check, in either format, leaves it unresolved.
         for fmt in [PathFormat::Posix, PathFormat::Windows] {
             let v = eval_in(expr, &unresolved_lib, fmt).unwrap_or_else(|e| panic!("{expr}: {e}"));
             assert!(v.is_unresolved(), "{expr} ({fmt:?}) folded to {v:?}");

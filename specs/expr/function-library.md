@@ -566,11 +566,11 @@ expression runs on the worker rather than at validation. A type error that the
 signatures show (`path('/a').startswith('/')`, `path(1)`) is still reported,
 since the signatures are unchanged; one that depends on a value computed from
 the path, such as a list comprehension filter over `.parts`, is reported at
-run time, as it is for a `PATH` parameter. Folding in one format instead, as validation did before, rejected
-expressions that a worker using the other format runs (openjd-rs#377), and
-gave wrong resolved values and length bounds for them. The other path
-functions take a `path` argument, which is now unresolved whenever it comes
-from a literal. A concrete `path` computed in TEMPLATE scope, such as a
+run time, as it is for a `PATH` parameter. Folding in one format would
+reject expressions that a worker using the other format runs, and would give
+wrong resolved values and length bounds for them. The other path functions
+take a `path` argument, which is unresolved whenever it comes from a
+literal. A concrete `path` computed in TEMPLATE scope, such as a
 step-level `let` binding, is converted to the worker's format by the session,
 so openjd-model also binds it unresolved in its host-scope check symbol tables
 (see [model validation.md § Path Format](../model/validation.md#path-format));
