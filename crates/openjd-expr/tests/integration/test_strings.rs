@@ -2697,7 +2697,7 @@ fn rsplit_negative_maxsplit_means_no_limit() {
 
 #[test]
 fn split_zero_maxsplit_means_no_splits() {
-    // Boundary of the negative-maxsplit fix: 0 must still mean "no splits".
+    // Boundary of negative-maxsplit handling: 0 must still mean "no splits".
     assert_eq!(
         eval("split('a b c', ' ', 0)").to_display_string(),
         r#"["a b c"]"#
@@ -2707,17 +2707,18 @@ fn split_zero_maxsplit_means_no_splits() {
         r#"["a b c"]"#
     );
 }
-// Regression: the `i64 -> usize` maxsplit conversion used a plain `as` cast,
-// which is lossy where `usize` is narrower than `i64`. On a 32-bit target a
-// maxsplit above `u32::MAX` wrapped to a small number (2^32 wrapped to 0,
-// giving no splits at all) and `n + 1` could overflow `usize`. The conversion
-// now saturates to `usize::MAX` and the `+ 1` saturates too, so "maxsplit
-// larger than the string" means "no limit" on every target width.
+// Regression: the `i64 -> usize` maxsplit conversion must not be a plain `as`
+// cast, which is lossy where `usize` is narrower than `i64`. On a 32-bit
+// target such a cast wraps a maxsplit above `u32::MAX` to a small number
+// (2^32 wraps to 0, giving no splits at all), and `n + 1` can overflow
+// `usize`. The conversion saturates to `usize::MAX` and the `+ 1` saturates
+// too, so "maxsplit larger than the string" means "no limit" on every target
+// width.
 //
 // NOTE ON FALSIFIABILITY: on a 64-bit host every non-negative `i64` converts
-// losslessly and `n + 1` cannot overflow `usize`, so these assertions pass with
-// or without the fix. They are load-bearing only on a 32-bit target, where the
-// unfixed code returns `["a b c"]` for the 2^32 case. Treat them as a contract
+// losslessly and `n + 1` cannot overflow `usize`, so these assertions pass
+// even with a lossy cast. They are load-bearing only on a 32-bit target, where
+// a lossy cast returns `["a b c"]` for the 2^32 case. Treat them as a contract
 // pinned for 32-bit builds, not as proof on this host.
 #[test]
 fn split_huge_maxsplit_means_no_limit() {
@@ -2986,7 +2987,7 @@ fn re_split_negative_maxsplit_means_no_splits() {
 #[test]
 fn re_split_zero_maxsplit_means_unlimited() {
     // Python re.split parity: maxsplit=0 means unlimited (str.split's 0 means
-    // no splits). Previously Rust returned ["a b c"] here.
+    // no splits), so this must not return ["a b c"].
     assert_eq!(
         eval("re_split('a b c', ' ', 0)").to_display_string(),
         r#"["a", "b", "c"]"#

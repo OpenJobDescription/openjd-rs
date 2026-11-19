@@ -188,7 +188,7 @@ fn test_job_no_expr_canonical_expr_only_type_reports_not_allowed() {
 }
 
 /// Mis-cased *and* EXPR-only without EXPR reports the casing, naming what the author
-/// wrote. Before this change it reported `'LIST[INT]' is not allowed.`, laundering a
+/// wrote. It must not report `'LIST[INT]' is not allowed.`, which launders a
 /// spelling the template never used.
 #[test]
 fn test_job_no_expr_miscased_expr_only_type_reports_the_casing() {

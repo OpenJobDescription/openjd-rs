@@ -1299,7 +1299,7 @@ mod tests {
             .is_ok());
     }
 
-    /// A lone `{` before `}}` used to escape to `{{{ ... }}`, which does not
+    /// A lone `{` before `}}` must not escape to `{{{ ... }}`, which does not
     /// parse. Found by the `expr_format_string` fuzz target.
     #[test]
     fn escape_format_string_lone_brace_before_closing_pair() {

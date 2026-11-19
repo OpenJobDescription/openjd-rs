@@ -1825,8 +1825,7 @@ fn nested_list_int_beside_bool_fails() {
 #[test]
 fn int_float_string_path_fails_pairwise() {
     // The int/float and path/string pairs do not make all four mutually
-    // compatible. This previously passed the check and panicked in
-    // make_list.
+    // compatible. This must fail the check, not panic in make_list.
     assert_err(
         "[1, 2.0, 'a', path('b')]",
         &[
@@ -1840,7 +1839,7 @@ fn int_float_string_path_fails_pairwise() {
 #[test]
 fn comprehension_int_float_string_fails_without_panic() {
     // A comprehension builds through make_list directly; an int, a float
-    // and a string body result previously panicked in its promotion.
+    // and a string body result must fail there, not panic in its promotion.
     assert_err(
         "[1 if x == 1 else (2.5 if x == 2 else 'a') for x in [1, 2, 3]]",
         &[
@@ -1853,7 +1852,7 @@ fn comprehension_int_float_string_fails_without_panic() {
 
 #[test]
 fn comprehension_nested_int_beside_string_fails() {
-    // Previously built a `list[list[string]]` holding `[2]` and `[3]`.
+    // Must not build a `list[list[string]]` holding `[2]` and `[3]`.
     assert_err(
         "[[x] if x > 1 else ['a'] for x in [1, 2, 3]]",
         &[

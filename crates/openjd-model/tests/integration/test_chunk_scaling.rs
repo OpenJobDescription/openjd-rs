@@ -258,9 +258,9 @@ fn static_contiguous_containment_of_a_huge_interval_locates_the_chunk() {
 
 // ── Differential test against the value-based construction ──
 //
-// Chunks used to be built by listing the range's values and rebuilding each
-// chunk from them. The oracle below is that construction, over ranges small
-// enough to list; the iterator must agree with it on every chunk string
+// The oracle below builds chunks by listing the range's values and rebuilding
+// each chunk from them, over ranges small enough to list; the iterator must
+// agree with it on every chunk string
 // (with the contiguous flag, as `Display` writes it), the chunk count,
 // random access, containment, and the run-cap behavior.
 

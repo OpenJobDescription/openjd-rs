@@ -241,8 +241,8 @@ mod tests {
 
     #[test]
     fn bare_shutdown_string_is_rejected() {
-        // The old bare-string form is no longer accepted: shutdown is always
-        // an object with a token.
+        // A bare `"shutdown"` string is rejected: shutdown is always an
+        // object with a token.
         let err = serde_json::from_str::<Command>(r#""shutdown""#).unwrap_err();
         assert!(err.to_string().contains("expected JSON object"));
     }

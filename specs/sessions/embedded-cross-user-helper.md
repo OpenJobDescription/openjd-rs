@@ -468,10 +468,10 @@ can't fail. `run_via_helper` writes its own cancel commands (the timeout, a
 bare token cancel, and a cancel held before Run) with `send_command`, through
 the helper's own stdin, which the runner owns during the action. So no cancel
 depends on a dup made after setup, which could fail when the process is out
-of file descriptors. (Before this, the runner and each handle took their own
-dup; a failed one left a timeout, a bare token cancel, or a handle cancel
-after Run with nothing to write, and the action ran to completion while it
-was still reported `Canceled`.) A test-only seam,
+of file descriptors. (If the runner and each handle took their own dup, a
+failed one would leave a timeout, a bare token cancel, or a handle cancel
+after Run with nothing to write, and the action would run to completion
+while reported `Canceled`.) A test-only seam,
 `Session::fail_cancel_pipe_dup_for_test` (feature `test-utils`), makes every
 later dup of the pipe fail, so tests check that no cancel path needs one.
 

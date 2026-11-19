@@ -711,7 +711,7 @@ fn reverse_slice_huge_negative_stop_clamped() {
 #[test]
 fn list_and_string_reverse_slice_huge_negative_stop_clamped() {
     // Same clamp in the shared compute_slice_indices helper: list and
-    // string reverse slices previously spun through uncharged
+    // string reverse slices must not spin through uncharged
     // below-zero indices for stops far below -len.
     assert_eq!(
         eval("[1, 2, 3][:-9223372036854775807:-1]").to_display_string(),

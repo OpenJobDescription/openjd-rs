@@ -234,7 +234,7 @@ impl TempDir {
             if let Some(u) = user.filter(|u| !u.is_process_user()) {
                 // Fail closed: a cross-user directory without the DACL grant is
                 // unusable by the session user (and silently skipping the grant
-                // previously masked the failure until a subprocess hit it).
+                // would hide the failure until a subprocess hit it).
                 let process_user = crate::win32::get_process_user().map_err(|e| {
                     SessionError::PathPermissions {
                         path: path.display().to_string(),

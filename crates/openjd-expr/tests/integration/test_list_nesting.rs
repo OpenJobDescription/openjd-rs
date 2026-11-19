@@ -74,8 +74,8 @@ fn make_list_rejects_unresolved_scalar_element() {
 
 #[test]
 fn make_list_rejects_unresolved_list_element() {
-    // Previously this silently built a ListList holding an Unresolved — a
-    // nested shape whose top-level is_unresolved() was false.
+    // make_list must not build a ListList holding an Unresolved — a nested
+    // shape whose top-level is_unresolved() is false.
     let inner = ExprValue::make_list(vec![ExprValue::Int(1)], ExprType::INT).unwrap();
     let err = ExprValue::make_list(
         vec![inner, ExprValue::unresolved(ExprType::list(ExprType::INT))],
@@ -141,8 +141,8 @@ fn list_literal_with_unresolved_list_element_hoists() {
 fn comprehension_with_unresolved_body_hoists() {
     // The iterable is concrete but the body references an unresolved
     // symbol, so every element is unresolved. This must hoist like a list
-    // literal — it previously failed validation because the unresolved
-    // elements reached make_list.
+    // literal, not pass the unresolved elements to make_list, which rejects
+    // them.
     let val = eval_with_unresolved("[Param.X + i for i in [1, 2]]").unwrap();
     assert!(matches!(
         val,
@@ -246,7 +246,7 @@ fn make_list_incompatible_types_error() {
 
 #[test]
 fn make_list_rejects_list_int_beside_list_string() {
-    // Previously built a ListList typed by its first element.
+    // Must not build a ListList typed by its first element.
     let ints = ExprValue::make_list(vec![ExprValue::Int(1)], ExprType::INT).unwrap();
     let strs = ExprValue::make_list(vec![ExprValue::String("a".into())], ExprType::STRING).unwrap();
     let err = ExprValue::make_list(vec![ints, strs], ExprType::NULLTYPE)

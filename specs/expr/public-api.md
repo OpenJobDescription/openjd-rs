@@ -1646,9 +1646,8 @@ publishes, pinned at `=0.0.22` (see [parser.md](parser.md)). A caller that
 passes a node must depend on that same crate and version, so every bump of the
 ruff pin is a breaking change for `with_node` callers and is released as one
 (0.0.21 to 0.0.22 gives a caller still on 0.0.21 an E0308 "mismatched types"
-error). Before #489 the type
-came from `rustpython-ruff_python_ast` 0.16.10, which is a different crate, so
-nodes from it no longer type-check.
+error). Nodes from the similarly named `rustpython-ruff_python_ast` crate are
+a different type and do not type-check.
 
 ## Function Implementations (`functions::*`)
 
