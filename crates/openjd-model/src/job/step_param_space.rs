@@ -1469,10 +1469,12 @@ pub struct StepParameterSpaceIterator {
 impl StepParameterSpaceIterator {
     /// Construct from a resolved `StepParameterSpace`.
     ///
-    /// Among other errors, fails when static `NONCONTIGUOUS` chunking would
-    /// build a chunk with more than [`openjd_expr::MAX_RANGE_EXPR_CHUNKS`]
-    /// runs in canonical form, which no `RangeExpr` can hold; the error
-    /// names the parameter and the chunk.
+    /// Among other errors, fails when the space has more than one `CHUNK[INT]`
+    /// parameter (`create_job` never builds one; the error names the first
+    /// two), and when static `NONCONTIGUOUS` chunking would build a chunk with
+    /// more than [`openjd_expr::MAX_RANGE_EXPR_CHUNKS`] runs in canonical form,
+    /// which no `RangeExpr` can hold (the error names the parameter and the
+    /// chunk).
     pub fn new(space: &job::StepParameterSpace) -> Result<Self, ModelError> {
         Self::new_inner(space, None)
     }
@@ -3084,9 +3086,9 @@ mod tests {
     fn test_second_chunk_int_parameter_is_rejected() {
         // Template validation rejects two CHUNK[INT] parameters per step, and
         // StepParameterSpace is publicly constructible, so the iterator rejects them
-        // too. The chunk metadata describes one parameter: before, a second was
-        // chunked statically and missing from that metadata, and its
-        // targetRuntimeSeconds was dropped without a signal.
+        // too. The chunk metadata describes one parameter: a second would be
+        // chunked statically and missing from that metadata, with its
+        // targetRuntimeSeconds dropped without a signal.
         let space = make_space(
             vec![
                 ("StaticFrame", noncontiguous_static_chunk_param("1-10", 5)),

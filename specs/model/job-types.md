@@ -229,19 +229,17 @@ pub enum TaskParameter {
 ```
 
 A chunked parameter has one representation, `ChunkInt`; `Int` carries no chunk
-configuration. `Int` used to have `chunks: Option<ResolvedChunks>`, which nothing set and
-which made a second, unsupported spelling of a chunked parameter that the iterator's chunk
-metadata did not see.
+configuration, so the iterator's chunk metadata sees every chunked parameter.
 
-The wire form is unchanged by the removal. `TaskParameter`'s serde impls go through a
-private `wire` module whose types have the old shape. `Serialize` writes `int` with
-`"chunks": null`, as released versions did, and makes the same serializer calls as the old
+Released versions had `chunks: Option<ResolvedChunks>` on `Int`, never set, and wrote
+`"chunks": null` on every `int` parameter. `TaskParameter`'s serde impls keep that wire
+form, through a private `wire` module whose types have that shape. `Serialize` writes
+`int` with `"chunks": null` and makes the same serializer calls as a released version's
 derived impl (type name `TaskParameter`, the same variant indices and names, two fields for
 `int`), so any format reads the result as it read a released version's. Deserialization
 (`#[serde(from = "wire::TaskParameter")]`) accepts `"chunks": null` or no `chunks` on `int`.
-Any other `chunks` value fails where it is read, with `an \`int\` task parameter cannot have
-\`chunks\`; a chunked parameter is \`chunkInt\` (CHUNK[INT])` and the position the format
-gives; the format never has to describe the value. Rejecting it, rather than dropping it,
+Any other `chunks` value fails where it is read, with
+``an `int` task parameter cannot have `chunks`; a chunked parameter is `chunkInt` (CHUNK[INT])`` and the position the format gives; the format never has to describe the value. Rejecting it, rather than dropping it,
 keeps a chunk configuration from being lost silently; accepting `null`, rather than adding
 `deny_unknown_fields`, keeps documents written by released versions readable. Other
 unknown keys are ignored, as before. The wire type is named `TaskParameter` so that serde's

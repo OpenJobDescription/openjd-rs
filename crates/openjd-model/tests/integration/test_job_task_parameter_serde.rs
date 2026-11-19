@@ -4,11 +4,10 @@
 
 //! Wire-format tests for `job::TaskParameter` (see `specs/model/job-types.md`).
 //!
-//! `TaskParameter::Int` used to carry `chunks: Option<ResolvedChunks>`, which
-//! nothing set and which serialized as `"chunks": null` on every `int`
-//! parameter. A chunked parameter is `chunkInt` only, but the wire form is
-//! unchanged: `int` is still written with `"chunks": null`, so documents read
-//! the same in both directions. These tests pin that form, that a document
+//! A chunked parameter is `chunkInt` only; `TaskParameter::Int` has no
+//! `chunks`. The wire form is the one released versions wrote, when `Int` had
+//! a never-set `chunks: Option<ResolvedChunks>`: `int` is written with
+//! `"chunks": null`, so documents read the same in both directions. These tests pin that form, that a document
 //! without the key still reads, and that an `int` parameter holding a chunk
 //! configuration is rejected rather than read as an unchunked parameter.
 
@@ -94,25 +93,10 @@ fn shape_errors_name_the_public_type() {
 }
 
 #[test]
-fn explicit_null_chunks_on_int_reads_as_int() {
-    // Released versions wrote `"chunks": null` for every `int` parameter, so a
-    // job or step document they serialized must still read back.
-    let param: TaskParameter =
-        serde_json::from_str(r#"{"int":{"range":{"list":[1,2,3]},"chunks":null}}"#).unwrap();
-    assert_eq!(
-        param,
-        TaskParameter::Int {
-            range: TaskParamRange::List(vec![1, 2, 3]),
-        }
-    );
-}
-
-#[test]
 fn chunks_on_int_is_rejected() {
-    // Before the field was removed this read as `Int { chunks: Some(..) }`, a
-    // second spelling of a chunked parameter that the iterator's chunk metadata
-    // did not see. Dropping the key instead would read it as unchunked and lose
-    // the configuration without a signal.
+    // A chunk configuration on `int` is not a chunked parameter, which is
+    // `chunkInt`. Dropping the key would read it as unchunked and lose the
+    // configuration without a signal, so it is an error.
     for chunks in [
         r#"{"defaultTaskCount":2,"targetRuntimeSeconds":null,"rangeConstraint":"CONTIGUOUS"}"#,
         // Rejected without being read: these are not valid chunk configurations,
@@ -141,7 +125,10 @@ fn chunks_on_int_is_rejected_inside_a_parameter_space() {
         "combination": null
     }"#;
     let err = serde_json::from_str::<StepParameterSpace>(doc).unwrap_err();
-    assert!(err.to_string().starts_with(INT_WITH_CHUNKS), "got: {err}");
+    assert_eq!(
+        err.to_string(),
+        format!("{INT_WITH_CHUNKS} at line 4 column 32")
+    );
 }
 
 #[test]
@@ -319,11 +306,14 @@ mod wire_shape {
         }
         fn deserialize_enum<V: Visitor<'de>>(
             self,
-            _: &'static str,
-            _: &'static [&'static str],
+            name: &'static str,
+            variants: &'static [&'static str],
             visitor: V,
         ) -> Result<V::Value, Seen> {
-            visitor.visit_enum(self)
+            // Formats that write the type name or the variant names read them here.
+            visitor
+                .visit_enum(self)
+                .map_err(|Seen(s)| Seen(format!("{name} {variants:?} {s}")))
         }
         serde::forward_to_deserialize_any! {
             bool i8 i16 i32 i64 i128 u8 u16 u32 u64 u128 f32 f64 char str string
@@ -382,22 +372,22 @@ fn positional_wire_shape_is_the_released_one() {
                 range: TaskParamRange::List(vec![1]),
             },
             "TaskParameter/0/int/2",
-            r#"["range", "chunks"]: invalid type: unit value, expected struct variant TaskParameter::Int"#,
+            r#"TaskParameter ["int", "float", "string", "path", "chunkInt"] ["range", "chunks"]: invalid type: unit value, expected struct variant TaskParameter::Int"#,
         ),
         (
             TaskParameter::Float { range: vec![] },
             "TaskParameter/1/float/1",
-            r#"["range"]: invalid type: unit value, expected struct variant TaskParameter::Float"#,
+            r#"TaskParameter ["int", "float", "string", "path", "chunkInt"] ["range"]: invalid type: unit value, expected struct variant TaskParameter::Float"#,
         ),
         (
             TaskParameter::String { range: vec![] },
             "TaskParameter/2/string/1",
-            r#"["range"]: invalid type: unit value, expected struct variant TaskParameter::String"#,
+            r#"TaskParameter ["int", "float", "string", "path", "chunkInt"] ["range"]: invalid type: unit value, expected struct variant TaskParameter::String"#,
         ),
         (
             TaskParameter::Path { range: vec![] },
             "TaskParameter/3/path/1",
-            r#"["range"]: invalid type: unit value, expected struct variant TaskParameter::Path"#,
+            r#"TaskParameter ["int", "float", "string", "path", "chunkInt"] ["range"]: invalid type: unit value, expected struct variant TaskParameter::Path"#,
         ),
         (
             TaskParameter::ChunkInt {
@@ -405,7 +395,7 @@ fn positional_wire_shape_is_the_released_one() {
                 chunks,
             },
             "TaskParameter/4/chunkInt/2",
-            r#"["range", "chunks"]: invalid type: unit value, expected struct variant TaskParameter::ChunkInt"#,
+            r#"TaskParameter ["int", "float", "string", "path", "chunkInt"] ["range", "chunks"]: invalid type: unit value, expected struct variant TaskParameter::ChunkInt"#,
         ),
     ];
     for (index, (param, written, read)) in (0u32..).zip(cases) {
@@ -418,6 +408,6 @@ fn positional_wire_shape_is_the_released_one() {
     }
     assert_eq!(
         wire_shape::struct_variant_at::<TaskParameter>(5),
-        "invalid value: integer `5`, expected variant index 0 <= i < 5"
+        r#"TaskParameter ["int", "float", "string", "path", "chunkInt"] invalid value: integer `5`, expected variant index 0 <= i < 5"#
     );
 }

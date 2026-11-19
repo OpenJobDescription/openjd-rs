@@ -681,43 +681,6 @@ fn walking_every_chunk_of_a_range_with_many_runs_stays_linear() {
     });
 }
 
-#[test]
-fn a_second_chunk_int_parameter_is_rejected() {
-    // Templates allow one CHUNK[INT] per step, and a `StepParameterSpace` built
-    // through the public API is held to the same rule: the iterator's chunk
-    // metadata describes one parameter, so a second would be missing from it and
-    // lose any `targetRuntimeSeconds`. (A static NONCONTIGUOUS node walked by its
-    // own iterator, which this shape used to reach, is covered by a unit test in
-    // `step_param_space.rs`.)
-    let mut defs = IndexMap::new();
-    for (name, range, constraint) in [
-        ("A", "1-4", RangeConstraint::Noncontiguous),
-        ("B", "10-13", RangeConstraint::Contiguous),
-    ] {
-        defs.insert(
-            name.to_string(),
-            job::TaskParameter::ChunkInt {
-                range: expr(range),
-                chunks: job::ResolvedChunks {
-                    default_task_count: 2,
-                    target_runtime_seconds: None,
-                    range_constraint: constraint,
-                },
-            },
-        );
-    }
-    let space = job::StepParameterSpace {
-        task_parameter_definitions: defs,
-        combination: None,
-    };
-    let err = StepParameterSpaceIterator::new(&space).err().unwrap();
-    assert_eq!(
-        err.to_string(),
-        "Validation error: Task parameters 'A' and 'B' are both CHUNK[INT]: only one \
-         CHUNK[INT] parameter is allowed per step."
-    );
-}
-
 /// 50,000 runs of three values with step 2 (`0-4:2,7-11:2,...`): 150,000
 /// values, and 150,000 contiguous intervals in 150,000 interval groups,
 /// written as text.

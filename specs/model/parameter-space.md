@@ -38,9 +38,10 @@ A space has at most one `CHUNK[INT]` parameter, as a template step does. `create
 never emits more, and `new` rejects a hand-built or deserialized space with two, with
 `ModelError::DecodeValidation`: `Task parameters '<first>' and '<second>' are both
 CHUNK[INT]: only one CHUNK[INT] parameter is allowed per step.` The chunk metadata below
-describes that one parameter. Before, a second was chunked statically with its own size,
-missing from that metadata, and its `targetRuntimeSeconds` was dropped without a signal. The check runs in definition order, before the
-second parameter's value bound (see "Chunking").
+describes one parameter, so a second would be chunked statically with its own size,
+missing from that metadata, with its `targetRuntimeSeconds` dropped without a signal. The
+check runs in definition order, before the second parameter's value bound (see
+"Chunking").
 
 **Divergence from the Python reference:** openjd-model-for-python's `StepParameterSpace`
 (the job-side model) does not check the count, and its `StepParameterSpaceIterator` takes
@@ -385,8 +386,8 @@ chunking is suppressed (the parameter uses static chunking with the override siz
 Two separate questions, tracked by two different flags.
 
 **Which path `Iterator::next` takes** is the `sequential` flag: adaptive chunking or
-contiguous chunking, decided from the space's one `CHUNK[INT]` parameter. Adaptive must be sequential because its chunk size can change
-part-way through a walk. Contiguous answers per index in O(log G), but its node iterator
+contiguous chunking, decided from the space's one `CHUNK[INT]` parameter. Adaptive must be
+sequential because its chunk size can change part-way through a walk. Contiguous answers per index in O(log G), but its node iterator
 walks the interval groups in O(1) per chunk, so both use the `node_iter` path. Every other space takes the random-access path, where
 `Iterator::next` is implemented as `get(current_index)`.
 
