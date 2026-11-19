@@ -737,8 +737,8 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   spaces, as N words in order. An empty string gives `''`, an empty list the
   empty string, and a NUL anywhere in the input is an evaluation error
   (`Cannot shell-quote string: ...` or `Cannot shell-quote list: ...`).
-  `bool`, `int`, `float`, `nulltype`, `range_expr` and nested lists have no
-  signature. Quoting is the `shlex` crate's `try_quote`, which differs in bytes
+  `bool`, `int`, `float`, `nulltype`, `range_expr`, nested lists and lists of
+  anything other than strings or paths have no signature. Quoting is the `shlex` crate's `try_quote`, which differs in bytes
   from Python's `shlex.quote` on some inputs, and both conform: `it's` is
   `"it's"` here and `'it'"'"'s'` in Python, `a\b` is `"a\\b"` here, and
   `a=b` is `'a=b'` here where Python leaves it bare. The spec requires no
