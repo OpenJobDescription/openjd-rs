@@ -4,8 +4,8 @@
 
 A Rust implementation of the Open Job Description (OpenJD) model library, expression
 language, sessions runtime, and CLI, targeting conformance with the
-[2023-09 Template Schemas](../../openjd-specifications/wiki/2023-09-Template-Schemas.md)
-and the [Expression Language](../../openjd-specifications/wiki/2026-02-Expression-Language.md) extension.
+[2023-09 Template Schemas](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas)
+and the [Expression Language](https://github.com/OpenJobDescription/openjd-specifications/wiki/2026-02-Expression-Language) extension.
 The workspace also holds a job attachments snapshots library and WebAssembly bindings,
 both experimental (see [Crate Status](#crate-status)).
 

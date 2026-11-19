@@ -29,7 +29,7 @@ implementation:
 | Aspect | Python | Rust |
 |--------|--------|------|
 | Argument parsing | argparse with manual subparser wiring | clap derive macros |
-| Output formatting | `@print_cli_result` decorator on dataclass results | Inline match on `--output` format string |
+| Output formatting | `@print_cli_result` decorator on dataclass results | Result structs implementing `CliResult`, rendered by the shared `print_cli_result` |
 | Session management | `LocalSession` context manager with signal handlers | Direct `Session` API calls in async `execute()` |
 | Async runtime | None (synchronous, threads in sessions layer) | tokio multi-thread runtime |
 | Logging | `LocalSessionLogHandler` (Python `logging.Handler`) | Custom `log::Log` impl filtering on kv metadata |
