@@ -8,7 +8,8 @@
 //! Every expected value below is what CPython 3.12 gives for the same
 //! literal, except where a test says otherwise: a surrogate escape, which
 //! CPython keeps in the string and EXPR rejects, and a lowercase algorithmic
-//! `\N{...}` name, which CPython accepts from 3.13.13 and 3.14.4.
+//! `\N{...}` name, which CPython accepts only from 3.13.13 in 3.13 and from
+//! 3.14.4 in 3.14.
 
 use openjd_expr::{ExprValue, ParsedExpression, SymbolTable};
 
@@ -104,8 +105,8 @@ fn hex_and_unicode_escapes() {
         // Names match without regard to case, and aliases are accepted.
         (r"'\N{bullet}'", "\u{2022}"),
         (r"'\N{LATIN CAPITAL LETTER GHA}'", "\u{1a2}"),
-        // An algorithmic name, in lowercase: CPython accepts it from 3.13.13
-        // and 3.14.4.
+        // An algorithmic name, in lowercase: CPython accepts it only from 3.13.13
+        // in 3.13 and from 3.14.4 in 3.14.
         (r"'\N{cjk unified ideograph-4e00}'", "\u{4e00}"),
     ];
     for (expr, want) in cases {
