@@ -354,8 +354,8 @@ static typing never builds a type deeper than
 for the same reason, since every walk over a type recurses. The deepest
 comprehension nesting the depth limit above allows types as 126 deep, below
 it, but a contrived expression or `let` chain can type deeper (wrapping each
-body of three nested comprehensions in 29 `([x] if C else 1)`, about 2 KB, is
-176 deep). Validation rejects such a template with "Type nesting depth
+body of three nested comprehensions in 29 `([x] if C else 1)`, about 1.4 KB,
+is 176 deep). Validation rejects such a template with "Type nesting depth
 exceeded limit (160)", although the specification allows it and a run of it
 would succeed, as the limits above reject some input the specification
 allows. See type-system.md § Depth limit.

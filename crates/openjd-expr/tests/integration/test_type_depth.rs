@@ -824,3 +824,77 @@ fn the_cached_depth_does_not_grow_expr_type() {
         std::mem::size_of::<(TypeCode, Vec<ExprType>)>()
     );
 }
+
+/// `int | list[A] | list[B]` at the limit, `A` and `B` 158 deep: merging
+/// its lists (`int | list[A | B]`) adds a level.
+fn union_with_lists_that_merge_past_the_limit() -> ExprType {
+    u(vec![
+        ExprType::INT,
+        l(deep_list(MAX_TYPE_DEPTH - 2)),
+        l((1..MAX_TYPE_DEPTH - 2).fold(ExprType::FLOAT, |t, _| l(t))),
+    ])
+}
+
+/// Concatenation and union typing merge an operand's or a return's list
+/// members, which can add a level.
+#[test]
+fn merging_list_members_past_the_limit_is_an_error() {
+    let u3 = union_with_lists_that_merge_past_the_limit();
+    let mut st = reach_symbols();
+    st.set("U", ExprValue::unresolved(u3.clone())).unwrap();
+    st.set("X", ExprValue::unresolved(deep_list(MAX_TYPE_DEPTH)))
+        .unwrap();
+    for expr in ["X + U", "U + [1]", "U + X"] {
+        assert_eval_too_deep(expr, None, &st);
+    }
+    let lib = openjd_expr::FunctionLibrary::for_profile(&openjd_expr::ExprProfile::current());
+    assert_too_deep(
+        lib.derive_return_type("__add__", &[u3.clone(), u3.clone()])
+            .map(Option::unwrap),
+    );
+    // A signature whose return type is the union of its parameters'.
+    let pair = identity_lib(&[("pair", "(T1, T2) -> T1 | T2")]);
+    assert_too_deep(
+        pair.derive_return_type("pair", &[u3, list_union_that_merges_past_the_limit()])
+            .map(Option::unwrap),
+    );
+}
+
+/// Coercing an unresolved value to a deep target can build a result type
+/// past the limit. `coerce` reports the limit's message, and static
+/// typing reports the error and never absorbs it in a branch.
+#[test]
+fn coercing_an_unresolved_value_past_the_limit_is_an_error() {
+    // `nulltype | float | list^157[int]`, 159 deep; the target `list[X]`
+    // is at the limit.
+    let x = u(vec![
+        ExprType::NULLTYPE,
+        ExprType::FLOAT,
+        deep_list(MAX_TYPE_DEPTH - 2),
+    ]);
+    let target = l(x);
+    let source = ExprType::parse("list[int] | list[nulltype]").unwrap();
+    let err = ExprValue::unresolved(source.clone())
+        .coerce(&target, PathFormat::Posix)
+        .expect_err("the coerced type is past the limit");
+    assert_eq!(err, "Type nesting depth exceeded limit (160)");
+    let err = ExprValue::unresolved(union_with_lists_that_merge_past_the_limit())
+        .coerce(&list_of_union_at_the_limit(), PathFormat::Posix)
+        .expect_err("the coerced type is past the limit");
+    assert_eq!(err, "Type nesting depth exceeded limit (160)");
+    let mut st = SymbolTable::new();
+    st.set("A", ExprValue::unresolved(source)).unwrap();
+    st.set("C", ExprValue::unresolved(ExprType::BOOL)).unwrap();
+    for expr in ["A", "A if C else []"] {
+        let parsed = openjd_expr::ParsedExpression::new(expr).unwrap();
+        let err = parsed
+            .with_target_type(&target)
+            .evaluate(&[&st])
+            .expect_err(expr);
+        assert!(
+            matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 160 }),
+            "{expr}: {:?}",
+            err.kind()
+        );
+    }
+}

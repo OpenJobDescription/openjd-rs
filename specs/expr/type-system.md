@@ -119,8 +119,8 @@ the deepest such nesting, which stays below the limit.
 Static typing can be made to go past any fixed limit, though. Wrapping a
 comprehension body in `([x] if C else 1)` adds two levels per wrap, and the
 levels compound along a chain of comprehensions each iterating over the one
-before: three comprehensions with 29 wraps each (about 2 KB of source) type
-as 176 deep, and within the expression depth and input length limits one
+before: three comprehensions with 29 wraps each (about 1.4 KB of source)
+type as 176 deep, and within the expression depth and input length limits one
 expression can type as about 1,860 deep. A chain of `let` bindings each
 nesting the one before goes further. Such a template now fails validation
 with `TypeTooDeep` at the expression or binding that passes the limit, while
@@ -129,7 +129,9 @@ like `MAX_EXPRESSION_DEPTH` and `MAX_PARSE_INPUT_LEN`, which also reject
 input the specification allows. Without it, the same templates took seconds
 to minutes to validate, and the deepest overflowed a 2 MiB stack (a type
 about 1,640 deep in a debug build). Raising the limit to cover them would
-need 2 to 4 MiB of stack for the walks in a debug build.
+need several MiB of stack in a debug build: evaluating one 1,862-deep type
+needed 2 to 4 MiB, and the walks over the most deeply nested shape need
+about three times what lists need.
 
 `ExprValue::expr_type` stays infallible. An `Unresolved(T)` value is
 `unresolved[T]`, as deep as `T`. A `ListList` whose element type hint is

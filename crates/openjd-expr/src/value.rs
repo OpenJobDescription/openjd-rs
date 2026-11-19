@@ -951,14 +951,16 @@ impl ExprValue {
     /// mechanically by `tests/integration/test_coercion_drift.rs`, which
     /// sweeps sample values against target types and checks the two paths
     /// agree.
+    ///
+    /// For an unresolved value whose result type would be deeper than
+    /// [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH) (only a target that deep
+    /// can make it), the error is the
+    /// [`TypeTooDeep`](crate::ExpressionErrorKind::TypeTooDeep) message.
     pub fn coerce(self, target: &ExprType, path_format: PathFormat) -> Result<Self, String> {
         // Unresolved values carry a type constraint and nothing else, so the
         // decision has to be made entirely at the type level.
         if let ExprValue::Unresolved(constraint) = &self {
-            return match Self::coerce_type(constraint, target).map_err(|e| e.to_string())? {
-                Some(result_type) => Ok(ExprValue::unresolved(result_type)),
-                None => Err(format!("Cannot coerce {constraint} to {target}")),
-            };
+            return Self::coerce_unresolved(constraint, target).map_err(|e| e.message());
         }
         // Step 1: already acceptable, so pass through untouched.
         let source_type = self.expr_type();
@@ -1228,6 +1230,37 @@ impl ExprValue {
             .map(|e| e.coerce(elem_type, path_format))
             .collect();
         ExprValue::make_list(coerced?, elem_type.clone()).map_err(|e| e.to_string())
+    }
+
+    /// [`Self::coerce`] with its error as an [`ExpressionError`]: a
+    /// `TypeTooDeep` from coercing an unresolved value keeps its kind (so
+    /// static typing never absorbs it, as it does any other value error),
+    /// and every other error is the message as an `Other` error.
+    ///
+    /// [`ExpressionError`]: crate::error::ExpressionError
+    pub(crate) fn coerce_keeping_kind(
+        self,
+        target: &ExprType,
+        path_format: PathFormat,
+    ) -> Result<Self, crate::error::ExpressionError> {
+        if let ExprValue::Unresolved(constraint) = &self {
+            return Self::coerce_unresolved(constraint, target);
+        }
+        self.coerce(target, path_format)
+            .map_err(crate::error::ExpressionError::new)
+    }
+
+    /// [`Self::coerce`] of an `Unresolved(constraint)` value.
+    fn coerce_unresolved(
+        constraint: &ExprType,
+        target: &ExprType,
+    ) -> Result<Self, crate::error::ExpressionError> {
+        match Self::coerce_type(constraint, target)? {
+            Some(result_type) => Ok(ExprValue::unresolved(result_type)),
+            None => Err(crate::error::ExpressionError::new(format!(
+                "Cannot coerce {constraint} to {target}"
+            ))),
+        }
     }
 
     /// The type-level counterpart of [`Self::coerce`], for unresolved values.

@@ -1772,7 +1772,7 @@ fn job_with_params_and_script_let(let_bindings: &[String]) -> String {
 }
 
 /// The deepest comprehension nesting one expression allows (62 levels
-/// inside `len`, within the 64-level expression depth limit, typed 124
+/// inside `len`, within the 64-level expression depth limit, typed 125
 /// deep) validates: the type depth limit is above it.
 #[test]
 fn deepest_single_expression_comprehension_validates() {

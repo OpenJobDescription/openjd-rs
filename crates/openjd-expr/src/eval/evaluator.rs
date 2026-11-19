@@ -448,8 +448,7 @@ impl<'a> Evaluator<'a> {
                     // If coercion fails the value is gone, so it stays
                     // released.
                     self.release(&val);
-                    let coerced = val.coerce(tt, self.path_format).map_err(|msg| {
-                        let e = ExpressionError::new(msg);
+                    let coerced = val.coerce_keeping_kind(tt, self.path_format).map_err(|e| {
                         if let Some(src) = &self.expr_source {
                             e.with_node(src, node)
                         } else {
@@ -1652,10 +1651,7 @@ impl<'a> Evaluator<'a> {
         if let Some(ref elem_t) = list_elem_target {
             let coerced: Result<Vec<ExprValue>, _> = elements
                 .into_iter()
-                .map(|e| {
-                    e.coerce(elem_t, self.path_format)
-                        .map_err(ExpressionError::new)
-                })
+                .map(|e| e.coerce_keeping_kind(elem_t, self.path_format))
                 .collect();
             let list = ExprValue::make_list_checked(self, coerced?, elem_t.clone())?;
             return self.track(list);
