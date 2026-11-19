@@ -25,8 +25,9 @@ use crate::error::{ExpressionError, ExpressionErrorKind};
 /// has a type. Only a one-parameter `unresolved` counts no level; a bare or
 /// many-parameter one (which only [`ExprType::new`] builds) counts one. A
 /// one-parameter `unresolved` is never the parameter of another
-/// (`unresolved[unresolved[T]]` normalizes to `unresolved[T]`), so a type
-/// `MAX_TYPE_DEPTH` deep nests at most `2 * MAX_TYPE_DEPTH` levels.
+/// one-parameter `unresolved` (`unresolved[unresolved[T]]` normalizes to
+/// `unresolved[T]`), so a type `MAX_TYPE_DEPTH` deep nests at most
+/// `2 * MAX_TYPE_DEPTH` levels.
 ///
 /// Every constructor rejects a type deeper than this with
 /// [`ExpressionErrorKind::TypeTooDeep`], so no `ExprType` value is ever
@@ -34,11 +35,19 @@ use crate::error::{ExpressionError, ExpressionErrorKind};
 /// (`==`, `Hash`, `Display`, `Debug`, `Drop`, [`ExprType::satisfies`],
 /// [`ExprType::match_type`], coercion), which would otherwise overflow the
 /// stack and abort the process on a type built deep enough through this
-/// API. Nothing the language itself builds comes near the limit:
-/// [`ExprType::parse`] stops at 10 levels of nesting, the function
-/// library's signatures are at most 4 deep, and list values nest at most
-/// two lists.
-pub const MAX_TYPE_DEPTH: usize = 64;
+/// API.
+///
+/// The limit is set above every type one expression can build from a
+/// template. [`ExprType::parse`] stops at 10 levels of nesting (11 deep),
+/// the function library's signatures are at most 4 deep, and list values
+/// nest at most two lists. Static typing builds deeper types: a list
+/// comprehension over an unresolved value is `list[T | nulltype]`, two
+/// levels over its element, so the 63 comprehensions an expression can nest
+/// within [`MAX_EXPRESSION_DEPTH`](crate::MAX_EXPRESSION_DEPTH) type as
+/// about 128 deep. `let` bindings that each nest the one before can go
+/// deeper; such a chain fails with [`ExpressionErrorKind::TypeTooDeep`]
+/// at the binding that passes the limit.
+pub const MAX_TYPE_DEPTH: usize = 160;
 
 /// Type codes for expression values.
 ///

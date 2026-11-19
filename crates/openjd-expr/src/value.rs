@@ -459,11 +459,25 @@ impl ExprValue {
     /// non-empty list, the join of the element types computed by
     /// [`make_list`](Self::make_list) (`[[], [1]]` holds `list[int]`
     /// elements whichever comes first).
-    fn make_list_list(v: Vec<ExprValue>, elem_type: ExprType) -> Self {
+    /// The `ListList` of `v` with element type `elem_type`, or
+    /// `TypeTooDeep` when `list[elem_type]` would be deeper than
+    /// [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH): such a list would have no
+    /// type.
+    fn make_list_list(
+        v: Vec<ExprValue>,
+        elem_type: ExprType,
+    ) -> Result<Self, crate::error::ExpressionError> {
+        if elem_type.depth() >= crate::MAX_TYPE_DEPTH {
+            return Err(crate::error::ExpressionError::from_kind(
+                crate::error::ExpressionErrorKind::TypeTooDeep {
+                    limit: crate::MAX_TYPE_DEPTH,
+                },
+            ));
+        }
         // Vec buffer holds ExprValues inline; only count their additional heap allocations
         let heap = v.len() * std::mem::size_of::<ExprValue>()
             + v.iter().map(|e| e.heap_size()).sum::<usize>();
-        Self::ListList(v, elem_type, heap)
+        Ok(Self::ListList(v, elem_type, heap))
     }
 
     /// Estimate the heap allocation required to build a list from `elements`.
@@ -541,10 +555,11 @@ impl ExprValue {
     /// handled by the evaluator, which hoists them to a top-level
     /// `ExprValue::unresolved(list[T])` before any list is built.
     ///
-    /// A `hint_type` already [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH)
-    /// deep is rejected with
-    /// [`TypeTooDeep`](crate::ExpressionErrorKind::TypeTooDeep): a list of
-    /// it would have no type.
+    /// A list of lists whose element type (the elements' join, or
+    /// `hint_type` for an empty list) is already
+    /// [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH) deep is rejected with
+    /// [`TypeTooDeep`](crate::ExpressionErrorKind::TypeTooDeep): the list
+    /// would have no type. A hint the result does not use is not checked.
     ///
     /// When called from an evaluator or function implementation that has
     /// an [`EvalContext`](crate::function_library::EvalContext), prefer
@@ -555,13 +570,6 @@ impl ExprValue {
         mut elements: Vec<ExprValue>,
         hint_type: ExprType,
     ) -> Result<Self, crate::error::ExpressionError> {
-        if hint_type.depth() >= crate::MAX_TYPE_DEPTH {
-            return Err(crate::error::ExpressionError::from_kind(
-                crate::error::ExpressionErrorKind::TypeTooDeep {
-                    limit: crate::MAX_TYPE_DEPTH,
-                },
-            ));
-        }
         // Reject 3+ nesting levels: if any element is itself a ListList
         // whose elements are lists, that's too deep. Empty lists (ListList
         // with NULLTYPE) represent `list[nulltype]` — a flat empty list,
@@ -652,7 +660,7 @@ impl ExprValue {
                 crate::types::TypeCode::Path => {
                     Self::make_list_path(Vec::new(), PathFormat::host())
                 }
-                crate::types::TypeCode::List => Self::make_list_list(Vec::new(), hint_type),
+                crate::types::TypeCode::List => Self::make_list_list(Vec::new(), hint_type)?,
                 crate::types::TypeCode::RangeExpr => {
                     Self::ListList(Vec::new(), ExprType::RANGE_EXPR, 0)
                 }
@@ -699,7 +707,7 @@ impl ExprValue {
                     );
                 }
             }
-            return Ok(Self::make_list_list(elements, joined));
+            return Self::make_list_list(elements, joined);
         }
         // Nested list path/string promotion: list[path] + list[string] → list[string]
         let has_list_path = elements
@@ -714,7 +722,7 @@ impl ExprValue {
                     *e = Self::make_list_string(std::mem::take(paths));
                 }
             }
-            return Ok(Self::make_list_list(elements, joined));
+            return Self::make_list_list(elements, joined);
         }
         // Path/string promotion: mix of path and string → string
         let has_path = elements.iter().any(|e| matches!(e, Self::Path { .. }));
@@ -796,8 +804,8 @@ impl ExprValue {
                     fmt,
                 )
             }
-            _ if elements[0].is_list() => Self::make_list_list(elements, joined),
-            Self::RangeExpr(_) => Self::make_list_list(elements, ExprType::RANGE_EXPR),
+            _ if elements[0].is_list() => Self::make_list_list(elements, joined)?,
+            Self::RangeExpr(_) => Self::make_list_list(elements, ExprType::RANGE_EXPR)?,
             _ => {
                 return Err(crate::error::ExpressionError::type_error(format!(
                     "Cannot create list from {} elements",

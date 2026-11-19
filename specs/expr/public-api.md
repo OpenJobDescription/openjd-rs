@@ -243,7 +243,7 @@ Additional per-module caps (see each module section below):
 - `range_expr::MAX_RANGE_EXPR_CHUNKS` (50,000 — elements parsed, and runs in the canonical form of every value)
 - `range_expr::MAX_RANGE_EXPR_LEN` (`i64::MAX` — bound on the number of values, not a heap cap)
 - `symbol_table::MAX_SYMBOL_TABLE_ENTRIES` (100,000 — transport-only)
-- `types::MAX_TYPE_DEPTH` (64 — the deepest an `ExprType` can be; a parsed type is at most 11 deep)
+- `types::MAX_TYPE_DEPTH` (160 — the deepest an `ExprType` can be; a parsed type is at most 11 deep, one expression's static typing builds at most about 128)
 
 All caps are orders of magnitude above any legitimate usage and exist to
 reject pathological inputs early, before they allocate.
@@ -549,9 +549,10 @@ Constructors + queries:
 
 ```rust
 /// The deepest an `ExprType` can be. Lists, unions and signatures count a
-/// level each; `unresolved[T]` is as deep as `T`. Re-exported at the
-/// crate root.
-pub const MAX_TYPE_DEPTH: usize = 64;
+/// level each; `unresolved[T]` is as deep as `T`. Above the about 128
+/// levels static typing builds for the deepest comprehension nesting one
+/// expression allows. Re-exported at the crate root.
+pub const MAX_TYPE_DEPTH: usize = 160;
 
 impl ExprType {
     // Every constructor, and every operation below that builds a type,
@@ -762,7 +763,9 @@ impl ExprValue {
     /// carries the joined element type. A `Null` or an `Unresolved`
     /// element is rejected: a list cannot hold `null`, and `make_list`
     /// constructs concrete lists (the
-    /// evaluator hoists unknown-element list expressions instead).
+    /// evaluator hoists unknown-element list expressions instead). A list
+    /// of lists whose element type is already `MAX_TYPE_DEPTH` deep is
+    /// `TypeTooDeep`.
     pub fn make_list(
         elements: Vec<ExprValue>, hint_type: ExprType,
     ) -> Result<Self, ExpressionError>;
@@ -809,7 +812,7 @@ impl ExprValue {
 
     /// The value's type. A `ListList` whose element type hint is already
     /// `MAX_TYPE_DEPTH` deep (only a value built through the enum variant
-    /// can hold one; `make_list` rejects such a hint) is `list[any]`, since
+    /// can hold one; `make_list` rejects such a list) is `list[any]`, since
     /// `list[hint]` would be too deep.
     pub fn expr_type(&self) -> ExprType;
     pub fn type_name(&self) -> &'static str;

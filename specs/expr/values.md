@@ -203,6 +203,10 @@ there is no silent fallback to string conversion, and no list of lists with
 mixed inner element types (`[[1], ['a']]` is an error, not a
 `list[list[int]]` holding a `list[string]`).
 
+A list of lists whose element type (the join, or `hint_type` for an empty list) is
+already `MAX_TYPE_DEPTH` deep is `TypeTooDeep`: the list would have no type
+(type-system.md § Depth limit). A hint the result does not use is not checked.
+
 Empty list variant selection by `hint_type`:
 
 | `hint_type` | Variant |

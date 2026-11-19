@@ -65,20 +65,20 @@ ExprType::parse("(list[T1], int) -> T1")?        // From spec notation (Err is a
 ### Depth limit
 
 A type is at most [`MAX_TYPE_DEPTH`](../../crates/openjd-expr/src/types.rs)
-(64) deep. Depth counts the types on the longest path down to one with no
+(160) deep. Depth counts the types on the longest path down to one with no
 parameters: `int` is 1, `list[int]` 2, `list[int | string]` 3,
 `(int) -> list[int]` 3. Lists, unions and signatures are a level each.
 `unresolved[T]` is as deep as `T`, so the type of an unresolved value is as
 deep as its constraint. Only a one-parameter `unresolved` counts no level (a
 bare or many-parameter one, which only `ExprType::new` builds, counts one).
 Normalization collapses `unresolved[unresolved[T]]`, so a one-parameter
-`unresolved` is never the parameter of another, and a type at the limit nests
-at most 128 levels.
+`unresolved` is never the parameter of another one-parameter `unresolved`, and
+a type at the limit nests at most 320 levels.
 
 Every way of building a type with parameters goes through one private funnel,
 `ExprType::build`, which computes the depth from the parameters' cached depths
 and returns `ExpressionErrorKind::TypeTooDeep { limit }` ("Type nesting depth
-exceeded limit (64)") past the limit. That covers the five constructors, the
+exceeded limit (160)") past the limit. That covers the five constructors, the
 normalizations inside them (which are checked on the type they build), `parse`,
 and every operation that builds a type from other types: `substitute`,
 `resolve_call`, `FunctionLibrary::derive_return_type` and `get_property_type`,
@@ -101,12 +101,21 @@ Because no `ExprType` is deeper than the limit, every recursive walk over a
 type (`==`, `Hash`, `Display`, `Debug`, `Serialize`, the derived `Drop`,
 `satisfies`, `match_type`, `substitute`, coercion) is bounded by it.
 `tests/integration/test_type_depth.rs` runs each of them on types at the limit
-on a 2 MiB thread; a debug build needs between 256 KiB and 512 KiB for them.
-Before the limit, a type built 50,000 deep through the Rust API overflowed the
-stack in those walks and aborted the process. Templates could not reach that:
+on a 2 MiB thread; a debug build needs between 768 KiB and 1 MiB for them, a
+release build between 128 KiB and 256 KiB. Before the limit, a type built
+50,000 deep through the Rust API overflowed the stack in those walks and
+aborted the process.
+
+The limit is set above every type one expression builds from a template.
 `parse` stops at 10 levels of nesting (a parsed type is at most 11 deep), the
 function library's signatures are at most 4 deep, and list values nest at most
-two lists.
+two lists. Static typing builds deeper types: a comprehension over an
+unresolved value is `list[T | nulltype]` (§1.3.7), two levels over its element,
+so the 63 comprehensions an expression can nest within `MAX_EXPRESSION_DEPTH`
+(64) type as about 128 deep (`test_type_depth.rs` checks the deepest nesting
+the parser accepts). A chain of `let` bindings, each nesting the one before,
+can build deeper types; such a template fails validation with `TypeTooDeep` at
+the binding that passes the limit.
 
 `ExprValue::expr_type` stays infallible. An `Unresolved(T)` value is
 `unresolved[T]`, as deep as `T`. A `ListList` whose element type hint is

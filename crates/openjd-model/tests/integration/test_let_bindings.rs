@@ -1734,3 +1734,85 @@ fn step_let_shared_scope_keeps_job_and_step_names() {
     }"#,
     );
 }
+
+// ── Expression type depth (MAX_TYPE_DEPTH) ──
+
+/// `binding` nesting `inner` in `n` list comprehensions with an unknown
+/// filter, each typed `list[T | nulltype]`, two type levels over `T`.
+fn nested_comprehensions(inner: &str, n: usize) -> String {
+    (0..n).fold(inner.to_string(), |c, i| {
+        format!("[{c} for v{i} in [1] if Param.C]")
+    })
+}
+
+fn job_with_params_and_script_let(let_bindings: &[String]) -> String {
+    let bindings: Vec<String> = let_bindings
+        .iter()
+        .map(|b| serde_json::to_string(b).unwrap())
+        .collect();
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [
+            {{"name": "N", "type": "INT", "default": 1}},
+            {{"name": "C", "type": "BOOL", "default": false}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "script": {{
+                "let": [{}],
+                "actions": {{"onRun": {{"command": "foo"}}}}
+            }}
+        }}]
+    }}"#,
+        bindings.join(", ")
+    )
+}
+
+/// The deepest comprehension nesting one expression allows (62 levels
+/// inside `len`, within the 64-level expression depth limit, typed about
+/// 126 deep) validates: the type depth limit is above it.
+#[test]
+fn deepest_single_expression_comprehension_validates() {
+    let decode = |n: usize| {
+        decode_job_template(
+            yaml_val(&job_with_params_and_script_let(&[format!(
+                "x = len({})",
+                nested_comprehensions("Param.N", n)
+            )])),
+            Some(&["EXPR"]),
+            &CallerLimits::default(),
+        )
+    };
+    // One more level is over the expression depth limit, not the type
+    // depth limit.
+    let err = decode(63).expect_err("63 levels inside len() are 65 deep");
+    assert!(
+        err.to_string()
+            .contains("Expression nesting depth (65) exceeded limit (64)"),
+        "{err}"
+    );
+    decode(62).expect("the deepest nesting validates");
+}
+
+/// A chain of bindings that each nest the one before builds a type past
+/// the limit; the binding that passes it fails validation.
+#[test]
+fn let_chain_past_the_type_depth_limit_fails_at_that_binding() {
+    let mut bindings = vec!["a0 = Param.N".to_string()];
+    for i in 1..=3 {
+        bindings.push(format!(
+            "a{i} = {}",
+            nested_comprehensions(&format!("a{}", i - 1), 30)
+        ));
+    }
+    check_err(
+        &job_with_params_and_script_let(&bindings),
+        &[
+            "steps[0] -> script -> let[3]:",
+            "Invalid expression in let binding 'a3': Type nesting depth exceeded limit (160)",
+        ],
+    );
+}
