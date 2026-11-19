@@ -126,6 +126,36 @@ New source files covered by `scripts/check_copyright_headers.sh` MUST carry
 the copyright header. Work that resolves a report item MUST strike that item
 through in the same change, as described in `AGENTS.md`.
 
+**Q10. Text describes the current code.** Specs, doc comments, and code
+comments, including those in tests, MUST describe the code as it is. They
+MUST NOT narrate the change that produced it or the implementation it
+replaced, with wording such as "before this change", "previously", "used
+to", "no longer", "was changed to", "the old code", or "now X instead of Y".
+That history belongs in the commit message and the PR description. In the
+tree it means nothing to a reader who never saw the old code. Two kinds of
+text remain allowed:
+
+- A regression test MAY state, in the present tense, the failure it guards
+  against.
+- Rationale MAY explain why the code does not use an alternative design, as
+  long as it is stated as a reason for the current code ("X is done this way
+  because Y would ...") rather than as a history of it.
+
+The listed words are signals to check, not banned words. "After the new DACL
+is applied, the file no longer inherits ACEs" describes what the code does at
+run time, and is fine.
+
+For example, a spec that says "(Before this change, the runner and each
+handle took their own dup of the pipe, and a failed dup left that handle
+unable to cancel.)" narrates history. As rationale for the current design, it
+reads: "The runner and its handles share one dup of the pipe, because a
+separate dup per handle can fail and leave that handle unable to cancel." In
+the same way, a test comment "a lost cancel used to leave the action running"
+becomes "a cancel must reach the helper even when the dup fails".
+
+A Q10 finding is low severity, or medium when a reader could take the past
+behavior it describes for the current behavior.
+
 ## 3. Evidence
 
 No claim is accepted on the strength of having been generated. Each kind of
@@ -215,8 +245,9 @@ leaving the file behind.
 
 ### Verifier rules
 1. When several verifiers run, they MUST get disjoint slices and different
-   angles, chosen from: spec fidelity (Q1, Q2, Q8), implementation correctness
-   (Q3, Q5, Q6), test adequacy by mutation (Q4), and Python divergence (Q7).
+   angles, chosen from: spec fidelity (Q1, Q2, Q8, Q10), implementation
+   correctness (Q3, Q5, Q6), test adequacy by mutation (Q4), and Python
+   divergence (Q7).
 2. Each verifier MUST be told that it is one of several and will not see the
    others' results, so that it checks rather than defers.
 3. Each finding comes back labelled as in §4.
