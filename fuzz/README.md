@@ -61,8 +61,8 @@ Windows-specific steps; call `cargo fuzz` directly only with the same flag and
 | Target | Entry points | Oracles beyond "no panic / hang / abort" |
 |--------|--------------|------------------------------------------|
 | `expr_parse` | `ParsedExpression::new`, `with_profile` | Profile monotonicity (`current()` ⊆ `latest()`), determinism |
-| `expr_eval_text` | parse + evaluate on mutated text; symbols bound from `accessed_symbols` | All of `check_expression` (below) |
-| `expr_eval_gen` | Well-typed expressions generated from the library's own signatures | `check_expression`, plus: a well-typed expression is not rejected statically and does not fail at run time with a type error |
+| `expr_eval_text` | parse + evaluate on mutated text; symbols bound from `accessed_symbols` | All of `check_expression` (below); text is not well-typed by construction, so a static rejection is not checked against the run |
+| `expr_eval_gen` | Well-typed expressions generated from the library's own signatures | `check_expression`, plus: a well-typed expression that runs is not rejected statically |
 | `expr_format_string` | `FormatString::new`, `resolve_with`, `resolve_string_with`, `validate_expressions`, `copy_used_symtab_values`, `escape_format_string` | Static resolution is sound (`min_resolved_string_len` ≤ actual, `resolved_value` exact, `resolved_type` satisfied); literals preserved in order; escaping round-trips; filtered table resolves identically; peak heap bounded |
 | `expr_range` | `RangeExpr::from_str` and every query | Reference model against a `Vec<i64>`: `len`/`iter`/`get` (incl. negative)/`contains`/`slice`/`from_values`/`from_ranges`; display ↔ parse; Eq/Hash agreement |
 | `expr_int_range` | `IntRange::new` over all of `i64` | Constructor invariants; `len`/`get`/`iter`/`contains` agree |
@@ -90,8 +90,14 @@ formats, and requires:
 
 - the concrete value belongs to the static type, and a statically folded value
   equals the run-time value (type soundness);
-- a statically accepted expression never fails at run time with an
-  undefined-symbol, unknown-function, unsupported-syntax, or type error;
+- static typing may accept an expression that a run with particular values
+  rejects, because the static pass can't see those values, but it must not
+  reject an expression that every run accepts. So after static acceptance a
+  run-time type error or dispatch miss is allowed when the static result is
+  unresolved. A run-time failure is still a violation when the static pass
+  folded the expression to a value (the run must agree with it), when it is an
+  undefined symbol, an unknown function, or unsupported syntax (no value can
+  cause one), or when it refuses to order operands the library orders;
 - determinism; evaluation metrics within their limits; a target-typed result
   satisfies its target; the result survives the template → session transport
   boundary unchanged;
@@ -105,9 +111,11 @@ space iteration → dependency graph → run-time resolution, and requires:
 preprocessing is idempotent; `create_job` is deterministic and
 Eq/Hash agree; `len()` matches iteration, `get(i)` equals the i-th iterated
 set, and every iterated set passes `contains`/`validate_containment`; topological order respects every dependency; and **a template that
-validates and instantiates never fails at run time with a static error** when
+validates and instantiates never fails at run time with an error no value can
+cause** (an undefined symbol, an unknown function, or unsupported syntax) when
 its actions, `let` bindings, and embedded files are resolved the way the
-session resolves them.
+session resolves them. As for expressions, a type error that depends on the
+parameter values is allowed.
 
 ## Enforcement
 

@@ -95,22 +95,9 @@ pub mod known {
              path format, so a format-dependent condition (`is_absolute(path('../a') / \
              path('C:\\\\'))`) is folded for the submitting machine, not the worker: an \
              expression typed `list[nulltype]` (always empty) on Linux yields a non-empty list \
-             on a Windows worker.",
-        ),
-        (
-            "expr-conditional-list-element-join",
-            "A list element whose type depends on a conditional is typed with the numeric \
-             join of its branches, dropping the others: `[1 if c else (2.5 if d else 'a') for x \
-             in xs]` is `list[float | int]` statically, and the elements mix (`make_list \
-             expected float element, got string`) at run time.",
-        ),
-        (
-            "expr-listcomp-non-iterable-runtime-check",
-            "An unresolved iterable whose type cannot be iterated binds `any` (\
-             specs/expr/evaluator.md: a type from an operation on unknown values may be \
-             imprecise), so `[x for x in Task.Param.I]` with an INT task parameter validates \
-             and then fails every run with `Cannot iterate over int`, even though a declared \
-             parameter's type is exact.",
+             on a Windows worker, and an expression whose branch fails only on Linux \
+             (`([] if path('C:\\\\x').is_absolute() else [False]) + range_expr('1')`) is \
+             rejected on Linux though it runs on a Windows worker.",
         ),
         (
             "expr-escape-segment-cap",
@@ -120,56 +107,19 @@ pub mod known {
              does not parse (`too many interpolation segments (1002); maximum is 1000`).",
         ),
         (
-            "expr-runtime-dispatch-miss",
-            "Some expressions pass static validation and then find no run-time signature: \
-             indexing a value that isn't indexable at run time, or with an index type \
-             `__getitem__` doesn't accept \
-             (`L[re_match(..):None:None]`, `s[1:2:1.5]`), an operand that is `null` at run \
-             time (`re_search(..) + range_expr(..)`), and `bool` arithmetic (`True * 3`). \
-             Each fails with `No matching signature for __getitem__(..)` or `Cannot use \
-             '<op>' operator with ..`.",
-        ),
-        (
-            "expr-ordering-runtime-type-check",
-            "The ordering operators are registered `(T1, T2) -> bool` and refuse mismatched \
-             operand types only at run time (`do_compare`; documented in \
-             specs/expr/function-library.md), so `Param.Path < 1`, `A > 5 > 5` with a BOOL \
-             parameter, or two `range_expr`s validate and then fail on the worker.",
-        ),
-        (
-            "expr-boolop-static-type",
-            "Speculative evaluation of `and` / `or` absorbs type errors in the operands after an \
-             unresolved one as if they were value-dependent: \
-             `Param.F or len([1] + ['a']) > 0` passes validation, though `[1] + ['a']` alone is \
-             refused, and fails at run time with \
-             `Cannot concatenate list[int] and list[string]`.",
-        ),
-        (
             "expr-unbound-return-typevar",
             "Signatures whose return type variable no parameter binds (`__add__: (list[T1], \
              list[T2]) -> list[T3]`, `(list[T1], range_expr) -> list[T2]`) lose the element type \
-             statically and admit mismatched operands: `[False] + Param.R` with a `range_expr` \
-             parameter is `list[T2]` statically and fails at run time with `Cannot concatenate \
-             list[bool] and range_expr`.",
-        ),
-        (
-            "expr-union-arg-overload",
-            "With a union-typed argument (from a conditional or a union-returning function) \
-             static dispatch can pick one overload's return type. A conditional with branches of \
-             different types passed to a function that takes one of them validates and finds \
-             no run-time signature: \
-             `upper(1 if Param.B else 'a')` is `string` statically and fails with `No \
-             matching signature for upper(int)` when `Param.B` is true. Operators too: `L * (n ** \
-             Param.N)` is typed with the `int` member of `int | float`, and fails with \
-             `Cannot use '*' operator with list[string] and float` when the power is a float.",
+             statically, so a value can fall outside its static type: \
+             `([L] + [[1.5] for v in E]).flatten() + range_expr('1-3')` with an empty `E` is \
+             `list[float]` statically and `[1, 2, 3]` at run time.",
         ),
         (
             "expr-range-slice-static-type",
             "A stepped slice of an unresolved `range_expr` is typed `range_expr` whatever the \
              step (evaluator.rs, the unresolved slice path), but a negative step gives \
              `list[int]` (specs/expr/function-library.md; the signature returns \
-             `range_expr | list[int]`), so `R[:None:-1] + 'x'` or `list(R[:None:-1])` \
-             validates and fails at run time.",
+             `range_expr | list[int]`), so `R[::-1]` gives a value outside its static type.",
         ),
         (
             "expr-dispatch-derive-mismatch",

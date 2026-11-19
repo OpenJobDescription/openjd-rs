@@ -385,27 +385,13 @@ fn expression_dictionary_covers_the_library() {
 
 /// Text in string literals is not code: it must not switch on a known-issue
 /// gate and mask a real static/run-time disagreement.
-/// Text Facts: only `a if c else b` is a conditional, not a comprehension
-/// filter.
 #[test]
-fn conditional_expressions() {
-    use openjd_fuzz::targets::expr::has_conditional_expr as cond;
-    for yes in [
-        "a if c else b",
-        "[x if x > 1 else 0 for x in L]",
-        "f(a if c else b)",
-        "[x for x in L if (1 if c else 2)]",
-    ] {
-        assert!(cond(yes), "{yes}");
-    }
-    for no in [
-        "[x for x in L if c]",
-        "[upper(x) for x in [1] if True]",
-        "[x for x in L if c] + [y]",
-        "a else b",
-    ] {
-        assert!(!cond(no), "{no}");
-    }
+fn unbound_return_text_ignores_string_literals() {
+    use openjd_fuzz::targets::expr::unbound_return_in_text as unbound;
+    assert!(unbound("max(y) + 1"));
+    assert!(unbound("1 + sum (L)"));
+    assert!(!unbound("upper(Param.S + ' sum(1) ')"));
+    assert!(!unbound("my_max(x) + 1"));
 }
 
 /// The `expr-range-slice-static-type` gate: any step but a non-negative
@@ -433,23 +419,4 @@ fn negative_step_slices() {
     ] {
         assert!(!neg(not), "{not}");
     }
-}
-
-#[test]
-fn text_facts_ignore_string_literals() {
-    use openjd_fuzz::targets::expr::Facts;
-    let f = Facts::from_text("upper(Param.S + ' or flatten(x) if [] ')");
-    assert!(!f.boolop && !f.union && !f.conditional, "{f:?}");
-    let f = Facts::from_text(r#"upper("a\" and b") + 'sum(1)'"#);
-    assert!(!f.boolop && !f.unbound_return, "{f:?}");
-    let f = Facts::from_text("a or flatten(x) + max (y) if c else []");
-    assert!(
-        f.boolop && f.union && f.unbound_return && f.conditional,
-        "{f:?}"
-    );
-    assert!(!Facts::from_text("my_flatten(x)").union);
-    // A format string's literal text is not code either, and an apostrophe
-    // there does not hide the interpolation after it.
-    let f = Facts::from_format_text("it's or {{ a and b }} flatten(x)");
-    assert!(f.boolop && !f.union, "{f:?}");
 }
