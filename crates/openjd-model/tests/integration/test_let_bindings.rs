@@ -1771,9 +1771,10 @@ fn job_with_params_and_script_let(let_bindings: &[String]) -> String {
     )
 }
 
-/// The deepest comprehension nesting one expression allows (62 levels
-/// inside `len`, within the 64-level expression depth limit, typed 125
-/// deep) validates: the type depth limit is above it.
+/// The deepest comprehension nesting that validates is 31 levels (typed
+/// 63 deep, here inside `len`); a 32nd level passes the type depth limit
+/// and fails validation at that binding, with the whole comprehension
+/// under the caret.
 #[test]
 fn deepest_single_expression_comprehension_validates() {
     let decode = |n: usize| {
@@ -1786,15 +1787,28 @@ fn deepest_single_expression_comprehension_validates() {
             &CallerLimits::default(),
         )
     };
-    // One more level is over the expression depth limit, not the type
-    // depth limit.
-    let err = decode(63).expect_err("63 levels inside len() are 65 deep");
-    assert!(
-        err.to_string()
-            .contains("Expression nesting depth (65) exceeded limit (64)"),
+    decode(31).expect("the deepest nesting validates");
+    let err = decode(32)
+        .expect_err("32 levels type past the limit")
+        .to_string();
+    let lines: Vec<&str> = err.lines().collect();
+    assert_eq!(
+        lines[..3],
+        [
+            "Model validation error: 1 validation error for JobTemplate",
+            "steps[0] -> script -> let[0]:",
+            "\tInvalid expression in let binding 'x': Type nesting depth exceeded limit (64)",
+        ],
         "{err}"
     );
-    decode(62).expect("the deepest nesting validates");
+    // The caret is under the outermost comprehension, the argument of `len`.
+    let comprehension = nested_comprehensions("Param.N", 32);
+    assert_eq!(lines[3], format!("  x = len({comprehension})"), "{err}");
+    assert_eq!(
+        lines[4],
+        format!("{}^{}", " ".repeat(10), "~".repeat(comprehension.len() - 1)),
+        "{err}"
+    );
 }
 
 /// A chain of bindings that each nest the one before builds a type past
@@ -1812,8 +1826,8 @@ fn let_chain_past_the_type_depth_limit_fails_at_that_binding() {
     check_err(
         &job_with_params_and_script_let(&bindings),
         &[
-            "steps[0] -> script -> let[3]:",
-            "Invalid expression in let binding 'a3': Type nesting depth exceeded limit (160)",
+            "steps[0] -> script -> let[2]:",
+            "Invalid expression in let binding 'a2': Type nesting depth exceeded limit (64)",
         ],
     );
     // A chain of this length validated in about a second without the
@@ -1848,12 +1862,12 @@ fn format_string_past_the_type_depth_limit_fails_at_that_field() {
             }}
         }}]
     }}"#,
-            serde_json::to_string(&format!("b1 = {}", nested_comprehensions("Param.N", 60)))
+            serde_json::to_string(&format!("b1 = {}", nested_comprehensions("Param.N", 30)))
                 .unwrap(),
-            serde_json::to_string(&format!("b2 = {}", nested_comprehensions("b1", 19))).unwrap(),
+            serde_json::to_string(&format!("b2 = {}", nested_comprehensions("b1", 1))).unwrap(),
         )
     };
-    // `b2` is 159 deep, so `[b2]` is at the limit and `[[b2]]` past it.
+    // `b2` is 63 deep, so `[b2]` is at the limit and `[[b2]]` past it.
     decode_ok(&template("{{ len([b2]) }}"));
     let err = decode_job_template(
         yaml_val(&template("{{ len([[b2]]) }}")),
@@ -1868,15 +1882,15 @@ fn format_string_past_the_type_depth_limit_fails_at_that_field() {
         "Model validation error: 1 validation error for JobTemplate\n\
          steps[0] -> script -> actions -> onRun -> args[0]:\n\
          \tFailed to parse interpolation expression at [0, 17]. \
-         Type nesting depth exceeded limit (160)\n  len([[b2]])\n      ^~~~~~"
+         Type nesting depth exceeded limit (64)\n  len([[b2]])\n      ^~~~~~"
     );
 }
 
 /// A chain as long as `let` allows (50 bindings), each nesting the one
 /// before in 30 comprehensions, also fails at the first binding past the
 /// limit. Each later binding is typed too (a failed one is rebound as
-/// `unresolved[any]`), which takes about 10 s in a debug build; without the
-/// limit a release build took over 5 minutes.
+/// `unresolved[any]`), which takes under a second in a debug build; without
+/// the limit a release build took over 5 minutes.
 #[test]
 fn longest_let_chain_past_the_type_depth_limit_fails_at_that_binding() {
     let mut bindings = vec!["a0 = Param.N".to_string()];
@@ -1890,8 +1904,8 @@ fn longest_let_chain_past_the_type_depth_limit_fails_at_that_binding() {
     check_err(
         &job_with_params_and_script_let(&bindings),
         &[
-            "steps[0] -> script -> let[3]:",
-            "Invalid expression in let binding 'a3': Type nesting depth exceeded limit (160)",
+            "steps[0] -> script -> let[2]:",
+            "Invalid expression in let binding 'a2': Type nesting depth exceeded limit (64)",
         ],
     );
     assert!(

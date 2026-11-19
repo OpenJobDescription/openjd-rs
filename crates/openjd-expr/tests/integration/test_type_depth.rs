@@ -35,12 +35,12 @@ fn assert_too_deep(r: Result<ExprType, ExpressionError>) {
         "{:?}",
         e.kind()
     );
-    assert_eq!(e.message(), "Type nesting depth exceeded limit (160)");
+    assert_eq!(e.message(), "Type nesting depth exceeded limit (64)");
 }
 
 #[test]
-fn max_type_depth_is_160() {
-    assert_eq!(MAX_TYPE_DEPTH, 160);
+fn max_type_depth_is_64() {
+    assert_eq!(MAX_TYPE_DEPTH, 64);
 }
 
 /// Every type constant is 1 deep: wrapping it in lists reaches the limit
@@ -299,11 +299,11 @@ fn evaluating_past_the_limit_is_an_error() {
         .evaluate(&st)
         .expect_err("a list of a type at the limit is too deep");
     assert!(
-        matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 160 }),
+        matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 64 }),
         "{:?}",
         err.kind()
     );
-    assert_eq!(err.message(), "Type nesting depth exceeded limit (160)");
+    assert_eq!(err.message(), "Type nesting depth exceeded limit (64)");
 }
 
 /// Unresolved symbols for the evaluation tests: `X` at the limit, `XS` its
@@ -377,7 +377,7 @@ fn evaluator_paths_past_the_limit_are_errors() {
     ] {
         let err = eval_err(expr, &st);
         assert!(
-            matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 160 }),
+            matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 64 }),
             "{expr}: {:?}",
             err.kind()
         );
@@ -403,7 +403,7 @@ fn speculative_evaluation_does_not_absorb_the_limit() {
     ] {
         let err = eval_err(expr, &st);
         assert!(
-            matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 160 }),
+            matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 64 }),
             "{expr}: {:?}",
             err.kind()
         );
@@ -419,7 +419,7 @@ fn make_list_whose_element_type_is_at_the_limit_is_an_error() {
         let e = r.expect_err("the list's element type is at the limit");
         assert!(matches!(
             e.kind(),
-            ExpressionErrorKind::TypeTooDeep { limit: 160 }
+            ExpressionErrorKind::TypeTooDeep { limit: 64 }
         ));
     };
     too_deep(ExprValue::make_list(vec![], deep_list(MAX_TYPE_DEPTH)));
@@ -457,9 +457,11 @@ fn make_list_whose_element_type_is_at_the_limit_is_an_error() {
 
 /// The deepest types one expression can build from a template come from
 /// nesting list comprehensions over an unresolved value: each is
-/// `list[T | nulltype]`, two levels over its element. The deepest nesting
-/// the parser accepts types without reaching the limit, and so does the
-/// deepest `list[list[int]]` parameter iterated at every level.
+/// `list[T | nulltype]`, two levels over its element. Over a list literal
+/// and over a `list[list[int]]` parameter alike, 31 nested comprehensions
+/// type as 63 deep and validate, and a 32nd passes the limit: typing fails
+/// with the limit's error on the outermost comprehension, the whole
+/// expression.
 #[test]
 fn the_deepest_comprehension_nesting_types_below_the_limit() {
     fn depth(t: &ExprType) -> usize {
@@ -477,24 +479,41 @@ fn the_deepest_comprehension_nesting_types_below_the_limit() {
         ExprValue::unresolved(ExprType::parse("list[list[int]]").unwrap()),
     )
     .unwrap();
-    for (iterable, expected) in [("[1]", 125), ("L", 127)] {
-        let mut expr = "N".to_string();
-        let mut deepest = 0;
-        for i in 0.. {
-            let next = format!("[{expr} for v{i} in {iterable} if C]");
-            let Ok(parsed) = openjd_expr::ParsedExpression::new(&next) else {
-                break;
-            };
-            let t = parsed
-                .evaluate(&st)
-                .unwrap_or_else(|e| panic!("{} nested comprehensions: {e}", i + 1))
-                .expr_type();
-            deepest = deepest.max(depth(&t));
-            expr = next;
-        }
-        // The deepest is the figure the docs give for the depth limit's
-        // margin (127, over a bare name).
-        assert_eq!(deepest, expected, "over {iterable}");
+    for iterable in ["[1]", "L"] {
+        let nest = |n: usize| {
+            (0..n).fold("N".to_string(), |e, i| {
+                format!("[{e} for v{i} in {iterable} if C]")
+            })
+        };
+        // Every nesting up to 31 validates, and the deepest is 63 deep:
+        // the figure type-system.md § Depth limit gives.
+        let deepest = (1..=31)
+            .map(|n| {
+                let parsed = openjd_expr::ParsedExpression::new(&nest(n)).unwrap();
+                let t = parsed
+                    .evaluate(&st)
+                    .unwrap_or_else(|e| panic!("{n} over {iterable}: {e}"))
+                    .expr_type();
+                depth(&t)
+            })
+            .max()
+            .unwrap();
+        assert_eq!(deepest, MAX_TYPE_DEPTH - 1, "over {iterable}");
+        let past = nest(32);
+        let err = openjd_expr::ParsedExpression::new(&past)
+            .unwrap()
+            .evaluate(&st)
+            .expect_err("32 nested comprehensions pass the limit");
+        assert!(
+            matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 64 }),
+            "over {iterable}: {:?}",
+            err.kind()
+        );
+        assert_eq!(
+            (err.col_offset(), err.end_col_offset(), err.caret_offset()),
+            (Some(0), Some(past.len()), Some(0)),
+            "over {iterable}"
+        );
     }
 }
 
@@ -514,7 +533,7 @@ fn many_parameter_unresolved_counts_a_level() {
             Err(e) => {
                 assert!(matches!(
                     e.kind(),
-                    ExpressionErrorKind::TypeTooDeep { limit: 160 }
+                    ExpressionErrorKind::TypeTooDeep { limit: 64 }
                 ));
                 break;
             }
@@ -642,7 +661,11 @@ fn list_of_union_at_the_limit() -> ExprType {
 /// A union of 65 members, past the 64 form combinations a call expands,
 /// one of them a level below the limit.
 fn union_past_the_form_cap() -> ExprType {
-    let mut members: Vec<ExprType> = (1..=64).map(deep_list).collect();
+    let floats = |d: usize| (1..d).fold(ExprType::FLOAT, |t, _| l(t));
+    let mut members: Vec<ExprType> = (1..=32)
+        .map(deep_list)
+        .chain((1..=32).map(floats))
+        .collect();
     members.push(deep_strings(MAX_TYPE_DEPTH - 1));
     u(members)
 }
@@ -693,7 +716,7 @@ fn assert_eval_too_deep(expr: &str, lib: Option<&FunctionLibrary>, st: &SymbolTa
     };
     match r {
         Err(e) => assert!(
-            matches!(e.kind(), ExpressionErrorKind::TypeTooDeep { limit: 160 }),
+            matches!(e.kind(), ExpressionErrorKind::TypeTooDeep { limit: 64 }),
             "{expr}: {}",
             e.message()
         ),
@@ -760,8 +783,8 @@ fn library_typing_past_the_limit_is_an_error() {
 /// wrap, compounding along the chain. Such an expression fails typing
 /// with the limit's error (a deliberate hardening limit, see
 /// type-system.md § Depth limit) on a 2 MiB stack, while a run of it
-/// succeeds. Three comprehensions with 26 wraps
-/// each type below the limit and with 27 past it; ten with 25 type as
+/// succeeds. Three comprehensions with 10 wraps
+/// each type below the limit and with 11 past it; ten with 25 type as
 /// about 500 deep without the limit.
 #[test]
 fn contrived_expression_past_the_limit_fails_typing_but_runs() {
@@ -787,9 +810,9 @@ fn contrived_expression_past_the_limit_fails_typing_but_runs() {
             run.set("N", ExprValue::Int(1)).unwrap();
             run.set("C", ExprValue::Bool(false)).unwrap();
             // Below the limit, typing succeeds.
-            let below = openjd_expr::ParsedExpression::new(&chain(3, 26)).unwrap();
+            let below = openjd_expr::ParsedExpression::new(&chain(3, 10)).unwrap();
             assert!(below.evaluate(&typing).is_ok());
-            for (n, w) in [(3, 27), (10, 25)] {
+            for (n, w) in [(3, 11), (10, 25)] {
                 let parsed = openjd_expr::ParsedExpression::new(&chain(n, w)).unwrap();
                 let start = std::time::Instant::now();
                 let err = parsed.evaluate(&typing).expect_err("types past the limit");
@@ -799,7 +822,7 @@ fn contrived_expression_past_the_limit_fails_typing_but_runs() {
                     start.elapsed()
                 );
                 assert!(
-                    matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 160 }),
+                    matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 64 }),
                     "n={n} w={w}: {:?}",
                     err.kind()
                 );
@@ -824,7 +847,7 @@ fn the_cached_depth_does_not_grow_expr_type() {
     );
 }
 
-/// `int | list[A] | list[B]` at the limit, `A` and `B` 158 deep: merging
+/// `int | list[A] | list[B]` at the limit, `A` and `B` 62 deep: merging
 /// its lists (`int | list[A | B]`) adds a level.
 fn union_with_lists_that_merge_past_the_limit() -> ExprType {
     u(vec![
@@ -864,7 +887,7 @@ fn merging_list_members_past_the_limit_is_an_error() {
 /// typing reports the error and never absorbs it in a branch.
 #[test]
 fn coercing_an_unresolved_value_past_the_limit_is_an_error() {
-    // `nulltype | float | list^157[int]`, 159 deep; the target `list[X]`
+    // `nulltype | float | list^61[int]`, 63 deep; the target `list[X]`
     // is at the limit.
     let x = u(vec![
         ExprType::NULLTYPE,
@@ -876,11 +899,11 @@ fn coercing_an_unresolved_value_past_the_limit_is_an_error() {
     let err = ExprValue::unresolved(source.clone())
         .coerce(&target, PathFormat::Posix)
         .expect_err("the coerced type is past the limit");
-    assert_eq!(err, "Type nesting depth exceeded limit (160)");
+    assert_eq!(err, "Type nesting depth exceeded limit (64)");
     let err = ExprValue::unresolved(union_with_lists_that_merge_past_the_limit())
         .coerce(&list_of_union_at_the_limit(), PathFormat::Posix)
         .expect_err("the coerced type is past the limit");
-    assert_eq!(err, "Type nesting depth exceeded limit (160)");
+    assert_eq!(err, "Type nesting depth exceeded limit (64)");
     let mut st = SymbolTable::new();
     st.set("A", ExprValue::unresolved(source)).unwrap();
     st.set("C", ExprValue::unresolved(ExprType::BOOL)).unwrap();
@@ -891,7 +914,7 @@ fn coercing_an_unresolved_value_past_the_limit_is_an_error() {
             .evaluate(&[&st])
             .expect_err(expr);
         assert!(
-            matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 160 }),
+            matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 64 }),
             "{expr}: {:?}",
             err.kind()
         );
@@ -938,17 +961,16 @@ fn irregular_list_type(seed: u64, depth: usize) -> ExprType {
 fn concatenation_join_past_the_limit_is_an_error() {
     // Typing `A[0] + B` joins the operands' element types. Against
     // `list[list[nulltype]] | list[nulltype]`, joining the union members
-    // with an irregular operand 155 deep builds a type past the limit.
-    // The regular shapes tried (a union at every level, every other level,
-    // and so on) stay within it: this shape was found by search.
-    let a0 = irregular_list_type(817_566_216_853, 120);
+    // with an irregular operand 63 deep builds a type past the limit.
+    // This shape was found by searching the generator's seeds.
+    let a0 = irregular_list_type(3_812_638_938_789, 48);
     let fnv1a = a0
         .to_string()
         .bytes()
         .fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
             (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
         });
-    assert_eq!(fnv1a, 0x32e7_1301_10a2_92d9, "the generator changed");
+    assert_eq!(fnv1a, 0x5617_6895_89cc_b84c, "the generator changed");
     let mut st = SymbolTable::new();
     st.set("A", ExprValue::unresolved(l(a0))).unwrap();
     st.set(
@@ -978,7 +1000,7 @@ fn concrete_list_elements_whose_join_passes_the_limit_are_errors() {
     let e = ExprValue::make_list(vec![ua.clone(), ub.clone()], ExprType::NULLTYPE)
         .expect_err("the join is past the limit");
     assert!(
-        matches!(e.kind(), ExpressionErrorKind::TypeTooDeep { limit: 160 }),
+        matches!(e.kind(), ExpressionErrorKind::TypeTooDeep { limit: 64 }),
         "{:?}",
         e.kind()
     );

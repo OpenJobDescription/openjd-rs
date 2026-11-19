@@ -1627,7 +1627,7 @@ fn type_too_deep_points_at_the_list() {
         "1 + len([X])",
         &type_at_the_limit(),
         &[
-            "Type nesting depth exceeded limit (160)\n",
+            "Type nesting depth exceeded limit (64)\n",
             "  1 + len([X])\n",
             "          ^~~",
         ],
@@ -1642,7 +1642,7 @@ fn type_too_deep_in_a_conditional_branch() {
         "1 if C else [X]",
         &type_at_the_limit(),
         &[
-            "Type nesting depth exceeded limit (160)\n",
+            "Type nesting depth exceeded limit (64)\n",
             "  1 if C else [X]\n",
             "              ^~~",
         ],
@@ -1655,7 +1655,7 @@ fn type_too_deep_in_a_boolean_operand() {
         "C and [X]",
         &type_at_the_limit(),
         &[
-            "Type nesting depth exceeded limit (160)\n",
+            "Type nesting depth exceeded limit (64)\n",
             "  C and [X]\n",
             "        ^~~",
         ],
@@ -1668,7 +1668,7 @@ fn type_too_deep_in_a_comprehension_body() {
         "[[X] for x in [1, 2] if C]",
         &type_at_the_limit(),
         &[
-            "Type nesting depth exceeded limit (160)\n",
+            "Type nesting depth exceeded limit (64)\n",
             "  [[X] for x in [1, 2] if C]\n",
             "   ^~~",
         ],

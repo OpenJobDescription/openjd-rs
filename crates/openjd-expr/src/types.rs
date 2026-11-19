@@ -42,17 +42,16 @@ use crate::error::{ExpressionError, ExpressionErrorKind};
 /// builds nest at most two lists, so no parsed type and no concrete value
 /// built from a template's values comes near the limit. (A value built
 /// through the Rust API, and values an evaluation derives from it, can.)
-/// Static
-/// typing builds deeper types: a list comprehension over an unresolved
-/// value is `list[T | nulltype]`, two levels over its element, so the
-/// deepest comprehension nesting
-/// [`MAX_EXPRESSION_DEPTH`](crate::MAX_EXPRESSION_DEPTH) allows types as at
-/// most 127 deep, below the limit. Contrived expressions (comprehension
-/// bodies wrapped in many `([x] if C else 1)`) and chains of `let` bindings
-/// can type deeper than any fixed limit; they fail validation with
+/// Static typing builds deeper types: a list comprehension over an
+/// unresolved value is `list[T | nulltype]`, two levels over its element,
+/// so 31 nested comprehensions type as 63 deep, and nesting more fails,
+/// although [`MAX_EXPRESSION_DEPTH`](crate::MAX_EXPRESSION_DEPTH) (also 64)
+/// allows about twice as many. Comprehension bodies wrapped in many
+/// `([x] if C else 1)`, and chains of `let` bindings, can type deeper than
+/// any fixed limit. All of these contrived expressions fail validation with
 /// [`ExpressionErrorKind::TypeTooDeep`], a deliberate hardening limit like
 /// `MAX_EXPRESSION_DEPTH` (see `specs/expr/type-system.md` § Depth limit).
-pub const MAX_TYPE_DEPTH: usize = 160;
+pub const MAX_TYPE_DEPTH: usize = 64;
 
 /// Type codes for expression values.
 ///

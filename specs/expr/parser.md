@@ -350,13 +350,14 @@ other targets accept.
 
 **Type depth.** A fourth Rust implementation limit sits next to these:
 static typing never builds a type deeper than
-[`MAX_TYPE_DEPTH`](../../crates/openjd-expr/src/types.rs) (currently **160**),
-for the same reason, since every walk over a type recurses. The deepest
-comprehension nesting the depth limit above allows types as 127 deep, below
-it, but a contrived expression or `let` chain can type deeper (wrapping each
-body of three nested comprehensions in 29 `([x] if C else 1)`, about 1.4 KB,
-is 176 deep). Validation rejects such a template with "Type nesting depth
-exceeded limit (160)", although the specification allows it and a run of it
+[`MAX_TYPE_DEPTH`](../../crates/openjd-expr/src/types.rs) (currently **64**),
+for the same reason, since every walk over a type recurses. A comprehension
+over an unresolved value types two levels over its element, so 31 nested
+comprehensions are the most that validate, about half what the depth limit
+above allows, and a contrived expression or `let` chain can type deeper still
+(wrapping each body of three nested comprehensions in 29 `([x] if C else 1)`,
+about 1.4 KB, is 176 deep). Validation rejects such a template with "Type
+nesting depth exceeded limit (64)", although the specification allows it and a run of it
 would succeed, as the limits above reject some input the specification
 allows. See type-system.md § Depth limit.
 
