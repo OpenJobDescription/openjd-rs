@@ -99,9 +99,11 @@ calling subprocess primitives directly.
 ## Constants
 
 ```rust
-/// Default notify period for `NOTIFY_THEN_TERMINATE` cancellation when
-/// the action itself does not specify a `notifyPeriodInSeconds`.
-/// Matches the OpenJD spec default.
+/// Notify period a cross-user cancel command uses after the helper has
+/// the action's Run command, when the action's cancel method failed to
+/// resolve and the caller gave no `time_limit` (see
+/// embedded-cross-user-helper.md § Choosing the cancel command). Not the default grace of an action: that is 120 s for
+/// `onRun` and 30 s for environment actions (runners.md).
 pub const session::DEFAULT_CANCEL_NOTIFY_PERIOD_SECS: u64 = 5;
 ```
 
@@ -251,11 +253,14 @@ impl Session {
 
     // ── Cancellation and cleanup ──
 
-    /// Cancel the currently running action. `time_limit` controls
-    /// the cancel method: `Some(zero)` forces immediate terminate;
-    /// `Some(d)` sends a notify followed by terminate after `d`;
-    /// `None` uses the action's declared `notifyPeriodInSeconds` (or
-    /// `DEFAULT_CANCEL_NOTIFY_PERIOD_SECS` if not specified).
+    /// Cancel the currently running action with its own cancel
+    /// method. A `TERMINATE` action (including one that declares no
+    /// cancelation) is killed at once. A `NOTIFY_THEN_TERMINATE` action
+    /// is notified and killed after its declared grace, capped at
+    /// `time_limit`; `Some(zero)` kills at once. Same-user and
+    /// cross-user sessions follow the same rule, except that cross-user
+    /// sends the grace in whole seconds, truncated: a grace under one
+    /// second kills at once without the notify signal.
     ///
     /// `mark_action_failed: true` reports a cancelled action as
     /// Failed rather than Canceled in the final `ActionResult`. This
@@ -369,6 +374,12 @@ impl Session {
     pub fn set_job_parameter_values_for_test(&mut self, values: JobParameterValues);
     pub fn set_cancel_writer_for_test(&mut self, writer: std::fs::File);
     pub fn set_helper_auth_token_for_test(&mut self, token: String);
+    /// Called on the session thread after each later action registers for
+    /// cancellation and right before its Run command goes to the
+    /// cross-user helper, so a test can cancel in that window.
+    pub fn set_before_helper_run_hook_for_test(&mut self, hook: Arc<dyn Fn() + Send + Sync>);
+    /// Makes each later cross-user runner's dup of the cancel pipe fail.
+    pub fn fail_runner_cancel_writer_for_test(&mut self);
     pub fn clone_cancel_writer(&self) -> Option<std::fs::File>;
 }
 ```
@@ -1154,8 +1165,10 @@ backed by an embedded cross-user helper binary:
 
 - POSIX: a single `sudo -i <helper>` is spawned at session creation.
   Subsequent actions are dispatched through the helper's stdin/stdout
-  IPC, avoiding the ~1s sudo startup cost per action. Cancellation
-  flows through a separate `cancel_writer` stdin FD.
+  IPC, avoiding the ~1s sudo startup cost per action. Cancel commands
+  go through `cancel_writer`, a dup of the helper's stdin, or, for a
+  cancel that arrives before the action's Run command, through the
+  helper's own stdin right after Run.
 - Windows: similar design using `CreateProcessWithLogonW` or
   `CreateProcessAsUserW` depending on which `WindowsSessionUser` mode
   is in use.

@@ -70,6 +70,36 @@ fn make_session(user: Arc<PosixSessionUser>) -> Session {
     Session::with_config(config).unwrap()
 }
 
+/// Like [`make_session`], but installs a session-wide `cancel_token` so a
+/// bare `token.cancel()` (the external cancel path a worker agent uses on a
+/// service cancel) can be exercised against the cross-user helper.
+fn make_session_with_token(
+    user: Arc<PosixSessionUser>,
+) -> (Session, tokio_util::sync::CancellationToken) {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    // Leak so the dir outlives the session constructor
+    std::mem::forget(tmp);
+    let token = tokio_util::sync::CancellationToken::new();
+    let config = SessionConfig {
+        limits: Default::default(),
+        session_id: "cross-user-test".into(),
+        job_parameter_values: HashMap::new(),
+        path_mapping_rules: None,
+        retain_working_dir: false,
+        callback: None,
+        os_env_vars: None,
+        session_root_directory: Some(root),
+        user: Some(user),
+        profile: None,
+        cancel_token: Some(token.clone()),
+        debug_collect_stdout: true,
+        echo_openjd_directives: true,
+        sticky_bit_policy: openjd_sessions::StickyBitPolicy::Disabled,
+    };
+    (Session::with_config(config).unwrap(), token)
+}
+
 fn support_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -452,6 +482,901 @@ async fn test_cross_user_session_cancel_handle_mark_failed_helper_subprocess() {
         "cancel must be delivered for this test to exercise mark_action_failed"
     );
     session.cleanup();
+}
+
+// === Cross-user external-token cancel tests (issue #288) ===
+
+/// A bare external `SessionConfig.cancel_token.cancel()` (not
+/// `cancel_action`/`SessionCancelHandle`) must cancel a cross-user helper
+/// subprocess: the token is a parent of every action token, so
+/// `run_via_helper` has to observe it and signal the helper. Before the fix,
+/// `run_via_helper` watched only the watch channel, so a bare token cancel
+/// let the child run to completion and the action reported Success.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_external_token_cancels_helper_subprocess() {
+    use openjd_sessions::session::SessionState;
+
+    let user = require_target_user();
+    let (mut session, token) = make_session_with_token(user);
+
+    // Cancel the session-wide token mid-action, from another task.
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        token.cancel();
+    });
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_subprocess("sleep", Some(&["60".to_string()]), None, None, true, None)
+        .await
+        .expect("run_subprocess must return a result");
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        r.state,
+        ActionState::Canceled,
+        "a bare session-wide token cancel must classify the helper subprocess \
+         as Canceled; exit_code: {:?}, stdout: {}",
+        r.exit_code,
+        r.stdout
+    );
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "the external token cancel must interrupt the 60s sleep, took {elapsed:?}"
+    );
+    // A Canceled action makes the session ending-only (brittle sessions).
+    assert_eq!(session.state(), SessionState::ReadyEnding);
+    session.cleanup();
+}
+
+/// The same external-token cancel through `run_task` (the environment/step
+/// runner helper path, distinct from `run_subprocess`).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_external_token_cancels_helper_task() {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::{Action, StepActions, StepScript};
+    use openjd_sessions::session::SessionState;
+
+    let user = require_target_user();
+    let (mut session, token) = make_session_with_token(user);
+
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        token.cancel();
+    });
+
+    let script = StepScript {
+        let_bindings: None,
+        actions: StepActions {
+            on_run: Action {
+                command: FormatString::new("sleep").unwrap(),
+                args: Some(vec![FormatString::new("60").unwrap()]),
+                timeout: None,
+                cancelation: None,
+            },
+        },
+        embedded_files: None,
+    };
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &script, None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        r.state,
+        ActionState::Canceled,
+        "a bare session-wide token cancel must classify the helper task as \
+         Canceled; exit_code: {:?}, stdout: {}",
+        r.exit_code,
+        r.stdout
+    );
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "the external token cancel must interrupt the 60s sleep, took {elapsed:?}"
+    );
+    assert_eq!(session.state(), SessionState::ReadyEnding);
+    session.cleanup();
+}
+
+/// A task that traps SIGTERM: on TERM it prints `GOT_TERM`, sleeps
+/// `trap_sleep` seconds, then exits 0. With `ntt = Some(n)` its cancelation
+/// is NOTIFY_THEN_TERMINATE with an `n`-second grace period.
+fn trap_task(
+    trap_sleep: u32,
+    ntt: Option<u32>,
+    timeout: Option<u32>,
+) -> openjd_model::job::StepScript {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::{Action, CancelationMode, StepActions, StepScript};
+    let script = format!(
+        "trap 'echo GOT_TERM; sleep {trap_sleep}; exit 0' TERM; echo STARTED; sleep 60 & wait"
+    );
+    StepScript {
+        let_bindings: None,
+        actions: StepActions {
+            on_run: Action {
+                command: FormatString::new("bash").unwrap(),
+                args: Some(vec![
+                    FormatString::new("-c").unwrap(),
+                    FormatString::new(&script).unwrap(),
+                ]),
+                timeout: timeout.map(|t| FormatString::new(&t.to_string()).unwrap()),
+                cancelation: ntt.map(|n| CancelationMode::NotifyThenTerminate {
+                    notify_period_in_seconds: Some(FormatString::new(&n.to_string()).unwrap()),
+                }),
+            },
+        },
+        embedded_files: None,
+    }
+}
+
+/// A bare token cancel on a NOTIFY_THEN_TERMINATE task notifies first and
+/// honours the grace period, as the same-user loop does: the TERM trap runs
+/// (`GOT_TERM`) and finishes its 3s sleep inside the 10s grace.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_external_token_notify_then_terminate() {
+    use openjd_sessions::session::SessionState;
+
+    let user = require_target_user();
+    let (mut session, token) = make_session_with_token(user);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        token.cancel();
+    });
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &trap_task(3, Some(10), None), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(
+        r.stdout.contains("GOT_TERM"),
+        "a NOTIFY_THEN_TERMINATE token cancel must send the notify signal first; stdout: {}",
+        r.stdout
+    );
+    assert!(
+        elapsed >= Duration::from_secs(4) && elapsed < Duration::from_secs(12),
+        "the TERM trap's 3s must run inside the 10s grace, took {elapsed:?}"
+    );
+    assert_eq!(session.state(), SessionState::ReadyEnding);
+    assert!(matches!(
+        session.clear_ending_only(),
+        Err(openjd_sessions::SessionError::SessionCanceled)
+    ));
+    session.cleanup();
+}
+
+/// A `SessionCancelHandle` cancel with a 2s time limit on a
+/// NOTIFY_THEN_TERMINATE(30s) task must stay bounded by the 2s limit: the
+/// handle writes the pipe command itself, so `run_via_helper`'s token branch
+/// must not send a second command with the declared 30s grace (which would
+/// reset the helper's escalation deadline).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_time_limit_not_extended_by_token_branch() {
+    let user = require_target_user();
+    let mut session = make_session(user);
+    let handle = session.cancel_handle();
+    let canceller = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        handle.cancel(Some(Duration::from_secs(2)), false)
+    });
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &trap_task(20, Some(30), None), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+
+    assert!(
+        canceller.await.unwrap(),
+        "the handle must find the running task"
+    );
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(
+        elapsed < Duration::from_secs(8),
+        "the 2s time limit must bound the cancel, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// A bare token cancel during `onEnter` cancels the helper-run action.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_external_token_cancels_on_enter() {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::{Action, Environment, EnvironmentActions, EnvironmentScript};
+
+    let user = require_target_user();
+    let (mut session, token) = make_session_with_token(user);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        token.cancel();
+    });
+    let env = Environment {
+        name: "Env".into(),
+        description: None,
+        variables: None,
+        resolved_symtab: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            embedded_files: None,
+            actions: EnvironmentActions {
+                on_enter: Some(Action {
+                    command: FormatString::new("sleep").unwrap(),
+                    args: Some(vec![FormatString::new("60").unwrap()]),
+                    timeout: None,
+                    cancelation: None,
+                }),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
+                on_exit: None,
+            },
+        }),
+    };
+
+    let started = std::time::Instant::now();
+    let _ = session.enter_environment(&env, None, None, None).await;
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        session.action_status().map(|a| a.state),
+        Some(ActionState::Canceled)
+    );
+    assert!(
+        elapsed < Duration::from_secs(30),
+        "the token cancel must interrupt the 60s onEnter, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// An action that timed out stays `Timeout` when the session token fires
+/// while it is still exiting, matching the same-user loop, which checks the
+/// timeout before the cancel. The token branch must also not send a second
+/// NOTIFY_THEN_TERMINATE: that would reset the helper's escalation deadline,
+/// so the TERM-ignoring task would be killed at 3 + 4 = 7s instead of 1 + 4 =
+/// 5s.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_timeout_then_token_stays_timeout() {
+    let user = require_target_user();
+    let (mut session, token) = make_session_with_token(user);
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        token.cancel();
+    });
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &trap_task(20, Some(4), Some(1)), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert_eq!(r.state, ActionState::Timeout, "stdout: {}", r.stdout);
+    assert!(
+        elapsed >= Duration::from_millis(4500) && elapsed < Duration::from_millis(6500),
+        "the timeout's 4s grace must end the task at about 5s, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// Run a NOTIFY_THEN_TERMINATE(4s) task with a 3s timeout whose TERM trap
+/// never exits, cancel it at 1s with `cancel`, and check it ends `Canceled`
+/// at about 1 + 4 = 5s: once a cancel is delivered the timeout must neither
+/// relabel the action `Timeout` nor send a second command that resets the
+/// escalation deadline (which would end it at 3 + 4 = 7s), as in the
+/// same-user loop.
+async fn check_cancel_then_timeout_stays_canceled(
+    mut session: Session,
+    cancel: impl FnOnce() + Send + 'static,
+) {
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        cancel();
+    });
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &trap_task(20, Some(4), Some(3)), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(
+        elapsed >= Duration::from_millis(4500) && elapsed < Duration::from_millis(6500),
+        "the cancel's 4s grace must end the task at about 5s, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_token_then_timeout_stays_canceled() {
+    let (session, token) = make_session_with_token(require_target_user());
+    check_cancel_then_timeout_stays_canceled(session, move || token.cancel()).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_then_timeout_stays_canceled() {
+    let session = make_session(require_target_user());
+    let handle = session.cancel_handle();
+    check_cancel_then_timeout_stays_canceled(session, move || {
+        assert!(
+            handle.cancel(None, false),
+            "the handle must find the running task"
+        );
+    })
+    .await;
+}
+
+// === One cancel method per action, whatever the entry point ===
+
+/// How a cross-user test cancels its task.
+#[derive(Debug, Clone, Copy)]
+enum CancelVia {
+    /// `SessionCancelHandle::cancel(time_limit, false)`, the same command
+    /// builder `Session::cancel_action` uses.
+    Handle(Option<Duration>),
+    /// A bare `SessionConfig.cancel_token.cancel()`.
+    Token,
+    /// The action's own timeout, in seconds.
+    Timeout(u32),
+}
+
+/// Run `trap_task(20, ntt, timeout)` cross-user and cancel it at 1.5s
+/// through `via`. Returns the result and the time the run took.
+async fn run_trap_task_and_cancel(
+    ntt: Option<u32>,
+    via: CancelVia,
+) -> (openjd_sessions::action::ActionResult, Duration) {
+    let user = require_target_user();
+    let (mut session, token) = make_session_with_token(user);
+    let timeout = match via {
+        CancelVia::Timeout(t) => Some(t),
+        _ => None,
+    };
+    let handle = session.cancel_handle();
+    let canceller = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        match via {
+            CancelVia::Handle(limit) => handle.cancel(limit, false),
+            CancelVia::Token => {
+                token.cancel();
+                true
+            }
+            CancelVia::Timeout(_) => true,
+        }
+    });
+
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &trap_task(20, ntt, timeout), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert!(
+        canceller.await.unwrap(),
+        "{via:?}: the handle must find the running task"
+    );
+    session.cleanup();
+    (r, elapsed)
+}
+
+/// A task that declares no cancelation is a TERMINATE action. The same-user
+/// loop kills it at once on any cancel (`subprocess.rs`), so cross-user must
+/// send the helper TERMINATE whichever way the cancel arrives: no TERM trap
+/// (`GOT_TERM`), and the task ends right after the 1.5s cancel. Before the
+/// shared command builder, the handle (and `cancel_action`) sent
+/// NOTIFY_THEN_TERMINATE with a 5s default grace, or with the time limit.
+async fn check_terminate_action_killed_at_once(via: CancelVia) {
+    let (r, elapsed) = run_trap_task_and_cancel(None, via).await;
+    let expected = match via {
+        CancelVia::Timeout(_) => ActionState::Timeout,
+        _ => ActionState::Canceled,
+    };
+    assert_eq!(r.state, expected, "{via:?}: stdout: {}", r.stdout);
+    assert!(
+        !r.stdout.contains("GOT_TERM"),
+        "{via:?}: a TERMINATE action must not get the notify signal; stdout: {}",
+        r.stdout
+    );
+    assert!(
+        elapsed < Duration::from_millis(4000),
+        "{via:?}: a TERMINATE action must be killed at once, took {elapsed:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_terminate_action_killed_at_once() {
+    check_terminate_action_killed_at_once(CancelVia::Handle(None)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_time_limit_terminate_action_killed_at_once() {
+    check_terminate_action_killed_at_once(CancelVia::Handle(Some(Duration::from_secs(10)))).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_token_terminate_action_killed_at_once() {
+    check_terminate_action_killed_at_once(CancelVia::Token).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_timeout_terminate_action_killed_at_once() {
+    check_terminate_action_killed_at_once(CancelVia::Timeout(1)).await;
+}
+
+/// `run_subprocess` through the helper is a TERMINATE action too: a handle
+/// cancel kills it at once, as on the same-user path.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_run_subprocess_killed_at_once() {
+    let mut session = make_session(require_target_user());
+    let handle = session.cancel_handle();
+    let canceller = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        handle.cancel(None, false)
+    });
+    let args = [
+        "-c".to_string(),
+        "trap 'echo GOT_TERM; sleep 20; exit 0' TERM; echo STARTED; sleep 60 & wait".to_string(),
+    ];
+    let started = std::time::Instant::now();
+    let r = session
+        .run_subprocess("bash", Some(&args), None, None, true, None)
+        .await
+        .expect("run_subprocess must return a result");
+    let elapsed = started.elapsed();
+    assert!(
+        canceller.await.unwrap(),
+        "the handle must find the subprocess"
+    );
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(
+        !r.stdout.contains("GOT_TERM"),
+        "run_subprocess must not get the notify signal; stdout: {}",
+        r.stdout
+    );
+    assert!(
+        elapsed < Duration::from_millis(4000),
+        "run_subprocess must be killed at once, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// A NOTIFY_THEN_TERMINATE(8s) task whose TERM trap never exits gets the
+/// notify signal and is killed when the grace ends, about 1.5 + `grace`
+/// seconds after the start, whichever way the cancel arrives. 8 s is far
+/// enough from the 5 s fallback grace that a command sent with the
+/// fallback lands outside the window.
+async fn check_notify_then_terminate_grace(via: CancelVia, grace: Duration) {
+    let (r, elapsed) = run_trap_task_and_cancel(Some(8), via).await;
+    assert_eq!(
+        r.state,
+        ActionState::Canceled,
+        "{via:?}: stdout: {}",
+        r.stdout
+    );
+    assert!(
+        r.stdout.contains("GOT_TERM"),
+        "{via:?}: a NOTIFY_THEN_TERMINATE cancel must notify first; stdout: {}",
+        r.stdout
+    );
+    let end = Duration::from_millis(1500) + grace;
+    assert!(
+        elapsed >= end - Duration::from_millis(500) && elapsed < end + Duration::from_millis(1500),
+        "{via:?}: the task must be killed when the {grace:?} grace ends (about {end:?}), \
+         took {elapsed:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_notify_then_terminate_uses_declared_grace() {
+    check_notify_then_terminate_grace(CancelVia::Handle(None), Duration::from_secs(8)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_notify_then_terminate_capped_by_time_limit() {
+    check_notify_then_terminate_grace(
+        CancelVia::Handle(Some(Duration::from_secs(2))),
+        Duration::from_secs(2),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_token_notify_then_terminate_uses_declared_grace() {
+    check_notify_then_terminate_grace(CancelVia::Token, Duration::from_secs(8)).await;
+}
+
+// === Cancel before the helper's Run command ===
+//
+// A handle cancel finds an action once it is registered, which is before
+// the helper is sent its Run command, and a helper with no command running
+// drops a cancel. These tests cancel in that window: deterministically from
+// the session's before-Run test hook, and with a canceller that spins on the
+// handle (the auditor's probe). Before the fix the action ran to completion
+// (6 s, prints FINISHED) and was still reported Canceled.
+
+/// A TERMINATE task that sleeps 6 s and then prints FINISHED.
+fn sleep_then_finish_task() -> openjd_model::job::StepScript {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::{Action, StepActions, StepScript};
+    StepScript {
+        let_bindings: None,
+        actions: StepActions {
+            on_run: Action {
+                command: FormatString::new("bash").unwrap(),
+                args: Some(vec![
+                    FormatString::new("-c").unwrap(),
+                    FormatString::new("sleep 6; echo FINISHED").unwrap(),
+                ]),
+                timeout: None,
+                cancelation: None,
+            },
+        },
+        embedded_files: None,
+    }
+}
+
+/// Install a before-Run hook that cancels through a handle with
+/// `time_limit`, once. Returns a flag the hook sets when the handle found
+/// the action.
+fn cancel_before_run_once(
+    session: &mut Session,
+    time_limit: Option<Duration>,
+) -> Arc<std::sync::atomic::AtomicBool> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let handle = session.cancel_handle();
+    let fired = Arc::new(AtomicBool::new(false));
+    let delivered = Arc::new(AtomicBool::new(false));
+    let delivered_in_hook = delivered.clone();
+    session.set_before_helper_run_hook_for_test(Arc::new(move || {
+        if !fired.swap(true, Ordering::SeqCst) {
+            delivered_in_hook.store(handle.cancel(time_limit, false), Ordering::SeqCst);
+        }
+    }));
+    delivered
+}
+
+/// A handle cancel before Run must still cancel a task: the TERMINATE task
+/// is killed at once instead of running its 6 s and printing FINISHED.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_before_run_task_killed_at_once() {
+    let mut session = make_session(require_target_user());
+    let delivered = cancel_before_run_once(&mut session, None);
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &sleep_then_finish_task(), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert!(
+        delivered.load(std::sync::atomic::Ordering::SeqCst),
+        "the hook's handle must find the registered task"
+    );
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(
+        !r.stdout.contains("FINISHED"),
+        "a cancel before Run must stop the task; stdout: {}",
+        r.stdout
+    );
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "the task must be killed at once, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// `run_subprocess` through the helper, cancelled before its Run command.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_before_run_subprocess_killed_at_once() {
+    let mut session = make_session(require_target_user());
+    let delivered = cancel_before_run_once(&mut session, None);
+    let args = ["-c".to_string(), "sleep 6; echo FINISHED".to_string()];
+    let started = std::time::Instant::now();
+    let r = session
+        .run_subprocess("bash", Some(&args), None, None, true, None)
+        .await
+        .expect("run_subprocess must return a result");
+    let elapsed = started.elapsed();
+    assert!(delivered.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(!r.stdout.contains("FINISHED"), "stdout: {}", r.stdout);
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "the subprocess must be killed at once, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// `onEnter` and `onExit` take the same gate as a task: a 6 s action
+/// canceled before its Run command ends at once with Canceled.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_before_run_on_enter_and_on_exit() {
+    use openjd_expr::format_string::FormatString;
+    use openjd_model::job::{Action, Environment, EnvironmentActions, EnvironmentScript};
+
+    let sleep_action = || Action {
+        command: FormatString::new("bash").unwrap(),
+        args: Some(vec![
+            FormatString::new("-c").unwrap(),
+            FormatString::new("sleep 6; echo FINISHED").unwrap(),
+        ]),
+        timeout: None,
+        cancelation: None,
+    };
+    let env = |on_enter: bool| Environment {
+        name: "Env".into(),
+        description: None,
+        variables: None,
+        resolved_symtab: None,
+        script: Some(EnvironmentScript {
+            let_bindings: None,
+            embedded_files: None,
+            actions: EnvironmentActions {
+                on_enter: on_enter.then(sleep_action),
+                on_wrap_env_enter: None,
+                on_wrap_task_run: None,
+                on_wrap_env_exit: None,
+                on_exit: (!on_enter).then(sleep_action),
+            },
+        }),
+    };
+
+    // onEnter
+    let mut session = make_session(require_target_user());
+    let delivered = cancel_before_run_once(&mut session, None);
+    let started = std::time::Instant::now();
+    let _ = session
+        .enter_environment(&env(true), None, None, None)
+        .await;
+    let elapsed = started.elapsed();
+    assert!(delivered.load(std::sync::atomic::Ordering::SeqCst));
+    let status = session.action_status();
+    assert_eq!(
+        status.as_ref().map(|a| a.state),
+        Some(ActionState::Canceled),
+        "{status:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "onEnter must be killed at once, took {elapsed:?}"
+    );
+    session.cleanup();
+
+    // onExit: enter with no onEnter, then cancel the exit before its Run.
+    let mut session = make_session(require_target_user());
+    let id = session
+        .enter_environment(&env(false), None, None, None)
+        .await
+        .unwrap();
+    let delivered = cancel_before_run_once(&mut session, None);
+    let started = std::time::Instant::now();
+    let _ = session.exit_environment(&id, None, false, None).await;
+    let elapsed = started.elapsed();
+    assert!(delivered.load(std::sync::atomic::Ordering::SeqCst));
+    let status = session.action_status();
+    assert_eq!(
+        status.as_ref().map(|a| a.state),
+        Some(ActionState::Canceled),
+        "{status:?}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "onExit must be killed at once, took {elapsed:?}"
+    );
+    session.cleanup();
+}
+
+/// After a task canceled before Run, the same helper runs the session's
+/// next action to Success. (On Unix a cancel can't carry over anyway, since
+/// the helper drops one with no command running; this checks the helper is
+/// still usable.) (These Docker tests don't check a NOTIFY_THEN_TERMINATE grace:
+/// a held cancel signals the process right after it starts, before a script
+/// could install a TERM trap. `cross_user_helper.rs`'s
+/// `run_via_helper_gate_tests` check the held command exactly.)
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_before_run_leaves_helper_ready_for_next_action() {
+    let mut session = make_session(require_target_user());
+    let _delivered = cancel_before_run_once(&mut session, None);
+    let r = session
+        .run_task("t", &sleep_then_finish_task(), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    // A canceled action makes the session ending-only (session.md § Brittle
+    // Sessions); clear it to run the next action.
+    session.clear_ending_only().unwrap();
+    let args = ["-c".to_string(), "sleep 1; echo FINISHED".to_string()];
+    let next = session
+        .run_subprocess("bash", Some(&args), None, None, true, None)
+        .await
+        .expect("run_subprocess must return a result");
+    assert_eq!(next.state, ActionState::Success, "stdout: {}", next.stdout);
+    assert!(next.stdout.contains("FINISHED"), "stdout: {}", next.stdout);
+    session.cleanup();
+}
+
+/// If a runner's dup of the cancel pipe fails, a cancel before Run still
+/// reaches a task, onEnter and onExit (the held cancel goes through the
+/// helper's own stdin), and so does a handle cancel after Run (the handle
+/// has its own dup).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_without_runner_cancel_pipe() {
+    // Before Run.
+    let mut session = make_session(require_target_user());
+    session.fail_runner_cancel_writer_for_test();
+    let delivered = cancel_before_run_once(&mut session, None);
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &sleep_then_finish_task(), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert!(delivered.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(!r.stdout.contains("FINISHED"), "stdout: {}", r.stdout);
+    assert!(elapsed < Duration::from_secs(3), "took {elapsed:?}");
+    session.cleanup();
+
+    // onEnter and onExit, before Run.
+    let env = |on_enter: bool| {
+        use openjd_expr::format_string::FormatString;
+        use openjd_model::job::{Action, Environment, EnvironmentActions, EnvironmentScript};
+        let action = || Action {
+            command: FormatString::new("bash").unwrap(),
+            args: Some(vec![
+                FormatString::new("-c").unwrap(),
+                FormatString::new("sleep 6; echo FINISHED").unwrap(),
+            ]),
+            timeout: None,
+            cancelation: None,
+        };
+        Environment {
+            name: "Env".into(),
+            description: None,
+            variables: None,
+            resolved_symtab: None,
+            script: Some(EnvironmentScript {
+                let_bindings: None,
+                embedded_files: None,
+                actions: EnvironmentActions {
+                    on_enter: on_enter.then(action),
+                    on_wrap_env_enter: None,
+                    on_wrap_task_run: None,
+                    on_wrap_env_exit: None,
+                    on_exit: (!on_enter).then(action),
+                },
+            }),
+        }
+    };
+    let mut session = make_session(require_target_user());
+    session.fail_runner_cancel_writer_for_test();
+    let delivered = cancel_before_run_once(&mut session, None);
+    let started = std::time::Instant::now();
+    let _ = session
+        .enter_environment(&env(true), None, None, None)
+        .await;
+    assert!(delivered.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(
+        session.action_status().map(|a| a.state),
+        Some(ActionState::Canceled)
+    );
+    assert!(started.elapsed() < Duration::from_secs(3), "onEnter");
+    session.cleanup();
+
+    let mut session = make_session(require_target_user());
+    session.fail_runner_cancel_writer_for_test();
+    let id = session
+        .enter_environment(&env(false), None, None, None)
+        .await
+        .unwrap();
+    let delivered = cancel_before_run_once(&mut session, None);
+    let started = std::time::Instant::now();
+    let _ = session.exit_environment(&id, None, false, None).await;
+    assert!(delivered.load(std::sync::atomic::Ordering::SeqCst));
+    assert_eq!(
+        session.action_status().map(|a| a.state),
+        Some(ActionState::Canceled)
+    );
+    assert!(started.elapsed() < Duration::from_secs(3), "onExit");
+    session.cleanup();
+
+    // After Run.
+    let mut session = make_session(require_target_user());
+    session.fail_runner_cancel_writer_for_test();
+    let handle = session.cancel_handle();
+    let canceller = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        handle.cancel(None, false)
+    });
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &sleep_then_finish_task(), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert!(canceller.await.unwrap());
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(!r.stdout.contains("FINISHED"), "stdout: {}", r.stdout);
+    assert!(elapsed < Duration::from_secs(4), "took {elapsed:?}");
+    session.cleanup();
+}
+
+/// The auditor's probe, without the hook: a canceller thread spins on the
+/// handle from before the task starts, so its cancel lands right after the
+/// task registers. Three runs, each must end at once.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_spinning_cancel_handle_stops_task() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    for run in 0..3 {
+        let mut session = make_session(require_target_user());
+        let handle = session.cancel_handle();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_spinner = stop.clone();
+        let spinner = std::thread::spawn(move || {
+            while !stop_spinner.load(Ordering::Relaxed) {
+                if handle.cancel(None, false) {
+                    return true;
+                }
+                std::hint::spin_loop();
+            }
+            false
+        });
+        let started = std::time::Instant::now();
+        let r = session
+            .run_task("t", &sleep_then_finish_task(), None, None, None)
+            .await
+            .expect("run_task must return a result");
+        let elapsed = started.elapsed();
+        stop.store(true, Ordering::Relaxed);
+        assert!(
+            spinner.join().unwrap(),
+            "run {run}: the handle must find the task"
+        );
+        assert_eq!(
+            r.state,
+            ActionState::Canceled,
+            "run {run}: stdout: {}",
+            r.stdout
+        );
+        assert!(
+            !r.stdout.contains("FINISHED"),
+            "run {run}: stdout: {}",
+            r.stdout
+        );
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "run {run}: the task must be killed at once, took {elapsed:?}"
+        );
+        session.cleanup();
+    }
 }
 
 // === Cross-user brittle-session tests ===

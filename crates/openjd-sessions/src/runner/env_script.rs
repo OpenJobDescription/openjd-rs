@@ -149,6 +149,16 @@ impl EnvironmentScriptRunner {
         self
     }
 
+    /// Attach the action's [`crate::cross_user_helper::HelperRunGate`],
+    /// with the helper.
+    pub(crate) fn with_helper_run_gate(
+        mut self,
+        run_gate: std::sync::Arc<crate::cross_user_helper::HelperRunGate>,
+    ) -> Self {
+        self.base.helper_run_gate = Some(run_gate);
+        self
+    }
+
     pub(crate) fn with_helpers_directory(mut self, dir: PathBuf) -> Self {
         self.base.helpers_directory = Some(dir);
         self
