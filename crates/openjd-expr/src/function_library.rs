@@ -225,17 +225,19 @@ impl FunctionLibrary {
             // capture it (`flatten(list[list[T1]]) -> list[T1]` would bind
             // its `T1` to an argument's `list[T1]`, typing `flatten` of a
             // `list[T1]` as `list[list[T1]]`).
-            let typing_args: Vec<ExprType> =
-                arg_types.iter().map(ExprType::erase_type_vars).collect();
-            let ret = match form_combinations(&typing_args) {
+            let typing_args = arg_types
+                .iter()
+                .map(ExprType::erase_type_vars)
+                .collect::<Result<Vec<_>, _>>()?;
+            let ret = match form_combinations(&typing_args)? {
                 Some(combinations) => unresolved_return_type(
                     name,
                     entries,
                     &combinations,
                     &typing_args,
                     skip_receiver_coercion,
-                ),
-                None => self.derive_return_type(name, &typing_args),
+                )?,
+                None => self.derive_return_type(name, &typing_args)?,
             };
             if let Some(ret) = ret {
                 return Ok(ExprValue::unresolved(ret));
@@ -400,24 +402,38 @@ impl FunctionLibrary {
     /// argument of unknown type (`any`, a bare type variable) that matches a
     /// signature is `any`; one that matches none is `None` here (`call`
     /// types it `any` when a signature has its arity).
-    pub fn derive_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
+    ///
+    /// Returns [`ExpressionErrorKind::TypeTooDeep`] if the return type
+    /// would be deeper than [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH), as it
+    /// can be when a signature's return type wraps a type variable bound to
+    /// a deep argument type.
+    pub fn derive_return_type(
+        &self,
+        name: &str,
+        arg_types: &[ExprType],
+    ) -> Result<Option<ExprType>, ExpressionError> {
         // An argument's type variables are values of unknown type, typed
         // as `any` so the signature's own variables cannot capture them,
         // as `call` types them.
-        let arg_types: Vec<ExprType> = arg_types.iter().map(ExprType::erase_type_vars).collect();
+        let arg_types = arg_types
+            .iter()
+            .map(ExprType::erase_type_vars)
+            .collect::<Result<Vec<_>, _>>()?;
         let arg_types = arg_types.as_slice();
         // Past `MAX_FORM_COMBINATIONS` the arguments are typed as they are.
-        match form_combinations(arg_types) {
+        match form_combinations(arg_types)? {
             Some(combinations) if combinations.len() > 1 => {
-                let returns: Vec<ExprType> = combinations
-                    .iter()
-                    .filter_map(|c| self.derive_form_return_type(name, c))
-                    .collect();
-                if returns.is_empty() {
-                    return None;
+                let mut returns = Vec::new();
+                for c in &combinations {
+                    if let Some(r) = self.derive_form_return_type(name, c)? {
+                        returns.push(r);
+                    }
                 }
-                let ret = crate::types::merge_list_union(ExprType::union(returns));
-                Some(concat_return_type(name, arg_types, ret))
+                if returns.is_empty() {
+                    return Ok(None);
+                }
+                let ret = crate::types::merge_list_union(ExprType::union(returns)?)?;
+                concat_return_type(name, arg_types, ret).map(Some)
             }
             Some(combinations) => self.derive_form_return_type(name, &combinations[0]),
             None => self.derive_form_return_type(name, arg_types),
@@ -425,16 +441,22 @@ impl FunctionLibrary {
     }
 
     /// [`Self::derive_return_type`] for one combination of forms.
-    fn derive_form_return_type(&self, name: &str, arg_types: &[ExprType]) -> Option<ExprType> {
-        self.derive_return_type_by_signature(name, arg_types)
-            .map(|ret| refined_return_type(name, arg_types, ret))
+    fn derive_form_return_type(
+        &self,
+        name: &str,
+        arg_types: &[ExprType],
+    ) -> Result<Option<ExprType>, ExpressionError> {
+        match self.derive_return_type_by_signature(name, arg_types)? {
+            Some(ret) => refined_return_type(name, arg_types, ret).map(Some),
+            None => Ok(None),
+        }
     }
 
     fn derive_return_type_by_signature(
         &self,
         name: &str,
         arg_types: &[ExprType],
-    ) -> Option<ExprType> {
+    ) -> Result<Option<ExprType>, ExpressionError> {
         // Fast path: if no union args, try exact match first (matches Python's singleton optimization)
         let has_unions = arg_types
             .iter()
@@ -445,7 +467,7 @@ impl FunctionLibrary {
                     continue;
                 }
                 if let Some(bindings) = entry.signature.match_call(arg_types) {
-                    return Some(entry.signature.sig_return().substitute(&bindings));
+                    return entry.signature.sig_return().substitute(&bindings).map(Some);
                 }
             }
             // Try coercion
@@ -457,11 +479,11 @@ impl FunctionLibrary {
                     try_coerce_types(arg_types, entry.signature.sig_params(), false)
                 {
                     if let Some(bindings) = entry.signature.match_call(&coerced) {
-                        return Some(entry.signature.sig_return().substitute(&bindings));
+                        return entry.signature.sig_return().substitute(&bindings).map(Some);
                     }
                 }
             }
-            return None;
+            return Ok(None);
         }
 
         // Union path: flatten each arg's types into sets, then recurse per-signature.
@@ -513,18 +535,18 @@ impl FunctionLibrary {
                 HashMap::new(),
                 HashMap::new(),
                 &mut result_types,
-            );
+            )?;
         }
 
         if result_types.is_empty() {
-            return None;
+            return Ok(None);
         }
         result_types.sort_by_key(|a| a.to_string());
         result_types.dedup();
         if result_types.len() == 1 {
-            Some(result_types.into_iter().next().unwrap())
+            Ok(result_types.into_iter().next())
         } else {
-            Some(ExprType::union(result_types))
+            ExprType::union(result_types).map(Some)
         }
     }
 
@@ -538,12 +560,12 @@ impl FunctionLibrary {
         bindings: HashMap<crate::types::TypeCode, ExprType>,
         weak: HashMap<crate::types::TypeCode, ExprType>,
         result_types: &mut Vec<ExprType>,
-    ) {
+    ) -> Result<(), ExpressionError> {
         if idx == arg_type_sets.len() {
             let mut all = bindings;
             crate::types::apply_weak_bindings(&mut all, weak);
-            result_types.push(sig.sig_return().substitute(&all));
-            return;
+            result_types.push(sig.sig_return().substitute(&all)?);
+            return Ok(());
         }
         let param = &sig_params[idx];
         for arg_type in &arg_type_sets[idx] {
@@ -573,14 +595,23 @@ impl FunctionLibrary {
                         merged,
                         merged_weak,
                         result_types,
-                    );
+                    )?;
                 }
             }
         }
+        Ok(())
     }
 
     /// Get the type of a property access.
-    pub fn get_property_type(&self, base_type: &ExprType, property_name: &str) -> Option<ExprType> {
+    ///
+    /// Returns `Ok(None)` if no type has the property, and
+    /// [`ExpressionErrorKind::TypeTooDeep`] as
+    /// [`derive_return_type`](Self::derive_return_type) does.
+    pub fn get_property_type(
+        &self,
+        base_type: &ExprType,
+        property_name: &str,
+    ) -> Result<Option<ExprType>, ExpressionError> {
         self.derive_return_type(
             &format!("__property_{property_name}__"),
             std::slice::from_ref(base_type),
@@ -636,28 +667,35 @@ const MAX_FORM_COMBINATIONS: usize = 64;
 /// (`list[int] + list[string]`, a run that always fails) leaves a type
 /// variable that the whole operands' join replaces
 /// (`list[int | nulltype] + list[string]` is `list[string]`).
-fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> ExprType {
-    let as_list = |t: &ExprType| {
+fn concat_return_type(
+    name: &str,
+    arg_types: &[ExprType],
+    ret: ExprType,
+) -> Result<ExprType, ExpressionError> {
+    let as_list = |t: &ExprType| -> Result<ExprType, ExpressionError> {
         let t = match (t.code(), t.params()) {
             (crate::types::TypeCode::Unresolved, [inner]) => inner.clone(),
             _ => t.clone(),
         };
-        match t.code() {
-            crate::types::TypeCode::RangeExpr => ExprType::list(ExprType::INT),
+        Ok(match t.code() {
+            crate::types::TypeCode::RangeExpr => ExprType::fixed(ExprType::list(ExprType::INT)),
             // An operand of unknown type, which a run that succeeds has as
             // a list of unknown elements. (Arguments' type variables reach
             // here as `any`.)
-            crate::types::TypeCode::Any => ExprType::list(ExprType::ANY),
-            crate::types::TypeCode::Union => crate::types::merge_list_union(t),
+            crate::types::TypeCode::Any => ExprType::fixed(ExprType::list(ExprType::ANY)),
+            crate::types::TypeCode::Union => crate::types::merge_list_union(t)?,
             _ => t,
-        }
+        })
     };
     let [left, right] = arg_types else {
-        return ret;
+        return Ok(ret);
     };
-    let (left, right) = (as_list(left), as_list(right));
-    if name != "__add__" || !ret.is_symbolic() || !left.is_list() || !right.is_list() {
-        return ret;
+    if name != "__add__" || !ret.is_symbolic() {
+        return Ok(ret);
+    }
+    let (left, right) = (as_list(left)?, as_list(right)?);
+    if !left.is_list() || !right.is_list() {
+        return Ok(ret);
     }
     // `any` joins as `any`, and `unresolved` reads as its constraint: an
     // operand of unknown elements gives `list[any]`.
@@ -668,12 +706,9 @@ fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Expr
         ) || t.params().iter().any(unknown)
     }
     if unknown(&left) || unknown(&right) {
-        return ExprType::list(ExprType::ANY);
+        return Ok(ExprType::fixed(ExprType::list(ExprType::ANY)));
     }
-    match crate::types::join_list_element(&left, &right) {
-        Some(joined) => joined,
-        None => ret,
-    }
+    Ok(crate::types::join_list_element(&left, &right)?.unwrap_or(ret))
 }
 
 /// The return type of a type-only call that matched a signature as `ret`,
@@ -683,16 +718,20 @@ fn concat_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> Expr
 /// Such an argument matches the first signature in the
 /// dispatch order (`any[0]` matches `__getitem__(string, int)`), which says
 /// nothing of the value a run passes, so the result may be any type.
-fn refined_return_type(name: &str, arg_types: &[ExprType], ret: ExprType) -> ExprType {
-    let concat = concat_return_type(name, arg_types, ret.clone());
+fn refined_return_type(
+    name: &str,
+    arg_types: &[ExprType],
+    ret: ExprType,
+) -> Result<ExprType, ExpressionError> {
+    let concat = concat_return_type(name, arg_types, ret.clone())?;
     if concat != ret {
-        return concat;
+        return Ok(concat);
     }
-    if arg_types.iter().any(is_unknown_type) {
+    Ok(if arg_types.iter().any(is_unknown_type) {
         ExprType::ANY
     } else {
         ret
-    }
+    })
 }
 
 /// Whether an argument's type is not known: `any` (a type variable in an
@@ -704,13 +743,21 @@ fn is_unknown_type(t: &ExprType) -> bool {
 /// The combinations of the arguments' list forms
 /// ([`crate::types::list_forms`]): one argument list per way of picking a
 /// form for each argument. `None` past [`MAX_FORM_COMBINATIONS`].
-fn form_combinations(arg_types: &[ExprType]) -> Option<Vec<Vec<ExprType>>> {
-    let forms: Vec<Vec<ExprType>> = arg_types.iter().map(crate::types::list_forms).collect();
-    let count = forms
+fn form_combinations(
+    arg_types: &[ExprType],
+) -> Result<Option<Vec<Vec<ExprType>>>, ExpressionError> {
+    let forms = arg_types
+        .iter()
+        .map(crate::types::list_forms)
+        .collect::<Result<Vec<_>, _>>()?;
+    let Some(count) = forms
         .iter()
         .try_fold(1usize, |n, f| n.checked_mul(f.len()))
-        .filter(|n| *n <= MAX_FORM_COMBINATIONS)?;
-    Some(
+        .filter(|n| *n <= MAX_FORM_COMBINATIONS)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(
         (0..count)
             .map(|i| {
                 let mut rest = i;
@@ -724,7 +771,7 @@ fn form_combinations(arg_types: &[ExprType]) -> Option<Vec<Vec<ExprType>>> {
                     .collect()
             })
             .collect(),
-    )
+    ))
 }
 
 /// The return type of a call with an unresolved argument, typed from the
@@ -747,23 +794,27 @@ fn unresolved_return_type(
     combinations: &[Vec<ExprType>],
     arg_types: &[ExprType],
     skip_receiver_coercion: bool,
-) -> Option<ExprType> {
-    let form_return_type = |args: &[ExprType]| {
-        phase_return_type(entries, args, skip_receiver_coercion)
-            .map(|ret| refined_return_type(name, args, ret))
+) -> Result<Option<ExprType>, ExpressionError> {
+    let form_return_type = |args: &[ExprType]| -> Result<Option<ExprType>, ExpressionError> {
+        match phase_return_type(entries, args, skip_receiver_coercion)? {
+            Some(ret) => refined_return_type(name, args, ret).map(Some),
+            None => Ok(None),
+        }
     };
     if let [only] = combinations {
         return form_return_type(only);
     }
-    let returns: Vec<ExprType> = combinations
-        .iter()
-        .filter_map(|c| form_return_type(c))
-        .collect();
-    if returns.is_empty() {
-        return None;
+    let mut returns = Vec::new();
+    for c in combinations {
+        if let Some(r) = form_return_type(c)? {
+            returns.push(r);
+        }
     }
-    let ret = crate::types::merge_list_union(ExprType::union(returns));
-    Some(concat_return_type(name, arg_types, ret))
+    if returns.is_empty() {
+        return Ok(None);
+    }
+    let ret = crate::types::merge_list_union(ExprType::union(returns)?)?;
+    concat_return_type(name, arg_types, ret).map(Some)
 }
 
 /// Whether `entry` has a `list[nulltype]` parameter whose argument is not
@@ -778,7 +829,7 @@ fn unresolved_return_type(
 /// argument of type `list[nulltype]` — the empty form of a list with a
 /// union element type, or an empty literal.
 fn empty_list_overload_mismatch(entry: &FunctionEntry, arg_types: &[ExprType]) -> bool {
-    let empty = ExprType::list(ExprType::NULLTYPE);
+    let empty = ExprType::fixed(ExprType::list(ExprType::NULLTYPE));
     entry
         .signature
         .sig_params()
@@ -793,7 +844,7 @@ fn phase_return_type(
     entries: &[FunctionEntry],
     arg_types: &[ExprType],
     skip_receiver_coercion: bool,
-) -> Option<ExprType> {
+) -> Result<Option<ExprType>, ExpressionError> {
     let entries: Vec<&FunctionEntry> = entries
         .iter()
         .filter(|e| !empty_list_overload_mismatch(e, arg_types))
@@ -802,7 +853,7 @@ fn phase_return_type(
     // Phase 1: exact match (non-generic)
     for entry in entries {
         if !entry.signature.is_symbolic() && entry.signature.match_call(arg_types).is_some() {
-            return Some(entry.signature.sig_return().clone());
+            return Ok(Some(entry.signature.sig_return().clone()));
         }
     }
     // Phase 2: coerced match (non-generic)
@@ -815,7 +866,7 @@ fn phase_return_type(
             )
             .is_some()
         {
-            return Some(entry.signature.sig_return().clone());
+            return Ok(Some(entry.signature.sig_return().clone()));
         }
     }
     // Phase 3: generic match, then generic with coercion
@@ -824,7 +875,7 @@ fn phase_return_type(
             continue;
         }
         if let Some(bindings) = entry.signature.match_call(arg_types) {
-            return Some(entry.signature.sig_return().substitute(&bindings));
+            return entry.signature.sig_return().substitute(&bindings).map(Some);
         }
         if let Some(coerced) = try_coerce_types(
             arg_types,
@@ -832,11 +883,11 @@ fn phase_return_type(
             skip_receiver_coercion,
         ) {
             if let Some(bindings) = entry.signature.match_call(&coerced) {
-                return Some(entry.signature.sig_return().substitute(&bindings));
+                return entry.signature.sig_return().substitute(&bindings).map(Some);
             }
         }
     }
-    None
+    Ok(None)
 }
 
 /// Try to coerce argument types to match parameter types.
@@ -1093,7 +1144,7 @@ mod tests {
             )
             .unwrap();
         assert!(r.is_unresolved());
-        assert_eq!(r.expr_type(), ExprType::unresolved(ExprType::INT));
+        assert_eq!(r.expr_type(), ExprType::unresolved(ExprType::INT).unwrap());
     }
 
     #[test]
@@ -1124,7 +1175,8 @@ mod tests {
         lib.register_sig("__add__", "(int, int) -> int", add_int)
             .unwrap();
         assert_eq!(
-            lib.derive_return_type("__add__", &[ExprType::INT, ExprType::INT]),
+            lib.derive_return_type("__add__", &[ExprType::INT, ExprType::INT])
+                .unwrap(),
             Some(ExprType::INT)
         );
     }
@@ -1137,8 +1189,9 @@ mod tests {
         assert_eq!(
             lib.derive_return_type(
                 "__getitem__",
-                &[ExprType::list(ExprType::STRING), ExprType::INT]
-            ),
+                &[ExprType::list(ExprType::STRING).unwrap(), ExprType::INT]
+            )
+            .unwrap(),
             Some(ExprType::STRING)
         );
     }
@@ -1150,7 +1203,8 @@ mod tests {
             .unwrap();
         // int + float → coerce → float
         assert_eq!(
-            lib.derive_return_type("__add__", &[ExprType::INT, ExprType::FLOAT]),
+            lib.derive_return_type("__add__", &[ExprType::INT, ExprType::FLOAT])
+                .unwrap(),
             Some(ExprType::FLOAT)
         );
     }
@@ -1163,13 +1217,14 @@ mod tests {
         lib.register_sig("__add__", "(float, float) -> float", add_float)
             .unwrap();
         // (int | float) + int → int (from int+int) | float (from float coerced)
-        let union_arg = ExprType::union(vec![ExprType::INT, ExprType::FLOAT]);
+        let union_arg = ExprType::union(vec![ExprType::INT, ExprType::FLOAT]).unwrap();
         let result = lib
             .derive_return_type("__add__", &[union_arg, ExprType::INT])
+            .unwrap()
             .unwrap();
         assert_eq!(
             result,
-            ExprType::union(vec![ExprType::INT, ExprType::FLOAT])
+            ExprType::union(vec![ExprType::INT, ExprType::FLOAT]).unwrap()
         );
     }
 
@@ -1181,9 +1236,13 @@ mod tests {
         lib.register_sig("len", "(list[T1]) -> int", dummy_impl)
             .unwrap();
         // len(string | list[int]) → int (both return int)
-        let union_arg = ExprType::union(vec![ExprType::STRING, ExprType::list(ExprType::INT)]);
+        let union_arg = ExprType::union(vec![
+            ExprType::STRING,
+            ExprType::list(ExprType::INT).unwrap(),
+        ])
+        .unwrap();
         assert_eq!(
-            lib.derive_return_type("len", &[union_arg]),
+            lib.derive_return_type("len", &[union_arg]).unwrap(),
             Some(ExprType::INT)
         );
     }
@@ -1201,7 +1260,8 @@ mod tests {
             .unwrap();
         // A later argument's forms.
         assert_eq!(
-            lib.derive_return_type("f", &[ExprType::INT, tp("list[int | string]")]),
+            lib.derive_return_type("f", &[ExprType::INT, tp("list[int | string]")])
+                .unwrap(),
             Some(tp("int | string"))
         );
         let mut lib = FunctionLibrary::new();
@@ -1218,12 +1278,14 @@ mod tests {
             lib.derive_return_type(
                 "g",
                 &[tp("list[int | string]"), tp("list[int] | list[string]")]
-            ),
+            )
+            .unwrap(),
             Some(tp("bool | int | path | string"))
         );
         // Combinations that match no signature contribute nothing.
         assert_eq!(
-            lib.derive_return_type("g", &[tp("list[int] | int"), tp("list[string] | path")]),
+            lib.derive_return_type("g", &[tp("list[int] | int"), tp("list[string] | path")])
+                .unwrap(),
             Some(ExprType::STRING)
         );
     }
@@ -1240,10 +1302,11 @@ mod tests {
             lib.derive_return_type(
                 "h",
                 &[
-                    ExprType::list(ExprType::INT),
-                    ExprType::list(ExprType::FLOAT)
+                    ExprType::list(ExprType::INT).unwrap(),
+                    ExprType::list(ExprType::FLOAT).unwrap()
                 ]
-            ),
+            )
+            .unwrap(),
             Some(ExprType::parse("list[T3]").unwrap())
         );
     }
@@ -1262,12 +1325,14 @@ mod tests {
             .unwrap();
         let u = tp("int | bool | list[int] | range_expr | list[string]");
         assert_eq!(
-            lib.derive_return_type("f", &[u.clone(), u.clone(), u]),
+            lib.derive_return_type("f", &[u.clone(), u.clone(), u])
+                .unwrap(),
             Some(ExprType::FLOAT)
         );
         let p = tp("path | bool | list[int] | range_expr | list[string]");
         assert_eq!(
-            lib.derive_return_type("g", &[p.clone(), p.clone(), p]),
+            lib.derive_return_type("g", &[p.clone(), p.clone(), p])
+                .unwrap(),
             Some(ExprType::STRING)
         );
     }
@@ -1280,13 +1345,13 @@ mod tests {
         lib.register_sig("__property_parent__", "(path) -> path", dummy_impl)
             .unwrap();
         assert_eq!(
-            lib.get_property_type(&ExprType::PATH, "name"),
+            lib.get_property_type(&ExprType::PATH, "name").unwrap(),
             Some(ExprType::STRING)
         );
         assert_eq!(
-            lib.get_property_type(&ExprType::PATH, "parent"),
+            lib.get_property_type(&ExprType::PATH, "parent").unwrap(),
             Some(ExprType::PATH)
         );
-        assert_eq!(lib.get_property_type(&ExprType::INT, "name"), None);
+        assert_eq!(lib.get_property_type(&ExprType::INT, "name").unwrap(), None);
     }
 }

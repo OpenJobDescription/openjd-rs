@@ -764,7 +764,7 @@ fn coerce_large_range_to_list_rejected() {
     let v = ExprValue::RangeExpr(r);
     let err = v
         .coerce(
-            &openjd_expr::types::ExprType::list(openjd_expr::types::ExprType::INT),
+            &openjd_expr::types::ExprType::list(openjd_expr::types::ExprType::INT).unwrap(),
             openjd_expr::path_mapping::PathFormat::Posix,
         )
         .unwrap_err();
@@ -774,7 +774,7 @@ fn coerce_large_range_to_list_rejected() {
     assert_eq!(
         small
             .coerce(
-                &openjd_expr::types::ExprType::list(openjd_expr::types::ExprType::INT),
+                &openjd_expr::types::ExprType::list(openjd_expr::types::ExprType::INT).unwrap(),
                 openjd_expr::path_mapping::PathFormat::Posix,
             )
             .unwrap()

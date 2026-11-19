@@ -21,6 +21,7 @@ use openjd_expr::FormatString;
 
 use crate::error::{path_field, path_index, PathElement, ValidationErrors};
 use crate::template::*;
+use crate::types::fixed_type;
 use crate::types::{ModelExtension, ValidationContext};
 
 use super::helpers;
@@ -52,7 +53,7 @@ fn build_param_symtab(params: Option<&[JobParameterDefinition]>) -> SymbolTable 
                 .expect("symtab");
             let raw_type = match pt {
                 JobParameterType::Path => ExprType::STRING,
-                JobParameterType::ListPath => ExprType::list(ExprType::STRING),
+                JobParameterType::ListPath => fixed_type(ExprType::list(ExprType::STRING)),
                 _ => expr_type,
             };
             symtab
@@ -90,7 +91,7 @@ fn build_template_scope_symtab(params: Option<&[JobParameterDefinition]>) -> Sym
             }
             let raw_type = match pt {
                 JobParameterType::Path => ExprType::STRING,
-                JobParameterType::ListPath => ExprType::list(ExprType::STRING),
+                JobParameterType::ListPath => fixed_type(ExprType::list(ExprType::STRING)),
                 _ => expr_type,
             };
             symtab
@@ -478,17 +479,24 @@ impl ResolvedConstraint<'_> {
                 Some(crate::types::string_list_item_target())
             }
             Self::NumericListItem { target } => Some(target.clone()),
-            Self::Float { .. } => Some(ExprType::union(vec![ExprType::FLOAT, ExprType::NULLTYPE])),
+            Self::Float { .. } => Some(fixed_type(ExprType::union(vec![
+                ExprType::FLOAT,
+                ExprType::NULLTYPE,
+            ]))),
             Self::Int { nullable, .. } => {
                 if *nullable {
-                    Some(ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]))
+                    Some(fixed_type(ExprType::union(vec![
+                        ExprType::INT,
+                        ExprType::NULLTYPE,
+                    ])))
                 } else {
                     Some(ExprType::INT)
                 }
             }
-            Self::CancelationMode => {
-                Some(ExprType::union(vec![ExprType::STRING, ExprType::NULLTYPE]))
-            }
+            Self::CancelationMode => Some(fixed_type(ExprType::union(vec![
+                ExprType::STRING,
+                ExprType::NULLTYPE,
+            ]))),
             Self::ResolvedString { .. } | Self::ArgListItem { .. } => None,
         }
     }
@@ -2789,22 +2797,25 @@ fn validate_env_format_strings(
 fn add_wrapped_action_scope(symtab: &mut SymbolTable) {
     for (name, ty) in [
         ("WrappedAction.Command", ExprType::STRING),
-        ("WrappedAction.Args", ExprType::list(ExprType::STRING)),
+        (
+            "WrappedAction.Args",
+            fixed_type(ExprType::list(ExprType::STRING)),
+        ),
         (
             "WrappedAction.Environment",
-            ExprType::list(ExprType::STRING),
+            fixed_type(ExprType::list(ExprType::STRING)),
         ),
         (
             "WrappedAction.Timeout",
-            ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]),
+            fixed_type(ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE])),
         ),
         (
             "WrappedAction.Cancelation.Mode",
-            ExprType::union(vec![ExprType::STRING, ExprType::NULLTYPE]),
+            fixed_type(ExprType::union(vec![ExprType::STRING, ExprType::NULLTYPE])),
         ),
         (
             "WrappedAction.Cancelation.NotifyPeriodInSeconds",
-            ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]),
+            fixed_type(ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE])),
         ),
     ] {
         symtab.set(name, ExprValue::unresolved(ty)).expect("symtab");

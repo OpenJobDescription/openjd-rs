@@ -504,8 +504,8 @@ pub fn add_list_list(ctx: Ctx, a: &[ExprValue]) -> R {
     concat_common_type(
         ctx,
         combined,
-        &ExprType::list(lt),
-        &ExprType::list(rt),
+        &ExprType::list(lt)?,
+        &ExprType::list(rt)?,
         None,
     )
 }
@@ -527,7 +527,7 @@ fn concat_common_type(
     right: &ExprType,
     range_side: Option<RangeSide>,
 ) -> R {
-    let Some(joined) = crate::types::join_list_element(left, right) else {
+    let Some(joined) = crate::types::join_list_element(left, right)? else {
         let name = |t: &ExprType, is_range: bool| {
             if is_range {
                 "range_expr".to_string()
@@ -589,8 +589,8 @@ pub fn add_list_range(ctx: Ctx, a: &[ExprValue]) -> R {
     concat_common_type(
         ctx,
         l,
-        &ExprType::list(et),
-        &ExprType::list(ExprType::INT),
+        &ExprType::list(et)?,
+        &ExprType::fixed(ExprType::list(ExprType::INT)),
         Some(RangeSide::Right),
     )
 }
@@ -614,8 +614,8 @@ pub fn add_range_list(ctx: Ctx, a: &[ExprValue]) -> R {
     concat_common_type(
         ctx,
         combined,
-        &ExprType::list(ExprType::INT),
-        &ExprType::list(et),
+        &ExprType::fixed(ExprType::list(ExprType::INT)),
+        &ExprType::list(et)?,
         Some(RangeSide::Left),
     )
 }

@@ -492,7 +492,7 @@ fn rfc_coercion_destination_preference_per_source_type() {
         coerce(lf(vec![1.5]), "list[int] | list[string]")
             .unwrap()
             .expr_type(),
-        ExprType::list(ExprType::STRING)
+        ExprType::list(ExprType::STRING).unwrap()
     );
     assert_eq!(
         coerce(

@@ -46,13 +46,13 @@ const PARAM_TYPES: &[ParamType] = &[
     ("PATH", || ExprType::PATH),
     ("BOOL", || ExprType::BOOL),
     ("RANGE_EXPR", || ExprType::RANGE_EXPR),
-    ("LIST[STRING]", || ExprType::list(ExprType::STRING)),
-    ("LIST[INT]", || ExprType::list(ExprType::INT)),
-    ("LIST[FLOAT]", || ExprType::list(ExprType::FLOAT)),
-    ("LIST[PATH]", || ExprType::list(ExprType::PATH)),
-    ("LIST[BOOL]", || ExprType::list(ExprType::BOOL)),
+    ("LIST[STRING]", || ExprType::list(ExprType::STRING).unwrap()),
+    ("LIST[INT]", || ExprType::list(ExprType::INT).unwrap()),
+    ("LIST[FLOAT]", || ExprType::list(ExprType::FLOAT).unwrap()),
+    ("LIST[PATH]", || ExprType::list(ExprType::PATH).unwrap()),
+    ("LIST[BOOL]", || ExprType::list(ExprType::BOOL).unwrap()),
     ("LIST[LIST[INT]]", || {
-        ExprType::list(ExprType::list(ExprType::INT))
+        ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap()
     }),
 ];
 
@@ -236,7 +236,7 @@ impl Ctx<'_, '_> {
             let args: Vec<Value> = (0..n)
                 .map(|_| {
                     let t = if one_in(self.u, 3) {
-                        ExprType::list(ExprType::STRING)
+                        ExprType::list(ExprType::STRING).unwrap()
                     } else {
                         ExprType::STRING
                     };

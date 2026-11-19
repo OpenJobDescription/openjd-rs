@@ -426,7 +426,7 @@ fn list_destination_with_a_partly_symbolic_element_is_rejected() {
 /// nothing. `satisfies` must not index into its missing constraint.
 #[test]
 fn satisfies_does_not_panic_on_a_param_less_unresolved() {
-    let bare = ExprType::new(TypeCode::Unresolved, vec![]);
+    let bare = ExprType::new(TypeCode::Unresolved, vec![]).unwrap();
     assert!(!bare.satisfies(&ExprType::INT));
     assert!(bare.satisfies(&ExprType::ANY));
 }
@@ -494,8 +494,8 @@ fn unknown_source_promise_filters_unusable_union_members() {
 fn malformed_list_source_is_rejected() {
     use openjd_expr::types::TypeCode;
     for malformed in [
-        ExprType::new(TypeCode::List, vec![]),
-        ExprType::new(TypeCode::List, vec![ExprType::INT, ExprType::STRING]),
+        ExprType::new(TypeCode::List, vec![]).unwrap(),
+        ExprType::new(TypeCode::List, vec![ExprType::INT, ExprType::STRING]).unwrap(),
     ] {
         let err = ExprValue::unresolved(malformed.clone())
             .coerce(&parse_type("list[int]"), PathFormat::Posix)

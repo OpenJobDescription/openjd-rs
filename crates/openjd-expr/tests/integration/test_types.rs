@@ -26,26 +26,29 @@ fn basic_types() {
 
 #[test]
 fn nullable() {
-    let t = ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]);
+    let t = ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]).unwrap();
     assert_eq!(t.code(), TypeCode::Union);
     assert_eq!(t.to_string(), "int?");
 }
 
 #[test]
 fn list_of() {
-    let t = ExprType::list(ExprType::INT);
+    let t = ExprType::list(ExprType::INT).unwrap();
     assert_eq!(t.code(), TypeCode::List);
     assert_eq!(t.params(), vec![ExprType::INT]);
 }
 
 #[test]
 fn equality() {
-    assert_eq!(ExprType::INT, ExprType::new(TypeCode::Int, vec![]));
+    assert_eq!(ExprType::INT, ExprType::new(TypeCode::Int, vec![]).unwrap());
     assert_ne!(ExprType::INT, ExprType::FLOAT);
-    assert_eq!(ExprType::list(ExprType::INT), ExprType::list(ExprType::INT));
+    assert_eq!(
+        ExprType::list(ExprType::INT).unwrap(),
+        ExprType::list(ExprType::INT).unwrap()
+    );
     assert_ne!(
-        ExprType::list(ExprType::INT),
-        ExprType::list(ExprType::STRING)
+        ExprType::list(ExprType::INT).unwrap(),
+        ExprType::list(ExprType::STRING).unwrap()
     );
 }
 
@@ -63,9 +66,14 @@ fn hash() {
 fn display_str() {
     assert_eq!(ExprType::INT.to_string(), "int");
     assert_eq!(ExprType::BOOL.to_string(), "bool");
-    assert_eq!(ExprType::list(ExprType::INT).to_string(), "list[int]");
     assert_eq!(
-        ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]).to_string(),
+        ExprType::list(ExprType::INT).unwrap().to_string(),
+        "list[int]"
+    );
+    assert_eq!(
+        ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE])
+            .unwrap()
+            .to_string(),
         "int?"
     );
 }
@@ -152,18 +160,18 @@ fn parse_signature_generic() {
 
 #[test]
 fn parse_list_types() {
-    assert_eq!(p("list[int]"), ExprType::list(ExprType::INT));
-    assert_eq!(p("list[string]"), ExprType::list(ExprType::STRING));
-    assert_eq!(p("list[float]"), ExprType::list(ExprType::FLOAT));
-    assert_eq!(p("list[path]"), ExprType::list(ExprType::PATH));
-    assert_eq!(p("list[bool]"), ExprType::list(ExprType::BOOL));
+    assert_eq!(p("list[int]"), ExprType::list(ExprType::INT).unwrap());
+    assert_eq!(p("list[string]"), ExprType::list(ExprType::STRING).unwrap());
+    assert_eq!(p("list[float]"), ExprType::list(ExprType::FLOAT).unwrap());
+    assert_eq!(p("list[path]"), ExprType::list(ExprType::PATH).unwrap());
+    assert_eq!(p("list[bool]"), ExprType::list(ExprType::BOOL).unwrap());
 }
 
 #[test]
 fn parse_nested_list() {
     assert_eq!(
         p("list[list[int]]"),
-        ExprType::list(ExprType::list(ExprType::INT))
+        ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap()
     );
 }
 
@@ -210,14 +218,14 @@ fn noreturn_type() {
 #[test]
 fn noreturn_collapses_in_union() {
     assert_eq!(
-        ExprType::union(vec![ExprType::INT, ExprType::NORETURN]),
+        ExprType::union(vec![ExprType::INT, ExprType::NORETURN]).unwrap(),
         ExprType::INT
     );
 }
 
 #[test]
 fn noreturn_collapses_with_multiple() {
-    let u = ExprType::union(vec![ExprType::INT, ExprType::STRING, ExprType::NORETURN]);
+    let u = ExprType::union(vec![ExprType::INT, ExprType::STRING, ExprType::NORETURN]).unwrap();
     assert_eq!(u.code(), TypeCode::Union);
     assert!(!u.params().contains(&ExprType::NORETURN));
     assert_eq!(u.to_string(), "int | string");
@@ -226,35 +234,35 @@ fn noreturn_collapses_with_multiple() {
 #[test]
 fn noreturn_only_union() {
     assert_eq!(
-        ExprType::union(vec![ExprType::NORETURN, ExprType::NORETURN]),
+        ExprType::union(vec![ExprType::NORETURN, ExprType::NORETURN]).unwrap(),
         ExprType::NORETURN
     );
 }
 
 #[test]
 fn union_construction() {
-    let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
+    let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
     assert_eq!(u.code(), TypeCode::Union);
     assert_eq!(u.to_string(), "int | string");
 }
 
 #[test]
 fn union_deduplication() {
-    let u = ExprType::union(vec![ExprType::INT, ExprType::INT]);
+    let u = ExprType::union(vec![ExprType::INT, ExprType::INT]).unwrap();
     assert_eq!(u.code(), TypeCode::Int);
 }
 
 #[test]
 fn union_single_element_unwrap() {
-    let u = ExprType::union(vec![ExprType::STRING]);
+    let u = ExprType::union(vec![ExprType::STRING]).unwrap();
     assert_eq!(u.code(), TypeCode::String);
 }
 
 #[test]
 fn union_flattening() {
-    let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
-    let u2 = ExprType::union(vec![ExprType::FLOAT, ExprType::BOOL]);
-    let combined = ExprType::union(vec![u1, u2]);
+    let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
+    let u2 = ExprType::union(vec![ExprType::FLOAT, ExprType::BOOL]).unwrap();
+    let combined = ExprType::union(vec![u1, u2]).unwrap();
     assert_eq!(combined.code(), TypeCode::Union);
     assert_eq!(combined.params().len(), 4);
     assert_eq!(combined.to_string(), "bool | float | int | string");
@@ -263,7 +271,9 @@ fn union_flattening() {
 #[test]
 fn union_any_absorption() {
     assert_eq!(
-        ExprType::union(vec![ExprType::INT, ExprType::ANY]).code(),
+        ExprType::union(vec![ExprType::INT, ExprType::ANY])
+            .unwrap()
+            .code(),
         TypeCode::Any
     );
 }
@@ -285,27 +295,29 @@ fn union_string_parsing_multiple() {
 #[test]
 fn union_nullable_display_single() {
     assert_eq!(
-        ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]).to_string(),
+        ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE])
+            .unwrap()
+            .to_string(),
         "int?"
     );
 }
 
 #[test]
 fn union_nullable_display_multiple() {
-    let u = ExprType::union(vec![ExprType::INT, ExprType::FLOAT, ExprType::NULLTYPE]);
+    let u = ExprType::union(vec![ExprType::INT, ExprType::FLOAT, ExprType::NULLTYPE]).unwrap();
     assert_eq!(u.to_string(), "float | int | nulltype");
 }
 
 #[test]
 fn union_equality_order_independent() {
-    let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
-    let u2 = ExprType::union(vec![ExprType::STRING, ExprType::INT]);
+    let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
+    let u2 = ExprType::union(vec![ExprType::STRING, ExprType::INT]).unwrap();
     assert_eq!(u1, u2);
 }
 
 #[test]
 fn union_hash_consistent() {
-    let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
+    let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
     let u2 = p("int | string");
     let mut s = HashSet::new();
     s.insert(u1);
@@ -315,7 +327,7 @@ fn union_hash_consistent() {
 
 #[test]
 fn union_roundtrip() {
-    let original = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
+    let original = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
     let roundtrip = p(&original.to_string());
     assert_eq!(roundtrip, original);
 }
@@ -340,7 +352,7 @@ fn any_matches_anything() {
     assert!(ExprType::ANY.match_type(&ExprType::INT).is_some());
     assert!(ExprType::ANY.match_type(&ExprType::STRING).is_some());
     assert!(ExprType::ANY
-        .match_type(&ExprType::list(ExprType::INT))
+        .match_type(&ExprType::list(ExprType::INT).unwrap())
         .is_some());
 }
 
@@ -354,19 +366,22 @@ fn anything_matches_any() {
 fn is_concrete() {
     assert!(ExprType::INT.is_concrete());
     assert!(ExprType::STRING.is_concrete());
-    assert!(ExprType::list(ExprType::INT).is_concrete());
+    assert!(ExprType::list(ExprType::INT).unwrap().is_concrete());
     assert!(!ExprType::T1.is_concrete());
-    assert!(!ExprType::list(ExprType::T1).is_concrete());
+    assert!(!ExprType::list(ExprType::T1).unwrap().is_concrete());
     assert!(!ExprType::ANY.is_concrete());
-    assert!(!ExprType::union(vec![ExprType::INT, ExprType::STRING]).is_concrete());
+    assert!(!ExprType::union(vec![ExprType::INT, ExprType::STRING])
+        .unwrap()
+        .is_concrete());
     // Nested union inside list
-    let list_union = ExprType::list(ExprType::union(vec![ExprType::INT, ExprType::STRING]));
+    let list_union =
+        ExprType::list(ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap()).unwrap();
     assert!(!list_union.is_concrete());
 }
 
 #[test]
 fn union_matches_member() {
-    let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
+    let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
     assert!(u.match_type(&ExprType::INT).is_some());
     assert!(u.match_type(&ExprType::STRING).is_some());
     assert!(u.match_type(&ExprType::FLOAT).is_none());
@@ -374,7 +389,7 @@ fn union_matches_member() {
 
 #[test]
 fn member_matches_union() {
-    let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
+    let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
     assert!(ExprType::INT.match_type(&u).is_some());
     assert!(ExprType::STRING.match_type(&u).is_some());
     assert!(ExprType::FLOAT.match_type(&u).is_none());
@@ -382,15 +397,15 @@ fn member_matches_union() {
 
 #[test]
 fn union_matches_union_with_overlap() {
-    let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
-    let u2 = ExprType::union(vec![ExprType::STRING, ExprType::FLOAT]);
+    let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
+    let u2 = ExprType::union(vec![ExprType::STRING, ExprType::FLOAT]).unwrap();
     assert!(u1.match_type(&u2).is_some());
     assert!(u2.match_type(&u1).is_some());
 }
 
 #[test]
 fn typevar_binds_to_union() {
-    let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
+    let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
     let b = ExprType::T1.match_type(&u).unwrap();
     assert_eq!(b[&TypeCode::TypeVarT1], u);
     let b2 = u.match_type(&ExprType::T1).unwrap();
@@ -399,9 +414,9 @@ fn typevar_binds_to_union() {
 
 #[test]
 fn nested_typevar_binds_to_union() {
-    let list_t1 = ExprType::list(ExprType::T1);
-    let inner_union = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
-    let list_union = ExprType::list(inner_union.clone());
+    let list_t1 = ExprType::list(ExprType::T1).unwrap();
+    let inner_union = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
+    let list_union = ExprType::list(inner_union.clone()).unwrap();
     let result = list_t1.match_type(&list_union).unwrap();
     assert_eq!(result[&TypeCode::TypeVarT1], inner_union);
 }
@@ -426,8 +441,8 @@ fn is_symbolic_simple() {
 
 #[test]
 fn is_symbolic_nested() {
-    assert!(ExprType::list(ExprType::T1).is_symbolic());
-    assert!(!ExprType::list(ExprType::INT).is_symbolic());
+    assert!(ExprType::list(ExprType::T1).unwrap().is_symbolic());
+    assert!(!ExprType::list(ExprType::INT).unwrap().is_symbolic());
 }
 
 #[test]
@@ -438,25 +453,28 @@ fn match_simple() {
 
 #[test]
 fn match_nested() {
-    let list_t1 = ExprType::list(ExprType::T1);
-    let list_int = ExprType::list(ExprType::INT);
+    let list_t1 = ExprType::list(ExprType::T1).unwrap();
+    let list_int = ExprType::list(ExprType::INT).unwrap();
     let b = list_t1.match_type(&list_int).unwrap();
     assert_eq!(b[&TypeCode::TypeVarT1], ExprType::INT);
 }
 
 #[test]
 fn match_no_match() {
-    let list_t1 = ExprType::list(ExprType::T1);
+    let list_t1 = ExprType::list(ExprType::T1).unwrap();
     assert!(list_t1.match_type(&ExprType::INT).is_none());
     assert!(list_t1.match_type(&ExprType::STRING).is_none());
 }
 
 #[test]
 fn substitute() {
-    let list_t1 = ExprType::list(ExprType::T1);
+    let list_t1 = ExprType::list(ExprType::T1).unwrap();
     let mut bindings = HashMap::new();
     bindings.insert(TypeCode::TypeVarT1, ExprType::INT);
-    assert_eq!(list_t1.substitute(&bindings), ExprType::list(ExprType::INT));
+    assert_eq!(
+        list_t1.substitute(&bindings).unwrap(),
+        ExprType::list(ExprType::INT).unwrap()
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -465,7 +483,7 @@ fn substitute() {
 
 #[test]
 fn unknown_construct_with_constraint() {
-    let t = ExprType::unresolved(ExprType::INT);
+    let t = ExprType::unresolved(ExprType::INT).unwrap();
     assert_eq!(t.code(), TypeCode::Unresolved);
     assert_eq!(t.params(), vec![ExprType::INT]);
 }
@@ -488,7 +506,7 @@ fn unknown_parse_int() {
 fn unknown_parse_list() {
     let t = p("unresolved[list[string]]");
     assert_eq!(t.code(), TypeCode::Unresolved);
-    assert_eq!(t.params(), vec![ExprType::list(ExprType::STRING)]);
+    assert_eq!(t.params(), vec![ExprType::list(ExprType::STRING).unwrap()]);
 }
 
 #[test]
@@ -510,7 +528,7 @@ fn unknown_str_bare() {
 #[test]
 fn unknown_str_any_is_bare() {
     assert_eq!(
-        ExprType::unresolved(ExprType::ANY).to_string(),
+        ExprType::unresolved(ExprType::ANY).unwrap().to_string(),
         "unresolved"
     );
 }
@@ -572,7 +590,7 @@ fn unknown_not_symbolic() {
 
 #[test]
 fn unknown_symbolic_if_constraint_is() {
-    let t = ExprType::unresolved(ExprType::T1);
+    let t = ExprType::unresolved(ExprType::T1).unwrap();
     assert!(t.is_symbolic());
 }
 
@@ -604,7 +622,9 @@ fn unknown_match_any_constraint() {
     let t = p("unresolved");
     assert!(t.match_type(&ExprType::INT).is_some());
     assert!(t.match_type(&ExprType::STRING).is_some());
-    assert!(t.match_type(&ExprType::list(ExprType::INT)).is_some());
+    assert!(t
+        .match_type(&ExprType::list(ExprType::INT).unwrap())
+        .is_some());
 }
 
 #[test]
@@ -623,10 +643,13 @@ fn unknown_match_unknown_vs_any() {
 
 #[test]
 fn unknown_substitute_constraint() {
-    let t = ExprType::unresolved(ExprType::T1);
+    let t = ExprType::unresolved(ExprType::T1).unwrap();
     let mut bindings = HashMap::new();
     bindings.insert(TypeCode::TypeVarT1, ExprType::INT);
-    assert_eq!(t.substitute(&bindings), ExprType::unresolved(ExprType::INT));
+    assert_eq!(
+        t.substitute(&bindings).unwrap(),
+        ExprType::unresolved(ExprType::INT).unwrap()
+    );
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -767,8 +790,8 @@ fn match_contains_signature() {
     // uses (list[T1], T2); this exercises same-var binding consistency)
     // Match list[T1] against list[int] => T1=int
     // Then match T1 against int => T1=int (consistent)
-    let list_t1 = ExprType::list(ExprType::T1);
-    let list_int = ExprType::list(ExprType::INT);
+    let list_t1 = ExprType::list(ExprType::T1).unwrap();
+    let list_int = ExprType::list(ExprType::INT).unwrap();
     let b1 = list_t1.match_type(&list_int).unwrap();
     assert_eq!(b1[&TypeCode::TypeVarT1], ExprType::INT);
     let b2 = ExprType::T1.match_type(&ExprType::INT).unwrap();
@@ -783,9 +806,13 @@ fn match_conflicting_bindings_fail() {
     // Then if we try to match T1 against string, that's a different binding
     // The match_type on a composite should detect this
     // Simulate: signature (list[T1], list[T1]) matched against (list[int], list[string])
-    let sig = ExprType::list(ExprType::T1);
-    let b1 = sig.match_type(&ExprType::list(ExprType::INT)).unwrap();
-    let b2 = sig.match_type(&ExprType::list(ExprType::STRING)).unwrap();
+    let sig = ExprType::list(ExprType::T1).unwrap();
+    let b1 = sig
+        .match_type(&ExprType::list(ExprType::INT).unwrap())
+        .unwrap();
+    let b2 = sig
+        .match_type(&ExprType::list(ExprType::STRING).unwrap())
+        .unwrap();
     // T1 binds to int in first, string in second — conflict
     assert_ne!(b1[&TypeCode::TypeVarT1], b2[&TypeCode::TypeVarT1]);
 }
@@ -793,8 +820,8 @@ fn match_conflicting_bindings_fail() {
 #[test]
 fn match_nested_list_consistent_binding() {
     // list[list[T1]] matched against list[list[int]]
-    let sig = ExprType::list(ExprType::list(ExprType::T1));
-    let concrete = ExprType::list(ExprType::list(ExprType::INT));
+    let sig = ExprType::list(ExprType::list(ExprType::T1).unwrap()).unwrap();
+    let concrete = ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap();
     let b = sig.match_type(&concrete).unwrap();
     assert_eq!(b[&TypeCode::TypeVarT1], ExprType::INT);
 }
@@ -802,8 +829,8 @@ fn match_nested_list_consistent_binding() {
 #[test]
 fn match_nested_list_conflicting_inner() {
     // list[list[T1]] vs list[list[string]] — T1 binds to string
-    let sig = ExprType::list(ExprType::list(ExprType::T1));
-    let concrete = ExprType::list(ExprType::list(ExprType::STRING));
+    let sig = ExprType::list(ExprType::list(ExprType::T1).unwrap()).unwrap();
+    let concrete = ExprType::list(ExprType::list(ExprType::STRING).unwrap()).unwrap();
     let b = sig.match_type(&concrete).unwrap();
     assert_eq!(b[&TypeCode::TypeVarT1], ExprType::STRING);
 }
@@ -812,52 +839,62 @@ fn match_nested_list_conflicting_inner() {
 
 #[test]
 fn match_getitem_list_int() {
-    let list_t1 = ExprType::list(ExprType::T1);
-    let b = list_t1.match_type(&ExprType::list(ExprType::INT)).unwrap();
+    let list_t1 = ExprType::list(ExprType::T1).unwrap();
+    let b = list_t1
+        .match_type(&ExprType::list(ExprType::INT).unwrap())
+        .unwrap();
     // Return type T1 substituted gives int
-    let ret = ExprType::T1.substitute(&b);
+    let ret = ExprType::T1.substitute(&b).unwrap();
     assert_eq!(ret, ExprType::INT);
 }
 
 #[test]
 fn match_getitem_list_string() {
-    let list_t1 = ExprType::list(ExprType::T1);
+    let list_t1 = ExprType::list(ExprType::T1).unwrap();
     let b = list_t1
-        .match_type(&ExprType::list(ExprType::STRING))
+        .match_type(&ExprType::list(ExprType::STRING).unwrap())
         .unwrap();
-    let ret = ExprType::T1.substitute(&b);
+    let ret = ExprType::T1.substitute(&b).unwrap();
     assert_eq!(ret, ExprType::STRING);
 }
 
 #[test]
 fn match_getitem_list_list_int() {
     // list[list[int]][0] -> list[int]
-    let list_t1 = ExprType::list(ExprType::T1);
+    let list_t1 = ExprType::list(ExprType::T1).unwrap();
     let b = list_t1
-        .match_type(&ExprType::list(ExprType::list(ExprType::INT)))
+        .match_type(&ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap())
         .unwrap();
-    let ret = ExprType::T1.substitute(&b);
-    assert_eq!(ret, ExprType::list(ExprType::INT));
+    let ret = ExprType::T1.substitute(&b).unwrap();
+    assert_eq!(ret, ExprType::list(ExprType::INT).unwrap());
 }
 
 // -- List concat: list[T1] + list[T2] -> list[T3] --
 
 #[test]
 fn match_list_concat_same_type() {
-    let sig1 = ExprType::list(ExprType::T1);
-    let sig2 = ExprType::list(ExprType::T2);
-    let b1 = sig1.match_type(&ExprType::list(ExprType::INT)).unwrap();
-    let b2 = sig2.match_type(&ExprType::list(ExprType::INT)).unwrap();
+    let sig1 = ExprType::list(ExprType::T1).unwrap();
+    let sig2 = ExprType::list(ExprType::T2).unwrap();
+    let b1 = sig1
+        .match_type(&ExprType::list(ExprType::INT).unwrap())
+        .unwrap();
+    let b2 = sig2
+        .match_type(&ExprType::list(ExprType::INT).unwrap())
+        .unwrap();
     assert_eq!(b1[&TypeCode::TypeVarT1], ExprType::INT);
     assert_eq!(b2[&TypeCode::TypeVarT2], ExprType::INT);
 }
 
 #[test]
 fn match_list_concat_different_types() {
-    let sig1 = ExprType::list(ExprType::T1);
-    let sig2 = ExprType::list(ExprType::T2);
-    let b1 = sig1.match_type(&ExprType::list(ExprType::INT)).unwrap();
-    let b2 = sig2.match_type(&ExprType::list(ExprType::STRING)).unwrap();
+    let sig1 = ExprType::list(ExprType::T1).unwrap();
+    let sig2 = ExprType::list(ExprType::T2).unwrap();
+    let b1 = sig1
+        .match_type(&ExprType::list(ExprType::INT).unwrap())
+        .unwrap();
+    let b2 = sig2
+        .match_type(&ExprType::list(ExprType::STRING).unwrap())
+        .unwrap();
     assert_eq!(b1[&TypeCode::TypeVarT1], ExprType::INT);
     assert_eq!(b2[&TypeCode::TypeVarT2], ExprType::STRING);
 }
@@ -867,25 +904,25 @@ fn match_list_concat_different_types() {
 #[test]
 fn substitute_multiple_typevars() {
     // Simulate resolving a return type that uses T1
-    let ret_type = ExprType::list(ExprType::T1);
+    let ret_type = ExprType::list(ExprType::T1).unwrap();
     let mut bindings = HashMap::new();
     bindings.insert(TypeCode::TypeVarT1, ExprType::FLOAT);
     bindings.insert(TypeCode::TypeVarT2, ExprType::STRING); // unused but present
     assert_eq!(
-        ret_type.substitute(&bindings),
-        ExprType::list(ExprType::FLOAT)
+        ret_type.substitute(&bindings).unwrap(),
+        ExprType::list(ExprType::FLOAT).unwrap()
     );
 }
 
 #[test]
 fn substitute_nested() {
     // list[list[T1]] with T1=int -> list[list[int]]
-    let t = ExprType::list(ExprType::list(ExprType::T1));
+    let t = ExprType::list(ExprType::list(ExprType::T1).unwrap()).unwrap();
     let mut b = HashMap::new();
     b.insert(TypeCode::TypeVarT1, ExprType::INT);
     assert_eq!(
-        t.substitute(&b),
-        ExprType::list(ExprType::list(ExprType::INT))
+        t.substitute(&b).unwrap(),
+        ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap()
     );
 }
 
@@ -894,29 +931,32 @@ fn substitute_no_match_passthrough() {
     // T2 not in bindings -> stays as T2
     let mut b = HashMap::new();
     b.insert(TypeCode::TypeVarT1, ExprType::INT);
-    assert_eq!(ExprType::T2.substitute(&b), ExprType::T2);
+    assert_eq!(ExprType::T2.substitute(&b).unwrap(), ExprType::T2);
 }
 
 #[test]
 fn substitute_in_union() {
     // T1 | string with T1=int -> int | string
-    let t = ExprType::union(vec![ExprType::T1, ExprType::STRING]);
+    let t = ExprType::union(vec![ExprType::T1, ExprType::STRING]).unwrap();
     let mut b = HashMap::new();
     b.insert(TypeCode::TypeVarT1, ExprType::INT);
-    let result = t.substitute(&b);
+    let result = t.substitute(&b).unwrap();
     assert_eq!(
         result,
-        ExprType::union(vec![ExprType::INT, ExprType::STRING])
+        ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap()
     );
 }
 
 #[test]
 fn substitute_in_unresolved() {
     // unresolved[T1] with T1=int -> unresolved[int]
-    let t = ExprType::unresolved(ExprType::T1);
+    let t = ExprType::unresolved(ExprType::T1).unwrap();
     let mut b = HashMap::new();
     b.insert(TypeCode::TypeVarT1, ExprType::INT);
-    assert_eq!(t.substitute(&b), ExprType::unresolved(ExprType::INT));
+    assert_eq!(
+        t.substitute(&b).unwrap(),
+        ExprType::unresolved(ExprType::INT).unwrap()
+    );
 }
 
 // -- Concrete vs concrete matching (no type vars) --
@@ -937,7 +977,9 @@ fn match_concrete_different() {
 #[test]
 fn match_concrete_list_same() {
     assert_eq!(
-        ExprType::list(ExprType::INT).match_type(&ExprType::list(ExprType::INT)),
+        ExprType::list(ExprType::INT)
+            .unwrap()
+            .match_type(&ExprType::list(ExprType::INT).unwrap()),
         Some(HashMap::new())
     );
 }
@@ -945,17 +987,19 @@ fn match_concrete_list_same() {
 #[test]
 fn match_concrete_list_different_elem() {
     assert!(ExprType::list(ExprType::INT)
-        .match_type(&ExprType::list(ExprType::STRING))
+        .unwrap()
+        .match_type(&ExprType::list(ExprType::STRING).unwrap())
         .is_none());
 }
 
 #[test]
 fn match_list_vs_nonlist() {
     assert!(ExprType::list(ExprType::INT)
+        .unwrap()
         .match_type(&ExprType::INT)
         .is_none());
     assert!(ExprType::INT
-        .match_type(&ExprType::list(ExprType::INT))
+        .match_type(&ExprType::list(ExprType::INT).unwrap())
         .is_none());
 }
 
@@ -964,7 +1008,7 @@ fn match_list_vs_nonlist() {
 #[test]
 fn match_typevar_in_union_signature() {
     // Signature like T1 | string matched against int -> T1=int
-    let sig = ExprType::union(vec![ExprType::T1, ExprType::STRING]);
+    let sig = ExprType::union(vec![ExprType::T1, ExprType::STRING]).unwrap();
     let b = sig.match_type(&ExprType::INT).unwrap();
     assert_eq!(b[&TypeCode::TypeVarT1], ExprType::INT);
 }
@@ -972,7 +1016,7 @@ fn match_typevar_in_union_signature() {
 #[test]
 fn match_typevar_in_union_matches_member() {
     // T1 | string matched against string -> empty bindings (string matches string directly)
-    let sig = ExprType::union(vec![ExprType::T1, ExprType::STRING]);
+    let sig = ExprType::union(vec![ExprType::T1, ExprType::STRING]).unwrap();
     // T1 matches string first in iteration, so we get T1=string
     let b = sig.match_type(&ExprType::STRING).unwrap();
     // Either T1 binds to string, or string matches string with no bindings — both valid
@@ -1012,37 +1056,40 @@ fn match_all_four_independently() {
 
 #[test]
 fn sig_display_no_params() {
-    let sig = ExprType::signature(vec![], ExprType::INT);
+    let sig = ExprType::signature(vec![], ExprType::INT).unwrap();
     assert_eq!(sig.to_string(), "() -> int");
 }
 
 #[test]
 fn sig_display_one_param() {
-    let sig = ExprType::signature(vec![ExprType::STRING], ExprType::INT);
+    let sig = ExprType::signature(vec![ExprType::STRING], ExprType::INT).unwrap();
     assert_eq!(sig.to_string(), "(string) -> int");
 }
 
 #[test]
 fn sig_display_two_params() {
-    let sig = ExprType::signature(vec![ExprType::STRING, ExprType::STRING], ExprType::BOOL);
+    let sig =
+        ExprType::signature(vec![ExprType::STRING, ExprType::STRING], ExprType::BOOL).unwrap();
     assert_eq!(sig.to_string(), "(string, string) -> bool");
 }
 
 #[test]
 fn sig_display_generic() {
     let sig = ExprType::signature(
-        vec![ExprType::list(ExprType::T1), ExprType::INT],
+        vec![ExprType::list(ExprType::T1).unwrap(), ExprType::INT],
         ExprType::T1,
-    );
+    )
+    .unwrap();
     assert_eq!(sig.to_string(), "(list[T1], int) -> T1");
 }
 
 #[test]
 fn sig_display_contains() {
     let sig = ExprType::signature(
-        vec![ExprType::list(ExprType::T1), ExprType::T1],
+        vec![ExprType::list(ExprType::T1).unwrap(), ExprType::T1],
         ExprType::BOOL,
-    );
+    )
+    .unwrap();
     assert_eq!(sig.to_string(), "(list[T1], T1) -> bool");
 }
 
@@ -1050,14 +1097,17 @@ fn sig_display_contains() {
 
 #[test]
 fn sig_parse_no_params() {
-    assert_eq!(p("() -> int"), ExprType::signature(vec![], ExprType::INT));
+    assert_eq!(
+        p("() -> int"),
+        ExprType::signature(vec![], ExprType::INT).unwrap()
+    );
 }
 
 #[test]
 fn sig_parse_one_param() {
     assert_eq!(
         p("(string) -> int"),
-        ExprType::signature(vec![ExprType::STRING], ExprType::INT)
+        ExprType::signature(vec![ExprType::STRING], ExprType::INT).unwrap()
     );
 }
 
@@ -1065,7 +1115,7 @@ fn sig_parse_one_param() {
 fn sig_parse_two_params() {
     assert_eq!(
         p("(string, string) -> bool"),
-        ExprType::signature(vec![ExprType::STRING, ExprType::STRING], ExprType::BOOL)
+        ExprType::signature(vec![ExprType::STRING, ExprType::STRING], ExprType::BOOL).unwrap()
     );
 }
 
@@ -1074,9 +1124,10 @@ fn sig_parse_generic() {
     assert_eq!(
         p("(list[T1], int) -> T1"),
         ExprType::signature(
-            vec![ExprType::list(ExprType::T1), ExprType::INT],
+            vec![ExprType::list(ExprType::T1).unwrap(), ExprType::INT],
             ExprType::T1
         )
+        .unwrap()
     );
 }
 
@@ -1085,9 +1136,10 @@ fn sig_parse_contains() {
     assert_eq!(
         p("(list[T1], T1) -> bool"),
         ExprType::signature(
-            vec![ExprType::list(ExprType::T1), ExprType::T1],
+            vec![ExprType::list(ExprType::T1).unwrap(), ExprType::T1],
             ExprType::BOOL
         )
+        .unwrap()
     );
 }
 
@@ -1096,9 +1148,13 @@ fn sig_parse_complex_return() {
     assert_eq!(
         p("(list[T1], list[T2]) -> list[T3]"),
         ExprType::signature(
-            vec![ExprType::list(ExprType::T1), ExprType::list(ExprType::T2)],
-            ExprType::list(ExprType::T3)
+            vec![
+                ExprType::list(ExprType::T1).unwrap(),
+                ExprType::list(ExprType::T2).unwrap()
+            ],
+            ExprType::list(ExprType::T3).unwrap()
         )
+        .unwrap()
     );
 }
 
@@ -1123,7 +1179,7 @@ fn sig_roundtrip() {
 
 #[test]
 fn sig_params_and_return() {
-    let sig = ExprType::signature(vec![ExprType::STRING, ExprType::INT], ExprType::BOOL);
+    let sig = ExprType::signature(vec![ExprType::STRING, ExprType::INT], ExprType::BOOL).unwrap();
     assert_eq!(sig.sig_params(), &[ExprType::STRING, ExprType::INT]);
     assert_eq!(sig.sig_return(), &ExprType::BOOL);
 }
@@ -1160,7 +1216,7 @@ fn match_call_getitem() {
     // __getitem__(list[T1], int) -> T1
     let sig = p("(list[T1], int) -> T1");
     let b = sig
-        .match_call(&[ExprType::list(ExprType::INT), ExprType::INT])
+        .match_call(&[ExprType::list(ExprType::INT).unwrap(), ExprType::INT])
         .unwrap();
     assert_eq!(b[&TypeCode::TypeVarT1], ExprType::INT);
 }
@@ -1171,7 +1227,7 @@ fn match_call_contains_consistent() {
     // uses (list[T1], T2); this exercises same-var binding consistency)
     let sig = p("(list[T1], T1) -> bool");
     let b = sig
-        .match_call(&[ExprType::list(ExprType::INT), ExprType::INT])
+        .match_call(&[ExprType::list(ExprType::INT).unwrap(), ExprType::INT])
         .unwrap();
     assert_eq!(b[&TypeCode::TypeVarT1], ExprType::INT);
 }
@@ -1182,7 +1238,7 @@ fn match_call_contains_conflict() {
     // (note: the registered __contains__ uses (list[T1], T2), which accepts this)
     let sig = p("(list[T1], T1) -> bool");
     assert!(sig
-        .match_call(&[ExprType::list(ExprType::INT), ExprType::STRING])
+        .match_call(&[ExprType::list(ExprType::INT).unwrap(), ExprType::STRING])
         .is_none());
 }
 
@@ -1201,7 +1257,8 @@ fn match_call_eq_any_types() {
 fn resolve_getitem_int() {
     let sig = p("(list[T1], int) -> T1");
     let ret = sig
-        .resolve_call(&[ExprType::list(ExprType::INT), ExprType::INT])
+        .resolve_call(&[ExprType::list(ExprType::INT).unwrap(), ExprType::INT])
+        .unwrap()
         .unwrap();
     assert_eq!(ret, ExprType::INT);
 }
@@ -1210,7 +1267,8 @@ fn resolve_getitem_int() {
 fn resolve_getitem_string() {
     let sig = p("(list[T1], int) -> T1");
     let ret = sig
-        .resolve_call(&[ExprType::list(ExprType::STRING), ExprType::INT])
+        .resolve_call(&[ExprType::list(ExprType::STRING).unwrap(), ExprType::INT])
+        .unwrap()
         .unwrap();
     assert_eq!(ret, ExprType::STRING);
 }
@@ -1220,16 +1278,21 @@ fn resolve_getitem_nested() {
     // list[list[int]][0] -> list[int]
     let sig = p("(list[T1], int) -> T1");
     let ret = sig
-        .resolve_call(&[ExprType::list(ExprType::list(ExprType::INT)), ExprType::INT])
+        .resolve_call(&[
+            ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap(),
+            ExprType::INT,
+        ])
+        .unwrap()
         .unwrap();
-    assert_eq!(ret, ExprType::list(ExprType::INT));
+    assert_eq!(ret, ExprType::list(ExprType::INT).unwrap());
 }
 
 #[test]
 fn resolve_contains() {
     let sig = p("(list[T1], T1) -> bool");
     let ret = sig
-        .resolve_call(&[ExprType::list(ExprType::INT), ExprType::INT])
+        .resolve_call(&[ExprType::list(ExprType::INT).unwrap(), ExprType::INT])
+        .unwrap()
         .unwrap();
     assert_eq!(ret, ExprType::BOOL);
 }
@@ -1238,7 +1301,8 @@ fn resolve_contains() {
 fn resolve_no_match_returns_none() {
     let sig = p("(list[T1], T1) -> bool");
     assert!(sig
-        .resolve_call(&[ExprType::list(ExprType::INT), ExprType::STRING])
+        .resolve_call(&[ExprType::list(ExprType::INT).unwrap(), ExprType::STRING])
+        .unwrap()
         .is_none());
 }
 
@@ -1246,7 +1310,7 @@ fn resolve_no_match_returns_none() {
 fn resolve_concrete_sig() {
     let sig = p("(string) -> int");
     assert_eq!(
-        sig.resolve_call(&[ExprType::STRING]).unwrap(),
+        sig.resolve_call(&[ExprType::STRING]).unwrap().unwrap(),
         ExprType::INT
     );
 }
@@ -1256,9 +1320,10 @@ fn resolve_sorted() {
     // sorted(list[T1]) -> list[T1]
     let sig = p("(list[T1]) -> list[T1]");
     let ret = sig
-        .resolve_call(&[ExprType::list(ExprType::STRING)])
+        .resolve_call(&[ExprType::list(ExprType::STRING).unwrap()])
+        .unwrap()
         .unwrap();
-    assert_eq!(ret, ExprType::list(ExprType::STRING));
+    assert_eq!(ret, ExprType::list(ExprType::STRING).unwrap());
 }
 
 #[test]
@@ -1266,9 +1331,10 @@ fn resolve_list_mul() {
     // list * int: (list[T1], int) -> list[T1]
     let sig = p("(list[T1], int) -> list[T1]");
     let ret = sig
-        .resolve_call(&[ExprType::list(ExprType::FLOAT), ExprType::INT])
+        .resolve_call(&[ExprType::list(ExprType::FLOAT).unwrap(), ExprType::INT])
+        .unwrap()
         .unwrap();
-    assert_eq!(ret, ExprType::list(ExprType::FLOAT));
+    assert_eq!(ret, ExprType::list(ExprType::FLOAT).unwrap());
 }
 
 // -- is_symbolic / is_concrete for signatures --
@@ -1406,7 +1472,7 @@ fn value_list_int_float_mix() {
         ExprValue::Int(3),
     ];
     let val = ExprValue::make_list(items, ExprType::FLOAT).unwrap();
-    assert_eq!(val.expr_type(), ExprType::list(ExprType::FLOAT));
+    assert_eq!(val.expr_type(), ExprType::list(ExprType::FLOAT).unwrap());
 }
 
 #[test]
@@ -1415,10 +1481,11 @@ fn value_list_nested() {
         ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
     let inner2 =
         ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4)], ExprType::INT).unwrap();
-    let val = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
+    let val =
+        ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT).unwrap()).unwrap();
     assert_eq!(
         val.expr_type(),
-        ExprType::list(ExprType::list(ExprType::INT))
+        ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap()
     );
 }
 
@@ -1429,7 +1496,7 @@ fn value_list_path_string_mix() {
         ExprValue::String("b".to_string()),
     ];
     let val = ExprValue::make_list(items, ExprType::STRING).unwrap();
-    assert_eq!(val.expr_type(), ExprType::list(ExprType::STRING));
+    assert_eq!(val.expr_type(), ExprType::list(ExprType::STRING).unwrap());
 }
 
 #[test]
@@ -1470,7 +1537,7 @@ fn value_unresolved_creation() {
 
 #[test]
 fn value_unresolved_from_list_string_type() {
-    let v = ExprValue::unresolved(ExprType::list(ExprType::STRING));
+    let v = ExprValue::unresolved(ExprType::list(ExprType::STRING).unwrap());
     assert_eq!(v.expr_type(), p("unresolved[list[string]]"));
 }
 

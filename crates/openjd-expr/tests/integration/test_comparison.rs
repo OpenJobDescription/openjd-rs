@@ -676,16 +676,19 @@ fn empty_list_generics_keep_nulltype_return_type() {
     let mut st = SymbolTable::new();
     st.set(
         "E",
-        ExprValue::unresolved(openjd_expr::ExprType::list(openjd_expr::ExprType::NULLTYPE)),
+        ExprValue::unresolved(
+            openjd_expr::ExprType::list(openjd_expr::ExprType::NULLTYPE).unwrap(),
+        ),
     )
     .unwrap();
     for expr in ["sorted(E)", "reversed(E)", "unique(E)", "E * 2"] {
         let v = eval_with(expr, &st);
         assert_eq!(
             v.expr_type(),
-            openjd_expr::ExprType::unresolved(openjd_expr::ExprType::list(
-                openjd_expr::ExprType::NULLTYPE
-            )),
+            openjd_expr::ExprType::unresolved(
+                openjd_expr::ExprType::list(openjd_expr::ExprType::NULLTYPE).unwrap()
+            )
+            .unwrap(),
             "{expr}: got {v:?}"
         );
     }

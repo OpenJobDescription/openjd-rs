@@ -238,7 +238,9 @@ fn add_unresolved_session_symbols(symtab: &mut SymbolTable) -> Result<(), ModelE
             let unresolved_type = match symtab.get_value(&raw_key) {
                 Some(
                     openjd_expr::ExprValue::ListPath(..) | openjd_expr::ExprValue::ListString(..),
-                ) => openjd_expr::ExprType::list(openjd_expr::ExprType::PATH),
+                ) => crate::types::fixed_type(openjd_expr::ExprType::list(
+                    openjd_expr::ExprType::PATH,
+                )),
                 _ => openjd_expr::ExprType::PATH,
             };
             symtab.set(

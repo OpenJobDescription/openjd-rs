@@ -428,7 +428,7 @@ fn resolved_type_is_list_for_single_list_expression() {
     // The list case the report flags: min_resolved_string_len measures the display
     // form, and resolved_type tells the consumer it is not a plain string.
     let sr = static_resolution("{{ [1, 2, 3] }}", &SymbolTable::new());
-    assert_eq!(sr.resolved_type, ExprType::list(ExprType::INT));
+    assert_eq!(sr.resolved_type, ExprType::list(ExprType::INT).unwrap());
 }
 
 #[test]
@@ -476,8 +476,9 @@ fn args_target() -> ExprType {
     ExprType::union(vec![
         ExprType::NULLTYPE,
         ExprType::STRING,
-        ExprType::list(ExprType::STRING),
+        ExprType::list(ExprType::STRING).unwrap(),
     ])
+    .unwrap()
 }
 
 fn static_resolution_with_target(
@@ -504,12 +505,11 @@ fn args_union_target_unresolved_list_of_string_satisfies() {
     // list[string] is a union member, so the unresolved value passes
     // through with its constraint intact: the consumer knows the field
     // resolves to a list[string] even though no value is known.
-    let st =
-        symtab!("WrappedAction.Args" => ExprValue::unresolved(ExprType::list(ExprType::STRING)));
+    let st = symtab!("WrappedAction.Args" => ExprValue::unresolved(ExprType::list(ExprType::STRING).unwrap()));
     let sr = static_resolution_with_target("{{ WrappedAction.Args }}", &st, &args_target());
     assert!(sr.resolved_value.is_none());
     assert_eq!(sr.min_resolved_string_len, 0);
-    assert_eq!(sr.resolved_type, ExprType::list(ExprType::STRING));
+    assert_eq!(sr.resolved_type, ExprType::list(ExprType::STRING).unwrap());
 }
 
 #[test]
@@ -526,10 +526,11 @@ fn args_union_target_unresolved_list_of_int_converts_to_list_of_string() {
     // (element compatibility is deferred until the payload is known), and
     // there is no list→string rule — so the only destination is
     // list[string], and the type promises the consumer a list.
-    let st = symtab!("Param.Frames" => ExprValue::unresolved(ExprType::list(ExprType::INT)));
+    let st =
+        symtab!("Param.Frames" => ExprValue::unresolved(ExprType::list(ExprType::INT).unwrap()));
     let sr = static_resolution_with_target("{{ Param.Frames }}", &st, &args_target());
     assert!(sr.resolved_value.is_none());
-    assert_eq!(sr.resolved_type, ExprType::list(ExprType::STRING));
+    assert_eq!(sr.resolved_type, ExprType::list(ExprType::STRING).unwrap());
 }
 
 #[test]
@@ -539,7 +540,7 @@ fn args_union_target_unresolved_union_source_keeps_satisfying_members() {
     // so the result is the union of the per-member outcomes.
     let st = symtab!(
         "WrappedAction.Timeout" => ExprValue::unresolved(
-            ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE])
+            ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]).unwrap()
         )
     );
     let sr = static_resolution_with_target("{{ WrappedAction.Timeout }}", &st, &args_target());
@@ -548,7 +549,7 @@ fn args_union_target_unresolved_union_source_keeps_satisfying_members() {
     // Pin the exact result so any change to union coerce_type is visible.
     assert_eq!(
         sr.resolved_type,
-        ExprType::union(vec![ExprType::STRING, ExprType::NULLTYPE])
+        ExprType::union(vec![ExprType::STRING, ExprType::NULLTYPE]).unwrap()
     );
 }
 
@@ -562,14 +563,18 @@ fn args_union_target_resolved_type_is_union_when_payload_decides() {
     // than the target, with null correctly excluded.
     let st = symtab!(
         "Param.Args" => ExprValue::unresolved(
-            ExprType::union(vec![ExprType::STRING, ExprType::list(ExprType::INT)])
+            ExprType::union(vec![ExprType::STRING, ExprType::list(ExprType::INT).unwrap()]).unwrap()
         )
     );
     let sr = static_resolution_with_target("{{ Param.Args }}", &st, &args_target());
     assert!(sr.resolved_value.is_none());
     assert_eq!(
         sr.resolved_type,
-        ExprType::union(vec![ExprType::STRING, ExprType::list(ExprType::STRING)])
+        ExprType::union(vec![
+            ExprType::STRING,
+            ExprType::list(ExprType::STRING).unwrap()
+        ])
+        .unwrap()
     );
 }
 
@@ -595,7 +600,7 @@ fn args_union_target_concrete_list_passes_through() {
         &args_target(),
     );
     assert!(sr.resolved_value.as_ref().is_some_and(ExprValue::is_list));
-    assert_eq!(sr.resolved_type, ExprType::list(ExprType::STRING));
+    assert_eq!(sr.resolved_type, ExprType::list(ExprType::STRING).unwrap());
 }
 
 #[test]
@@ -616,8 +621,7 @@ fn args_union_target_ignored_in_multi_segment() {
     // "--flag {{ Args }}" concatenates: the union target is ignored
     // (mirroring resolution) and the type is string; the literal prefix
     // still bounds the length.
-    let st =
-        symtab!("WrappedAction.Args" => ExprValue::unresolved(ExprType::list(ExprType::STRING)));
+    let st = symtab!("WrappedAction.Args" => ExprValue::unresolved(ExprType::list(ExprType::STRING).unwrap()));
     let sr = static_resolution_with_target("--flag {{ WrappedAction.Args }}", &st, &args_target());
     assert!(sr.resolved_value.is_none());
     assert_eq!(sr.min_resolved_string_len, 7); // "--flag "

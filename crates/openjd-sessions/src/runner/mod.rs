@@ -297,7 +297,8 @@ pub(crate) fn resolve_effective_cancelation(
             let target = openjd_expr::ExprType::union(vec![
                 openjd_expr::ExprType::STRING,
                 openjd_expr::ExprType::NULLTYPE,
-            ]);
+            ])
+            .expect("string | nulltype is 2 deep, far below MAX_TYPE_DEPTH");
             let value = mode
                 .resolve_with(
                     symtab,
@@ -401,7 +402,8 @@ pub(crate) fn resolve_action_timeout(
             let target = openjd_expr::ExprType::union(vec![
                 openjd_expr::ExprType::INT,
                 openjd_expr::ExprType::NULLTYPE,
-            ]);
+            ])
+            .expect("int | nulltype is 2 deep, far below MAX_TYPE_DEPTH");
             let value = fmt
                 .resolve_with(
                     symtab,
@@ -483,7 +485,8 @@ pub(crate) fn resolve_notify_period_seconds(
     let target = openjd_expr::ExprType::union(vec![
         openjd_expr::ExprType::INT,
         openjd_expr::ExprType::NULLTYPE,
-    ]);
+    ])
+    .expect("int | nulltype is 2 deep, far below MAX_TYPE_DEPTH");
     let value = fs
         .resolve_with(
             symtab,

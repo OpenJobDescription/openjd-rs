@@ -4238,7 +4238,11 @@ mod typed_param_seeding_tests {
         // Input: a ListList containing ListString elements that should become ListInt
         let inner1 = ExprValue::ListString(vec!["10".into(), "20".into()], 2);
         let inner2 = ExprValue::ListString(vec!["30".into(), "40".into()], 2);
-        let outer = ExprValue::ListList(vec![inner1, inner2], ExprType::list(ExprType::STRING), 0);
+        let outer = ExprValue::ListList(
+            vec![inner1, inner2],
+            ExprType::list(ExprType::STRING).unwrap(),
+            0,
+        );
         let symtab =
             build_symtab_from_scratch(vec![("Grid", JobParameterType::ListListInt, outer)])
                 .unwrap();

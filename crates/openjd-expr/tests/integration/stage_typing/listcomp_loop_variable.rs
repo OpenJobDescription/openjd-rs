@@ -110,9 +110,12 @@ fn bare_unresolved_element_type_binds_any() {
     // F1 of audit round 8: a `list[unresolved]` iterable (built through
     // `ExprType::new`) panicked in union normalization; base typed it.
     let mut st = states()[0].clone();
-    let bare = ExprType::new(TypeCode::Unresolved, vec![]);
-    st.set("LU", ExprValue::unresolved(ExprType::list(bare.clone())))
-        .unwrap();
+    let bare = ExprType::new(TypeCode::Unresolved, vec![]).unwrap();
+    st.set(
+        "LU",
+        ExprValue::unresolved(ExprType::list(bare.clone()).unwrap()),
+    )
+    .unwrap();
     st.set("U", ExprValue::unresolved(bare)).unwrap();
     for (expr, ty) in [
         ("[x for x in LU]", "unresolved[list[any]]"),

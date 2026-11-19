@@ -31,10 +31,10 @@ pub(super) fn resolve_to_f64(
     context: &str,
     budgets: super::EvalBudgets,
 ) -> Result<Option<f64>, ModelError> {
-    let target = openjd_expr::ExprType::union(vec![
+    let target = crate::types::fixed_type(openjd_expr::ExprType::union(vec![
         openjd_expr::ExprType::FLOAT,
         openjd_expr::ExprType::NULLTYPE,
-    ]);
+    ]));
     let resolved = fs
         .resolve_with(symtab, &budgets.fs_options().with_target_type(&target))
         .map_err(|e| ModelError::FormatStringError {
@@ -360,10 +360,11 @@ fn resolve_task_parameter(
                     template::IntOrFormatString::FormatString(fs) => {
                         // Optional field: target type `int?` — a
                         // whole-field null means "field omitted".
-                        let target = openjd_expr::ExprType::union(vec![
-                            openjd_expr::ExprType::INT,
-                            openjd_expr::ExprType::NULLTYPE,
-                        ]);
+                        let target =
+                            crate::types::fixed_type(openjd_expr::ExprType::union(vec![
+                                openjd_expr::ExprType::INT,
+                                openjd_expr::ExprType::NULLTYPE,
+                            ]));
                         let value = fs
                             .resolve_with(
                                 symtab,

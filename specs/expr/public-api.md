@@ -472,16 +472,17 @@ impl FunctionLibrary {
     /// signature's type (`list[T3]`, or `list[T2]` for the range overloads).
     /// Any other call with an argument of unknown type (`any`, a bare type
     /// variable) that matches a signature is `any`; one that matches none
-    /// is `None`.
+    /// is `Ok(None)`. `TypeTooDeep` when the return type would be deeper
+    /// than `MAX_TYPE_DEPTH`.
     pub fn derive_return_type(
         &self, name: &str, arg_types: &[ExprType],
-    ) -> Option<ExprType>;
+    ) -> Result<Option<ExprType>, ExpressionError>;
 
     /// Static type-checking for property access: `x.name`.
     /// Looks up `__property_name__(base_type)` in the library.
     pub fn get_property_type(
         &self, base_type: &ExprType, property_name: &str,
-    ) -> Option<ExprType>;
+    ) -> Result<Option<ExprType>, ExpressionError>;
 }
 ```
 
@@ -546,15 +547,28 @@ impl ExprType {
 Constructors + queries:
 
 ```rust
+/// The deepest an `ExprType` can be. Lists, unions and signatures count a
+/// level each; `unresolved[T]` is as deep as `T`. Re-exported at the
+/// crate root.
+pub const MAX_TYPE_DEPTH: usize = 64;
+
 impl ExprType {
+    // Every constructor, and every operation below that builds a type,
+    // returns `ExpressionErrorKind::TypeTooDeep` for a result deeper than
+    // `MAX_TYPE_DEPTH`. No `ExprType` is ever deeper, so the recursive
+    // walks (`==`, `Hash`, `Display`, `Drop`, `satisfies`, coercion) are
+    // bounded and cannot overflow the stack.
+
     /// Construct with normalization. Prefer the named constructors below
     /// unless you're building a generic type dynamically.
-    pub fn new(code: TypeCode, params: Vec<ExprType>) -> Self;
+    pub fn new(code: TypeCode, params: Vec<ExprType>) -> Result<Self, ExpressionError>;
 
-    pub fn list(elem: ExprType) -> Self;
-    pub fn union(types: Vec<ExprType>) -> Self;
-    pub fn unresolved(constraint: ExprType) -> Self;
-    pub fn signature(param_types: Vec<ExprType>, return_type: ExprType) -> Self;
+    pub fn list(elem: ExprType) -> Result<Self, ExpressionError>;
+    pub fn union(types: Vec<ExprType>) -> Result<Self, ExpressionError>;
+    pub fn unresolved(constraint: ExprType) -> Result<Self, ExpressionError>;
+    pub fn signature(
+        param_types: Vec<ExprType>, return_type: ExprType,
+    ) -> Result<Self, ExpressionError>;
 
     pub fn code(&self) -> TypeCode;
     pub fn params(&self) -> &[ExprType];
@@ -597,16 +611,23 @@ impl ExprType {
         &self, other: &ExprType,
     ) -> Option<HashMap<TypeCode, ExprType>>;
 
-    /// Substitute type variables with concrete types.
-    pub fn substitute(&self, bindings: &HashMap<TypeCode, ExprType>) -> ExprType;
+    /// Substitute type variables with concrete types. `TypeTooDeep` when a
+    /// deep binding takes the result past `MAX_TYPE_DEPTH`.
+    pub fn substitute(
+        &self, bindings: &HashMap<TypeCode, ExprType>,
+    ) -> Result<ExprType, ExpressionError>;
 
     /// Convenience: match + substitute on the return type in one call.
-    pub fn resolve_call(&self, arg_types: &[ExprType]) -> Option<ExprType>;
+    /// `Ok(None)` when the arguments do not match.
+    pub fn resolve_call(
+        &self, arg_types: &[ExprType],
+    ) -> Result<Option<ExprType>, ExpressionError>;
 
     // ── Parsing ──
 
     /// Parse a spec-form type string: `"int"`, `"list[string]"`,
-    /// `"int?"`, `"int | string"`, `"(int, int) -> int"`, etc.
+    /// `"int?"`, `"int | string"`, `"(int, int) -> int"`, etc. Stops at 10
+    /// levels of nesting, so a parsed type is at most 11 deep.
     pub fn parse(s: &str) -> Result<ExprType, String>;
 }
 ```
@@ -785,6 +806,9 @@ impl ExprValue {
 
     // ── Queries ──
 
+    /// The value's type. A `ListList` whose element type hint is already
+    /// `MAX_TYPE_DEPTH` deep (only a value built through the API can hold
+    /// one) is `list[any]`, since `list[hint]` would be too deep.
     pub fn expr_type(&self) -> ExprType;
     pub fn type_name(&self) -> &'static str;
     pub fn is_list(&self) -> bool;
@@ -1580,6 +1604,8 @@ pub enum ExpressionErrorKind {
     OperationLimitExceeded { count: usize, limit: usize },
     /// Exceeded `MAX_EXPRESSION_DEPTH`.
     ExpressionTooDeep { depth: usize, limit: usize },
+    /// Building an `ExprType` would pass `MAX_TYPE_DEPTH` (the limit).
+    TypeTooDeep { limit: usize },
     /// A Python syntax feature that's not in the OpenJD subset
     /// (lambdas, walrus, dict/set literals, chained `is`, etc.).
     UnsupportedSyntax { feature: String },
@@ -1724,7 +1750,7 @@ pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS, MAX_RANGE
 pub use symbol_table::{
     SerializedSymbolTable, SymbolTable, SymbolTableError, MAX_SYMBOL_TABLE_ENTRIES,
 };
-pub use types::{ExprType, TypeCode};
+pub use types::{ExprType, TypeCode, MAX_TYPE_DEPTH};
 pub use value::ExprValue;
 ```
 

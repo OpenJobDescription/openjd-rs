@@ -11,6 +11,33 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use crate::error::{ExpressionError, ExpressionErrorKind};
+
+/// The maximum nesting depth of an [`ExprType`].
+///
+/// A type's depth is the number of types on the longest path from it down
+/// to a type with no parameters, not counting `unresolved[...]` wrappers:
+/// `int` is 1 deep, `list[int]` 2, `list[int | string]` 3,
+/// `(int) -> list[int]` 3, and `unresolved[list[int]]` 2, as deep as
+/// `list[int]`. Lists, unions and signatures each count as a level.
+/// `unresolved[T]` does not, so that the type of an unresolved value is as
+/// deep as its constraint, and an `ExprValue::Unresolved` holding any type
+/// has a type. An `unresolved` is never the direct parameter of another
+/// (`unresolved[unresolved[T]]` normalizes to `unresolved[T]`), so a type
+/// `MAX_TYPE_DEPTH` deep nests at most `2 * MAX_TYPE_DEPTH` levels.
+///
+/// Every constructor rejects a type deeper than this with
+/// [`ExpressionErrorKind::TypeTooDeep`], so no `ExprType` value is ever
+/// deeper. That bounds the recursion of every operation that walks a type
+/// (`==`, `Hash`, `Display`, `Debug`, `Drop`, [`ExprType::satisfies`],
+/// [`ExprType::match_type`], coercion), which would otherwise overflow the
+/// stack and abort the process on a type built deep enough through this
+/// API. Nothing the language itself builds comes near the limit:
+/// [`ExprType::parse`] stops at 10 levels of nesting, the function
+/// library's signatures are at most 4 deep, and list values nest at most
+/// two lists.
+pub const MAX_TYPE_DEPTH: usize = 64;
+
 /// Type codes for expression values.
 ///
 /// Marked `#[non_exhaustive]` so that future revisions and extensions can
@@ -45,12 +72,33 @@ pub enum TypeCode {
 
 /// Represents a type in the expression language.
 ///
-/// Fields are crate-private to enforce normalization via constructors.
-/// Use [`code()`](ExprType::code) and [`params()`](ExprType::params) for read access.
-#[derive(Debug, Clone, Eq, serde::Serialize)]
+/// Fields are crate-private to enforce normalization and the
+/// [`MAX_TYPE_DEPTH`] limit via constructors, which return `Err` for a type
+/// deeper than the limit. Use [`code()`](ExprType::code) and
+/// [`params()`](ExprType::params) for read access.
+#[derive(Clone, Eq, serde::Serialize)]
 pub struct ExprType {
     code: TypeCode,
     params: Vec<ExprType>,
+    /// This type's depth (see [`MAX_TYPE_DEPTH`]), computed once by
+    /// [`ExprType::build`]. At most `MAX_TYPE_DEPTH`, so it fits a `u8`,
+    /// which sits in the struct's padding. It is a function of `code` and
+    /// `params`, so equality and hashing ignore it.
+    #[serde(skip)]
+    depth: u8,
+}
+
+// `MAX_TYPE_DEPTH` must fit the `depth` field.
+const _: () = assert!(MAX_TYPE_DEPTH < u8::MAX as usize);
+
+impl fmt::Debug for ExprType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // The cached depth is not part of the type's identity.
+        f.debug_struct("ExprType")
+            .field("code", &self.code)
+            .field("params", &self.params)
+            .finish()
+    }
 }
 
 // ── Constants ──
@@ -63,6 +111,7 @@ impl ExprType {
     pub const BOOL: ExprType = ExprType {
         code: TypeCode::Bool,
         params: Vec::new(),
+        depth: 1,
     };
     #[allow(
         missing_docs,
@@ -71,6 +120,7 @@ impl ExprType {
     pub const INT: ExprType = ExprType {
         code: TypeCode::Int,
         params: Vec::new(),
+        depth: 1,
     };
     #[allow(
         missing_docs,
@@ -79,6 +129,7 @@ impl ExprType {
     pub const FLOAT: ExprType = ExprType {
         code: TypeCode::Float,
         params: Vec::new(),
+        depth: 1,
     };
     #[allow(
         missing_docs,
@@ -87,6 +138,7 @@ impl ExprType {
     pub const STRING: ExprType = ExprType {
         code: TypeCode::String,
         params: Vec::new(),
+        depth: 1,
     };
     #[allow(
         missing_docs,
@@ -95,6 +147,7 @@ impl ExprType {
     pub const PATH: ExprType = ExprType {
         code: TypeCode::Path,
         params: Vec::new(),
+        depth: 1,
     };
     #[allow(
         missing_docs,
@@ -103,6 +156,7 @@ impl ExprType {
     pub const RANGE_EXPR: ExprType = ExprType {
         code: TypeCode::RangeExpr,
         params: Vec::new(),
+        depth: 1,
     };
     #[allow(
         missing_docs,
@@ -111,6 +165,7 @@ impl ExprType {
     pub const NULLTYPE: ExprType = ExprType {
         code: TypeCode::NullType,
         params: Vec::new(),
+        depth: 1,
     };
     #[allow(
         missing_docs,
@@ -119,6 +174,7 @@ impl ExprType {
     pub const ANY: ExprType = ExprType {
         code: TypeCode::Any,
         params: Vec::new(),
+        depth: 1,
     };
     #[allow(
         missing_docs,
@@ -127,6 +183,7 @@ impl ExprType {
     pub const NORETURN: ExprType = ExprType {
         code: TypeCode::NoReturn,
         params: Vec::new(),
+        depth: 1,
     };
     #[allow(
         missing_docs,
@@ -135,6 +192,7 @@ impl ExprType {
     pub const T: ExprType = ExprType {
         code: TypeCode::TypeVarT,
         params: Vec::new(),
+        depth: 1,
     };
     #[allow(
         missing_docs,
@@ -143,6 +201,7 @@ impl ExprType {
     pub const T1: ExprType = ExprType {
         code: TypeCode::TypeVarT1,
         params: Vec::new(),
+        depth: 1,
     };
     #[allow(
         missing_docs,
@@ -151,6 +210,7 @@ impl ExprType {
     pub const T2: ExprType = ExprType {
         code: TypeCode::TypeVarT2,
         params: Vec::new(),
+        depth: 1,
     };
     #[allow(
         missing_docs,
@@ -159,6 +219,7 @@ impl ExprType {
     pub const T3: ExprType = ExprType {
         code: TypeCode::TypeVarT3,
         params: Vec::new(),
+        depth: 1,
     };
 
     /// The type code for this type.
@@ -171,60 +232,103 @@ impl ExprType {
         &self.params
     }
 
-    #[allow(
-        missing_docs,
-        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-    )]
-    pub fn list(elem: ExprType) -> Self {
-        // Normalize: list[unresolved[T]] -> unresolved[list[T]]
-        if elem.code == TypeCode::Unresolved && elem.params.len() == 1 {
-            let inner_list = ExprType {
-                code: TypeCode::List,
-                params: vec![elem.params[0].clone()],
-            };
-            return ExprType {
-                code: TypeCode::Unresolved,
-                params: vec![inner_list],
-            };
-        }
-        ExprType {
-            code: TypeCode::List,
-            params: vec![elem],
-        }
+    /// This type's depth, as [`MAX_TYPE_DEPTH`] defines it.
+    pub(crate) fn depth(&self) -> usize {
+        self.depth as usize
     }
 
-    #[allow(
-        missing_docs,
-        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-    )]
-    pub fn union(types: Vec<ExprType>) -> Self {
+    /// The single point every `ExprType` with parameters is built through:
+    /// computes the depth and rejects a type deeper than [`MAX_TYPE_DEPTH`].
+    /// It does not normalize; the public constructors normalize first.
+    fn build(code: TypeCode, params: Vec<ExprType>) -> Result<ExprType, ExpressionError> {
+        let deepest = params.iter().map(ExprType::depth).max().unwrap_or(0);
+        // `unresolved[T]` is as deep as `T` (see `MAX_TYPE_DEPTH`); every
+        // other type is a level deeper than its deepest parameter.
+        let depth = match (code, params.as_slice()) {
+            (TypeCode::Unresolved, [_]) => deepest,
+            _ => 1 + deepest,
+        };
+        if depth > MAX_TYPE_DEPTH {
+            return Err(ExpressionError::from_kind(
+                ExpressionErrorKind::TypeTooDeep {
+                    limit: MAX_TYPE_DEPTH,
+                },
+            ));
+        }
+        Ok(ExprType {
+            code,
+            params,
+            // At most `MAX_TYPE_DEPTH`, checked above, which fits a `u8`.
+            depth: depth as u8,
+        })
+    }
+
+    /// Build a fixed type that is a few levels deep, such as
+    /// `list[string]` or `int | nulltype`, from one of the fallible
+    /// constructors.
+    ///
+    /// Only for a type written out in the source from constants, never
+    /// for one derived from a caller's type: such a type is at most 3
+    /// deep, so the constructor cannot fail, and the panic is unreachable.
+    pub(crate) fn fixed(t: Result<ExprType, ExpressionError>) -> ExprType {
+        t.expect("a fixed type written from constants is far below MAX_TYPE_DEPTH")
+    }
+
+    /// The list type `list[elem]`.
+    ///
+    /// Normalizes `list[unresolved[T]]` to `unresolved[list[T]]`, since an
+    /// unresolved value never sits inside a list.
+    ///
+    /// Returns [`ExpressionErrorKind::TypeTooDeep`] if the result would be
+    /// deeper than [`MAX_TYPE_DEPTH`], that is, if `elem` is already at the
+    /// limit.
+    pub fn list(elem: ExprType) -> Result<Self, ExpressionError> {
+        // Normalize: list[unresolved[T]] -> unresolved[list[T]]
+        if let (TypeCode::Unresolved, [inner]) = (elem.code, elem.params.as_slice()) {
+            let inner_list = ExprType::build(TypeCode::List, vec![inner.clone()])?;
+            return ExprType::build(TypeCode::Unresolved, vec![inner_list]);
+        }
+        ExprType::build(TypeCode::List, vec![elem])
+    }
+
+    /// The union of `types`, normalized: nested unions are flattened,
+    /// `noreturn` members dropped, duplicates removed, an `any` member
+    /// absorbs the rest, an `unresolved` member is hoisted
+    /// (`T | unresolved[S]` is `unresolved[T | S]`), a single member is
+    /// returned as itself and no members give `noreturn`.
+    ///
+    /// Returns [`ExpressionErrorKind::TypeTooDeep`] if the normalized
+    /// result would be deeper than [`MAX_TYPE_DEPTH`].
+    pub fn union(types: Vec<ExprType>) -> Result<Self, ExpressionError> {
         normalize_union(types)
     }
 
-    #[allow(
-        missing_docs,
-        reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-    )]
-    pub fn unresolved(constraint: ExprType) -> Self {
+    /// The type `unresolved[constraint]` of a value that is not known until
+    /// run time. `unresolved[unresolved[T]]` normalizes to `unresolved[T]`.
+    ///
+    /// `unresolved[T]` is as deep as `T` (see [`MAX_TYPE_DEPTH`]), so this
+    /// never fails today; it returns a `Result` like the other
+    /// constructors.
+    pub fn unresolved(constraint: ExprType) -> Result<Self, ExpressionError> {
         // Normalize: unresolved[unresolved[T]] -> unresolved[T]
         if constraint.code == TypeCode::Unresolved {
-            return constraint;
+            return Ok(constraint);
         }
-        ExprType {
-            code: TypeCode::Unresolved,
-            params: vec![constraint],
-        }
+        ExprType::build(TypeCode::Unresolved, vec![constraint])
     }
 
     /// Create a function signature type: `(param_types) -> return_type`.
     /// Stored as params = [param0, param1, ..., return_type].
-    pub fn signature(param_types: Vec<ExprType>, return_type: ExprType) -> Self {
+    ///
+    /// Returns [`ExpressionErrorKind::TypeTooDeep`] if the result would be
+    /// deeper than [`MAX_TYPE_DEPTH`].
+    pub fn signature(
+        param_types: Vec<ExprType>,
+        return_type: ExprType,
+    ) -> Result<Self, ExpressionError> {
         let mut params = param_types;
         params.push(return_type);
-        ExprType {
-            code: TypeCode::Signature,
-            params,
-        }
+        ExprType::build(TypeCode::Signature, params)
     }
 
     /// Get the parameter types of a signature (all params except the last).
@@ -276,9 +380,18 @@ impl ExprType {
 
     /// Resolve the return type of a signature given argument types.
     /// Matches args, substitutes bindings into return type.
-    pub fn resolve_call(&self, arg_types: &[ExprType]) -> Option<ExprType> {
-        let bindings = self.match_call(arg_types)?;
-        Some(self.sig_return().substitute(&bindings))
+    ///
+    /// Returns `Ok(None)` if the arguments do not match, and
+    /// [`ExpressionErrorKind::TypeTooDeep`] if the substituted return type
+    /// would be deeper than [`MAX_TYPE_DEPTH`].
+    pub fn resolve_call(
+        &self,
+        arg_types: &[ExprType],
+    ) -> Result<Option<ExprType>, ExpressionError> {
+        match self.match_call(arg_types) {
+            Some(bindings) => self.sig_return().substitute(&bindings).map(Some),
+            None => Ok(None),
+        }
     }
 }
 
@@ -372,8 +485,11 @@ fn unify_inner(a: &ExprType, b: &ExprType, as_list_element: bool) -> Option<Expr
         (TypeCode::List, TypeCode::RangeExpr) if matches!(a.params.first(), Some(e) if e.code == TypeCode::Int) => {
             Some(a.clone())
         }
+        // The unified type is never deeper than the deeper of `a` and `b`
+        // (every other arm returns one of them or a scalar), so `list`
+        // cannot fail here; if it did, the two would not unify.
         (TypeCode::List, TypeCode::List) => match (a.params.as_slice(), b.params.as_slice()) {
-            ([ea], [eb]) => Some(ExprType::list(unify_inner(ea, eb, true)?)),
+            ([ea], [eb]) => ExprType::list(unify_inner(ea, eb, true)?).ok(),
             _ => None,
         },
         (TypeCode::Union, _) => a
@@ -422,9 +538,17 @@ fn unify_inner(a: &ExprType, b: &ExprType, as_list_element: bool) -> Option<Expr
 /// - Everything else is a conflict — notably `bool` against `int`, a scalar
 ///   against a list, `range_expr` against `list[int]`, a top-level
 ///   `nulltype` (a list literal cannot hold `null`).
-pub(crate) fn join_list_element(a: &ExprType, b: &ExprType) -> Option<ExprType> {
-    let a = list_element_contribution(a)?;
-    let b = list_element_contribution(b)?;
+///
+/// Returns [`ExpressionErrorKind::TypeTooDeep`] if the joined type would be
+/// deeper than [`MAX_TYPE_DEPTH`]: joining union members can make a type a
+/// level deeper than either side.
+pub(crate) fn join_list_element(
+    a: &ExprType,
+    b: &ExprType,
+) -> Result<Option<ExprType>, ExpressionError> {
+    let (Some(a), Some(b)) = (list_element_contribution(a)?, list_element_contribution(b)?) else {
+        return Ok(None);
+    };
     join_element_inner(&a, &b, false)
 }
 
@@ -444,12 +568,12 @@ pub(crate) fn join_list_element(a: &ExprType, b: &ExprType) -> Option<ExprType> 
 /// Nor is it dropped from a joined union: `[([] if c else [1])]` is a
 /// `list[list[nulltype] | list[int]]`, since a run where `c` holds builds
 /// `[[]]`, whose element is the untyped empty list (§1.2.1).
-pub(crate) fn list_element_contribution(t: &ExprType) -> Option<ExprType> {
+pub(crate) fn list_element_contribution(t: &ExprType) -> Result<Option<ExprType>, ExpressionError> {
     let t = match (t.code, t.params.as_slice()) {
         (TypeCode::Unresolved, [inner]) => inner,
         _ => t,
     };
-    match t.code {
+    Ok(match t.code {
         TypeCode::NullType => None,
         TypeCode::Union => {
             let members: Vec<ExprType> = t
@@ -461,11 +585,11 @@ pub(crate) fn list_element_contribution(t: &ExprType) -> Option<ExprType> {
             if members.is_empty() {
                 None
             } else {
-                Some(ExprType::union(members))
+                Some(ExprType::union(members)?)
             }
         }
         _ => Some(t.clone()),
-    }
+    })
 }
 
 fn is_unknown_element(t: &ExprType) -> bool {
@@ -491,7 +615,11 @@ fn unknown_element_as_any(t: ExprType) -> ExprType {
     }
 }
 
-fn join_element_inner(a: &ExprType, b: &ExprType, nested: bool) -> Option<ExprType> {
+fn join_element_inner(
+    a: &ExprType,
+    b: &ExprType,
+    nested: bool,
+) -> Result<Option<ExprType>, ExpressionError> {
     if let (TypeCode::Unresolved, [inner]) = (a.code, a.params.as_slice()) {
         return join_element_inner(inner, b, nested);
     }
@@ -499,9 +627,9 @@ fn join_element_inner(a: &ExprType, b: &ExprType, nested: bool) -> Option<ExprTy
         return join_element_inner(a, inner, nested);
     }
     if a == b && !is_unknown_element(a) {
-        return Some(a.clone());
+        return Ok(Some(a.clone()));
     }
-    match (a.code, b.code) {
+    Ok(match (a.code, b.code) {
         // An element of unknown type (`any`, or a type variable left
         // unbound, such as the `T1` of `flatten` of a `list[any]`) need not
         // have the other's type (`[s, path('/b')]` with `s` a string is a
@@ -510,8 +638,8 @@ fn join_element_inner(a: &ExprType, b: &ExprType, nested: bool) -> Option<ExprTy
         _ if is_unknown_element(a) || is_unknown_element(b) => Some(ExprType::ANY),
         (TypeCode::NullType, _) if nested => Some(b.clone()),
         (_, TypeCode::NullType) if nested => Some(a.clone()),
-        (TypeCode::Union, _) => join_union_members(&a.params, b, nested),
-        (_, TypeCode::Union) => join_union_members(&b.params, a, nested),
+        (TypeCode::Union, _) => return join_union_members(&a.params, b, nested),
+        (_, TypeCode::Union) => return join_union_members(&b.params, a, nested),
         (TypeCode::Int, TypeCode::Float) | (TypeCode::Float, TypeCode::Int) => {
             Some(ExprType::FLOAT)
         }
@@ -519,37 +647,64 @@ fn join_element_inner(a: &ExprType, b: &ExprType, nested: bool) -> Option<ExprTy
             Some(ExprType::STRING)
         }
         (TypeCode::List, TypeCode::List) => match (a.params.as_slice(), b.params.as_slice()) {
-            ([ea], [eb]) => Some(ExprType::list(join_element_inner(ea, eb, true)?)),
+            ([ea], [eb]) => match join_element_inner(ea, eb, true)? {
+                Some(e) => Some(ExprType::list(e)?),
+                None => None,
+            },
             _ => None,
         },
         _ => None,
-    }
+    })
 }
 
 /// The union of each member's join with `other`, or `None` if no member
 /// joins. The join is commutative, so the member side does not matter.
-fn join_union_members(members: &[ExprType], other: &ExprType, nested: bool) -> Option<ExprType> {
-    let joined: Vec<ExprType> = members
-        .iter()
-        .filter_map(|m| join_element_inner(m, other, nested))
-        .collect();
+fn join_union_members(
+    members: &[ExprType],
+    other: &ExprType,
+    nested: bool,
+) -> Result<Option<ExprType>, ExpressionError> {
+    let mut joined = Vec::new();
+    for m in members {
+        if let Some(j) = join_element_inner(m, other, nested)? {
+            joined.push(j);
+        }
+    }
     if joined.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(ExprType::union(joined))
+        ExprType::union(joined).map(Some)
+    }
+}
+
+/// Why [`join_list_element_types`] found no element type.
+#[derive(Debug)]
+pub(crate) enum ListJoinError {
+    /// `(joined_so_far, offending)`: the first element that cannot join
+    /// the elements before it.
+    Conflict(ExprType, ExprType),
+    /// The joined type would be deeper than [`MAX_TYPE_DEPTH`].
+    TooDeep(ExpressionError),
+}
+
+impl From<ExpressionError> for ListJoinError {
+    fn from(e: ExpressionError) -> Self {
+        ListJoinError::TooDeep(e)
     }
 }
 
 /// Fold [`join_list_element`] over a list's element types.
 ///
 /// Returns `Ok(None)` for no elements, `Ok(Some(t))` with the joined
-/// element type, or `Err((joined_so_far, offending))` at the first element
-/// that cannot join the elements before it. Every element, including a
-/// lone one, is reduced to its [`list_element_contribution`]; a first
-/// element that contributes nothing (`nulltype`) fails as
-/// `Err((t, t))`, and a lone one of unknown type (a type variable, or a
-/// union with one) is `any`, as its join with another element is.
-pub(crate) fn join_list_element_types<I>(types: I) -> Result<Option<ExprType>, (ExprType, ExprType)>
+/// element type, or `Err(ListJoinError::Conflict(joined_so_far,
+/// offending))` at the first element that cannot join the elements before
+/// it. Every element, including a lone one, is reduced to its
+/// [`list_element_contribution`]; a first element that contributes nothing
+/// (`nulltype`) fails as `Conflict(t, t)`, and a lone one of unknown type
+/// (a type variable, or a union with one) is `any`, as its join with
+/// another element is. A join deeper than [`MAX_TYPE_DEPTH`] is
+/// `Err(ListJoinError::TooDeep)`.
+pub(crate) fn join_list_element_types<I>(types: I) -> Result<Option<ExprType>, ListJoinError>
 where
     I: IntoIterator<Item = ExprType>,
 {
@@ -558,13 +713,13 @@ where
         acc = Some(match acc {
             // A lone element of unknown type (a type variable) is `any`,
             // as it is when it joins another element.
-            None => match list_element_contribution(&t) {
+            None => match list_element_contribution(&t)? {
                 Some(c) => unknown_element_as_any(c),
-                None => return Err((t.clone(), t)),
+                None => return Err(ListJoinError::Conflict(t.clone(), t)),
             },
-            Some(prev) => match join_list_element(&prev, &t) {
+            Some(prev) => match join_list_element(&prev, &t)? {
                 Some(j) => j,
-                None => return Err((prev, t)),
+                None => return Err(ListJoinError::Conflict(prev, t)),
             },
         });
     }
@@ -593,7 +748,10 @@ pub(crate) enum ComprehensionVar {
 /// `nulltype` list element contributes nothing (§1.2.1: it marks the
 /// list as possibly empty), nor does a `nulltype` iterable or union member
 /// (a `null` iterable fails every run). `unresolved[T]` is read as `T`.
-pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
+///
+/// Returns [`ExpressionErrorKind::TypeTooDeep`] if the union of element
+/// types would be deeper than [`MAX_TYPE_DEPTH`].
+pub(crate) fn comprehension_var(t: &ExprType) -> Result<ComprehensionVar, ExpressionError> {
     let t = match (t.code, t.params.as_slice()) {
         (TypeCode::Unresolved, [inner]) => inner,
         _ => t,
@@ -607,7 +765,7 @@ pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
     for m in members {
         match (m.code, m.params.as_slice()) {
             (TypeCode::List, [elem]) => {
-                if let Some(e) = list_element_contribution(elem) {
+                if let Some(e) = list_element_contribution(elem)? {
                     // A bare `unresolved` element (any type), or a type
                     // variable left unbound (`list[T3]`), binds `any`.
                     let e = if (e.code == TypeCode::Unresolved && e.params.is_empty())
@@ -636,11 +794,11 @@ pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
             _ => elems.push(ExprType::ANY),
         }
     }
-    if elems.is_empty() {
+    Ok(if elems.is_empty() {
         ComprehensionVar::EmptyOnly
     } else {
-        ComprehensionVar::Typed(ExprType::union(elems))
-    }
+        ComprehensionVar::Typed(ExprType::union(elems)?)
+    })
 }
 
 /// The type of a comprehension over an unresolved iterable (or with an
@@ -655,22 +813,25 @@ pub(crate) fn comprehension_var(t: &ExprType) -> ComprehensionVar {
 /// - nothing is left of `T`, `T` is `noreturn`, or every form of `T` is a
 ///   list of lists ([`comprehension_too_deep`], a run that keeps an
 ///   element fails): `list[nulltype]`, the only run that can succeed.
-pub(crate) fn comprehension_list_type(body: &ExprType) -> ExprType {
+///
+/// Returns [`ExpressionErrorKind::TypeTooDeep`] if the list type would be
+/// deeper than [`MAX_TYPE_DEPTH`].
+pub(crate) fn comprehension_list_type(body: &ExprType) -> Result<ExprType, ExpressionError> {
     let body = match (body.code, body.params.as_slice()) {
         (TypeCode::Unresolved, [inner]) => inner,
         _ => body,
     };
-    let empty = ExprType::list(ExprType::NULLTYPE);
-    let Some(t) = list_element_contribution(body) else {
-        return empty;
+    let empty = ExprType::fixed(ExprType::list(ExprType::NULLTYPE));
+    let Some(t) = list_element_contribution(body)? else {
+        return Ok(empty);
     };
     // `noreturn` (a body that never produces a value) needs no case: the
     // union below drops it, leaving `list[nulltype]`.
-    let t = merge_list_union(t);
-    if comprehension_too_deep(&t) {
-        return empty;
+    let t = merge_list_union(t)?;
+    if comprehension_too_deep(&t)? {
+        return Ok(empty);
     }
-    ExprType::list(ExprType::union(vec![t, ExprType::NULLTYPE]))
+    ExprType::list(ExprType::union(vec![t, ExprType::NULLTYPE])?)
 }
 
 /// Whether `t`, as a comprehension's element type `T` (§1.3.7), makes the
@@ -682,7 +843,10 @@ pub(crate) fn comprehension_list_type(body: &ExprType) -> ExprType {
 /// type variable (`list[list[T1]]`, from typing an operation on an
 /// element of unknown type) does not say what its values are, so it does
 /// not count.
-pub(crate) fn comprehension_too_deep(t: &ExprType) -> bool {
+///
+/// Returns [`ExpressionErrorKind::TypeTooDeep`] if a form would be deeper
+/// than [`MAX_TYPE_DEPTH`].
+pub(crate) fn comprehension_too_deep(t: &ExprType) -> Result<bool, ExpressionError> {
     fn depth(t: &ExprType) -> usize {
         match (t.code, t.params.as_slice()) {
             (TypeCode::List, [elem]) => 1 + depth(elem),
@@ -694,12 +858,11 @@ pub(crate) fn comprehension_too_deep(t: &ExprType) -> bool {
     } else {
         std::slice::from_ref(t)
     };
-    let mut forms = members
-        .iter()
-        .filter(|m| m.code != TypeCode::NullType)
-        .flat_map(list_forms)
-        .peekable();
-    forms.peek().is_some() && forms.all(|f| depth(&f) >= 2 && !f.is_symbolic())
+    let mut forms = Vec::new();
+    for m in members.iter().filter(|m| m.code != TypeCode::NullType) {
+        forms.extend(list_forms(m)?);
+    }
+    Ok(!forms.is_empty() && forms.iter().all(|f| depth(f) >= 2 && !f.is_symbolic()))
 }
 
 /// A union of list types as the single list type it equals (§1.2.1: a
@@ -707,11 +870,16 @@ pub(crate) fn comprehension_too_deep(t: &ExprType) -> bool {
 /// `list[A] | list[B]` is `list[A | B]`, applied at every depth. Any
 /// other type is returned unchanged (a union with a non-list member, or
 /// none at all, has its list members merged in place).
-pub(crate) fn merge_list_union(t: ExprType) -> ExprType {
+///
+/// Returns [`ExpressionErrorKind::TypeTooDeep`] if the merged type would be
+/// deeper than [`MAX_TYPE_DEPTH`]: merging a union that has a non-list
+/// member as well (`int | list[A] | list[B]`, which becomes
+/// `int | list[A | B]`) adds a level.
+pub(crate) fn merge_list_union(t: ExprType) -> Result<ExprType, ExpressionError> {
     match t.code {
         TypeCode::List => match t.params.as_slice() {
-            [elem] => ExprType::list(merge_list_union(elem.clone())),
-            _ => t,
+            [elem] => ExprType::list(merge_list_union(elem.clone())?),
+            _ => Ok(t),
         },
         TypeCode::Union => {
             let (lists, others): (Vec<ExprType>, Vec<ExprType>) =
@@ -722,11 +890,11 @@ pub(crate) fn merge_list_union(t: ExprType) -> ExprType {
                     .into_iter()
                     .filter_map(|l| l.params.into_iter().next())
                     .collect();
-                members.push(ExprType::list(merge_list_union(ExprType::union(elems))));
+                members.push(ExprType::list(merge_list_union(ExprType::union(elems)?)?)?);
             }
             ExprType::union(members)
         }
-        _ => t,
+        _ => Ok(t),
     }
 }
 
@@ -737,18 +905,21 @@ pub(crate) fn merge_list_union(t: ExprType) -> ExprType {
 /// member: `list[int] | list[string]` has the same forms as
 /// `list[int | string]`, and `int | string` has `int` and `string`. A
 /// type with no union in it is its own single form.
-pub(crate) fn list_forms(t: &ExprType) -> Vec<ExprType> {
+///
+/// A form is never deeper than `t`, but the result is a `Result` because
+/// each form is built through the checked constructors.
+pub(crate) fn list_forms(t: &ExprType) -> Result<Vec<ExprType>, ExpressionError> {
     match (t.code, t.params.as_slice()) {
-        (TypeCode::List, [elem]) => element_forms(elem)
+        (TypeCode::List, [elem]) => element_forms(elem)?
             .into_iter()
             .map(ExprType::list)
             .collect(),
         (TypeCode::Union, _) => element_forms(t),
-        _ => vec![t.clone()],
+        _ => Ok(vec![t.clone()]),
     }
 }
 
-fn element_forms(elem: &ExprType) -> Vec<ExprType> {
+fn element_forms(elem: &ExprType) -> Result<Vec<ExprType>, ExpressionError> {
     let members: &[ExprType] = if elem.code == TypeCode::Union {
         &elem.params
     } else {
@@ -756,22 +927,22 @@ fn element_forms(elem: &ExprType) -> Vec<ExprType> {
     };
     let mut forms = Vec::new();
     for m in members {
-        for f in list_forms(m) {
+        for f in list_forms(m)? {
             if !forms.contains(&f) {
                 forms.push(f);
             }
         }
     }
-    forms
+    Ok(forms)
 }
 
 // ── Normalization ──
 
-fn normalize_union(types: Vec<ExprType>) -> ExprType {
+fn normalize_union(types: Vec<ExprType>) -> Result<ExprType, ExpressionError> {
     let mut members = Vec::new();
     for t in types {
         match t.code {
-            TypeCode::Any => return ExprType::ANY,
+            TypeCode::Any => return Ok(ExprType::ANY),
             TypeCode::NoReturn => continue,
             TypeCode::Union => members.extend(t.params),
             _ => members.push(t),
@@ -791,19 +962,16 @@ fn normalize_union(types: Vec<ExprType>) -> ExprType {
     if !unresolved_constraints.is_empty() {
         let mut all_parts = non_unresolved;
         all_parts.extend(unresolved_constraints);
-        let inner = ExprType::union(all_parts);
+        let inner = ExprType::union(all_parts)?;
         return ExprType::unresolved(inner);
     }
     // Deduplicate
     members.sort_by_key(|a| a.to_string());
     members.dedup();
     match members.len() {
-        0 => ExprType::NORETURN,
-        1 => members.into_iter().next().unwrap(),
-        _ => ExprType {
-            code: TypeCode::Union,
-            params: members,
-        },
+        0 => Ok(ExprType::NORETURN),
+        1 => Ok(members.into_iter().next().unwrap()),
+        _ => ExprType::build(TypeCode::Union, members),
     }
 }
 
@@ -954,9 +1122,12 @@ impl ExprType {
     /// variable is preserved — `list[T1]` becomes `list[any]`. Unions
     /// re-normalize, so `int | T1` collapses to `any` (a union with an
     /// `any` member accepts everything).
-    pub(crate) fn erase_type_vars(&self) -> ExprType {
+    ///
+    /// The result is never deeper than `self`, but it is a `Result`
+    /// because it is rebuilt through the checked constructors.
+    pub(crate) fn erase_type_vars(&self) -> Result<ExprType, ExpressionError> {
         if !self.is_symbolic() {
-            return self.clone();
+            return Ok(self.clone());
         }
         let bindings = HashMap::from([
             (TypeCode::TypeVarT, ExprType::ANY),
@@ -968,15 +1139,26 @@ impl ExprType {
     }
 
     /// Substitute type variables with concrete types.
-    pub fn substitute(&self, bindings: &HashMap<TypeCode, ExprType>) -> ExprType {
+    ///
+    /// Returns [`ExpressionErrorKind::TypeTooDeep`] if the result would be
+    /// deeper than [`MAX_TYPE_DEPTH`], as it can be when a variable is
+    /// bound to a deep type (`list[T]` with `T` bound to a type at the
+    /// limit).
+    pub fn substitute(
+        &self,
+        bindings: &HashMap<TypeCode, ExprType>,
+    ) -> Result<ExprType, ExpressionError> {
         if let Some(bound) = bindings.get(&self.code) {
-            return bound.clone();
+            return Ok(bound.clone());
         }
         if self.params.is_empty() {
-            return self.clone();
+            return Ok(self.clone());
         }
-        let new_params: Vec<ExprType> =
-            self.params.iter().map(|p| p.substitute(bindings)).collect();
+        let new_params = self
+            .params
+            .iter()
+            .map(|p| p.substitute(bindings))
+            .collect::<Result<Vec<_>, _>>()?;
         ExprType::new(self.code, new_params)
     }
 
@@ -1059,8 +1241,15 @@ impl ExprType {
         Some(bindings)
     }
 
-    /// Construct with normalization.
-    pub fn new(code: TypeCode, params: Vec<ExprType>) -> Self {
+    /// Construct with normalization: a union is normalized as
+    /// [`union`](Self::union) does, a one-parameter list as
+    /// [`list`](Self::list) and a one-parameter `unresolved` as
+    /// [`unresolved`](Self::unresolved). Any other code is built with the
+    /// parameters as given.
+    ///
+    /// Returns [`ExpressionErrorKind::TypeTooDeep`] if the result would be
+    /// deeper than [`MAX_TYPE_DEPTH`].
+    pub fn new(code: TypeCode, params: Vec<ExprType>) -> Result<Self, ExpressionError> {
         match code {
             TypeCode::Union => normalize_union(params),
             TypeCode::List if params.len() == 1 => {
@@ -1069,7 +1258,7 @@ impl ExprType {
             TypeCode::Unresolved if params.len() == 1 => {
                 ExprType::unresolved(params.into_iter().next().unwrap())
             }
-            _ => ExprType { code, params },
+            _ => ExprType::build(code, params),
         }
     }
 }
@@ -1080,6 +1269,9 @@ impl ExprType {
     const MAX_PARSE_DEPTH: usize = 10;
 
     /// Parse a type string like "int", "list\[string\]", "int?", "int | string", "unresolved\[int\]".
+    ///
+    /// Parsing stops at 10 levels of nesting, so a parsed type is at most 11
+    /// deep, well below [`MAX_TYPE_DEPTH`].
     pub fn parse(s: &str) -> Result<ExprType, String> {
         Self::parse_inner(s, 0)
     }
@@ -1102,7 +1294,7 @@ impl ExprType {
                         .collect::<Result<Vec<_>, _>>()?
                 };
                 let return_type = Self::parse_inner(ret_str, depth + 1)?;
-                return Ok(ExprType::signature(param_types, return_type));
+                return ExprType::signature(param_types, return_type).map_err(|e| e.to_string());
             }
         }
         // Union: split on " | " outside brackets/parens
@@ -1112,7 +1304,7 @@ impl ExprType {
                 .iter()
                 .map(|p| Self::parse_inner(p, depth + 1))
                 .collect();
-            return Ok(ExprType::union(types?));
+            return ExprType::union(types?).map_err(|e| e.to_string());
         }
         // Base types
         match s {
@@ -1125,18 +1317,18 @@ impl ExprType {
             "nulltype" => return Ok(ExprType::NULLTYPE),
             "noreturn" => return Ok(ExprType::NORETURN),
             "any" => return Ok(ExprType::ANY),
-            "unresolved" => return Ok(ExprType::unresolved(ExprType::ANY)),
+            "unresolved" => return ExprType::unresolved(ExprType::ANY).map_err(|e| e.to_string()),
             _ => {}
         }
         // Optional: T?
         if let Some(inner) = s.strip_suffix('?') {
             let t = Self::parse_inner(inner, depth + 1)?;
-            return Ok(ExprType::union(vec![t, ExprType::NULLTYPE]));
+            return ExprType::union(vec![t, ExprType::NULLTYPE]).map_err(|e| e.to_string());
         }
         // list[T]
         if let Some(inner) = s.strip_prefix("list[").and_then(|s| s.strip_suffix(']')) {
             let elem = Self::parse_inner(inner, depth + 1)?;
-            return Ok(ExprType::list(elem));
+            return ExprType::list(elem).map_err(|e| e.to_string());
         }
         // unresolved[T]
         if let Some(inner) = s
@@ -1144,7 +1336,7 @@ impl ExprType {
             .and_then(|s| s.strip_suffix(']'))
         {
             let constraint = Self::parse_inner(inner, depth + 1)?;
-            return Ok(ExprType::unresolved(constraint));
+            return ExprType::unresolved(constraint).map_err(|e| e.to_string());
         }
         // Type variables
         match s {
@@ -1311,7 +1503,10 @@ mod tests {
     }
     #[test]
     fn display_list_int() {
-        assert_eq!(ExprType::list(ExprType::INT).to_string(), "list[int]");
+        assert_eq!(
+            ExprType::list(ExprType::INT).unwrap().to_string(),
+            "list[int]"
+        );
     }
     #[test]
     fn display_any() {
@@ -1328,28 +1523,32 @@ mod tests {
     #[test]
     fn display_union() {
         assert_eq!(
-            ExprType::union(vec![ExprType::INT, ExprType::STRING]).to_string(),
+            ExprType::union(vec![ExprType::INT, ExprType::STRING])
+                .unwrap()
+                .to_string(),
             "int | string"
         );
     }
     #[test]
     fn display_nullable() {
         assert_eq!(
-            ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE]).to_string(),
+            ExprType::union(vec![ExprType::INT, ExprType::NULLTYPE])
+                .unwrap()
+                .to_string(),
             "int?"
         );
     }
     #[test]
     fn display_unresolved_bare() {
         assert_eq!(
-            ExprType::unresolved(ExprType::ANY).to_string(),
+            ExprType::unresolved(ExprType::ANY).unwrap().to_string(),
             "unresolved"
         );
     }
     #[test]
     fn display_unresolved_int() {
         assert_eq!(
-            ExprType::unresolved(ExprType::INT).to_string(),
+            ExprType::unresolved(ExprType::INT).unwrap().to_string(),
             "unresolved[int]"
         );
     }
@@ -1395,21 +1594,21 @@ mod tests {
     fn parse_list_int() {
         assert_eq!(
             ExprType::parse("list[int]").unwrap(),
-            ExprType::list(ExprType::INT)
+            ExprType::list(ExprType::INT).unwrap()
         );
     }
     #[test]
     fn parse_list_string() {
         assert_eq!(
             ExprType::parse("list[string]").unwrap(),
-            ExprType::list(ExprType::STRING)
+            ExprType::list(ExprType::STRING).unwrap()
         );
     }
     #[test]
     fn parse_nested_list() {
         assert_eq!(
             ExprType::parse("list[list[int]]").unwrap(),
-            ExprType::list(ExprType::list(ExprType::INT))
+            ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap()
         );
     }
     #[test]
@@ -1428,21 +1627,21 @@ mod tests {
     fn parse_unresolved_bare() {
         assert_eq!(
             ExprType::parse("unresolved").unwrap(),
-            ExprType::unresolved(ExprType::ANY)
+            ExprType::unresolved(ExprType::ANY).unwrap()
         );
     }
     #[test]
     fn parse_unresolved_int() {
         assert_eq!(
             ExprType::parse("unresolved[int]").unwrap(),
-            ExprType::unresolved(ExprType::INT)
+            ExprType::unresolved(ExprType::INT).unwrap()
         );
     }
     #[test]
     fn parse_unresolved_list() {
         assert_eq!(
             ExprType::parse("unresolved[list[string]]").unwrap(),
-            ExprType::unresolved(ExprType::list(ExprType::STRING))
+            ExprType::unresolved(ExprType::list(ExprType::STRING).unwrap()).unwrap()
         );
     }
     #[test]
@@ -1491,13 +1690,16 @@ mod tests {
     }
     #[test]
     fn eq_list() {
-        assert_eq!(ExprType::list(ExprType::INT), ExprType::list(ExprType::INT));
+        assert_eq!(
+            ExprType::list(ExprType::INT).unwrap(),
+            ExprType::list(ExprType::INT).unwrap()
+        );
     }
     #[test]
     fn ne_list() {
         assert_ne!(
-            ExprType::list(ExprType::INT),
-            ExprType::list(ExprType::STRING)
+            ExprType::list(ExprType::INT).unwrap(),
+            ExprType::list(ExprType::STRING).unwrap()
         );
     }
     #[test]
@@ -1514,22 +1716,24 @@ mod tests {
     #[test]
     fn union_dedup() {
         assert_eq!(
-            ExprType::union(vec![ExprType::INT, ExprType::INT]).code,
+            ExprType::union(vec![ExprType::INT, ExprType::INT])
+                .unwrap()
+                .code,
             TypeCode::Int
         );
     }
     #[test]
     fn union_single_unwrap() {
         assert_eq!(
-            ExprType::union(vec![ExprType::STRING]).code,
+            ExprType::union(vec![ExprType::STRING]).unwrap().code,
             TypeCode::String
         );
     }
     #[test]
     fn union_flatten() {
-        let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
-        let u2 = ExprType::union(vec![ExprType::FLOAT, ExprType::BOOL]);
-        let combined = ExprType::union(vec![u1, u2]);
+        let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
+        let u2 = ExprType::union(vec![ExprType::FLOAT, ExprType::BOOL]).unwrap();
+        let combined = ExprType::union(vec![u1, u2]).unwrap();
         assert_eq!(combined.code, TypeCode::Union);
         assert_eq!(combined.params.len(), 4);
         assert_eq!(combined.to_string(), "bool | float | int | string");
@@ -1537,34 +1741,36 @@ mod tests {
     #[test]
     fn union_any_absorbs() {
         assert_eq!(
-            ExprType::union(vec![ExprType::INT, ExprType::ANY]).code,
+            ExprType::union(vec![ExprType::INT, ExprType::ANY])
+                .unwrap()
+                .code,
             TypeCode::Any
         );
     }
     #[test]
     fn union_noreturn_collapses() {
         assert_eq!(
-            ExprType::union(vec![ExprType::INT, ExprType::NORETURN]),
+            ExprType::union(vec![ExprType::INT, ExprType::NORETURN]).unwrap(),
             ExprType::INT
         );
     }
     #[test]
     fn union_all_noreturn() {
         assert_eq!(
-            ExprType::union(vec![ExprType::NORETURN, ExprType::NORETURN]),
+            ExprType::union(vec![ExprType::NORETURN, ExprType::NORETURN]).unwrap(),
             ExprType::NORETURN
         );
     }
     #[test]
     fn union_order_independent() {
-        let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
-        let u2 = ExprType::union(vec![ExprType::STRING, ExprType::INT]);
+        let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
+        let u2 = ExprType::union(vec![ExprType::STRING, ExprType::INT]).unwrap();
         assert_eq!(u1, u2);
     }
     #[test]
     fn union_hash_consistent() {
         use std::collections::HashSet;
-        let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
+        let u1 = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
         let u2 = ExprType::parse("int | string").unwrap();
         let mut s = HashSet::new();
         s.insert(u1);
@@ -1575,30 +1781,38 @@ mod tests {
     // ── Unresolved normalization ──
     #[test]
     fn list_of_unresolved_hoists() {
-        let t = ExprType::list(ExprType::unresolved(ExprType::INT));
-        assert_eq!(t.code, TypeCode::Unresolved);
-        assert_eq!(t, ExprType::unresolved(ExprType::list(ExprType::INT)));
-    }
-    #[test]
-    fn union_with_unresolved_hoists() {
-        let t = ExprType::union(vec![ExprType::STRING, ExprType::unresolved(ExprType::INT)]);
+        let t = ExprType::list(ExprType::unresolved(ExprType::INT).unwrap()).unwrap();
         assert_eq!(t.code, TypeCode::Unresolved);
         assert_eq!(
             t,
-            ExprType::unresolved(ExprType::union(vec![ExprType::INT, ExprType::STRING]))
+            ExprType::unresolved(ExprType::list(ExprType::INT).unwrap()).unwrap()
+        );
+    }
+    #[test]
+    fn union_with_unresolved_hoists() {
+        let t = ExprType::union(vec![
+            ExprType::STRING,
+            ExprType::unresolved(ExprType::INT).unwrap(),
+        ])
+        .unwrap();
+        assert_eq!(t.code, TypeCode::Unresolved);
+        assert_eq!(
+            t,
+            ExprType::unresolved(ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap())
+                .unwrap()
         );
     }
     #[test]
     fn nested_unresolved_flattens() {
-        let t = ExprType::unresolved(ExprType::unresolved(ExprType::INT));
+        let t = ExprType::unresolved(ExprType::unresolved(ExprType::INT).unwrap()).unwrap();
         assert_eq!(t.code, TypeCode::Unresolved);
-        assert_eq!(t, ExprType::unresolved(ExprType::INT));
+        assert_eq!(t, ExprType::unresolved(ExprType::INT).unwrap());
     }
     #[test]
     fn unresolved_never_inside_list() {
-        let t = ExprType::list(ExprType::unresolved(ExprType::STRING));
+        let t = ExprType::list(ExprType::unresolved(ExprType::STRING).unwrap()).unwrap();
         assert_eq!(t.code, TypeCode::Unresolved);
-        assert_eq!(t.params[0], ExprType::list(ExprType::STRING));
+        assert_eq!(t.params[0], ExprType::list(ExprType::STRING).unwrap());
     }
 
     // ── is_symbolic / is_concrete ──
@@ -1608,7 +1822,7 @@ mod tests {
     }
     #[test]
     fn concrete_list_int() {
-        assert!(ExprType::list(ExprType::INT).is_concrete());
+        assert!(ExprType::list(ExprType::INT).unwrap().is_concrete());
     }
     #[test]
     fn not_concrete_any() {
@@ -1616,7 +1830,9 @@ mod tests {
     }
     #[test]
     fn not_concrete_union() {
-        assert!(!ExprType::union(vec![ExprType::INT, ExprType::STRING]).is_concrete());
+        assert!(!ExprType::union(vec![ExprType::INT, ExprType::STRING])
+            .unwrap()
+            .is_concrete());
     }
     #[test]
     fn not_concrete_typevar() {
@@ -1632,7 +1848,7 @@ mod tests {
     }
     #[test]
     fn symbolic_list_t1() {
-        assert!(ExprType::list(ExprType::T1).is_symbolic());
+        assert!(ExprType::list(ExprType::T1).unwrap().is_symbolic());
     }
 
     // ── match_type ──
@@ -1643,14 +1859,14 @@ mod tests {
     }
     #[test]
     fn match_nested_typevar() {
-        let list_t1 = ExprType::list(ExprType::T1);
-        let list_int = ExprType::list(ExprType::INT);
+        let list_t1 = ExprType::list(ExprType::T1).unwrap();
+        let list_int = ExprType::list(ExprType::INT).unwrap();
         let b = list_t1.match_type(&list_int).unwrap();
         assert_eq!(b[&TypeCode::TypeVarT1], ExprType::INT);
     }
     #[test]
     fn match_no_match() {
-        let list_t1 = ExprType::list(ExprType::T1);
+        let list_t1 = ExprType::list(ExprType::T1).unwrap();
         assert!(list_t1.match_type(&ExprType::INT).is_none());
     }
     #[test]
@@ -1660,14 +1876,14 @@ mod tests {
     }
     #[test]
     fn match_union_member() {
-        let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
+        let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
         assert!(u.match_type(&ExprType::INT).is_some());
         assert!(u.match_type(&ExprType::STRING).is_some());
         assert!(u.match_type(&ExprType::FLOAT).is_none());
     }
     #[test]
     fn match_unresolved_delegates() {
-        let t = ExprType::unresolved(ExprType::INT);
+        let t = ExprType::unresolved(ExprType::INT).unwrap();
         assert!(t.match_type(&ExprType::INT).is_some());
         assert!(t.match_type(&ExprType::STRING).is_none());
     }
@@ -1675,10 +1891,13 @@ mod tests {
     // ── substitute ──
     #[test]
     fn substitute_typevar() {
-        let list_t1 = ExprType::list(ExprType::T1);
+        let list_t1 = ExprType::list(ExprType::T1).unwrap();
         let mut bindings = HashMap::new();
         bindings.insert(TypeCode::TypeVarT1, ExprType::INT);
-        assert_eq!(list_t1.substitute(&bindings), ExprType::list(ExprType::INT));
+        assert_eq!(
+            list_t1.substitute(&bindings).unwrap(),
+            ExprType::list(ExprType::INT).unwrap()
+        );
     }
 
     // === unify_binding: one type variable bound from two parameters ===
@@ -1709,7 +1928,7 @@ mod tests {
             unify_binding(&ExprType::STRING, &ExprType::PATH),
             Some(ExprType::STRING)
         );
-        let list_int = ExprType::list(ExprType::INT);
+        let list_int = ExprType::list(ExprType::INT).unwrap();
         assert_eq!(
             unify_binding(&ExprType::RANGE_EXPR, &list_int),
             Some(list_int.clone())
@@ -1723,11 +1942,17 @@ mod tests {
     #[test]
     fn unify_range_expr_only_with_list_int() {
         assert_eq!(
-            unify_binding(&ExprType::RANGE_EXPR, &ExprType::list(ExprType::FLOAT)),
+            unify_binding(
+                &ExprType::RANGE_EXPR,
+                &ExprType::list(ExprType::FLOAT).unwrap()
+            ),
             None
         );
         assert_eq!(
-            unify_binding(&ExprType::RANGE_EXPR, &ExprType::list(ExprType::STRING)),
+            unify_binding(
+                &ExprType::RANGE_EXPR,
+                &ExprType::list(ExprType::STRING).unwrap()
+            ),
             None
         );
     }
@@ -1741,7 +1966,7 @@ mod tests {
             (ExprType::BOOL, ExprType::FLOAT),
             (ExprType::BOOL, ExprType::STRING),
             (ExprType::PATH, ExprType::INT),
-            (ExprType::INT, ExprType::list(ExprType::INT)),
+            (ExprType::INT, ExprType::list(ExprType::INT).unwrap()),
         ] {
             assert_eq!(unify_binding(&a, &b), None, "{a} vs {b}");
         }
@@ -1758,9 +1983,9 @@ mod tests {
 
     #[test]
     fn unify_lists_element_wise_and_empty_list_yields() {
-        let list_int = ExprType::list(ExprType::INT);
-        let list_float = ExprType::list(ExprType::FLOAT);
-        let list_null = ExprType::list(ExprType::NULLTYPE);
+        let list_int = ExprType::list(ExprType::INT).unwrap();
+        let list_float = ExprType::list(ExprType::FLOAT).unwrap();
+        let list_null = ExprType::list(ExprType::NULLTYPE).unwrap();
         assert_eq!(
             unify_binding(&list_int, &list_float),
             Some(list_float.clone())
@@ -1769,15 +1994,15 @@ mod tests {
         assert_eq!(unify_binding(&list_null, &list_int), Some(list_int.clone()));
         assert_eq!(
             unify_binding(
-                &ExprType::list(list_int.clone()),
-                &ExprType::list(list_null)
+                &ExprType::list(list_int.clone()).unwrap(),
+                &ExprType::list(list_null).unwrap()
             ),
-            Some(ExprType::list(list_int))
+            Some(ExprType::list(list_int).unwrap())
         );
         assert_eq!(
             unify_binding(
-                &ExprType::list(ExprType::INT),
-                &ExprType::list(ExprType::STRING)
+                &ExprType::list(ExprType::INT).unwrap(),
+                &ExprType::list(ExprType::STRING).unwrap()
             ),
             None
         );
@@ -1785,7 +2010,7 @@ mod tests {
 
     #[test]
     fn unify_union_agrees_if_any_member_does() {
-        let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]);
+        let u = ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap();
         assert_eq!(unify_binding(&u, &ExprType::INT), Some(u.clone()));
         assert_eq!(unify_binding(&ExprType::FLOAT, &u), Some(u.clone()));
         assert_eq!(unify_binding(&u, &ExprType::BOOL), None);
@@ -1794,12 +2019,12 @@ mod tests {
     #[test]
     fn match_call_reconciles_repeated_type_variable() {
         let sig = ExprType::parse("(list[T], T) -> bool").unwrap();
-        let list_int = ExprType::list(ExprType::INT);
+        let list_int = ExprType::list(ExprType::INT).unwrap();
         // Same type binds.
         assert!(sig.match_call(&[list_int.clone(), ExprType::INT]).is_some());
         // Coercible pair binds to the wider type.
         let b = sig
-            .match_call(&[ExprType::list(ExprType::FLOAT), ExprType::INT])
+            .match_call(&[ExprType::list(ExprType::FLOAT).unwrap(), ExprType::INT])
             .unwrap();
         assert_eq!(b[&TypeCode::TypeVarT], ExprType::FLOAT);
         // Incompatible pair does not match.
@@ -1811,7 +2036,10 @@ mod tests {
             .is_none());
         // The empty list binds only weakly, so the item's type wins.
         let b = sig
-            .match_call(&[ExprType::list(ExprType::NULLTYPE), ExprType::STRING])
+            .match_call(&[
+                ExprType::list(ExprType::NULLTYPE).unwrap(),
+                ExprType::STRING,
+            ])
             .unwrap();
         assert_eq!(b[&TypeCode::TypeVarT], ExprType::STRING);
     }
@@ -1824,24 +2052,30 @@ mod tests {
         // resolve to `list[nulltype]`, and so must `[] * 3`.
         let sorted = ExprType::parse("(list[T1]) -> list[T1]").unwrap();
         assert_eq!(
-            sorted.resolve_call(&[ExprType::list(ExprType::NULLTYPE)]),
-            Some(ExprType::list(ExprType::NULLTYPE))
+            sorted
+                .resolve_call(&[ExprType::list(ExprType::NULLTYPE).unwrap()])
+                .unwrap(),
+            Some(ExprType::list(ExprType::NULLTYPE).unwrap())
         );
         let mul = ExprType::parse("(list[T], int) -> list[T]").unwrap();
         assert_eq!(
-            mul.resolve_call(&[ExprType::list(ExprType::NULLTYPE), ExprType::INT]),
-            Some(ExprType::list(ExprType::NULLTYPE))
+            mul.resolve_call(&[ExprType::list(ExprType::NULLTYPE).unwrap(), ExprType::INT])
+                .unwrap(),
+            Some(ExprType::list(ExprType::NULLTYPE).unwrap())
         );
         // And with a sibling that binds the variable, the sibling wins.
         let contains = ExprType::parse("(list[T], T) -> bool").unwrap();
         let b = contains
-            .match_call(&[ExprType::list(ExprType::NULLTYPE), ExprType::INT])
+            .match_call(&[ExprType::list(ExprType::NULLTYPE).unwrap(), ExprType::INT])
             .unwrap();
         assert_eq!(b[&TypeCode::TypeVarT], ExprType::INT);
         // A weak binding never conflicts with a strong one, in either order.
         let rev = ExprType::parse("(T, list[T]) -> bool").unwrap();
         let b = rev
-            .match_call(&[ExprType::STRING, ExprType::list(ExprType::NULLTYPE)])
+            .match_call(&[
+                ExprType::STRING,
+                ExprType::list(ExprType::NULLTYPE).unwrap(),
+            ])
             .unwrap();
         assert_eq!(b[&TypeCode::TypeVarT], ExprType::STRING);
     }
@@ -1862,30 +2096,39 @@ mod tests {
         );
         assert_eq!(
             unify_binding(
-                &ExprType::list(ExprType::INT),
-                &ExprType::list(ExprType::ANY)
+                &ExprType::list(ExprType::INT).unwrap(),
+                &ExprType::list(ExprType::ANY).unwrap()
             ),
-            Some(ExprType::list(ExprType::INT))
+            Some(ExprType::list(ExprType::INT).unwrap())
         );
         let sig = ExprType::parse("(list[T], T) -> bool").unwrap();
         assert!(sig
-            .match_call(&[ExprType::list(ExprType::INT), ExprType::ANY])
+            .match_call(&[ExprType::list(ExprType::INT).unwrap(), ExprType::ANY])
             .is_some());
     }
 
     #[test]
     fn unify_malformed_list_yields_none_not_panic() {
-        // Review finding on #396: `ExprType::new(TypeCode::List, vec![])` is
+        // Review finding on #396: `ExprType::new(TypeCode::List, vec![]).unwrap()` is
         // constructible and the repo treats it as a real input elsewhere
         // (test_target_type_union::malformed_list_source_is_rejected).
-        let bad = ExprType::new(TypeCode::List, vec![]);
-        assert_eq!(unify_binding(&bad, &ExprType::list(ExprType::INT)), None);
-        assert_eq!(unify_binding(&ExprType::list(ExprType::INT), &bad), None);
+        let bad = ExprType::new(TypeCode::List, vec![]).unwrap();
+        assert_eq!(
+            unify_binding(&bad, &ExprType::list(ExprType::INT).unwrap()),
+            None
+        );
+        assert_eq!(
+            unify_binding(&ExprType::list(ExprType::INT).unwrap(), &bad),
+            None
+        );
         assert_eq!(unify_binding(&bad, &ExprType::RANGE_EXPR), None);
         assert_eq!(unify_binding(&ExprType::RANGE_EXPR, &bad), None);
         let sig = ExprType::parse("(list[T], T) -> bool").unwrap();
         assert!(sig
-            .match_call(&[ExprType::list(ExprType::list(ExprType::INT)), bad])
+            .match_call(&[
+                ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap(),
+                bad
+            ])
             .is_none());
     }
 
@@ -1893,8 +2136,8 @@ mod tests {
 
     fn join(a: &str, b: &str) -> Option<String> {
         let (a, b) = (ExprType::parse(a).unwrap(), ExprType::parse(b).unwrap());
-        let ab = join_list_element(&a, &b).map(|t| t.to_string());
-        let ba = join_list_element(&b, &a).map(|t| t.to_string());
+        let ab = join_list_element(&a, &b).unwrap().map(|t| t.to_string());
+        let ba = join_list_element(&b, &a).unwrap().map(|t| t.to_string());
         assert_eq!(ab, ba, "join must be commutative for {a} and {b}");
         ab
     }
@@ -1904,17 +2147,21 @@ mod tests {
         let any = ComprehensionVar::Typed(ExprType::ANY);
         for v in ["T", "T1", "T2", "T3"] {
             let t = ExprType::parse(v).unwrap();
-            assert_eq!(comprehension_var(&t), any, "{v}");
-            assert_eq!(comprehension_var(&ExprType::list(t)), any, "list[{v}]");
+            assert_eq!(comprehension_var(&t).unwrap(), any, "{v}");
+            assert_eq!(
+                comprehension_var(&ExprType::list(t).unwrap()).unwrap(),
+                any,
+                "list[{v}]"
+            );
         }
     }
 
     #[test]
     fn comprehension_too_deep_ignores_type_variable_forms() {
         let tp = |s: &str| ExprType::parse(s).unwrap();
-        assert!(comprehension_too_deep(&tp("list[list[int]]")));
-        assert!(!comprehension_too_deep(&tp("list[list[T1]]")));
-        assert!(!comprehension_too_deep(&tp("list[int]")));
+        assert!(comprehension_too_deep(&tp("list[list[int]]")).unwrap());
+        assert!(!comprehension_too_deep(&tp("list[list[T1]]")).unwrap());
+        assert!(!comprehension_too_deep(&tp("list[int]")).unwrap());
     }
 
     #[test]
@@ -1996,7 +2243,9 @@ mod tests {
     #[test]
     fn list_element_contribution_drops_unbuildable_members() {
         let c = |s: &str| {
-            list_element_contribution(&ExprType::parse(s).unwrap()).map(|t| t.to_string())
+            list_element_contribution(&ExprType::parse(s).unwrap())
+                .unwrap()
+                .map(|t| t.to_string())
         };
         assert_eq!(c("int").as_deref(), Some("int"));
         assert_eq!(c("int?").as_deref(), Some("int"));
@@ -2036,6 +2285,11 @@ mod tests {
                 .map(|t| ExprType::parse(t).unwrap())
                 .collect::<Vec<_>>()
         };
+        let join_list_element_types = |ts: Vec<ExprType>| match super::join_list_element_types(ts) {
+            Ok(t) => Ok(t),
+            Err(ListJoinError::Conflict(a, b)) => Err((a, b)),
+            Err(ListJoinError::TooDeep(e)) => panic!("{e}"),
+        };
         assert_eq!(join_list_element_types(ts(&[])), Ok(None));
         assert_eq!(
             join_list_element_types(ts(&["list[nulltype]", "list[int]", "list[float]"])),
@@ -2071,14 +2325,20 @@ mod tests {
     fn bare_unresolved_matches_as_unresolved_any() {
         // A bare `unresolved` (never built by `parse`) is read as
         // `unresolved[any]` by `match_type` as the receiver.
-        let bare = ExprType::new(TypeCode::Unresolved, vec![]);
+        let bare = ExprType::new(TypeCode::Unresolved, vec![]).unwrap();
         assert!(bare.match_type(&ExprType::STRING).is_some());
-        assert!(bare.match_type(&ExprType::list(ExprType::INT)).is_some());
+        assert!(bare
+            .match_type(&ExprType::list(ExprType::INT).unwrap())
+            .is_some());
     }
 
     #[test]
     fn merge_list_union_merges_at_every_depth() {
-        let m = |t: &str| merge_list_union(ExprType::parse(t).unwrap()).to_string();
+        let m = |t: &str| {
+            merge_list_union(ExprType::parse(t).unwrap())
+                .unwrap()
+                .to_string()
+        };
         assert_eq!(m("list[int] | list[string]"), "list[int | string]");
         assert_eq!(
             m("list[list[int] | list[string] | nulltype]"),
@@ -2089,5 +2349,120 @@ mod tests {
             "int | list[float | int]"
         );
         assert_eq!(m("int"), "int");
+    }
+
+    // ── Depth limit (MAX_TYPE_DEPTH) ──
+
+    fn deep_list(depth: usize) -> ExprType {
+        let mut t = ExprType::INT;
+        for _ in 1..depth {
+            t = ExprType::list(t).unwrap();
+        }
+        t
+    }
+
+    fn is_too_deep(r: Result<ExprType, ExpressionError>) -> bool {
+        matches!(
+            r.map_err(|e| e.kind().clone()),
+            Err(ExpressionErrorKind::TypeTooDeep {
+                limit: MAX_TYPE_DEPTH
+            })
+        )
+    }
+
+    #[test]
+    fn depth_counts_every_level_but_unresolved() {
+        let d = |s: &str| ExprType::parse(s).unwrap().depth;
+        assert_eq!(ExprType::INT.depth, 1);
+        assert_eq!(ExprType::T1.depth, 1);
+        assert_eq!(d("list[int]"), 2);
+        assert_eq!(d("list[int | string]"), 3);
+        assert_eq!(d("(int) -> list[int]"), 3);
+        assert_eq!(d("() -> int"), 2);
+        assert_eq!(d("unresolved[list[int]]"), 2);
+        assert_eq!(d("unresolved"), 1);
+        assert_eq!(d("list[int]?"), 3);
+        // A nested union is flattened before it is counted.
+        let inner = ExprType::parse("list[int] | string").unwrap();
+        assert_eq!(
+            ExprType::union(vec![inner, ExprType::PATH]).unwrap().depth,
+            3
+        );
+        assert_eq!(deep_list(MAX_TYPE_DEPTH).depth as usize, MAX_TYPE_DEPTH);
+    }
+
+    /// `parse` stops at 10 levels, so what it builds is at most 11 deep:
+    /// far from the limit.
+    #[test]
+    fn parsed_types_are_at_most_11_deep() {
+        let nested = |n: usize| format!("{}int{}", "list[".repeat(n), "]".repeat(n));
+        assert_eq!(ExprType::parse(&nested(10)).unwrap().depth, 11);
+        assert!(ExprType::parse(&nested(11)).is_err());
+        let unions = |n: usize| format!("{}int{}", "list[string | ".repeat(n), "]".repeat(n));
+        assert!(ExprType::parse(&unions(5)).unwrap().depth <= 11);
+        assert!(ExprType::parse(&unions(6)).is_err());
+    }
+
+    /// The derived operations that can build a type deeper than their
+    /// inputs report the limit instead.
+    #[test]
+    fn merge_list_union_past_the_limit_is_an_error() {
+        // `int | list[A] | list[B]` becomes `int | list[A | B]`, a level
+        // deeper.
+        let lists_of =
+            |leaf: ExprType, depth: usize| (1..depth).fold(leaf, |t, _| ExprType::list(t).unwrap());
+        let union_of = |d: usize| {
+            ExprType::union(vec![
+                ExprType::INT,
+                ExprType::list(lists_of(ExprType::INT, d)).unwrap(),
+                ExprType::list(lists_of(ExprType::STRING, d)).unwrap(),
+            ])
+            .unwrap()
+        };
+        let below = union_of(MAX_TYPE_DEPTH - 3);
+        assert_eq!(below.depth as usize, MAX_TYPE_DEPTH - 1);
+        assert_eq!(
+            merge_list_union(below).unwrap().depth as usize,
+            MAX_TYPE_DEPTH
+        );
+        let at = union_of(MAX_TYPE_DEPTH - 2);
+        assert_eq!(at.depth as usize, MAX_TYPE_DEPTH);
+        assert!(is_too_deep(merge_list_union(at)));
+    }
+
+    #[test]
+    fn list_element_join_past_the_limit_is_an_error() {
+        // Joining `list[nulltype] | list[any]` with `list[X]` member by
+        // member gives `list[X] | list[any]`, a level deeper than `list[X]`.
+        let members = ExprType::parse("list[nulltype] | list[any]").unwrap();
+        let below = deep_list(MAX_TYPE_DEPTH - 1);
+        let joined = join_list_element(&members, &below).unwrap().unwrap();
+        assert_eq!(joined.depth as usize, MAX_TYPE_DEPTH);
+        let at = deep_list(MAX_TYPE_DEPTH);
+        let err = join_list_element(&members, &at).expect_err("the join adds a level");
+        assert!(matches!(
+            err.kind(),
+            ExpressionErrorKind::TypeTooDeep { .. }
+        ));
+        assert!(matches!(
+            join_list_element_types([members, at]),
+            Err(ListJoinError::TooDeep(_))
+        ));
+    }
+
+    #[test]
+    fn comprehension_list_type_past_the_limit_is_an_error() {
+        // `list[T | nulltype]` for a body of type `T`: two levels over `T`
+        // when `T` is not a union.
+        assert!(comprehension_list_type(&deep_list(MAX_TYPE_DEPTH - 2)).is_ok());
+        let err = comprehension_list_type(
+            &ExprType::union(vec![deep_list(MAX_TYPE_DEPTH - 1), ExprType::STRING]).unwrap(),
+        )
+        .expect_err("list[T | nulltype] is past the limit");
+        assert!(matches!(
+            err.kind(),
+            ExpressionErrorKind::TypeTooDeep { .. }
+        ));
+        assert!(is_too_deep(ExprType::list(deep_list(MAX_TYPE_DEPTH))));
     }
 }

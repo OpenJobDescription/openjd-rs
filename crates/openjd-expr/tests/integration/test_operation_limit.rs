@@ -986,8 +986,11 @@ fn repr_json_counts_nested_elements_and_string_work() {
         ExprType::STRING,
     )
     .unwrap();
-    let value =
-        ExprValue::make_list(vec![inner.clone(), inner], ExprType::list(ExprType::STRING)).unwrap();
+    let value = ExprValue::make_list(
+        vec![inner.clone(), inner],
+        ExprType::list(ExprType::STRING).unwrap(),
+    )
+    .unwrap();
     let mut st = SymbolTable::new();
     st.set("Param.Items", value).unwrap();
 

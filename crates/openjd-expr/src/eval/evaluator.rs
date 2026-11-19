@@ -989,7 +989,7 @@ impl<'a> Evaluator<'a> {
                         BoolOpOutcome::Typed(t) => t,
                     })
                     .collect();
-                self.track(ExprValue::unresolved(ExprType::union(types)))
+                self.track(ExprValue::unresolved(ExprType::union(types)?))
             }
         }
     }
@@ -1358,7 +1358,7 @@ impl<'a> Evaluator<'a> {
                     if bt == ot {
                         self.track(ExprValue::unresolved(bt))
                     } else {
-                        self.track(ExprValue::unresolved(ExprType::union(vec![bt, ot])))
+                        self.track(ExprValue::unresolved(ExprType::union(vec![bt, ot])?))
                     }
                 }
             }
@@ -1468,7 +1468,9 @@ impl<'a> Evaluator<'a> {
                 match types.len() {
                     0 => None,
                     1 => Some(types.pop().unwrap()),
-                    _ => Some(ExprType::union(types)),
+                    // A union too deep to build leaves the position
+                    // unconstrained: this is only a coercion hint.
+                    _ => ExprType::union(types).ok(),
                 }
             })
             .collect()
@@ -1655,10 +1657,13 @@ impl<'a> Evaluator<'a> {
         }
         // Check type consistency with the shared list-element join, the
         // same one `make_list` and the unresolved hoisting use.
-        if crate::types::join_list_element_types(elements.iter().map(ExprValue::expr_type)).is_err()
-        {
-            let types: Vec<ExprType> = elements.iter().map(ExprValue::expr_type).collect();
-            return Err(incompatible_list_types_error(&types));
+        match crate::types::join_list_element_types(elements.iter().map(ExprValue::expr_type)) {
+            Ok(_) => {}
+            Err(crate::types::ListJoinError::Conflict(..)) => {
+                let types: Vec<ExprType> = elements.iter().map(ExprValue::expr_type).collect();
+                return Err(incompatible_list_types_error(&types));
+            }
+            Err(crate::types::ListJoinError::TooDeep(e)) => return Err(e),
         }
         let elem_type = if elements.is_empty() {
             ExprType::NULLTYPE
@@ -1715,14 +1720,14 @@ impl<'a> Evaluator<'a> {
             let unresolved_result = if value.is_unresolved() {
                 let inner = unwrap_unresolved(&value.expr_type());
                 Some(match inner.list_element_type() {
-                    Some(elem) => ExprValue::unresolved(ExprType::list(elem.clone())),
+                    Some(elem) => ExprValue::unresolved(ExprType::list(elem.clone())?),
                     None => ExprValue::unresolved(inner),
                 })
             } else if start.is_unresolved() || stop.is_unresolved() || step.is_unresolved() {
                 // Any unresolved bound makes the result unresolved.
                 if value.is_list() {
                     let elem_type = value.list_elem_type().unwrap();
-                    Some(ExprValue::unresolved(ExprType::list(elem_type.clone())))
+                    Some(ExprValue::unresolved(ExprType::list(elem_type.clone())?))
                 } else if matches!(&value, ExprValue::String(_)) {
                     Some(ExprValue::unresolved(ExprType::STRING))
                 } else {
@@ -1777,10 +1782,11 @@ impl<'a> Evaluator<'a> {
         }
 
         // Single-index access: dispatch through library
+        let empty_list = ExprType::fixed(ExprType::list(ExprType::NULLTYPE));
         let receiver_always_empty =
-            crate::types::list_forms(&unwrap_unresolved(&value.expr_type()))
+            crate::types::list_forms(&unwrap_unresolved(&value.expr_type()))?
                 .iter()
-                .all(|f| *f == ExprType::list(ExprType::NULLTYPE));
+                .all(|f| *f == empty_list);
         let result = self.dispatch_with_node(
             "__getitem__",
             vec![value, slice],
@@ -1793,7 +1799,9 @@ impl<'a> Evaluator<'a> {
         // into a concrete empty list fails in dispatch with the list's
         // length.) A comprehension that is always empty because a run that
         // keeps an element fails says how.
-        if receiver_always_empty && result.expr_type() == ExprType::unresolved(ExprType::NORETURN) {
+        if receiver_always_empty
+            && result.expr_type() == ExprType::fixed(ExprType::unresolved(ExprType::NORETURN))
+        {
             let cause = match (s.value.as_ref(), &self.absorbed_listcomp_failure) {
                 (ast::Expr::ListComp(lc), Some((id, e)))
                     if *id == std::ptr::from_ref(lc) as usize =>
@@ -1950,10 +1958,10 @@ impl<'a> Evaluator<'a> {
         let body_type = child.speculate(|c| c.listcomp_body_type(lc, if_clause));
         self.absorb_spend_and_reset(&child, memory_baseline);
         let list_type = match body_type? {
-            Speculative::Value(t) => crate::types::comprehension_list_type(&t),
+            Speculative::Value(t) => crate::types::comprehension_list_type(&t)?,
             Speculative::Absorbed(e) => {
                 self.absorbed_listcomp_failure = Some((std::ptr::from_ref(lc) as usize, e));
-                ExprType::list(ExprType::NULLTYPE)
+                ExprType::fixed(ExprType::list(ExprType::NULLTYPE))
             }
         };
         self.track(ExprValue::unresolved(list_type))
@@ -1982,7 +1990,10 @@ impl<'a> Evaluator<'a> {
     /// filter-unresolved) `iterable` ([`crate::types::comprehension_var`]).
     /// A type that cannot be iterated binds `any` there (2026-02 §1.3.7); a
     /// concrete iterable that cannot be iterated fails in `eval_listcomp`.
-    fn comprehension_var_of(&self, iterable: &ExprValue) -> crate::types::ComprehensionVar {
+    fn comprehension_var_of(
+        &self,
+        iterable: &ExprValue,
+    ) -> Result<crate::types::ComprehensionVar, ExpressionError> {
         crate::types::comprehension_var(&iterable.expr_type())
     }
 
@@ -2048,13 +2059,15 @@ impl<'a> Evaluator<'a> {
         // consumed here like everywhere else below.
         if iterable.is_unresolved() {
             self.current_memory = comprehension_baseline;
-            return match self.comprehension_var_of(&iterable) {
+            return match self.comprehension_var_of(&iterable)? {
                 crate::types::ComprehensionVar::Typed(elem_type) => {
                     self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type)
                 }
                 // The iterable can only be `[]`: the body never runs and
                 // is not type-checked (§1.3.7).
-                _ => self.track(ExprValue::unresolved(ExprType::list(ExprType::NULLTYPE))),
+                _ => self.track(ExprValue::unresolved(ExprType::fixed(ExprType::list(
+                    ExprType::NULLTYPE,
+                )))),
             };
         }
 
@@ -2197,14 +2210,16 @@ impl<'a> Evaluator<'a> {
             // runtime filter may exclude could raise a spurious value
             // error (e.g. `[1 // f for f in [0, 1] if f > Task.Param.N]`
             // must not divide by zero here).
-            return match self.comprehension_var_of(&iterable) {
+            return match self.comprehension_var_of(&iterable)? {
                 crate::types::ComprehensionVar::Typed(elem_type) => {
                     self.eval_listcomp_unresolved(lc, gen.ifs.first(), &var_name, elem_type)
                 }
                 // `EmptyOnly` cannot happen here: an element reached the
                 // filter, so the iterable is not empty-only. The arm keeps
                 // the match total without a panic.
-                _ => self.track(ExprValue::unresolved(ExprType::list(ExprType::NULLTYPE))),
+                _ => self.track(ExprValue::unresolved(ExprType::fixed(ExprType::list(
+                    ExprType::NULLTYPE,
+                )))),
             };
         }
         let result = result.into_vec();
@@ -2417,25 +2432,26 @@ fn unresolved_list_from_elements(
     // run. Report it with the caller's run-time error: list literals say
     // "null is not allowed in list literals", comprehensions report
     // `ExprValue::make_list`'s "Cannot create list from null elements".
-    if elements.iter().any(|e| {
-        matches!(e, ExprValue::Null)
-            || crate::types::list_element_contribution(&unwrap_unresolved(&e.expr_type())).is_none()
-    }) {
-        return Err(null_error());
-    }
     // Each element as the type it contributes to a built list (`int?`
     // contributes `int`), so the error names the types that conflict.
-    let types: Vec<ExprType> = elements
-        .iter()
-        .map(|e| {
-            let t = unwrap_unresolved(&e.expr_type());
-            crate::types::list_element_contribution(&t).unwrap_or(t)
-        })
-        .collect();
-    let elem_type = crate::types::join_list_element_types(types.iter().cloned())
-        .map_err(|_| incompatible_list_types_error(&types))?
-        .unwrap_or(ExprType::NULLTYPE);
-    Ok(ExprValue::unresolved(ExprType::list(elem_type)))
+    let mut types: Vec<ExprType> = Vec::with_capacity(elements.len());
+    for e in elements {
+        let t = unwrap_unresolved(&e.expr_type());
+        match crate::types::list_element_contribution(&t)? {
+            // A concrete `null` has type `nulltype`, which contributes
+            // nothing.
+            Some(c) => types.push(c),
+            None => return Err(null_error()),
+        }
+    }
+    let elem_type = match crate::types::join_list_element_types(types.iter().cloned()) {
+        Ok(t) => t.unwrap_or(ExprType::NULLTYPE),
+        Err(crate::types::ListJoinError::Conflict(..)) => {
+            return Err(incompatible_list_types_error(&types))
+        }
+        Err(crate::types::ListJoinError::TooDeep(e)) => return Err(e),
+    };
+    Ok(ExprValue::unresolved(ExprType::list(elem_type)?))
 }
 
 /// The "List literal contains incompatible types" error, listing each
@@ -2552,7 +2568,7 @@ mod tests {
             assert!(!is_bool_compatible(&tp(t)), "{t}");
         }
         // A bare `unresolved` (any type), as `ExprType::new` builds it.
-        let bare = ExprType::new(crate::types::TypeCode::Unresolved, vec![]);
+        let bare = ExprType::new(crate::types::TypeCode::Unresolved, vec![]).unwrap();
         assert!(is_bool_compatible(&bare));
     }
 }

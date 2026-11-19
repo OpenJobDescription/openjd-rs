@@ -50,15 +50,67 @@ ExprType::ANY           // TypeCode::Any
 ExprType::T, T1, T2, T3 // Type variables
 ```
 
-Parameterized constructors:
+Parameterized constructors, each returning `Result<ExprType, ExpressionError>`
+(see [Depth limit](#depth-limit)):
 
 ```rust
-ExprType::list(ExprType::INT)                    // list[int]
-ExprType::union(vec![ExprType::INT, ExprType::STRING])  // int | string
-ExprType::unresolved(ExprType::INT)              // unresolved[int]
-ExprType::signature(params, return_type)         // (params) -> return
-ExprType::parse("(list[T1], int) -> T1")         // From spec notation
+ExprType::list(ExprType::INT)?                   // list[int]
+ExprType::union(vec![ExprType::INT, ExprType::STRING])?  // int | string
+ExprType::unresolved(ExprType::INT)?             // unresolved[int]
+ExprType::signature(params, return_type)?        // (params) -> return
+ExprType::new(code, params)?                     // any code, normalized
+ExprType::parse("(list[T1], int) -> T1")?        // From spec notation (Err is a String)
 ```
+
+### Depth limit
+
+A type is at most [`MAX_TYPE_DEPTH`](../../crates/openjd-expr/src/types.rs)
+(64) deep. Depth counts the types on the longest path down to one with no
+parameters: `int` is 1, `list[int]` 2, `list[int | string]` 3,
+`(int) -> list[int]` 3. Lists, unions and signatures are a level each.
+`unresolved[T]` is as deep as `T`, so the type of an unresolved value is as
+deep as its constraint. Normalization collapses `unresolved[unresolved[T]]`,
+so an `unresolved` is never the direct parameter of another, and a type at the
+limit nests at most 128 levels.
+
+Every way of building a type with parameters goes through one private funnel,
+`ExprType::build`, which computes the depth from the parameters' cached depths
+and returns `ExpressionErrorKind::TypeTooDeep { limit }` ("Type nesting depth
+exceeded limit (64)") past the limit. That covers the five constructors, the
+normalizations inside them (which are checked on the type they build), `parse`,
+and every operation that builds a type from other types: `substitute`,
+`resolve_call`, `FunctionLibrary::derive_return_type` and `get_property_type`,
+and inside the crate the list-element join, `merge_list_union`, list forms,
+comprehension typing and the type-level coercion. Several of those can build a
+type deeper than their inputs (substituting into `list[T1]`, merging
+`int | list[A] | list[B]` into `int | list[A | B]`, joining union members), so
+they are fallible too. Type variable unification (behind `match_type` and
+`match_call`) never deepens a type, so those stay `Option`. `Clone` copies an
+existing type, the type constants have no parameters, and `ExprType` has no
+`Deserialize` (symbol tables deserialize through `parse`). An evaluation that
+would build a type past the limit fails with the error.
+
+Because no `ExprType` is deeper than the limit, every recursive walk over a
+type (`==`, `Hash`, `Display`, `Debug`, `Serialize`, the derived `Drop`,
+`satisfies`, `match_type`, `substitute`, coercion) is bounded by it.
+`tests/integration/test_type_depth.rs` runs each of them on types at the limit
+on a 2 MiB thread; a debug build needs between 256 KiB and 512 KiB for them.
+Before the limit, a type built 50,000 deep through the Rust API overflowed the
+stack in those walks and aborted the process. Templates could not reach that:
+`parse` stops at 10 levels of nesting (a parsed type is at most 11 deep), the
+function library's signatures are at most 4 deep, and list values nest at most
+two lists.
+
+`ExprValue::expr_type` stays infallible. An `Unresolved(T)` value is
+`unresolved[T]`, as deep as `T`. A `ListList` whose element type hint is
+already at the limit has no list type one level up, so it is `list[any]`; only
+a value built through the API with such a hint gets that.
+
+Fixed types written from constants (`list[string]`, `int | nulltype`) use
+crate-private helpers, `ExprType::fixed` in openjd-expr and
+`types::fixed_type` in openjd-model, which unwrap the constructor's `Result`:
+such a type is at most 3 deep, so the constructor cannot fail. Types derived
+from a caller's or a template's types use `?`.
 
 ## Type Matching and Substitution
 
@@ -67,11 +119,11 @@ concrete argument types, `match_call` determines whether the call is valid and b
 type variables:
 
 ```rust
-let sig = ExprType::parse("(list[T1], int) -> T1");
-let bindings = sig.match_call(&[ExprType::LIST_INT, ExprType::INT]);
+let sig = ExprType::parse("(list[T1], int) -> T1")?;
+let bindings = sig.match_call(&[ExprType::list(ExprType::INT)?, ExprType::INT]);
 // → Some({T1: int})
 
-let ret = sig.sig_return().substitute(&bindings);
+let ret = sig.sig_return().substitute(&bindings.unwrap())?;
 // → int
 ```
 
@@ -80,8 +132,8 @@ Key methods:
 | Method | Purpose |
 |--------|---------|
 | `match_call(&[ExprType]) -> Option<HashMap>` | Match argument types, bind type variables |
-| `resolve_call(&[ExprType]) -> Option<ExprType>` | Match + resolve return type in one step |
-| `substitute(&HashMap) -> ExprType` | Replace type variables with bound types |
+| `resolve_call(&[ExprType]) -> Result<Option<ExprType>, ExpressionError>` | Match + resolve return type in one step |
+| `substitute(&HashMap) -> Result<ExprType, ExpressionError>` | Replace type variables with bound types |
 | `is_symbolic() -> bool` | Contains type variables (T, T1, T2, T3) |
 | `is_concrete() -> bool` | No type variables or unresolved wrappers |
 | `satisfies(&ExprType) -> bool` | Directional: may a value of this type pass unchanged where the argument is required? |

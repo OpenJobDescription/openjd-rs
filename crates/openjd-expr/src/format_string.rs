@@ -1266,7 +1266,7 @@ mod tests {
         let mut st = SymbolTable::new();
         st.set(
             "Param.X",
-            crate::ExprValue::unresolved(crate::ExprType::list(crate::ExprType::INT)),
+            crate::ExprValue::unresolved(crate::ExprType::list(crate::ExprType::INT).unwrap()),
         )
         .unwrap();
         let host_lib = crate::FunctionLibrary::for_profile(

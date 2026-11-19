@@ -3592,7 +3592,7 @@ fn repr_py_escapes_inside_list_of_path_elements() {
                 ExprValue::new_path("/a\nb".to_string(), PathFormat::Posix),
                 ExprValue::new_path("/c".to_string(), PathFormat::Posix),
             ],
-            openjd_expr::ExprType::list(openjd_expr::ExprType::PATH),
+            openjd_expr::ExprType::list(openjd_expr::ExprType::PATH).unwrap(),
         )
         .unwrap(),
     )
@@ -3613,14 +3613,17 @@ fn repr_py_escapes_inside_a_nested_list() {
             ExprValue::String("a\nb".to_string()),
             ExprValue::String("it's".to_string()),
         ],
-        openjd_expr::ExprType::list(openjd_expr::ExprType::STRING),
+        openjd_expr::ExprType::list(openjd_expr::ExprType::STRING).unwrap(),
     )
     .unwrap();
     st.set(
         "N",
         ExprValue::make_list(
             vec![inner],
-            openjd_expr::ExprType::list(openjd_expr::ExprType::list(openjd_expr::ExprType::STRING)),
+            openjd_expr::ExprType::list(
+                openjd_expr::ExprType::list(openjd_expr::ExprType::STRING).unwrap(),
+            )
+            .unwrap(),
         )
         .unwrap(),
     )

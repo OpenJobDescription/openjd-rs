@@ -47,7 +47,7 @@ fn empty_list_beside_a_typed_empty_list_takes_its_type() {
     let mut p8 = SymbolTable::new();
     p8.set(
         "Param.B",
-        ExprValue::unresolved(ExprType::list(ExprType::STRING)),
+        ExprValue::unresolved(ExprType::list(ExprType::STRING).unwrap()),
     )
     .unwrap();
     let mut rt = SymbolTable::new();
@@ -152,7 +152,7 @@ fn concatenation_with_an_empty_side_has_the_common_type() {
     let v = eval("EF + [1]", &st);
     assert_eq!(v.expr_type(), tp("list[float]"));
     assert_eq!(v.to_display_string(), "[1.0]");
-    let st = typed_empty("EI", ExprType::list(ExprType::INT));
+    let st = typed_empty("EI", ExprType::list(ExprType::INT).unwrap());
     let v = eval("EI + [[]]", &st);
     assert_eq!(v.expr_type(), tp("list[list[int]]"));
     let expr = "(EI + [[]]) + [['a']]";
@@ -233,7 +233,7 @@ fn unresolved_concatenation_has_the_common_element_type() {
     ] {
         let args = args.map(tp);
         assert_eq!(
-            lib.derive_return_type("__add__", &args),
+            lib.derive_return_type("__add__", &args).unwrap(),
             Some(tp(ty)),
             "{args:?}"
         );
@@ -297,7 +297,7 @@ fn concatenation_with_an_any_operand_on_either_side_is_a_list_of_any() {
     for args in [["list[any]", "list[int]"], ["list[int]", "list[any]"]] {
         let args = args.map(tp);
         assert_eq!(
-            lib.derive_return_type("__add__", &args),
+            lib.derive_return_type("__add__", &args).unwrap(),
             Some(tp("list[any]")),
             "{args:?}"
         );
@@ -324,7 +324,7 @@ fn concatenation_with_an_operand_of_unknown_type_is_a_list_of_any() {
     ] {
         let args = args.map(tp);
         assert_eq!(
-            lib.derive_return_type("__add__", &args),
+            lib.derive_return_type("__add__", &args).unwrap(),
             Some(tp("list[any]")),
             "{args:?}"
         );

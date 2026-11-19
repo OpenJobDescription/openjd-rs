@@ -641,7 +641,7 @@ pub fn re_findall_fn(ctx: Ctx, a: &[ExprValue]) -> R {
         Ok(ExprValue::make_list_checked(
             ctx,
             matches?,
-            ExprType::list(ExprType::STRING),
+            ExprType::fixed(ExprType::list(ExprType::STRING)),
         )?)
     }
 }

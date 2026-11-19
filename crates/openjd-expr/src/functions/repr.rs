@@ -698,7 +698,7 @@ mod tests {
                 ExprValue::make_list(vec![ExprValue::String("!%^\"".into())], ExprType::STRING)
                     .unwrap(),
             ],
-            ExprType::list(ExprType::STRING),
+            ExprType::list(ExprType::STRING).unwrap(),
         )
         .unwrap();
         check_bound(&value);
@@ -710,7 +710,7 @@ mod tests {
                 ExprValue::make_list(vec![ExprValue::String("^".repeat(1000))], ExprType::STRING)
                     .unwrap(),
             ],
-            ExprType::list(ExprType::STRING),
+            ExprType::list(ExprType::STRING).unwrap(),
         )
         .unwrap();
         check_bound(&nested_carets);
@@ -746,7 +746,7 @@ mod tests {
             check_bound(
                 &ExprValue::make_list(
                     vec![ExprValue::String(repeated)],
-                    ExprType::list(ExprType::STRING),
+                    ExprType::list(ExprType::STRING).unwrap(),
                 )
                 .unwrap(),
             );

@@ -25,6 +25,8 @@ pub openjd_expr::error::ExpressionErrorKind::Other(alloc::string::String)
 pub openjd_expr::error::ExpressionErrorKind::ParseError(alloc::string::String)
 pub openjd_expr::error::ExpressionErrorKind::TypeError
 pub openjd_expr::error::ExpressionErrorKind::TypeError::message: alloc::string::String
+pub openjd_expr::error::ExpressionErrorKind::TypeTooDeep
+pub openjd_expr::error::ExpressionErrorKind::TypeTooDeep::limit: usize
 pub openjd_expr::error::ExpressionErrorKind::UndefinedVariable
 pub openjd_expr::error::ExpressionErrorKind::UndefinedVariable::name: alloc::string::String
 pub openjd_expr::error::ExpressionErrorKind::UndefinedVariable::suggestion: alloc::string::String
@@ -199,9 +201,9 @@ pub struct openjd_expr::function_library::FunctionLibrary
 impl openjd_expr::function_library::FunctionLibrary
 pub fn openjd_expr::function_library::FunctionLibrary::call(&self, &str, &[openjd_expr::value::ExprValue], &mut dyn openjd_expr::function_library::EvalContext) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::function_library::FunctionLibrary::call_method(&self, &str, &[openjd_expr::value::ExprValue], &mut dyn openjd_expr::function_library::EvalContext) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
-pub fn openjd_expr::function_library::FunctionLibrary::derive_return_type(&self, &str, &[openjd_expr::types::ExprType]) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::function_library::FunctionLibrary::derive_return_type(&self, &str, &[openjd_expr::types::ExprType]) -> core::result::Result<core::option::Option<openjd_expr::types::ExprType>, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::function_library::FunctionLibrary::function_names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
-pub fn openjd_expr::function_library::FunctionLibrary::get_property_type(&self, &openjd_expr::types::ExprType, &str) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::function_library::FunctionLibrary::get_property_type(&self, &openjd_expr::types::ExprType, &str) -> core::result::Result<core::option::Option<openjd_expr::types::ExprType>, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::function_library::FunctionLibrary::get_signatures(&self, &str) -> &[openjd_expr::function_library::FunctionEntry]
 pub fn openjd_expr::function_library::FunctionLibrary::merge(self, openjd_expr::function_library::FunctionLibrary) -> Self
 pub fn openjd_expr::function_library::FunctionLibrary::new() -> Self
@@ -739,24 +741,24 @@ pub const openjd_expr::types::ExprType::T1: openjd_expr::types::ExprType
 pub const openjd_expr::types::ExprType::T2: openjd_expr::types::ExprType
 pub const openjd_expr::types::ExprType::T3: openjd_expr::types::ExprType
 pub fn openjd_expr::types::ExprType::code(&self) -> openjd_expr::types::TypeCode
-pub fn openjd_expr::types::ExprType::list(openjd_expr::types::ExprType) -> Self
+pub fn openjd_expr::types::ExprType::list(openjd_expr::types::ExprType) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::types::ExprType::match_call(&self, &[openjd_expr::types::ExprType]) -> core::option::Option<std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>>
 pub fn openjd_expr::types::ExprType::params(&self) -> &[openjd_expr::types::ExprType]
-pub fn openjd_expr::types::ExprType::resolve_call(&self, &[openjd_expr::types::ExprType]) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::types::ExprType::resolve_call(&self, &[openjd_expr::types::ExprType]) -> core::result::Result<core::option::Option<openjd_expr::types::ExprType>, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::types::ExprType::sig_params(&self) -> &[openjd_expr::types::ExprType]
 pub fn openjd_expr::types::ExprType::sig_return(&self) -> &openjd_expr::types::ExprType
-pub fn openjd_expr::types::ExprType::signature(alloc::vec::Vec<openjd_expr::types::ExprType>, openjd_expr::types::ExprType) -> Self
-pub fn openjd_expr::types::ExprType::union(alloc::vec::Vec<openjd_expr::types::ExprType>) -> Self
-pub fn openjd_expr::types::ExprType::unresolved(openjd_expr::types::ExprType) -> Self
+pub fn openjd_expr::types::ExprType::signature(alloc::vec::Vec<openjd_expr::types::ExprType>, openjd_expr::types::ExprType) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::types::ExprType::union(alloc::vec::Vec<openjd_expr::types::ExprType>) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::types::ExprType::unresolved(openjd_expr::types::ExprType) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
 impl openjd_expr::types::ExprType
 pub fn openjd_expr::types::ExprType::is_concrete(&self) -> bool
 pub fn openjd_expr::types::ExprType::is_list(&self) -> bool
 pub fn openjd_expr::types::ExprType::is_symbolic(&self) -> bool
 pub fn openjd_expr::types::ExprType::list_element_type(&self) -> core::option::Option<&openjd_expr::types::ExprType>
 pub fn openjd_expr::types::ExprType::match_type(&self, &openjd_expr::types::ExprType) -> core::option::Option<std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>>
-pub fn openjd_expr::types::ExprType::new(openjd_expr::types::TypeCode, alloc::vec::Vec<openjd_expr::types::ExprType>) -> Self
+pub fn openjd_expr::types::ExprType::new(openjd_expr::types::TypeCode, alloc::vec::Vec<openjd_expr::types::ExprType>) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::types::ExprType::satisfies(&self, &openjd_expr::types::ExprType) -> bool
-pub fn openjd_expr::types::ExprType::substitute(&self, &std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>) -> openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::substitute(&self, &std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>) -> core::result::Result<openjd_expr::types::ExprType, openjd_expr::error::ExpressionError>
 impl openjd_expr::types::ExprType
 pub fn openjd_expr::types::ExprType::parse(&str) -> core::result::Result<openjd_expr::types::ExprType, alloc::string::String>
 impl core::clone::Clone for openjd_expr::types::ExprType
@@ -774,6 +776,7 @@ impl core::hash::Hash for openjd_expr::types::ExprType
 pub fn openjd_expr::types::ExprType::hash<H: core::hash::Hasher>(&self, &mut H)
 impl serde_core::ser::Serialize for openjd_expr::types::ExprType
 pub fn openjd_expr::types::ExprType::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub const openjd_expr::types::MAX_TYPE_DEPTH: usize
 pub mod openjd_expr::uri_path
 pub struct openjd_expr::uri_path::UriParts
 pub openjd_expr::uri_path::UriParts::authority: alloc::string::String
@@ -1030,6 +1033,8 @@ pub openjd_expr::ExpressionErrorKind::Other(alloc::string::String)
 pub openjd_expr::ExpressionErrorKind::ParseError(alloc::string::String)
 pub openjd_expr::ExpressionErrorKind::TypeError
 pub openjd_expr::ExpressionErrorKind::TypeError::message: alloc::string::String
+pub openjd_expr::ExpressionErrorKind::TypeTooDeep
+pub openjd_expr::ExpressionErrorKind::TypeTooDeep::limit: usize
 pub openjd_expr::ExpressionErrorKind::UndefinedVariable
 pub openjd_expr::ExpressionErrorKind::UndefinedVariable::name: alloc::string::String
 pub openjd_expr::ExpressionErrorKind::UndefinedVariable::suggestion: alloc::string::String
@@ -1164,24 +1169,24 @@ pub const openjd_expr::types::ExprType::T1: openjd_expr::types::ExprType
 pub const openjd_expr::types::ExprType::T2: openjd_expr::types::ExprType
 pub const openjd_expr::types::ExprType::T3: openjd_expr::types::ExprType
 pub fn openjd_expr::types::ExprType::code(&self) -> openjd_expr::types::TypeCode
-pub fn openjd_expr::types::ExprType::list(openjd_expr::types::ExprType) -> Self
+pub fn openjd_expr::types::ExprType::list(openjd_expr::types::ExprType) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::types::ExprType::match_call(&self, &[openjd_expr::types::ExprType]) -> core::option::Option<std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>>
 pub fn openjd_expr::types::ExprType::params(&self) -> &[openjd_expr::types::ExprType]
-pub fn openjd_expr::types::ExprType::resolve_call(&self, &[openjd_expr::types::ExprType]) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::types::ExprType::resolve_call(&self, &[openjd_expr::types::ExprType]) -> core::result::Result<core::option::Option<openjd_expr::types::ExprType>, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::types::ExprType::sig_params(&self) -> &[openjd_expr::types::ExprType]
 pub fn openjd_expr::types::ExprType::sig_return(&self) -> &openjd_expr::types::ExprType
-pub fn openjd_expr::types::ExprType::signature(alloc::vec::Vec<openjd_expr::types::ExprType>, openjd_expr::types::ExprType) -> Self
-pub fn openjd_expr::types::ExprType::union(alloc::vec::Vec<openjd_expr::types::ExprType>) -> Self
-pub fn openjd_expr::types::ExprType::unresolved(openjd_expr::types::ExprType) -> Self
+pub fn openjd_expr::types::ExprType::signature(alloc::vec::Vec<openjd_expr::types::ExprType>, openjd_expr::types::ExprType) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::types::ExprType::union(alloc::vec::Vec<openjd_expr::types::ExprType>) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
+pub fn openjd_expr::types::ExprType::unresolved(openjd_expr::types::ExprType) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
 impl openjd_expr::types::ExprType
 pub fn openjd_expr::types::ExprType::is_concrete(&self) -> bool
 pub fn openjd_expr::types::ExprType::is_list(&self) -> bool
 pub fn openjd_expr::types::ExprType::is_symbolic(&self) -> bool
 pub fn openjd_expr::types::ExprType::list_element_type(&self) -> core::option::Option<&openjd_expr::types::ExprType>
 pub fn openjd_expr::types::ExprType::match_type(&self, &openjd_expr::types::ExprType) -> core::option::Option<std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>>
-pub fn openjd_expr::types::ExprType::new(openjd_expr::types::TypeCode, alloc::vec::Vec<openjd_expr::types::ExprType>) -> Self
+pub fn openjd_expr::types::ExprType::new(openjd_expr::types::TypeCode, alloc::vec::Vec<openjd_expr::types::ExprType>) -> core::result::Result<Self, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::types::ExprType::satisfies(&self, &openjd_expr::types::ExprType) -> bool
-pub fn openjd_expr::types::ExprType::substitute(&self, &std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>) -> openjd_expr::types::ExprType
+pub fn openjd_expr::types::ExprType::substitute(&self, &std::collections::hash::map::HashMap<openjd_expr::types::TypeCode, openjd_expr::types::ExprType>) -> core::result::Result<openjd_expr::types::ExprType, openjd_expr::error::ExpressionError>
 impl openjd_expr::types::ExprType
 pub fn openjd_expr::types::ExprType::parse(&str) -> core::result::Result<openjd_expr::types::ExprType, alloc::string::String>
 impl core::clone::Clone for openjd_expr::types::ExprType
@@ -1296,9 +1301,9 @@ pub struct openjd_expr::FunctionLibrary
 impl openjd_expr::function_library::FunctionLibrary
 pub fn openjd_expr::function_library::FunctionLibrary::call(&self, &str, &[openjd_expr::value::ExprValue], &mut dyn openjd_expr::function_library::EvalContext) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::function_library::FunctionLibrary::call_method(&self, &str, &[openjd_expr::value::ExprValue], &mut dyn openjd_expr::function_library::EvalContext) -> core::result::Result<openjd_expr::value::ExprValue, openjd_expr::error::ExpressionError>
-pub fn openjd_expr::function_library::FunctionLibrary::derive_return_type(&self, &str, &[openjd_expr::types::ExprType]) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::function_library::FunctionLibrary::derive_return_type(&self, &str, &[openjd_expr::types::ExprType]) -> core::result::Result<core::option::Option<openjd_expr::types::ExprType>, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::function_library::FunctionLibrary::function_names(&self) -> impl core::iter::traits::iterator::Iterator<Item = &str>
-pub fn openjd_expr::function_library::FunctionLibrary::get_property_type(&self, &openjd_expr::types::ExprType, &str) -> core::option::Option<openjd_expr::types::ExprType>
+pub fn openjd_expr::function_library::FunctionLibrary::get_property_type(&self, &openjd_expr::types::ExprType, &str) -> core::result::Result<core::option::Option<openjd_expr::types::ExprType>, openjd_expr::error::ExpressionError>
 pub fn openjd_expr::function_library::FunctionLibrary::get_signatures(&self, &str) -> &[openjd_expr::function_library::FunctionEntry]
 pub fn openjd_expr::function_library::FunctionLibrary::merge(self, openjd_expr::function_library::FunctionLibrary) -> Self
 pub fn openjd_expr::function_library::FunctionLibrary::new() -> Self
@@ -1507,6 +1512,7 @@ pub const openjd_expr::MAX_PARSE_INPUT_LEN: usize
 pub const openjd_expr::MAX_RANGE_EXPR_CHUNKS: usize
 pub const openjd_expr::MAX_RANGE_EXPR_LEN: u64
 pub const openjd_expr::MAX_SYMBOL_TABLE_ENTRIES: usize
+pub const openjd_expr::MAX_TYPE_DEPTH: usize
 pub trait openjd_expr::EvalContext
 pub fn openjd_expr::EvalContext::check_memory(&self, usize) -> core::result::Result<(), openjd_expr::error::ExpressionError>
 pub fn openjd_expr::EvalContext::count_op(&mut self) -> core::result::Result<(), openjd_expr::error::ExpressionError>
