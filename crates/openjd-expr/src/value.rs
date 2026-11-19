@@ -541,6 +541,11 @@ impl ExprValue {
     /// handled by the evaluator, which hoists them to a top-level
     /// `ExprValue::unresolved(list[T])` before any list is built.
     ///
+    /// A `hint_type` already [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH)
+    /// deep is rejected with
+    /// [`TypeTooDeep`](crate::ExpressionErrorKind::TypeTooDeep): a list of
+    /// it would have no type.
+    ///
     /// When called from an evaluator or function implementation that has
     /// an [`EvalContext`](crate::function_library::EvalContext), prefer
     /// [`make_list_checked`](Self::make_list_checked) so that an oversized
@@ -550,6 +555,13 @@ impl ExprValue {
         mut elements: Vec<ExprValue>,
         hint_type: ExprType,
     ) -> Result<Self, crate::error::ExpressionError> {
+        if hint_type.depth() >= crate::MAX_TYPE_DEPTH {
+            return Err(crate::error::ExpressionError::from_kind(
+                crate::error::ExpressionErrorKind::TypeTooDeep {
+                    limit: crate::MAX_TYPE_DEPTH,
+                },
+            ));
+        }
         // Reject 3+ nesting levels: if any element is itself a ListList
         // whose elements are lists, that's too deep. Empty lists (ListList
         // with NULLTYPE) represent `list[nulltype]` — a flat empty list,

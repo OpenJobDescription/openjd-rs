@@ -53,7 +53,7 @@ openjd_expr                 — crate root; most commonly used items re-exported
 ├── range_expr              — RangeExpr, IntRange, RangeExprError
 ├── symbol_table            — SymbolTable, SymbolTableEntry, SymbolTableError,
 │                             SerializedSymbolTable, MAX_SYMBOL_TABLE_ENTRIES
-├── types                   — ExprType, TypeCode
+├── types                   — ExprType, TypeCode, MAX_TYPE_DEPTH
 ├── uri_path                — URI-aware path helpers (module-path-only)
 └── value                   — ExprValue, Float64, ListIter, format_float
 ```
@@ -243,6 +243,7 @@ Additional per-module caps (see each module section below):
 - `range_expr::MAX_RANGE_EXPR_CHUNKS` (50,000 — elements parsed, and runs in the canonical form of every value)
 - `range_expr::MAX_RANGE_EXPR_LEN` (`i64::MAX` — bound on the number of values, not a heap cap)
 - `symbol_table::MAX_SYMBOL_TABLE_ENTRIES` (100,000 — transport-only)
+- `types::MAX_TYPE_DEPTH` (64 — the deepest an `ExprType` can be; a parsed type is at most 11 deep)
 
 All caps are orders of magnitude above any legitimate usage and exist to
 reject pathological inputs early, before they allocate.
@@ -807,8 +808,9 @@ impl ExprValue {
     // ── Queries ──
 
     /// The value's type. A `ListList` whose element type hint is already
-    /// `MAX_TYPE_DEPTH` deep (only a value built through the API can hold
-    /// one) is `list[any]`, since `list[hint]` would be too deep.
+    /// `MAX_TYPE_DEPTH` deep (only a value built through the enum variant
+    /// can hold one; `make_list` rejects such a hint) is `list[any]`, since
+    /// `list[hint]` would be too deep.
     pub fn expr_type(&self) -> ExprType;
     pub fn type_name(&self) -> &'static str;
     pub fn is_list(&self) -> bool;
@@ -1851,6 +1853,7 @@ minor-version change; lowering them is a breaking change):
 - `MAX_EXPRESSION_DEPTH`, `MAX_PARSE_INPUT_LEN`,
   `MAX_FORMAT_STRING_LEN`, `MAX_FORMAT_STRING_SEGMENTS`,
   `MAX_STATIC_RESOLVED_VALUE_LEN`,
-  `MAX_RANGE_EXPR_CHUNKS`, `MAX_SYMBOL_TABLE_ENTRIES`: defensive caps.
+  `MAX_RANGE_EXPR_CHUNKS`, `MAX_SYMBOL_TABLE_ENTRIES`, `MAX_TYPE_DEPTH`:
+  defensive caps.
   Values may rise to accommodate new legitimate use cases; values will
   not drop without a breaking-change bump.

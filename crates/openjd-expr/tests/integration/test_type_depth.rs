@@ -166,6 +166,27 @@ fn normalization_does_not_slip_past_the_limit() {
     assert_too_deep(ExprType::union(vec![ExprType::INT, u]));
 }
 
+/// Substituting below the outermost parameter rebuilds every level, so a
+/// binding deep inside the type is checked too.
+#[test]
+fn nested_substitution_past_the_limit_is_an_error() {
+    let sig = ExprType::parse("(T1) -> list[list[T1]]").unwrap();
+    assert!(sig
+        .resolve_call(&[deep_list(MAX_TYPE_DEPTH - 2)])
+        .unwrap()
+        .is_some());
+    assert_too_deep(
+        sig.resolve_call(&[deep_list(MAX_TYPE_DEPTH - 1)])
+            .map(Option::unwrap),
+    );
+    // Here the inner `list[T1]` is already too deep: its error must reach
+    // the caller rather than leave the outer list without an element.
+    assert_too_deep(
+        sig.resolve_call(&[deep_list(MAX_TYPE_DEPTH)])
+            .map(Option::unwrap),
+    );
+}
+
 /// Operations that build a type from other types are checked too:
 /// substituting a deep binding into `list[T1]` adds a level.
 #[test]
@@ -218,6 +239,137 @@ fn evaluating_past_the_limit_is_an_error() {
         err.kind()
     );
     assert_eq!(err.message(), "Type nesting depth exceeded limit (64)");
+}
+
+/// Unresolved symbols for the evaluation tests: `X` 64 deep, `XS` its
+/// `string` twin, `C` and `C2` unknown `bool`s, `N` an unknown `int`, and
+/// `M` a list whose elements join with `X`'s into a union a level deeper.
+fn deep_symbols() -> SymbolTable {
+    let mut st = SymbolTable::new();
+    let deep_strings =
+        (1..MAX_TYPE_DEPTH).fold(ExprType::STRING, |t, _| ExprType::list(t).unwrap());
+    let members = ExprType::parse("list[list[nulltype] | list[any]]").unwrap();
+    for (name, t) in [
+        ("X", deep_list(MAX_TYPE_DEPTH)),
+        ("XS", deep_strings),
+        ("C", ExprType::BOOL),
+        ("C2", ExprType::BOOL),
+        ("N", ExprType::INT),
+        ("M", members),
+    ] {
+        st.set(name, ExprValue::unresolved(t)).unwrap();
+    }
+    // A concrete list whose element type hint is at the limit, which
+    // only the enum variant can build.
+    st.set(
+        "LL",
+        ExprValue::ListList(vec![], deep_list(MAX_TYPE_DEPTH), 0),
+    )
+    .unwrap();
+    st
+}
+
+fn eval_err(expr: &str, st: &SymbolTable) -> ExpressionError {
+    openjd_expr::ParsedExpression::new(expr)
+        .unwrap()
+        .evaluate(st)
+        .expect_err(expr)
+}
+
+/// Every evaluator path that builds a type from deep operands reports the
+/// limit rather than a wrong type.
+#[test]
+fn evaluator_paths_past_the_limit_are_errors() {
+    let st = deep_symbols();
+    for expr in [
+        // A union of two 64-deep branches.
+        "X if C else XS",
+        // A list literal whose element join is a level deeper than either
+        // element (the join's list arm, then the literal's list type).
+        "[M, X]",
+        // A comprehension's list type: `list[T | nulltype]` over a 64-deep
+        // `T`.
+        "[x if C else 1 for x in X]",
+        // Slicing with an unknown bound builds `list[hint]`.
+        "LL[N:]",
+    ] {
+        let err = eval_err(expr, &st);
+        assert!(
+            matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 64 }),
+            "{expr}: {:?}",
+            err.kind()
+        );
+    }
+}
+
+/// Static typing evaluates a conditional's branches, a boolean operator's
+/// operands and a comprehension's body speculatively, absorbing a failure
+/// a run might skip. A type past the limit is not such a failure: the
+/// sub-expression has no type, so it is reported, not absorbed into a
+/// type that leaves it out.
+#[test]
+fn speculative_evaluation_does_not_absorb_the_limit() {
+    let st = deep_symbols();
+    for expr in [
+        "1 if C else ([X] if C2 else 1)",
+        "[X] if C else 1",
+        "C and [X]",
+        "C or [X]",
+        "[[X] for x in [1, 2] if C]",
+        "[len([[x]]) for x in X]",
+        "[1 for x in X if len([[x]]) > 0]",
+    ] {
+        let err = eval_err(expr, &st);
+        assert!(
+            matches!(err.kind(), ExpressionErrorKind::TypeTooDeep { limit: 64 }),
+            "{expr}: {:?}",
+            err.kind()
+        );
+    }
+}
+
+/// `make_list` with a hint at the limit has no list type to give the list.
+#[test]
+fn make_list_with_a_hint_at_the_limit_is_an_error() {
+    let err = ExprValue::make_list(vec![], deep_list(MAX_TYPE_DEPTH))
+        .expect_err("list[hint] is too deep");
+    assert!(matches!(
+        err.kind(),
+        ExpressionErrorKind::TypeTooDeep { limit: 64 }
+    ));
+    let below = deep_list(MAX_TYPE_DEPTH - 1);
+    assert_eq!(
+        ExprValue::make_list(vec![], below.clone())
+            .unwrap()
+            .expr_type(),
+        ExprType::list(below).unwrap()
+    );
+}
+
+/// Only a one-parameter `unresolved` adds no level. A bare or
+/// many-parameter one, which only `new` builds, counts a level, so a chain
+/// of them stops at the limit.
+#[test]
+fn many_parameter_unresolved_counts_a_level() {
+    let mut t = ExprType::INT;
+    let mut levels = 1;
+    loop {
+        match ExprType::new(TypeCode::Unresolved, vec![t.clone(), ExprType::INT]) {
+            Ok(next) => {
+                t = next;
+                levels += 1;
+            }
+            Err(e) => {
+                assert!(matches!(
+                    e.kind(),
+                    ExpressionErrorKind::TypeTooDeep { limit: 64 }
+                ));
+                break;
+            }
+        }
+        assert!(levels <= MAX_TYPE_DEPTH, "the chain passed the limit");
+    }
+    assert_eq!(levels, MAX_TYPE_DEPTH);
 }
 
 /// A `ListList` whose element type hint is at the limit has no list type

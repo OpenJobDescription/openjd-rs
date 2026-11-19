@@ -40,12 +40,16 @@ fn append_sub_error(msg: &mut String, err: &ExpressionError, is_last: bool) {
 }
 
 /// Whether an error is (or contains, through compound sub-errors) a
-/// budget exceedance. `eval_speculative` uses this to decide whether an
-/// error may be absorbed, and `eval_attribute` and `eval_call` use it to
-/// decide whether an error may be rewritten. A value error may not
-/// matter at run time (the resolved test may select the other branch),
-/// but the memory and operations were spent in this evaluation either
-/// way, so a budget error must always propagate.
+/// budget exceedance, or a type deeper than
+/// [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH). `eval_speculative` uses
+/// this to decide whether an error may be absorbed, and `eval_attribute`
+/// and `eval_call` use it to decide whether an error may be rewritten. A
+/// value error may not matter at run time (the resolved test may select
+/// the other branch), but the memory and operations were spent in this
+/// evaluation either way, so a budget error must always propagate. A type
+/// too deep is a limit of the type system rather than of any run: the
+/// sub-expression has no type, so absorbing it would type the construct
+/// from its other parts and claim a type that a run can contradict.
 ///
 /// Deliberately coarse: when a *compound* error contains a budget
 /// exceedance among value sub-errors, the whole compound propagates
@@ -56,6 +60,7 @@ fn contains_budget_error(err: &ExpressionError) -> bool {
         err.kind(),
         crate::error::ExpressionErrorKind::MemoryLimitExceeded { .. }
             | crate::error::ExpressionErrorKind::OperationLimitExceeded { .. }
+            | crate::error::ExpressionErrorKind::TypeTooDeep { .. }
     ) || err.sub_errors().iter().any(contains_budget_error)
 }
 
@@ -1878,7 +1883,8 @@ impl<'a> Evaluator<'a> {
     /// - A budget error (`MemoryLimitExceeded` / `OperationLimitExceeded`,
     ///   directly or inside a compound error's sub-errors) is returned as
     ///   `Err`. The memory and operations were spent regardless of what
-    ///   a runtime would skip.
+    ///   a runtime would skip. So is `TypeTooDeep`: the sub-expression has
+    ///   no type to absorb.
     /// - A name that resolves nowhere (an undefined symbol, an unknown
     ///   function, or a method or property that no type has;
     ///   [`contains_name_error`]) is returned as `Err`

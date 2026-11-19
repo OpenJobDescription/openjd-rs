@@ -69,9 +69,11 @@ A type is at most [`MAX_TYPE_DEPTH`](../../crates/openjd-expr/src/types.rs)
 parameters: `int` is 1, `list[int]` 2, `list[int | string]` 3,
 `(int) -> list[int]` 3. Lists, unions and signatures are a level each.
 `unresolved[T]` is as deep as `T`, so the type of an unresolved value is as
-deep as its constraint. Normalization collapses `unresolved[unresolved[T]]`,
-so an `unresolved` is never the direct parameter of another, and a type at the
-limit nests at most 128 levels.
+deep as its constraint. Only a one-parameter `unresolved` counts no level (a
+bare or many-parameter one, which only `ExprType::new` builds, counts one).
+Normalization collapses `unresolved[unresolved[T]]`, so a one-parameter
+`unresolved` is never the parameter of another, and a type at the limit nests
+at most 128 levels.
 
 Every way of building a type with parameters goes through one private funnel,
 `ExprType::build`, which computes the depth from the parameters' cached depths
@@ -81,14 +83,19 @@ normalizations inside them (which are checked on the type they build), `parse`,
 and every operation that builds a type from other types: `substitute`,
 `resolve_call`, `FunctionLibrary::derive_return_type` and `get_property_type`,
 and inside the crate the list-element join, `merge_list_union`, list forms,
-comprehension typing and the type-level coercion. Several of those can build a
+comprehension typing and the type-level coercion. `ExprValue::make_list` and
+`make_list_checked` return the error for an element type hint already at the
+limit. Several of those can build a
 type deeper than their inputs (substituting into `list[T1]`, merging
 `int | list[A] | list[B]` into `int | list[A | B]`, joining union members), so
 they are fallible too. Type variable unification (behind `match_type` and
 `match_call`) never deepens a type, so those stay `Option`. `Clone` copies an
 existing type, the type constants have no parameters, and `ExprType` has no
 `Deserialize` (symbol tables deserialize through `parse`). An evaluation that
-would build a type past the limit fails with the error.
+would build a type past the limit fails with the error, including inside a
+conditional branch, a boolean operand or a comprehension that static typing
+evaluates speculatively: like a budget error, `TypeTooDeep` is never absorbed
+there (evaluator.md § Speculative evaluation).
 
 Because no `ExprType` is deeper than the limit, every recursive walk over a
 type (`==`, `Hash`, `Display`, `Debug`, `Serialize`, the derived `Drop`,
@@ -243,19 +250,20 @@ Session.HasPathMappingRules else Param.F) for x in Param.L]` at job creation is
 `unresolved[list[float | int]]`, since the values decide whether the run-time
 list is `list[int]` or `list[float]`.
 
-Crate-internal helpers (`pub(crate)`, not part of the public API):
+Crate-internal helpers (`pub(crate)`, not part of the public API). Those
+returning a `Result` fail only with `TypeTooDeep` (see [Depth limit](#depth-limit)):
 
 | Method | Purpose |
 |--------|---------|
 | `denotes_runtime_values() -> bool` | Does this type denote a set of runtime values? Gates satisfaction and coercion targets |
-| `erase_type_vars() -> ExprType` | Replace every type variable with `any` — the wildcard reading of unbound variables in coercion sources |
-| `types::list_element_contribution(&ExprType) -> Option<ExprType>` | The type an element contributes to a built list: unwraps `unresolved[T]`; drops a top-level `nulltype` (union member or bare; `None` if nothing is left); keeps `list[nulltype]` members |
-| `types::join_list_element(&ExprType, &ExprType) -> Option<ExprType>` | The list-element join above; `None` on a conflict |
-| `types::comprehension_var(&ExprType) -> ComprehensionVar` | A list comprehension's loop variable for an unresolved iterable of this type (§1.3.7): `Typed(E)` for `list[E]` (`int` for `range_expr`, the union of the members' element types for a union, `nulltype` elements and members contributing nothing, and `any` for `any`, a type variable, a list of one, or a type that cannot be iterated: it may come from typing an operation on values of unknown type), `EmptyOnly` when the iterable can only be `[]` or `null` |
-| `types::comprehension_list_type(&ExprType) -> ExprType` | The type of a comprehension over an unresolved iterable (or with an unresolved filter) from its body's type (§1.3.7): `T` is the body without `nulltype`, its unions of lists merged; `list[T \| nulltype]`, the run that keeps no element included; `list[nulltype]` if nothing is left, the body is `noreturn`, or `T` is a list of lists (`comprehension_too_deep`) |
-| `types::comprehension_too_deep(&ExprType) -> bool` | Is every form of a comprehension element type `T` (each union member's `list_forms`, `nulltype` aside) a list of lists, so the comprehension would nest three levels? |
-| `types::merge_list_union(ExprType) -> ExprType` | A union's list members as the one list type they equal (`list[A] \| list[B]` is `list[A \| B]`), at every depth |
-| `types::list_forms(&ExprType) -> Vec<ExprType>` | The types a type with unions in it stands for (`list[int \| nulltype]` gives `list[int]` and `list[nulltype]`, at every depth); a top-level union has its members' forms (`list[int] \| list[string]` the same as `list[int \| string]`, `int \| string` gives `int` and `string`) |
+| `erase_type_vars() -> Result<ExprType, ExpressionError>` | Replace every type variable with `any` — the wildcard reading of unbound variables in coercion sources |
+| `types::list_element_contribution(&ExprType) -> Result<Option<ExprType>, ExpressionError>` | The type an element contributes to a built list: unwraps `unresolved[T]`; drops a top-level `nulltype` (union member or bare; `None` if nothing is left); keeps `list[nulltype]` members |
+| `types::join_list_element(&ExprType, &ExprType) -> Result<Option<ExprType>, ExpressionError>` | The list-element join above; `Ok(None)` on a conflict |
+| `types::comprehension_var(&ExprType) -> Result<ComprehensionVar, ExpressionError>` | A list comprehension's loop variable for an unresolved iterable of this type (§1.3.7): `Typed(E)` for `list[E]` (`int` for `range_expr`, the union of the members' element types for a union, `nulltype` elements and members contributing nothing, and `any` for `any`, a type variable, a list of one, or a type that cannot be iterated: it may come from typing an operation on values of unknown type), `EmptyOnly` when the iterable can only be `[]` or `null` |
+| `types::comprehension_list_type(&ExprType) -> Result<ExprType, ExpressionError>` | The type of a comprehension over an unresolved iterable (or with an unresolved filter) from its body's type (§1.3.7): `T` is the body without `nulltype`, its unions of lists merged; `list[T \| nulltype]`, the run that keeps no element included; `list[nulltype]` if nothing is left, the body is `noreturn`, or `T` is a list of lists (`comprehension_too_deep`) |
+| `types::comprehension_too_deep(&ExprType) -> Result<bool, ExpressionError>` | Is every form of a comprehension element type `T` (each union member's `list_forms`, `nulltype` aside) a list of lists, so the comprehension would nest three levels? |
+| `types::merge_list_union(ExprType) -> Result<ExprType, ExpressionError>` | A union's list members as the one list type they equal (`list[A] \| list[B]` is `list[A \| B]`), at every depth |
+| `types::list_forms(&ExprType) -> Result<Vec<ExprType>, ExpressionError>` | The types a type with unions in it stands for (`list[int \| nulltype]` gives `list[int]` and `list[nulltype]`, at every depth); a top-level union has its members' forms (`list[int] \| list[string]` the same as `list[int \| string]`, `int \| string` gives `int` and `string`) |
 
 ### Lists with union element types
 

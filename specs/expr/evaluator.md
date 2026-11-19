@@ -252,7 +252,8 @@ its value's type, or on a misused member, keeps its own error), and a failed pro
 available for string" (or "is a method, not a property", or "Cannot access
 attribute"; the last two, when no type has the property, are `UnknownMember`, and
 "Cannot access attribute" for a property only a generic receiver has stays a plain error). Budget errors are
-not replaced; they propagate unchanged. A replaced budget error would be a
+(and `TypeTooDeep`) are not replaced; they propagate unchanged. A replaced
+budget error would be a
 value error that an enclosing construct may absorb (see
 [Speculative evaluation](#speculative-evaluation)), and the memory and
 operations were spent regardless.
@@ -499,7 +500,10 @@ typed over an unresolved iterable or filter. All use one helper, `speculate`
   inside a compound error's sub-errors) is never absorbed. The memory and
   operations were spent regardless of what a runtime would skip. It propagates
   immediately: a conditional whose if-branch exceeds the budget does not evaluate
-  the else-branch.
+  the else-branch. `TypeTooDeep` (a type past `MAX_TYPE_DEPTH`, see
+  type-system.md § Depth limit) is treated the same way: the sub-expression has
+  no type, so absorbing it would type the construct from its other parts and
+  claim a type a run can contradict.
 - A name that resolves nowhere (`UndefinedVariable`, `UnknownFunction` or
   `UnknownMember`, directly or inside a compound error's sub-errors: an
   undefined symbol, an unknown function, or a method or property that no type

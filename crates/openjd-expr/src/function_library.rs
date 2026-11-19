@@ -393,14 +393,14 @@ impl FunctionLibrary {
     /// one, is typed by its forms (`int | string` as `int` and `string`,
     /// `list[int | nulltype]` as `list[int]` and `list[nulltype]`): the
     /// result is the union of the return types of the combinations of forms
-    /// that match, or `None` when none does.
+    /// that match, or `Ok(None)` when none does.
     /// A list concatenation of known element types (a `range_expr` counting
     /// as a `list[int]`) has their common element type, as concatenating
     /// values gives, of unknown ones (or an operand of unknown type)
     /// `list[any]`, and of no common type the signature's type (`list[T3]`,
     /// or `list[T2]` for the range overloads). Any other call with an
     /// argument of unknown type (`any`, a bare type variable) that matches a
-    /// signature is `any`; one that matches none is `None` here (`call`
+    /// signature is `any`; one that matches none is `Ok(None)` here (`call`
     /// types it `any` when a signature has its arity).
     ///
     /// Returns [`ExpressionErrorKind::TypeTooDeep`] if the return type

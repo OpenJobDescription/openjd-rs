@@ -22,7 +22,9 @@ use crate::error::{ExpressionError, ExpressionErrorKind};
 /// `list[int]`. Lists, unions and signatures each count as a level.
 /// `unresolved[T]` does not, so that the type of an unresolved value is as
 /// deep as its constraint, and an `ExprValue::Unresolved` holding any type
-/// has a type. An `unresolved` is never the direct parameter of another
+/// has a type. Only a one-parameter `unresolved` counts no level; a bare or
+/// many-parameter one (which only [`ExprType::new`] builds) counts one. A
+/// one-parameter `unresolved` is never the parameter of another
 /// (`unresolved[unresolved[T]]` normalizes to `unresolved[T]`), so a type
 /// `MAX_TYPE_DEPTH` deep nests at most `2 * MAX_TYPE_DEPTH` levels.
 ///
@@ -2401,6 +2403,22 @@ mod tests {
         let unions = |n: usize| format!("{}int{}", "list[string | ".repeat(n), "]".repeat(n));
         assert!(ExprType::parse(&unions(5)).unwrap().depth <= 11);
         assert!(ExprType::parse(&unions(6)).is_err());
+        // Each other nesting form counts toward parse's limit too: a
+        // signature's return type, `T?` and `unresolved[T]`. (A
+        // signature's parameters are split at the first `) -> `, so a
+        // signature cannot be one.)
+        let returns = |n: usize| format!("{}int", "() -> ".repeat(n));
+        let optionals = |n: usize| format!("int{}", "?".repeat(n));
+        let unresolved = |n: usize| format!("{}int{}", "unresolved[".repeat(n), "]".repeat(n));
+        for (form, f) in [
+            ("returns", &returns as &dyn Fn(usize) -> String),
+            ("optionals", &optionals),
+            ("unresolved", &unresolved),
+        ] {
+            let t = ExprType::parse(&f(10)).unwrap_or_else(|e| panic!("{form}: {e}"));
+            assert!(t.depth <= 11, "{form}: {}", t.depth);
+            assert!(ExprType::parse(&f(11)).is_err(), "{form} at 11");
+        }
     }
 
     /// The derived operations that can build a type deeper than their
@@ -2428,6 +2446,10 @@ mod tests {
         let at = union_of(MAX_TYPE_DEPTH - 2);
         assert_eq!(at.depth as usize, MAX_TYPE_DEPTH);
         assert!(is_too_deep(merge_list_union(at)));
+        // Inside a list, too.
+        let in_list = ExprType::list(union_of(MAX_TYPE_DEPTH - 3)).unwrap();
+        assert_eq!(in_list.depth as usize, MAX_TYPE_DEPTH);
+        assert!(is_too_deep(merge_list_union(in_list)));
     }
 
     #[test]
