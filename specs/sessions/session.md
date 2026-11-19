@@ -284,7 +284,7 @@ The optional `cancel_token` provides external cancellation support. When provide
 action cancel tokens are created as children of this token via `parent.child_token()`.
 Canceling the parent cascades to all current and future actions in the session. This
 applies to cross-user sessions too: `run_via_helper` awaits the action's token and
-signals the helper over the cancel pipe when it fires, so a bare
+sends the helper a cancel command through the helper's own stdin when it fires, so a bare
 `cancel_token.cancel()` (not routed through `cancel_action` / `SessionCancelHandle`)
 cancels a helper-run action and reports it `Canceled`.
 
@@ -605,7 +605,8 @@ Unset takes precedence over set within the same environment, matching the spec.
 2. Sets state to `Canceling`, and records `mark_action_failed` (step 6) before
    anything is delivered, so the result can't be reported first
 3. Sends `time_limit` over the watch channel
-4. On a cross-user session, writes the cancel command to the helper. The command
+4. On a cross-user session, writes the cancel command to the helper over the
+   session's cancel pipe (the dup of the helper's stdin made at setup). The command
    follows the action's cancel method as the same-user loop does: `TERMINATE` for
    a `TERMINATE` action, and `NOTIFY_THEN_TERMINATE` with the declared grace capped
    at `time_limit` otherwise (see [Choosing the cancel command](embedded-cross-user-helper.md#choosing-the-cancel-command)).
@@ -642,6 +643,10 @@ channel, `mark_failed` flag, all behind one `Arc<Mutex<..>>`).
   sessions; held until the helper has the action's Run command, as for
   `cancel_action`), and the token cancel — while holding the shared lock so the target action cannot change
   mid-delivery.
+- On a cross-user session the handle writes the command over the session's own
+  cancel pipe, which it shares (an `Arc<File>`) rather than holding a dup of its own.
+  So `cancel_handle()` can't fail, and a handle made while the process is out of file
+  descriptors still reaches the helper.
 - Unlike `cancel_action`, it cannot set the session's transient `Canceling` state
   (the `Session` is owned elsewhere); the state moves directly to the terminal value
   when the canceled action finishes.
@@ -801,7 +806,7 @@ Read-only accessors on `Session`:
 | `environments_entered()` | `&[EnvironmentIdentifier]` | Stack of entered environment IDs (entry order) |
 | `path_mapping_rules()` | `&[PathMappingRule]` | Current path mapping rules, in the order given |
 | `action_status()` | `Option<ActionStatus>` | Snapshot of the current/most-recent action status. `None` if no action has run. |
-| `clone_cancel_writer()` | `Option<std::fs::File>` | Clone the cross-user helper's cancel pipe (a dup of its stdin). `cancel_handle()` uses it to deliver cancel commands from another thread; writing to it directly bypasses the cancel command builder and the ordering against the action's Run command (the Unix helper drops a cancel written before Run), so callers should use `cancel_handle()`. |
+| `clone_cancel_writer()` | `Option<std::fs::File>` | Clone the cross-user helper's cancel pipe (a new dup of its stdin); `None` without one or if the dup fails. The session's own cancel paths don't use it (`cancel_handle()` shares the session's pipe). Writing to it directly bypasses the cancel command builder and the ordering against the action's Run command (the Unix helper drops a cancel written before Run), so callers should use `cancel_handle()`. |
 | `override_action_state(state)` | `()` | Override the action state. Used by PyO3 bindings to convert Failed → Canceled when cancel was requested externally. |
 
 ## enter_environment_with_output

@@ -517,9 +517,6 @@ impl Drop for CrossUserHelperWin {
 pub(crate) trait AsyncHelper: Send {
     fn async_reader(&mut self) -> &mut dyn AsyncHelperReader;
     fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError>;
-    /// The helper's shared auth token. Used by callers that bypass
-    /// `send_command` (e.g. the cancel_writer path in `run_via_helper`).
-    fn auth_token(&self) -> &str;
 }
 
 #[cfg(unix)]
@@ -530,9 +527,6 @@ impl AsyncHelper for CrossUserHelper {
     fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
         CrossUserHelper::send_command(self, cmd)
     }
-    fn auth_token(&self) -> &str {
-        CrossUserHelper::auth_token(self)
-    }
 }
 
 #[cfg(windows)]
@@ -542,9 +536,6 @@ impl AsyncHelper for CrossUserHelperWin {
     }
     fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
         CrossUserHelperWin::send_command(self, cmd)
-    }
-    fn auth_token(&self) -> &str {
-        CrossUserHelperWin::auth_token(self)
     }
 }
 
@@ -560,7 +551,6 @@ pub(crate) async fn run_via_helper(
     filter: &mut crate::action_filter::ActionFilter,
     session_id: &str,
     message_tx: tokio::sync::mpsc::UnboundedSender<ActionMessage>,
-    cancel_writer: Option<&std::fs::File>,
     run_gate: Option<&HelperRunGate>,
     cancel_token: &tokio_util::sync::CancellationToken,
 ) -> Result<crate::subprocess::SubprocessResult, SessionError> {
@@ -590,37 +580,24 @@ pub(crate) async fn run_via_helper(
         "cwd": config.working_dir,
     });
 
-    // The helper auth token, captured once: the `select!` branches below
-    // cannot borrow `helper` while its reader future is live.
-    let auth_token = helper.auth_token().to_string();
-
     // Write Run through the action's gate, so a `cancel_action` /
     // `SessionCancelHandle` cancel that arrived before it is written to the
-    // helper right after it. See [`HelperRunGate`]. The held cancel goes
-    // through `send_command` (the helper's own stdin, which adds the token),
-    // so it doesn't depend on `cancel_writer`. `pending_cancel_sent` records
-    // that it was written.
+    // helper right after it. See [`HelperRunGate`]. Every cancel command
+    // this function writes (the held one here, and the timeout and
+    // bare-token ones below) goes through `send_command`, the helper's own
+    // stdin, so none depends on a dup of the cancel pipe.
+    // `pending_cancel_sent` records that the held one was written.
     let mut pending_cancel_sent = false;
     match run_gate {
         Some(gate) => gate.start_run(
             helper,
             |helper| helper.send_command(&cmd),
             |helper, time_limit| {
-                let line = helper_cancel_line(None, &config.cancel_method, time_limit);
                 // Run is already written, so a failure here doesn't fail the
                 // action: the run loop goes on reading the helper's
                 // responses, and a broken pipe surfaces there.
-                let sent = serde_json::from_str::<serde_json::Value>(&line)
-                    .map_err(|e| SessionError::HelperCommunication(e.to_string()))
-                    .and_then(|held| helper.send_command(&held));
-                match sent {
-                    Ok(()) => pending_cancel_sent = true,
-                    Err(e) => session_log!(
-                        warn,
-                        session_id,
-                        LogContent::PROCESS_CONTROL,
-                        "Failed to send a cancel held for the run command: {e}"
-                    ),
+                if send_cancel_command(helper, &config.cancel_method, time_limit, session_id) {
+                    pending_cancel_sent = true;
                 }
                 Ok(())
             },
@@ -778,9 +755,7 @@ pub(crate) async fn run_via_helper(
                     .as_ref()
                     .is_some_and(|rx| rx.has_changed().unwrap_or(false));
                 if !cancel_delivered && !watch_fired {
-                    if let Some(writer) = cancel_writer {
-                        write_helper_cancel(writer, &auth_token, &config.cancel_method)?;
-                    }
+                    send_cancel_command(helper, &config.cancel_method, None, session_id);
                 }
                 cancel_delivered = true;
             }
@@ -791,10 +766,7 @@ pub(crate) async fn run_via_helper(
             _ = &mut timeout_fut, if !timed_out && !cancel_delivered => {
                 timed_out = true;
                 cancel_delivered = true;
-                // Send cancel to helper via the cancel_writer
-                if let Some(writer) = cancel_writer {
-                    write_helper_cancel(writer, &auth_token, &config.cancel_method)?;
-                }
+                send_cancel_command(helper, &config.cancel_method, None, session_id);
             }
         }
     }
@@ -804,9 +776,10 @@ pub(crate) async fn run_via_helper(
 /// object without the trailing newline.
 ///
 /// This is the only place the session side writes a helper cancel command.
-/// [`run_via_helper`]'s timeout and bare-token branches (through
-/// [`write_helper_cancel`]), its write of a cancel [`HelperRunGate`] held
-/// until Run, and `Session::cancel_action` / `SessionCancelHandle::cancel`
+/// [`run_via_helper`]'s timeout and bare-token branches and its write of a
+/// cancel [`HelperRunGate`] held until Run (all through
+/// [`send_cancel_command`]), and `Session::cancel_action` /
+/// `SessionCancelHandle::cancel`
 /// (through `session.rs`'s `send_helper_cancel_command`) all call it, so one
 /// action gets one answer for the same `time_limit` whichever way the cancel
 /// arrives.
@@ -825,11 +798,11 @@ pub(crate) async fn run_via_helper(
 ///   notify signal and kills after the exact `Duration`), which the wire
 ///   can't express.
 ///
-/// `token: None` omits the `"token"` field. The held cancel passes `None`
-/// because `send_command` adds the token; otherwise only the test-only
-/// injection path in `session.rs` (a cancel writer with no helper) has no
-/// token. The
-/// token alphabet excludes `"` and `\`, so it is embedded without escaping.
+/// `token: None` omits the `"token"` field. [`send_cancel_command`] passes
+/// `None` because `send_command` adds the token; otherwise only the
+/// test-only injection path in `session.rs` (a cancel writer with no
+/// helper) has no token. The token alphabet excludes `"` and `\`, so it is
+/// embedded without escaping.
 pub(crate) fn helper_cancel_line(
     token: Option<&str>,
     method: &crate::runner::CancelMethod,
@@ -854,35 +827,43 @@ pub(crate) fn helper_cancel_line(
     }
 }
 
-/// Write a tokenized cancel command to the cross-user helper over
-/// `cancel_writer`, built by [`helper_cancel_line`] from the action's
-/// configured cancel method and no `time_limit`. Shared by the timeout and
-/// external-token `select!` branches of [`run_via_helper`].
+/// Send one cancel command, built by [`helper_cancel_line`] from the
+/// action's `cancel_method` and `time_limit`, through the helper's own
+/// stdin (`send_command`, which adds the auth token). [`run_via_helper`]
+/// uses it for the cancel [`HelperRunGate`] held until Run and for its
+/// timeout and bare-token branches. Returns whether the command was
+/// written.
 ///
-/// A bare token cancel carries no `time_limit` (the same-user loop reads
-/// `None` from the watch channel too), so it matches the same-user method.
-/// A timeout also uses the action's method here, while the same-user loop
-/// kills at once on a timeout; that difference is known and not changed by
-/// the shared builder.
-fn write_helper_cancel(
-    writer: &std::fs::File,
-    auth_token: &str,
+/// A failed write is logged and doesn't fail the action: Run is already
+/// written, so the run loop goes on reading the helper's responses, and a
+/// helper that has gone away shows there as closed stdout.
+///
+/// A bare token cancel and a timeout carry no `time_limit` (the same-user
+/// loop reads `None` from the watch channel too), so they get the action's
+/// own method. The same-user loop kills at once on a timeout instead; that
+/// difference is known and not changed here.
+fn send_cancel_command(
+    helper: &mut dyn AsyncHelper,
     cancel_method: &crate::runner::CancelMethod,
-) -> Result<(), SessionError> {
-    use std::io::Write;
-    let mut w = writer.try_clone().map_err(|e| {
-        SessionError::HelperCommunication(format!("Failed to clone cancel_writer: {e}"))
-    })?;
-    // One write of the whole line, so it can't interleave with a cancel line
-    // another thread writes at the same moment (on Unix a write under
-    // PIPE_BUF is atomic; both are).
-    let line = format!(
-        "{}\n",
-        helper_cancel_line(Some(auth_token), cancel_method, None)
-    );
-    let _ = w.write_all(line.as_bytes());
-    let _ = w.flush();
-    Ok(())
+    time_limit: Option<std::time::Duration>,
+    session_id: &str,
+) -> bool {
+    let line = helper_cancel_line(None, cancel_method, time_limit);
+    let sent = serde_json::from_str::<serde_json::Value>(&line)
+        .map_err(|e| SessionError::HelperCommunication(e.to_string()))
+        .and_then(|cancel| helper.send_command(&cancel));
+    match sent {
+        Ok(()) => true,
+        Err(e) => {
+            session_log!(
+                warn,
+                session_id,
+                LogContent::PROCESS_CONTROL,
+                "Failed to send a cancel command to the cross-user helper: {e}"
+            );
+            false
+        }
+    }
 }
 
 /// Orders a session-side cancel against one action's Run command on the
@@ -1145,54 +1126,10 @@ mod run_gate_tests {
     }
 }
 
-#[cfg(all(test, unix))]
-mod write_helper_cancel_tests {
-    /// Concurrent `write_helper_cancel` calls (the run loop's timeout or
-    /// token branch racing a handle) never mix their lines.
-    #[test]
-    fn concurrent_lines_stay_whole() {
-        use std::io::BufRead;
-        use std::time::Duration;
-        let (reader, writer) = std::io::pipe().unwrap();
-        let writer = std::fs::File::from(std::os::fd::OwnedFd::from(writer));
-        const N: usize = 5000;
-        let writers: Vec<_> = (0..2u64)
-            .map(|i| {
-                let w = writer.try_clone().unwrap();
-                std::thread::spawn(move || {
-                    let method = crate::runner::CancelMethod::NotifyThenTerminate {
-                        terminate_delay: Duration::from_secs(10 + i),
-                    };
-                    for _ in 0..N {
-                        super::write_helper_cancel(&w, "AbCdEfGhIjKlMnOpQrStUv", &method).unwrap();
-                    }
-                })
-            })
-            .collect();
-        drop(writer);
-        let lines = std::thread::spawn(move || {
-            std::io::BufReader::new(reader)
-                .lines()
-                .map(Result::unwrap)
-                .collect::<Vec<_>>()
-        });
-        for w in writers {
-            w.join().unwrap();
-        }
-        let lines = lines.join().unwrap();
-        assert_eq!(lines.len(), 2 * N);
-        for line in &lines {
-            serde_json::from_str::<crate::helper_protocol::Command>(line)
-                .unwrap_or_else(|e| panic!("mixed cancel line {line:?}: {e}"));
-        }
-    }
-}
-
 #[cfg(test)]
 mod run_via_helper_gate_tests {
-    //! [`run_via_helper`] with a fake helper whose commands, and the cancel
-    //! pipe, go to one file, so the file shows the pipe order the helper
-    //! would read.
+    //! [`run_via_helper`] with a fake helper whose commands go to a file,
+    //! so the file shows the order the helper would read them in.
     use super::*;
     use crate::runner::CancelMethod;
     use std::io::Write;
@@ -1220,7 +1157,7 @@ mod run_via_helper_gate_tests {
             &mut self.reader
         }
         /// A Run command is logged as `RUN <command>`; anything else (a
-        /// held cancel) as its JSON with the token added, as the real
+        /// cancel) as its JSON with the token added, as the real
         /// `send_command` sends it.
         fn send_command(&mut self, cmd: &serde_json::Value) -> Result<(), SessionError> {
             if self.fail_after_run && cmd.get("command").is_none() {
@@ -1232,9 +1169,6 @@ mod run_via_helper_gate_tests {
             }
             Ok(())
         }
-        fn auth_token(&self) -> &str {
-            TOKEN
-        }
     }
 
     struct Setup {
@@ -1242,7 +1176,6 @@ mod run_via_helper_gate_tests {
         path: std::path::PathBuf,
         helper: FakeHelper,
         responses: tokio::sync::mpsc::UnboundedSender<serde_json::Value>,
-        writer: std::fs::File,
         config: crate::subprocess::SubprocessConfig,
         cancel_tx: tokio::sync::watch::Sender<Option<Duration>>,
     }
@@ -1250,22 +1183,19 @@ mod run_via_helper_gate_tests {
     fn setup(method: CancelMethod, timeout: Option<Duration>) -> Setup {
         let tmp = tempfile::TempDir::new().unwrap();
         let path = tmp.path().join("pipe.log");
-        let open = || {
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&path)
-                .unwrap()
-        };
+        let pipe = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .unwrap();
         let (responses, rx) = tokio::sync::mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(None);
         Setup {
             helper: FakeHelper {
                 reader: FakeReader(rx),
-                pipe: open(),
+                pipe,
                 fail_after_run: false,
             },
-            writer: open(),
             config: crate::subprocess::SubprocessConfig {
                 args: vec!["work".into()],
                 env_vars: Default::default(),
@@ -1288,29 +1218,11 @@ mod run_via_helper_gate_tests {
         gate: Option<&HelperRunGate>,
         token: &tokio_util::sync::CancellationToken,
     ) -> crate::subprocess::SubprocessResult {
-        run_with_writer(s, gate, token, true).await
-    }
-
-    async fn run_with_writer(
-        s: &mut Setup,
-        gate: Option<&HelperRunGate>,
-        token: &tokio_util::sync::CancellationToken,
-        with_writer: bool,
-    ) -> crate::subprocess::SubprocessResult {
         let mut filter = crate::action_filter::ActionFilter::new("s", true, false);
         let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
-        run_via_helper(
-            &mut s.helper,
-            &s.config,
-            &mut filter,
-            "s",
-            tx,
-            with_writer.then_some(&s.writer),
-            gate,
-            token,
-        )
-        .await
-        .unwrap()
+        run_via_helper(&mut s.helper, &s.config, &mut filter, "s", tx, gate, token)
+            .await
+            .unwrap()
     }
 
     /// The pipe's lines, with each cancel command parsed so key order
@@ -1408,27 +1320,88 @@ mod run_via_helper_gate_tests {
         assert_eq!(r.state, ActionState::Canceled);
     }
 
-    /// A runner whose cancel-pipe dup failed has no `cancel_writer` but
-    /// still has the gate: the held cancel goes through the helper's own
-    /// stdin, and the gate opens so later cancels are written by the
-    /// canceller's own pipe.
+    /// A bare token cancel (the watch channel hasn't fired) sends one
+    /// command, from the action's method, through the helper's own stdin,
+    /// so it doesn't depend on a dup of the cancel pipe.
     #[tokio::test]
-    async fn held_cancel_needs_no_cancel_writer() {
-        let mut s = setup(CancelMethod::Terminate, None);
+    async fn bare_token_cancel_goes_through_the_helper() {
+        let mut s = setup(ntt(8), None);
         let gate = HelperRunGate::new();
-        gate.deliver_cancel(None, || panic!("before Run"));
-        s.responses
-            .send(serde_json::json!({"exited": 137}))
-            .unwrap();
-        let r = run_with_writer(&mut s, Some(&gate), &Default::default(), false).await;
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let responses = s.responses.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            responses.send(serde_json::json!({"exited": 143})).unwrap();
+        });
+        let r = run(&mut s, Some(&gate), &token).await;
+        assert_eq!(pipe(&s), [run_line(), cancel(&ntt(8), None)]);
+        assert_eq!(r.state, ActionState::Canceled);
+    }
+
+    /// A timeout sends one command, from the action's method, through the
+    /// helper's own stdin, and a token cancel after it sends none.
+    #[tokio::test]
+    async fn timeout_goes_through_the_helper() {
+        let mut s = setup(CancelMethod::Terminate, Some(Duration::from_millis(10)));
+        let token = tokio_util::sync::CancellationToken::new();
+        let responses = s.responses.clone();
+        let late_token = token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            late_token.cancel();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            responses.send(serde_json::json!({"exited": 137})).unwrap();
+        });
+        let r = run(&mut s, Some(&HelperRunGate::new()), &token).await;
         assert_eq!(
             pipe(&s),
             [run_line(), cancel(&CancelMethod::Terminate, None)]
         );
+        assert_eq!(r.state, ActionState::Timeout);
+    }
+
+    /// When the canceller has fired the watch channel it writes the command
+    /// itself, so the token branch sends none.
+    #[tokio::test]
+    async fn token_after_the_watch_sends_nothing() {
+        let mut s = setup(CancelMethod::Terminate, None);
+        let token = tokio_util::sync::CancellationToken::new();
+        s.cancel_tx.send(None).unwrap();
+        token.cancel();
+        let responses = s.responses.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            responses.send(serde_json::json!({"exited": 137})).unwrap();
+        });
+        let r = run(&mut s, Some(&HelperRunGate::new()), &token).await;
+        assert_eq!(pipe(&s), [run_line()]);
         assert_eq!(r.state, ActionState::Canceled);
-        let mut written = false;
-        gate.deliver_cancel(None, || written = true);
-        assert!(written);
+    }
+
+    /// A failed timeout or token cancel send doesn't fail the action: the
+    /// run loop goes on reading the helper's responses to the end.
+    #[tokio::test]
+    async fn failed_cancel_send_does_not_fail_the_action() {
+        for via_timeout in [false, true] {
+            let mut s = setup(
+                CancelMethod::Terminate,
+                via_timeout.then_some(Duration::from_millis(10)),
+            );
+            s.helper.fail_after_run = true;
+            let token = tokio_util::sync::CancellationToken::new();
+            if !via_timeout {
+                token.cancel();
+            }
+            let responses = s.responses.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                responses.send(serde_json::json!({"exited": 0})).unwrap();
+            });
+            let r = run(&mut s, Some(&HelperRunGate::new()), &token).await;
+            assert_eq!(pipe(&s), [run_line()], "via_timeout={via_timeout}");
+            assert_eq!(r.exit_code, Some(0), "via_timeout={via_timeout}");
+        }
     }
 
     /// Run is written before the held cancel, so a failed held-cancel send

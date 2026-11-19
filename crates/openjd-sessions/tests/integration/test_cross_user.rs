@@ -1221,16 +1221,20 @@ async fn test_cross_user_cancel_before_run_leaves_helper_ready_for_next_action()
     session.cleanup();
 }
 
-/// If a runner's dup of the cancel pipe fails, a cancel before Run still
-/// reaches a task, onEnter and onExit (the held cancel goes through the
-/// helper's own stdin), and so does a handle cancel after Run (the handle
-/// has its own dup).
+// The tests below make every dup of the cancel pipe fail, as when the
+// process is out of file descriptors. No cancel path may depend on one: a
+// cancel that reached no helper used to leave the action running to
+// completion and still report it Canceled.
+
+/// Without a dup of the cancel pipe, a cancel before Run still reaches a
+/// task, onEnter and onExit: the held cancel goes through the helper's own
+/// stdin.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
-async fn test_cross_user_cancel_without_runner_cancel_pipe() {
+async fn test_cross_user_cancel_before_run_without_cancel_pipe_dup() {
     // Before Run.
     let mut session = make_session(require_target_user());
-    session.fail_runner_cancel_writer_for_test();
+    session.fail_cancel_pipe_dup_for_test();
     let delivered = cancel_before_run_once(&mut session, None);
     let started = std::time::Instant::now();
     let r = session
@@ -1276,7 +1280,7 @@ async fn test_cross_user_cancel_without_runner_cancel_pipe() {
         }
     };
     let mut session = make_session(require_target_user());
-    session.fail_runner_cancel_writer_for_test();
+    session.fail_cancel_pipe_dup_for_test();
     let delivered = cancel_before_run_once(&mut session, None);
     let started = std::time::Instant::now();
     let _ = session
@@ -1291,7 +1295,7 @@ async fn test_cross_user_cancel_without_runner_cancel_pipe() {
     session.cleanup();
 
     let mut session = make_session(require_target_user());
-    session.fail_runner_cancel_writer_for_test();
+    session.fail_cancel_pipe_dup_for_test();
     let id = session
         .enter_environment(&env(false), None, None, None)
         .await
@@ -1306,10 +1310,16 @@ async fn test_cross_user_cancel_without_runner_cancel_pipe() {
     );
     assert!(started.elapsed() < Duration::from_secs(3), "onExit");
     session.cleanup();
+}
 
-    // After Run.
+/// Without a dup of the cancel pipe, a handle cancel after Run still stops
+/// a task at once. The handle shares the session's cancel pipe rather than
+/// holding a dup of its own.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_cancel_handle_after_run_without_cancel_pipe_dup() {
     let mut session = make_session(require_target_user());
-    session.fail_runner_cancel_writer_for_test();
+    session.fail_cancel_pipe_dup_for_test();
     let handle = session.cancel_handle();
     let canceller = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(1500)).await;
@@ -1324,6 +1334,50 @@ async fn test_cross_user_cancel_without_runner_cancel_pipe() {
     assert!(canceller.await.unwrap());
     assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
     assert!(!r.stdout.contains("FINISHED"), "stdout: {}", r.stdout);
+    assert!(elapsed < Duration::from_secs(4), "took {elapsed:?}");
+    session.cleanup();
+}
+
+/// Without a dup of the cancel pipe, a bare session token cancel after Run
+/// still stops a task at once: the run loop sends the command through the
+/// helper's own stdin.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_token_cancel_without_cancel_pipe_dup() {
+    let (mut session, token) = make_session_with_token(require_target_user());
+    session.fail_cancel_pipe_dup_for_test();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        token.cancel();
+    });
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &sleep_then_finish_task(), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert_eq!(r.state, ActionState::Canceled, "stdout: {}", r.stdout);
+    assert!(!r.stdout.contains("FINISHED"), "stdout: {}", r.stdout);
+    assert!(elapsed < Duration::from_secs(4), "took {elapsed:?}");
+    session.cleanup();
+}
+
+/// Without a dup of the cancel pipe, a task's timeout still stops it: the
+/// run loop sends the command through the helper's own stdin. The TERMINATE
+/// task is killed right after its 1 s timeout, without the notify signal.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore]
+async fn test_cross_user_timeout_without_cancel_pipe_dup() {
+    let mut session = make_session(require_target_user());
+    session.fail_cancel_pipe_dup_for_test();
+    let started = std::time::Instant::now();
+    let r = session
+        .run_task("t", &trap_task(20, None, Some(1)), None, None, None)
+        .await
+        .expect("run_task must return a result");
+    let elapsed = started.elapsed();
+    assert_eq!(r.state, ActionState::Timeout, "stdout: {}", r.stdout);
+    assert!(!r.stdout.contains("GOT_TERM"), "stdout: {}", r.stdout);
     assert!(elapsed < Duration::from_secs(4), "took {elapsed:?}");
     session.cleanup();
 }
