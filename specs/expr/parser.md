@@ -182,6 +182,48 @@ language:
 - Subscript, Slice, Call, Attribute, Name, Constant
 - List, ListComp, comprehension
 
+## String Literal Escapes
+
+String literals are decoded by ruff's lexer, which follows CPython: every escape in
+Expression Language §1.1.5, including `\a`, `\b`, `\f`, `\v`, octal `\ooo` (up to 3
+digits, so `'\400'` is U+0100 and `'\1234'` is `'S4'`), and a backslash before a
+line break (LF, CR LF or CR), which continues the line. An unrecognized escape such as `\d`, `\q`
+or `\8` keeps its backslash, as §1.1.5 says; CPython 3.12 warns about it
+and about octal above `\377`, and this crate has no warnings, so it accepts both
+silently. §1.1.5 notes that the next major revision of the expression language
+specification should consider rejecting both forms. A malformed escape (`\x4g`, `\u12`, an unknown `\N{...}`, `\U00110000`) is
+a ruff lexical error. `\N{...}` looks names up in ruff's own table, which matches
+CPython 3.13 for the names §1.1.5 requires but rejects some it lets implementations
+differ on, such as `TANGUT IDEOGRAPH-17000`. It also accepts
+`CJK UNIFIED IDEOGRAPH-04E00`, with a leading zero, which CPython 3.13 rejects.
+
+Two differences need a pass of their own. The first is surrogates: for a `\u` or `\U`
+escape with a surrogate value (U+D800 to U+DFFF), CPython keeps the surrogate in the
+string and ruff silently substitutes U+FFFD. §1.1.5 makes it a syntax error, since a Rust string can't hold a
+surrogate. During AST validation, `reject_surrogate_escapes` scans the source text of
+each non-raw string literal part (an implicitly concatenated literal has several) for
+`\u` and `\U` escapes, skipping every other escape by its first two bytes, and
+reports `Syntax error: \ud800 is a surrogate code point, which a string can't hold`
+with the caret on the escape. AST validation walks slice bounds
+(`x[0:len('\ud800')]`) like any other subexpression, at the depth of the slice itself,
+as the evaluator does. It doesn't walk a comprehension's loop target, but any target
+other than a plain name is rejected at evaluation. The lexer has already checked each escape's syntax, so
+the scan only needs to find where escapes start. Raw strings have no escapes and are
+skipped.
+
+A second difference is in line breaks. CPython reads source with universal newlines,
+so a CR LF or a lone CR written inside a string literal is one LF before any escape is
+decoded, in raw strings too, and §1.1.5 says the same. ruff's lexer keeps the CR. After
+AST validation, when the expression holds a CR, `normalize_string_line_breaks` walks
+the AST and decodes again each string literal part whose source text holds one: it
+makes every CR LF and lone CR in that part's text an LF and parses the part alone,
+so ruff still decodes every escape, including a backslash before the line break (a
+continuation, or kept in a raw string). The expression's source isn't rewritten, so
+every AST offset and caret still points into the text as written. A CR from an escape
+(`'\r'`, `'\x0d'`, `'\15'`) isn't in the source, so it stays. A line break in a
+short (not triple-quoted) string is ruff's "missing closing quote" error, as
+CPython rejects it.
+
 ## Depth Limit
 
 The parser and evaluator both enforce a maximum AST nesting depth of

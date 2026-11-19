@@ -81,6 +81,8 @@ mod test_rfc_examples;
 mod test_round_cpython;
 #[path = "integration/test_slicing.rs"]
 mod test_slicing;
+#[path = "integration/test_string_escapes.rs"]
+mod test_string_escapes;
 #[path = "integration/test_string_operation_counting.rs"]
 mod test_string_operation_counting;
 #[path = "integration/test_strings.rs"]
