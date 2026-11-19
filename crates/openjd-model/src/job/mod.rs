@@ -388,8 +388,17 @@ impl Hash for StepParameterSpace {
 }
 
 /// A resolved task parameter with concrete range values.
+///
+/// A chunked parameter has exactly one representation, [`TaskParameter::ChunkInt`].
+/// `Int` carries no chunk configuration.
+///
+/// Deserialization reads the same externally tagged form serialization writes. For
+/// documents written before `Int` lost its `chunks` field, an `int` parameter may
+/// carry `"chunks": null`, which is accepted and ignored; a non-null `chunks` on an
+/// `int` parameter is an error rather than being dropped, because the chunk
+/// configuration it holds would otherwise be lost silently.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "TaskParameterWire")]
 #[allow(
     missing_docs,
     reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
@@ -397,7 +406,6 @@ impl Hash for StepParameterSpace {
 pub enum TaskParameter {
     Int {
         range: TaskParamRange<i64>,
-        chunks: Option<ResolvedChunks>,
     },
     Float {
         range: Vec<Float64>,
@@ -421,10 +429,7 @@ impl Hash for TaskParameter {
     fn hash<H: Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
         match self {
-            Self::Int { range, chunks } => {
-                range.hash(state);
-                chunks.hash(state);
-            }
+            Self::Int { range } => range.hash(state),
             Self::Float { range } => {
                 range.len().hash(state);
                 for elem in range {
@@ -440,6 +445,55 @@ impl Hash for TaskParameter {
                 chunks.hash(state);
             }
         }
+    }
+}
+
+/// The deserialization form of [`TaskParameter`]: the same shape, except that an
+/// `int` parameter may carry the `chunks` key that versions before its removal
+/// always wrote (as `null`).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum TaskParameterWire {
+    Int {
+        range: TaskParamRange<i64>,
+        /// Present only to tell `"chunks": null` (accepted) from a chunk
+        /// configuration (rejected); the value itself is never read.
+        #[serde(default)]
+        chunks: Option<serde::de::IgnoredAny>,
+    },
+    Float {
+        range: Vec<Float64>,
+    },
+    String {
+        range: Vec<String>,
+    },
+    Path {
+        range: Vec<String>,
+    },
+    ChunkInt {
+        range: TaskParamRange<i64>,
+        chunks: ResolvedChunks,
+    },
+}
+
+impl TryFrom<TaskParameterWire> for TaskParameter {
+    type Error = &'static str;
+
+    fn try_from(wire: TaskParameterWire) -> Result<Self, Self::Error> {
+        Ok(match wire {
+            TaskParameterWire::Int {
+                chunks: Some(_), ..
+            } => {
+                return Err(
+                    "an `int` task parameter cannot have `chunks`; a chunked parameter is `chunkInt` (CHUNK[INT])",
+                )
+            }
+            TaskParameterWire::Int { range, chunks: None } => Self::Int { range },
+            TaskParameterWire::Float { range } => Self::Float { range },
+            TaskParameterWire::String { range } => Self::String { range },
+            TaskParameterWire::Path { range } => Self::Path { range },
+            TaskParameterWire::ChunkInt { range, chunks } => Self::ChunkInt { range, chunks },
+        })
     }
 }
 

@@ -34,6 +34,14 @@ product of parameter dimensions overflows `u64`). `get` returns `Option<TaskPara
 boundaries are not a function of the index alone).
 `set_chunks_default_task_count` takes `&mut self` (no `Arc<AtomicU64>` indirection).
 
+A space has at most one `CHUNK[INT]` parameter, as a template step does. `create_job`
+never emits more, and `new` rejects a hand-built or deserialized space with two, with
+`ModelError::DecodeValidation`: `Task parameters '<first>' and '<second>' are both
+CHUNK[INT]: only one CHUNK[INT] parameter is allowed per step.` The chunk metadata below
+describes that one parameter, so a second would lose its chunk size and any
+`targetRuntimeSeconds` without a signal. The check runs in definition order, before the
+second parameter's value bound (see "Chunking").
+
 `chunks_parameter_name` and `chunks_default_task_count` report for *any* chunked space,
 adaptive or not: both values are in the template, and a chunk override replaces the size.
 Only `set_chunks_default_task_count` is adaptive-specific, because only an adaptive size
@@ -219,7 +227,10 @@ the offset and size of chunk `j` be computed without walking the chunks before i
 `StaticLayout` holds the chunk count, base chunk size (`small = total / num_chunks`), and
 remainder count (`leftovers = total % num_chunks`); the first `leftovers` chunks take one
 more value. Both `StaticChunkNode` and `StaticChunkIterator` build chunk `i` with the
-shared `static_chunk()`.
+shared `static_chunk()`. A space walks its nodes' iterators only when it is adaptive or
+CONTIGUOUS (see "Sequential Iteration"), and it has only one `CHUNK[INT]` parameter, so no
+space reaches `StaticChunkIterator` today; it exists because every node has an iterator, and
+a unit test walks it directly against `get`.
 
 A chunk is the values at a window of indices, and `noncontiguous_chunk()` builds it without
 listing them. For a range expression it is `RangeExpr::slice(offset, offset + size, 1)`,
@@ -368,7 +379,7 @@ chunking is suppressed (the parameter uses static chunking with the override siz
 Two separate questions, tracked by two different flags.
 
 **Which path `Iterator::next` takes** is the `sequential` flag: adaptive chunking or
-contiguous chunking. Adaptive must be sequential because its chunk size can change
+contiguous chunking, decided from the space's one `CHUNK[INT]` parameter. Adaptive must be sequential because its chunk size can change
 part-way through a walk. Contiguous answers per index in O(log G), but its node iterator
 walks the interval groups in O(1) per chunk, so both use the `node_iter` path. Every other space takes the random-access path, where
 `Iterator::next` is implemented as `get(current_index)`.

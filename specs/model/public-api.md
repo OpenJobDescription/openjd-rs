@@ -667,7 +667,7 @@ pub struct job::StepParameterSpace {
 }
 
 pub enum job::TaskParameter {
-    Int { range: TaskParamRange<i64>, chunks: Option<ResolvedChunks> },
+    Int { range: TaskParamRange<i64> },
     Float { range: Vec<Float64> },
     String { range: Vec<String> },
     Path { range: Vec<String> },
@@ -687,6 +687,13 @@ pub struct job::ResolvedChunks {
     pub range_constraint: RangeConstraint,
 }
 ```
+
+A chunked parameter is `ChunkInt` and nothing else; `Int` has no chunk
+configuration. Deserializing an `int` parameter accepts `"chunks": null`,
+which versions before `Int.chunks` was removed wrote for every `int`
+parameter, and rejects a non-null `chunks` with `an \`int\` task
+parameter cannot have \`chunks\`; a chunked parameter is \`chunkInt\`
+(CHUNK[INT])` (see job-types.md "TaskParameter").
 
 ### Host Requirements (Resolved)
 
@@ -1179,7 +1186,11 @@ pub fn convert_environment_with_symtab(
 pub struct StepParameterSpaceIterator { /* private fields */ }
 
 impl StepParameterSpaceIterator {
-    /// Errors: `ModelError::DecodeValidation` naming the parameter when a
+    /// Errors: `ModelError::DecodeValidation` naming both parameters when
+    /// the space has more than one `CHUNK[INT]` parameter, e.g. `Task
+    /// parameters 'A' and 'B' are both CHUNK[INT]: only one CHUNK[INT]
+    /// parameter is allowed per step.`; `ModelError::DecodeValidation`
+    /// naming the parameter when a
     /// `CHUNK[INT]` parameter's range (a list or a range expression) has a
     /// value of magnitude 2^62 or more (see parameter-space.md "Chunking");
     /// `ModelError::DecodeValidation` also when the combination expression

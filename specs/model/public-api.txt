@@ -291,7 +291,6 @@ pub openjd_model::job::TaskParameter::ChunkInt::range: openjd_model::job::TaskPa
 pub openjd_model::job::TaskParameter::Float
 pub openjd_model::job::TaskParameter::Float::range: alloc::vec::Vec<openjd_expr::value::Float64>
 pub openjd_model::job::TaskParameter::Int
-pub openjd_model::job::TaskParameter::Int::chunks: core::option::Option<openjd_model::job::ResolvedChunks>
 pub openjd_model::job::TaskParameter::Int::range: openjd_model::job::TaskParamRange<i64>
 pub openjd_model::job::TaskParameter::Path
 pub openjd_model::job::TaskParameter::Path::range: alloc::vec::Vec<alloc::string::String>

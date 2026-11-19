@@ -47,6 +47,8 @@ mod test_job_eq_hash;
 mod test_job_parameters;
 #[path = "integration/test_job_step_serde.rs"]
 mod test_job_step_serde;
+#[path = "integration/test_job_task_parameter_serde.rs"]
+mod test_job_task_parameter_serde;
 #[path = "integration/test_job_template.rs"]
 mod test_job_template;
 #[path = "integration/test_let_bindings.rs"]

@@ -1217,7 +1217,7 @@ fn test_reset_non_sequential_iterator() {
 #[test]
 fn test_reset_sequential_iterator_contiguous_chunks() {
     // CHUNK[INT] with rangeConstraint=CONTIGUOUS forces the sequential
-    // path (`needs_sequential = adaptive || has_contiguous_chunks`).
+    // path (`needs_sequential = adaptive || contiguous`).
     // `reset()` here delegates to the inner `node_iter.reset()`. No
     // adaptive chunking — `targetRuntimeSeconds` is omitted — so the
     // chunk size is fixed at `defaultTaskCount = 10` and a re-walk

@@ -24,7 +24,6 @@ fn make_space(params: Vec<(&str, TaskParameter)>, combination: Option<&str>) -> 
 fn int_list(vals: &[i64]) -> TaskParameter {
     TaskParameter::Int {
         range: TaskParamRange::List(vals.to_vec()),
-        chunks: None,
     }
 }
 
@@ -43,7 +42,6 @@ fn string_list(vals: &[&str]) -> TaskParameter {
 fn int_range_expr(expr: &str) -> TaskParameter {
     TaskParameter::Int {
         range: TaskParamRange::RangeExpr(expr.parse::<RangeExpr>().unwrap()),
-        chunks: None,
     }
 }
 
@@ -441,14 +439,12 @@ fn test_truly_lazy_trillion_element_space() {
                 "Frame",
                 TaskParameter::Int {
                     range: TaskParamRange::RangeExpr("1-1000000".parse::<RangeExpr>().unwrap()),
-                    chunks: None,
                 },
             ),
             (
                 "Tile",
                 TaskParameter::Int {
                     range: TaskParamRange::RangeExpr("1-2000000:2".parse::<RangeExpr>().unwrap()),
-                    chunks: None,
                 },
             ),
         ],
@@ -512,7 +508,6 @@ fn test_lazy_association_with_large_product() {
                 "D",
                 TaskParameter::Int {
                     range: TaskParamRange::RangeExpr("1-1000000000".parse::<RangeExpr>().unwrap()),
-                    chunks: None,
                 },
             ),
         ],

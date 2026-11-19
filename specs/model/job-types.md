@@ -217,13 +217,26 @@ Fully resolved task parameter with concrete range values:
 
 ```rust
 pub enum TaskParameter {
-    Int { range: TaskParamRange<i64>, chunks: Option<ResolvedChunks> },
+    Int { range: TaskParamRange<i64> },
     Float { range: Vec<Float64> },
     String { range: Vec<String> },
     Path { range: Vec<String> },
     ChunkInt { range: TaskParamRange<i64>, chunks: ResolvedChunks },
 }
 ```
+
+A chunked parameter has one representation, `ChunkInt`; `Int` carries no chunk
+configuration. `Int` used to have `chunks: Option<ResolvedChunks>`, which nothing set and
+which made a second, unsupported spelling of a chunked parameter that the iterator's chunk
+metadata did not see. Released versions serialized it as `"chunks": null` on every `int`
+parameter, so `TaskParameter` deserializes through a private wire enum
+(`#[serde(try_from = "TaskParameterWire")]`) that accepts `"chunks": null` (or no `chunks`)
+on `int` and rejects any other `chunks` value with `an \`int\` task parameter cannot have
+\`chunks\`; a chunked parameter is \`chunkInt\` (CHUNK[INT])`. Rejecting it, rather than
+dropping it, keeps a chunk configuration from being lost silently; accepting `null`, rather
+than adding `deny_unknown_fields`, keeps documents written by released versions readable.
+Other unknown keys are ignored, as before. Serialization writes `int` without `chunks`,
+which released versions read as `chunks: None`.
 
 `Int` and `ChunkInt` ranges may be either a materialized list or a `RangeExpr` (from
 `openjd-expr`) for compact representation of large integer sequences. A `RangeExpr`
