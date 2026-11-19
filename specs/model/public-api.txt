@@ -1583,7 +1583,7 @@ pub fn openjd_model::types::JobParameterType::hash<__H: core::hash::Hasher>(&sel
 impl core::marker::Copy for openjd_model::types::JobParameterType
 impl core::marker::StructuralPartialEq for openjd_model::types::JobParameterType
 impl serde_core::ser::Serialize for openjd_model::types::JobParameterType
-pub fn openjd_model::types::JobParameterType::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn openjd_model::types::JobParameterType::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 #[non_exhaustive] pub enum openjd_model::types::ModelExtension
 pub openjd_model::types::ModelExtension::Expr
 pub openjd_model::types::ModelExtension::FeatureBundle1
@@ -1866,7 +1866,7 @@ pub fn openjd_model::types::JobParameterType::hash<__H: core::hash::Hasher>(&sel
 impl core::marker::Copy for openjd_model::types::JobParameterType
 impl core::marker::StructuralPartialEq for openjd_model::types::JobParameterType
 impl serde_core::ser::Serialize for openjd_model::types::JobParameterType
-pub fn openjd_model::types::JobParameterType::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+pub fn openjd_model::types::JobParameterType::serialize<S: serde_core::ser::Serializer>(&self, S) -> core::result::Result<<S as serde_core::ser::Serializer>::Ok, <S as serde_core::ser::Serializer>::Error>
 #[non_exhaustive] pub enum openjd_model::ModelError
 pub openjd_model::ModelError::Compatibility(alloc::string::String)
 pub openjd_model::ModelError::DecodeValidation(alloc::string::String)

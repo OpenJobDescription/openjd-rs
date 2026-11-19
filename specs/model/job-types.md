@@ -54,6 +54,10 @@ pub struct JobParameter {
 }
 ```
 
+`param_type` serializes as `paramType` with the spec spelling of the type (`"INT"`,
+`"LIST[LIST[INT]]"`), the same string as `JobParameterType`'s `Display` and the template's
+`type` field.
+
 Stores the final typed value as an `ExprValue` (from `openjd-expr`), preserving the full
 type information. PATH values are stored as `ExprValue::String` because the source path
 format may differ from the host path format. During the TEMPLATE scope, `Param.X` is not

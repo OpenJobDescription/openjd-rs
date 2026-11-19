@@ -83,13 +83,6 @@ pub mod known {
     /// `(id, summary)` for every open known issue.
     pub const KNOWN_ISSUES: &[(&str, &str)] = &[
         (
-            "model-param-type-serde-spelling",
-            "`JobParameterType` serializes with serde's variant names (`\"Int\"`, \
-             `\"ListListInt\"`) while its `Display` and the template spelling are `\"INT\"`, \
-             `\"LIST[LIST[INT]]\"`, so a serialized `Job`'s `parameters[*].paramType` (and \
-             openjd-for-js, which uses `{:?}`) does not use the spec spelling.",
-        ),
-        (
             "expr-static-fold-host-path-format",
             "Template validation folds path operations on literals in the validating host's \
              path format, so a format-dependent condition (`is_absolute(path('../a') / \
@@ -113,18 +106,11 @@ pub mod known {
              parameter's type is exact.",
         ),
         (
-            "expr-escape-segment-cap",
-            "`escape_format_string` writes each `{{` and `}}` as its own interpolation \
-             (`}}` becomes `{{ \"}\" + \"}\" }}`), and literal text between them \
-             counts as segments too, so escaping e.g. `a}}` 501 times gives a format string that \
-             does not parse (`too many interpolation segments (1002); maximum is 1000`).",
-        ),
-        (
             "expr-runtime-dispatch-miss",
             "Some expressions pass static validation and then find no run-time signature: \
              indexing a value that isn't indexable at run time, or with an index type \
-             `__getitem__` doesn't accept \
-             (`L[re_match(..):None:None]`, `s[1:2:1.5]`), an operand that is `null` at run \
+             `__getitem__` doesn't accept through a union-typed bound \
+             (`L[re_match(..):None:None]`), an operand that is `null` at run \
              time (`re_search(..) + range_expr(..)`), and `bool` arithmetic (`True * 3`). \
              Each fails with `No matching signature for __getitem__(..)` or `Cannot use \
              '<op>' operator with ..`.",
@@ -162,14 +148,6 @@ pub mod known {
              matching signature for upper(int)` when `Param.B` is true. Operators too: `L * (n ** \
              Param.N)` is typed with the `int` member of `int | float`, and fails with \
              `Cannot use '*' operator with list[string] and float` when the power is a float.",
-        ),
-        (
-            "expr-range-slice-static-type",
-            "A stepped slice of an unresolved `range_expr` is typed `range_expr` whatever the \
-             step (evaluator.rs, the unresolved slice path), but a negative step gives \
-             `list[int]` (specs/expr/function-library.md; the signature returns \
-             `range_expr | list[int]`), so `R[:None:-1] + 'x'` or `list(R[:None:-1])` \
-             validates and fails at run time.",
         ),
         (
             "expr-dispatch-derive-mismatch",
@@ -211,12 +189,6 @@ pub mod known {
              (`/a` and `/a/b`, including entries beneath a symlink); diff/compose then treat \
              the file's deletion as deleting the subtree, so `compose(a, [diff(a, b)]) != b`, \
              and `subtree_snapshot` with symlink collapsing emits duplicate paths.",
-        ),
-        (
-            "snapshots-collapse-nested-symlink",
-            "`subtree_snapshot` with a collapsing symlink policy pulls a symlinked directory's \
-             contents into the subtree but leaves a nested symlink's absolute target as-is, so \
-             the relative result fails `validate()` (`symlink_target path style mismatch`).",
         ),
         (
             "snapshots-subtree-root-symlink-empty-target",

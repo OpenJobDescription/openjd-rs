@@ -1945,3 +1945,21 @@ fn slice_with_unresolved_bound_releases_sliced_value() {
         .and_then(|p| p.with_memory_limit(1_500_000).evaluate(&[&st]))
         .unwrap_or_else(|e| panic!("{expr}: the discarded sliced value must be released: {e}"));
 }
+
+/// Narrowing an unresolved `range_expr` slice's type replaces dispatch's
+/// result: the replaced value is released, so a chain of narrowed slices
+/// peaks no higher than a chain of list slices, which are not narrowed.
+#[test]
+fn narrowed_range_slice_releases_dispatch_result() {
+    use openjd_expr::ExprType;
+    let mut st = SymbolTable::new();
+    st.set("R", ExprValue::unresolved(ExprType::RANGE_EXPR))
+        .unwrap();
+    st.set("L", ExprValue::unresolved(ExprType::list(ExprType::INT)))
+        .unwrap();
+    let chain = "[1:]".repeat(50);
+    assert_eq!(
+        eval_peak_with(&format!("R{chain}"), &st),
+        eval_peak_with(&format!("L{chain}"), &st)
+    );
+}

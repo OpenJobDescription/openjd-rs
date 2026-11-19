@@ -332,17 +332,18 @@ fn known_issue_reproducers_reproduce() {
 }
 
 /// `expr-static-fold-host-path-format` explains only mismatches the path
-/// format causes: a mismatch from another cause, in an expression that
-/// merely mentions a path, is still reported as that other cause alone.
+/// format causes. The range-slice regression's expression, wrapped in a path
+/// condition whose branches are the same, must replay clean with no known
+/// issue recorded: if the slice typing regresses, the mismatch must fail the
+/// oracle, not be absorbed as a path-format fold.
 /// (`known_issue_reproducers_reproduce` checks only that an id is recorded.)
 #[test]
 fn host_path_fold_does_not_claim_other_mismatches() {
     use openjd_fuzz::known::take_recorded;
     install_hook();
-    // The range-slice reproducer's expression, wrapped in a path condition
-    // whose branches are the same, with its control bytes.
+    // The expression with the regression's control bytes.
     let base = std::fs::read(
-        root().join("regressions/expr_eval_text/known-expr-range-slice-static-type--param-step"),
+        root().join("regressions/expr_eval_text/expr-range-slice-static-type--param-step"),
     )
     .unwrap();
     let ctl = &base[base.iter().position(|&b| b == 0).unwrap()..];
@@ -363,11 +364,7 @@ fn host_path_fold_does_not_claim_other_mismatches() {
         LAST_PANIC.with(|p| p.borrow().clone())
     );
     let hit = take_recorded();
-    assert_eq!(
-        hit,
-        BTreeSet::from(["expr-range-slice-static-type".to_string()]),
-        "recorded known issues"
-    );
+    assert_eq!(hit, BTreeSet::new(), "recorded known issues");
 }
 
 #[test]
@@ -405,33 +402,6 @@ fn conditional_expressions() {
         "a else b",
     ] {
         assert!(!cond(no), "{no}");
-    }
-}
-
-/// The `expr-range-slice-static-type` gate: any step but a non-negative
-/// literal may be negative, whether it is written with `-` or not.
-#[test]
-fn negative_step_slices() {
-    use openjd_fuzz::targets::expr::has_negative_step_slice as neg;
-    for may in [
-        "R[::-1]",
-        "R[1:2:Param.N]",
-        "R[::int(  )]",
-        "R[::(0-1)]",
-        "f(R[::x])[0]",
-    ] {
-        assert!(neg(may), "{may}");
-    }
-    for not in [
-        "R[::2]",
-        "R[1:2:]",
-        "R[::None]",
-        "R[1:2]",
-        "R[0]",
-        "f(a, b)[::1]",
-        "R[g(1:2)]",
-    ] {
-        assert!(!neg(not), "{not}");
     }
 }
 

@@ -884,38 +884,18 @@ pub fn ops_gen(data: &[u8]) {
                 })
             })
             .collect();
-        let collapsing = matches!(
-            policy,
-            SymlinkPolicy::CollapseEscaping | SymlinkPolicy::CollapseAll
-        );
         // A symlink to the subtree root itself gets an empty target.
         let root_target =
             |&(t, src): &(&str, Option<&str>)| t.is_empty() && src == Some(&*sub_root);
-        // Collapsing pulls a symlinked dir's contents in, and a symlink
-        // inside it keeps its absolute target: it has no symlink at the
-        // same path in the input. A symlink that was already in the subtree
-        // must be relativized.
-        let nested =
-            |&(t, src): &(&str, Option<&str>)| collapsing && !t.is_empty() && src.is_none();
-        if style_mismatch && !bad.is_empty() && bad.iter().all(|b| root_target(b) || nested(b)) {
-            for (id, hit) in [
-                (
-                    "snapshots-subtree-root-symlink-empty-target",
-                    bad.iter().any(root_target),
-                ),
-                ("snapshots-collapse-nested-symlink", bad.iter().any(nested)),
-            ] {
-                if hit {
-                    crate::known::hit(id, || {
-                        format!(
-                            "subtree({sub_root:?}, {policy}) produced an invalid manifest: {:?}\na={:?}\nsub={:?}",
-                            sub.validate(),
-                            a.files,
-                            sub.files
-                        )
-                    });
-                }
-            }
+        if style_mismatch && !bad.is_empty() && bad.iter().all(root_target) {
+            crate::known::hit("snapshots-subtree-root-symlink-empty-target", || {
+                format!(
+                    "subtree({sub_root:?}, {policy}) produced an invalid manifest: {:?}\na={:?}\nsub={:?}",
+                    sub.validate(),
+                    a.files,
+                    sub.files
+                )
+            });
         } else if file_is_ancestor(&a) {
             known_issue!(
                 "snapshots-file-as-ancestor",

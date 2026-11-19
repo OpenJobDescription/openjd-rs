@@ -55,13 +55,20 @@ fn is_dir_target(target: &str, file_lookup: &HashMap<&str, &FileEntry>) -> bool 
 
 /// Expand a directory symlink: find all files under the target directory and remap them.
 ///
-/// Nested symlinks inside the expanded directory are handled according to `symlink_policy`:
-/// - `CollapseAll`: nested symlinks are resolved to their real targets.
-/// - `CollapseEscaping`: nested symlinks are preserved (remapped but kept as symlinks),
-///   since the escaping decision was already made on the parent directory symlink.
+/// A nested symlink inside the expanded directory is handled like a symlink
+/// in the subtree, by whether its target is within the new root `prefix`:
+/// - `CollapseEscaping` keeps a nested symlink whose target is within the
+///   new root, with the target rebased, whether the target is a file or a
+///   directory. The new root itself is excluded: its rebased target would
+///   be empty, which is not a valid symlink target.
+/// - Otherwise (`CollapseAll`, an escaping target, or the new root) the
+///   nested symlink is resolved to the file it points to. One whose target
+///   is a directory, missing, or a cycle is skipped: nested directory
+///   symlinks are not expanded in turn.
 fn expand_dir_symlink(
     link_rel_path: &str,
     target: &str,
+    prefix: &str,
     files: &[FileEntry],
     file_lookup: &HashMap<&str, &FileEntry>,
     symlink_policy: SymlinkPolicy,
@@ -75,21 +82,24 @@ fn expand_dir_symlink(
         let suffix = &f.path[target_prefix.len()..];
         let new_path = format!("{link_rel_path}/{suffix}");
         if let Some(ref sym_target) = f.symlink_target {
-            match symlink_policy {
-                SymlinkPolicy::CollapseAll => {
-                    // Resolve nested symlinks to their real targets
-                    if let Some(real) = resolve_symlink(sym_target, file_lookup, 64) {
-                        let mut entry = real.clone();
-                        entry.path = new_path;
-                        result.push(entry);
-                    }
+            let rebased = match symlink_policy {
+                // A target equal to the new root would rebase to an empty
+                // target, which is not valid; it is resolved instead, and
+                // the root is a directory, so the symlink is skipped.
+                SymlinkPolicy::CollapseEscaping => {
+                    strip_prefix(sym_target, prefix).filter(|t| !t.is_empty())
                 }
-                _ => {
-                    // Preserve nested symlinks with remapped path
-                    let mut entry = f.clone();
-                    entry.path = new_path;
-                    result.push(entry);
-                }
+                _ => None,
+            };
+            if let Some(rel_target) = rebased {
+                let mut entry = f.clone();
+                entry.path = new_path;
+                entry.symlink_target = Some(rel_target);
+                result.push(entry);
+            } else if let Some(real) = resolve_symlink(sym_target, file_lookup, 64) {
+                let mut entry = real.clone();
+                entry.path = new_path;
+                result.push(entry);
             }
         } else {
             let mut entry = f.clone();
@@ -123,6 +133,7 @@ fn process_files(
                         result.extend(expand_dir_symlink(
                             &rel_path,
                             target,
+                            prefix,
                             files,
                             file_lookup,
                             symlink_policy,
@@ -162,6 +173,7 @@ fn process_files(
                                 result.extend(expand_dir_symlink(
                                     &rel_path,
                                     target,
+                                    prefix,
                                     files,
                                     file_lookup,
                                     symlink_policy,

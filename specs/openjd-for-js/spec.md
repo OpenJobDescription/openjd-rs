@@ -189,8 +189,8 @@ Callers who want non-throwing validation use `try { decodeJobTemplate(...) } cat
 | Function | Signature | Description |
 |----------|-----------|-------------|
 | `createJob` | `(template: JobTemplate, params: Record<string, string>, pathOptions: PathParameterOptions, limits?: CallerLimits) → Job` | Create a fully resolved Job from a template and parameter values. Resolves all format strings, expands parameter spaces. `limits.maxTaskCount` is checked after expansion. |
-| `preprocessJobParameters` | `(template: JobTemplate, rawValues: Record<string, string>, pathOptions: PathParameterOptions) → Map<string, ExprValue>` | Coerce raw string parameter values to typed ExprValues per the parameter definitions. |
-| `mergeJobParameterDefinitions` | `(templates: (JobTemplate \| EnvironmentTemplate)[]) → JobParameterDefinition[]` | Merge parameter definitions from multiple templates per the spec's merging rules. |
+| `preprocessJobParameters` | `(template: JobTemplate, rawValues: Record<string, string>, pathOptions: PathParameterOptions) → Map<string, Map<"type" \| "value", string>>` | Coerce raw string parameter values per the template's parameter definitions. Each parameter maps to a `Map` with `type`, the parameter type in its spec spelling (`"INT"`, `"LIST[PATH]"`), and `value`, the coerced value's display string. The results are ES `Map`s, not plain objects (serde-wasm-bindgen's default for maps): read them with `.get("type")`. |
+| `mergeJobParameterDefinitions` | `(template: JobTemplate) → Map<"name" \| "type", string>[]` | Merge the job template's parameter definitions per the spec's merging rules (no environment templates). Each element is a `Map` with `name` and `type`, `type` in its spec spelling. |
 | `evaluateLetBindings` | `(bindings: string[], symbols: SymbolTable) → SymbolTable` | Evaluate `let` bindings and add results to the symbol table. |
 | `createEnvironment` | `(envTemplate: EnvironmentTemplate, params: Record<string, string>) → Environment` | Create a resolved Environment from a template. |
 | `deserializeStep` | `(obj: object) → StepTemplate` | Deserialize a step from a JS object. |
@@ -204,7 +204,7 @@ Callers who want non-throwing validation use `try { decodeJobTemplate(...) } cat
 | `getDefaultLibrary` | `() → FunctionLibrary` | Get the default function library (includes builtins like `len`, `str`, `int`, etc.). |
 | `getDefaultMemoryLimit` | `() → number` | Report the built-in memory budget (bytes) used when `EvalOptions.memoryLimit` is omitted. Informational only. |
 | `getDefaultOperationLimit` | `() → number` | Report the built-in operation budget used when `EvalOptions.operationLimit` is omitted. Informational only. |
-| `escapeFormatString` | `(s: string) → string` | Escape `{{` and `}}` in a string for literal use in format strings; a lone `{` directly before `}}` is escaped too, so it cannot join the pair. |
+| `escapeFormatString` | `(s: string) → string` | Escape `{{` and `}}` in a string for literal use in format strings; a lone `{` directly before `}}` is escaped too, so it cannot join the pair. The output parses under the wasm32 512-byte expression cap (see `specs/expr/format-string.md`, Utility). |
 | `parseRangeExpr` | `(expr: string) → number[]` | Parse an IntRangeExpr (e.g., `"1-10:2"`) into an array of integers. |
 
 `EvalOptions` is a structural type (plain JS object) with optional camelCase keys mirroring [`openjd_expr::EvalBuilder`]. Omit or pass `undefined` / `{}` to use the spec-default budgets:
@@ -456,12 +456,17 @@ All errors extend ECMAScript's `Error` class with a `.message` property.
 ### Covered (full parity)
 
 - All template decode functions (str and dict variants)
-- All job creation functions (createJob, preprocessJobParameters, mergeJobParameterDefinitions, evaluateLetBindings)
+- Job creation functions createJob, preprocessJobParameters and evaluateLetBindings
 - All model types (JobTemplate, Job, Step, Action, Environment, etc.)
 - All expression types (ExprValue, FormatString, SymbolTable, FunctionLibrary, ParsedExpression)
 - All error types
 - Step dependency graph
 - Step parameter space iteration
+
+### Partial parity
+
+- `mergeJobParameterDefinitions` takes only the job template; Python's
+  `merge_job_parameter_definitions` also accepts environment templates.
 
 ### Not covered (not applicable to browser)
 

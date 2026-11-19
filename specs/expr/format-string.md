@@ -381,12 +381,37 @@ Python behavior where Pydantic validates format strings on model construction.
 
 ```rust
 /// Escape `{{` and `}}` in a string so the format string parser treats them as literals.
-/// Replaces `{{` with `{{ "{{" }}` and `}}` with `{{ "}" + "}" }}` — wrapping the
-/// literal brace characters in expression interpolations that produce them as string values.
-/// A lone `{` directly before `}}` becomes `{{ "{" }}`, so it cannot join the
-/// escape's opening `{{` into an unparseable `{{{`.
 pub fn escape_format_string(s: &str) -> String;
 ```
+
+The text that must be escaped is `{{`, `}}`, and a lone `{` directly before `}}`
+(which would otherwise join the escape's opening `{{` into an unparseable `{{{`).
+It is written as a `{{ "..." }}` interpolation of a string literal that evaluates
+to it: `{{` becomes `{{ "{{" }}` and `}}` becomes `{{ "}\x7d" }}`. Text with no
+`{{` or `}}` is returned unchanged.
+
+- **Grouping.** Escapes, and the literal runs between them, share one
+  interpolation while its string literal stays within 400 bytes of source
+  (`ESCAPE_LITERAL_MAX`): `a{{b}}c` becomes `a{{ "{{b}\x7d" }}c`. So the
+  segment count grows with the length of the escaped text, not with the number
+  of escapes, and escaping `a}}` 501 times stays far under
+  `MAX_FORMAT_STRING_SEGMENTS`. Every segment but the first and last holds at
+  least about 50 bytes of the input (a literal run left out is over 100 bytes,
+  and two neighboring interpolations hold over 100 bytes between them, since
+  no source character is more than four times its input bytes), so input up
+  to 32 KB always fits the cap. Longer, escape-dense input can still exceed it,
+  and then the output does not parse. A literal run that does not fit stays literal
+  text, and the text before the first escape and after the last is never moved
+  into an interpolation.
+- **Expression cap.** 400 bytes keeps every interpolation under the 512-byte
+  `MAX_PARSE_INPUT_LEN` of wasm32 builds, so the output parses on every target,
+  including openjd-for-js.
+- **String literal.** The format string parser ends an interpolation at the
+  first `}}`, inside a string literal or not, so a `}` that follows another `}`
+  in the literal is written `\x7d`. `\`, `"`, `\n`, `\r` and `\t` take their
+  backslash forms, and every other character outside printable ASCII its
+  `\xNN`, `\uNNNN` or `\UNNNNNNNN` form. The literal is a single string, with no
+  `+` chain, so it is never limited by `MAX_EXPRESSION_DEPTH`.
 
 ## Divergence from Python
 

@@ -696,9 +696,14 @@ describe("mergeJobParameterDefinitions", () => {
     );
     const merged = mod.mergeJobParameterDefinitions(template);
     expect(merged).toHaveLength(2);
-    // Verify it's an array of objects (structure may vary)
-    expect(merged[0]).toBeDefined();
-    expect(merged[1]).toBeDefined();
+    // Each element is an ES Map with `name` and the spec spelling of `type`.
+    const byName = Object.fromEntries(
+      merged.map((m) => {
+        expect(m).toBeInstanceOf(Map);
+        return [m.get("name"), m.get("type")];
+      })
+    );
+    expect(byName).toEqual({ Frames: "STRING", Quality: "INT" });
     template.free();
   });
 });
@@ -845,6 +850,28 @@ describe("preprocessJobParameters", () => {
     expect(() => mod.preprocessJobParameters(template, {}, opts)).toThrow(
       /absolute path/
     );
+    opts.free();
+    template.free();
+  });
+
+  it("returns Maps with the spec spelling of type", () => {
+    const template = mod.decodeJobTemplate(
+      JSON.stringify({
+        specificationVersion: "jobtemplate-2023-09",
+        name: "T",
+        parameterDefinitions: [{ name: "N", type: "INT", default: 3 }],
+        steps: [
+          { name: "S", script: { actions: { onRun: { command: "x" } } } },
+        ],
+      })
+    );
+    const opts = new mod.PathParameterOptions("/tmpl", "/cwd");
+    const params = mod.preprocessJobParameters(template, {}, opts);
+    expect(params).toBeInstanceOf(Map);
+    const n = params.get("N");
+    expect(n).toBeInstanceOf(Map);
+    expect(n.get("type")).toBe("INT");
+    expect(n.get("value")).toBe("3");
     opts.free();
     template.free();
   });

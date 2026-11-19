@@ -1683,6 +1683,109 @@ fn subscript_unknown_slice_bounds_type() {
     assert_eq!(r.expr_type(), tp("unresolved[list[int]]"));
 }
 
+/// A slice of a `range_expr` is a `range_expr` for a non-negative step and a
+/// `list[int]` for a negative one (range-expr.md §"Operations"), so an
+/// unresolved range's slice is typed from its step.
+#[test]
+fn subscript_unknown_range_slice_type_follows_step() {
+    let st = st_unresolved(vec![
+        ("R", "range_expr"),
+        ("U", "range_expr | string"),
+        ("S", "string"),
+        ("N", "int"),
+    ]);
+    for (expr, ty) in [
+        ("R[1:3]", "unresolved[range_expr]"),
+        ("R[::2]", "unresolved[range_expr]"),
+        ("R[::None]", "unresolved[range_expr]"),
+        ("R[::-1]", "unresolved[list[int]]"),
+        ("R[:None:-1]", "unresolved[list[int]]"),
+        ("R[::N]", "unresolved[range_expr | list[int]]"),
+        ("R[::-N]", "unresolved[range_expr | list[int]]"),
+        // A concrete receiver with an unresolved bound is typed the same
+        // way as an unresolved receiver.
+        ("range_expr('1-5')[N:]", "unresolved[range_expr]"),
+        ("range_expr('1-5')[N::-1]", "unresolved[list[int]]"),
+        (
+            "range_expr('1-5')[::N]",
+            "unresolved[range_expr | list[int]]",
+        ),
+        // A union receiver keeps its signatures' types: each member's
+        // slice type, with `range_expr | list[int]` for the range member.
+        ("U[::2]", "unresolved[range_expr | string | list[int]]"),
+        ("U[::-1]", "unresolved[range_expr | string | list[int]]"),
+        ("S[::-1]", "unresolved[string]"),
+        ("S[N:]", "unresolved[string]"),
+        ("'abc'[N:]", "unresolved[string]"),
+        ("[1, 2][N:]", "unresolved[list[int]]"),
+    ] {
+        assert_eq!(eval_u(expr, &st).expr_type(), tp(ty), "{expr}");
+    }
+}
+
+/// Slice bounds must be `int` or `null`, also when the receiver or another
+/// bound is unresolved: the slice is typed by its `__getitem__` signatures,
+/// as a concrete one is.
+#[test]
+fn subscript_unresolved_slice_checks_bound_types() {
+    let st = st_unresolved(vec![
+        ("R", "range_expr"),
+        ("S", "string"),
+        ("L", "list[int]"),
+        ("N", "int"),
+    ]);
+    for (expr, msg) in [
+        (
+            "S[::'x']",
+            "No matching signature for __getitem__(string, nulltype, nulltype, string)\n\
+             \x20 S[::'x']\n\
+             \x20 ~^~~~~~~",
+        ),
+        (
+            "L[::'x']",
+            "No matching signature for __getitem__(list[int], nulltype, nulltype, string)\n\
+             \x20 L[::'x']\n\
+             \x20 ~^~~~~~~",
+        ),
+        (
+            "R[::True]",
+            "No matching signature for __getitem__(range_expr, nulltype, nulltype, bool)\n\
+             \x20 R[::True]\n\
+             \x20 ~^~~~~~~~",
+        ),
+        (
+            "[1, 2][N:'x']",
+            "No matching signature for __getitem__(list[int], int, string, nulltype)\n\
+             \x20 [1, 2][N:'x']\n\
+             \x20 ~~~~~~^~~~~~~",
+        ),
+        // Inside a larger expression the caret spans only the slice.
+        (
+            "1 + S[True:]",
+            "No matching signature for __getitem__(string, bool, nulltype, nulltype)\n\
+             \x20 1 + S[True:]\n\
+             \x20     ~^~~~~~~",
+        ),
+    ] {
+        assert_err_w(expr, &st, &[msg]);
+    }
+}
+
+#[test]
+fn subscript_unknown_range_negative_step_slice_is_a_list() {
+    let st = st_unresolved(vec![("R", "range_expr")]);
+    assert_err_w(
+        "R[:None:-1] + 'x'",
+        &st,
+        &["Cannot use '+' operator with list[int] and string"],
+    );
+    assert_err_w(
+        "list(R[:None:-1])",
+        &st,
+        &["No matching signature for list(list[int])"],
+    );
+}
+
 // ══════════════════════════════════════════════════════════════
 // round() return type with unresolved ndigits (§RFC 0006)
 // ══════════════════════════════════════════════════════════════

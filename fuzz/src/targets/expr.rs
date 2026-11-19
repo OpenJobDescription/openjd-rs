@@ -450,53 +450,6 @@ pub(crate) fn in_dropped_branch(
     })
 }
 
-/// Does `code` (string literals blanked) slice with a step that may be
-/// negative: any step but a non-negative integer literal or `None`
-/// (`x[a:b:-1]`, `x[::Param.N]`, `x[::int('-1')]`)?
-pub fn has_negative_step_slice(code: &str) -> bool {
-    // Per open bracket: (colons at its own level, step text so far).
-    let mut stack: Vec<Option<(usize, String)>> = Vec::new();
-    for c in code.chars() {
-        match c {
-            '[' => stack.push(Some((0, String::new()))),
-            '(' | '{' => stack.push(None),
-            ']' | ')' | '}' => {
-                if let Some(Some((n, step))) = stack.pop() {
-                    let step = step.trim();
-                    let literal = step == "None" || step.bytes().all(|b| b.is_ascii_digit());
-                    if c == ']' && n >= 2 && !literal {
-                        return true;
-                    }
-                }
-            }
-            _ => {}
-        }
-        // Text inside nested brackets counts toward every enclosing step.
-        for (n, step) in stack.iter_mut().flatten() {
-            if *n >= 2 {
-                step.push(c);
-            }
-        }
-        if c == ':' {
-            if let Some(Some((n, _))) = stack.last_mut() {
-                *n += 1;
-            }
-        }
-    }
-    false
-}
-
-/// Known issue `expr-range-slice-static-type`: a negative-step slice of
-/// an unresolved `range_expr` is typed `range_expr`, though it gives
-/// `list[int]`, so a `list[int]` turns up where the checker expected a range.
-fn is_range_slice_miss(e: &ExpressionError) -> bool {
-    let code = e.expr().map(blank_string_literals).unwrap_or_default();
-    let m = e.message();
-    has_negative_step_slice(&code)
-        && m.contains("list[int]")
-        && !m.starts_with("No matching signature for __getitem__(")
-}
-
 /// Did `e` happen after the first `and` / `or` of its expression (the
 /// operands `expr-boolop-static-type` covers)? Unknown positions count.
 pub(crate) fn after_boolop(e: &ExpressionError) -> bool {
@@ -516,8 +469,6 @@ pub(crate) fn check_static_miss(e: &ExpressionError, facts: Facts, msg: impl FnO
     }
     if is_comparable_refusal(e) {
         oracle!(false, "{}", msg());
-    } else if is_range_slice_miss(e) {
-        crate::known::hit("expr-range-slice-static-type", msg);
     } else if is_known_dispatch_miss(e) {
         crate::known::hit("expr-runtime-dispatch-miss", msg);
     } else if is_ordering_type_error(e) {
@@ -909,23 +860,13 @@ pub fn check_expression(
                 // explains is a new bug.
                 let mut explained: Vec<&'static str> = Vec::new();
                 if mismatch {
-                    // Only a negative step gives a list: it descends.
-                    let descending =
-                        matches!(cv, ExprValue::ListInt(xs) if xs.windows(2).all(|w| w[0] > w[1]));
-                    let range_slice = st.to_string().contains("range_expr")
-                        && descending
-                        && has_negative_step_slice(&blank_string_literals(src));
-                    if range_slice {
-                        // The precise cause; the broader gates below don't
-                        // also claim it.
-                        explained.push("expr-range-slice-static-type");
-                    } else if facts.unbound_return || has_type_var(&st) {
+                    if facts.unbound_return || has_type_var(&st) {
                         explained.push("expr-unbound-return-typevar");
                     }
                     // A `nulltype` in the static type marks an untyped `[]`
                     // branch whose overload won the dispatch.
                     let empty_branch = facts.conditional && st.to_string().contains("nulltype");
-                    if !range_slice && ((facts.union && facts.generated) || empty_branch) {
+                    if (facts.union && facts.generated) || empty_branch {
                         explained.push("expr-union-arg-overload");
                     }
                     // The static pass folds path operations in the host's
@@ -1350,9 +1291,10 @@ pub fn format_string(data: &[u8]) {
         }
         Err(e) => {
             if e.to_string().contains("too many interpolation segments") {
-                known_issue!(
-                    "expr-escape-segment-cap",
-                    false,
+                // Escaping takes at least about 50 bytes of text per
+                // segment, so text up to 32 KB always fits the cap.
+                oracle!(
+                    text.len() > 32 * 1024,
                     "escaped {} bytes do not parse: {e}",
                     text.len()
                 );

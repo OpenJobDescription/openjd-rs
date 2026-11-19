@@ -755,7 +755,27 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
 Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 
 - Negative indices wrap around (Python semantics)
-- Slices return the same type as the input (string→string, list→list)
+- Slices return the same type as the input (string→string, list→list),
+  except that a `range_expr` slice with a negative step is a `list[int]`
+  (range-expr.md)
+- A slice dispatches the 4-argument `__getitem__` whether or not its
+  operands are resolved, as indexing does, so the signatures check the
+  bound types (`int | nulltype`) and give the result type: `S[::'x']` with
+  an unresolved string fails validation as `'abc'[::'x']` does. The range
+  signature's result is `range_expr | list[int]`, since the step's sign
+  decides which. When the receiver is a `range_expr` (concrete, or
+  unresolved of exactly that type) and the step is omitted or a concrete
+  `int`, an unresolved result is narrowed to `range_expr` for a positive
+  step or `list[int]` for a negative one. A union receiver
+  (`(R if C else S)[::2]`) keeps the signatures' type, here
+  `range_expr | list[int] | string`: other members add types of their own,
+  so the range member is not narrowed. A bound of unknown type (`any`)
+  makes the result `unresolved[any]` (`S[NA:]`, not `unresolved[string]`),
+  as an `any` index does: a type-only call with an `any` argument is `any`
+  (function-library.md, the unknown-argument rule). The range narrowing
+  still applies on top, so `R[NA:]` is `unresolved[range_expr]` and
+  `R[NA::-1]` is `unresolved[list[int]]`; only a step of unknown type
+  leaves a range slice `unresolved[any]`
 - Out-of-bounds index raises an error; out-of-bounds slice clamps silently
 - Indexing a receiver every form of which is the empty list
   (`list[nulltype]`, e.g. `[None for x in L]`, or `[]` with an unresolved
@@ -777,10 +797,8 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 - A slice's four operands (receiver, start, stop, step) are tracked and
   released symmetrically. An omitted bound is passed to `__getitem__` as
   a `Null` placeholder, which is tracked when created so that dispatch's
-  release of every operand matches. When the result is a type-only
-  `Unresolved` (the receiver or any bound is unresolved), the operands
-  are released before the result is tracked. This is a success path, so
-  nothing else would reset the memory tracking.
+  release of every operand matches. Narrowing a range slice's type
+  releases dispatch's result and tracks the narrowed one.
 
 ## Dispatch Flow
 
