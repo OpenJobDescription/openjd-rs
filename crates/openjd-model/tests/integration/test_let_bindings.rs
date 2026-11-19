@@ -1268,3 +1268,469 @@ fn path_valued_step_let_in_range_passes_validation() {
     }"#;
     decode_ok(s);
 }
+
+/// A step whose `let` bindings feed host requirements and a parameterSpace
+/// range, for pinning every diagnostic those sites report and their order.
+fn job_with_let_in_hr_and_range(let_bindings: &str, range_ref: &str) -> String {
+    job_with_let_in_hr_and_range_ext(
+        r#""EXPR", "FEATURE_BUNDLE_1""#,
+        let_bindings,
+        "b",
+        range_ref,
+    )
+}
+
+fn job_with_let_in_hr_and_range_ext(
+    extensions: &str,
+    let_bindings: &str,
+    hr_ref: &str,
+    range_ref: &str,
+) -> String {
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": [{extensions}],
+        "parameterDefinitions": [{{"name": "N", "type": "INT", "default": 4}}],
+        "steps": [{{
+            "name": "S",
+            "let": [{let_bindings}],
+            "hostRequirements": {{
+                "amounts": [{{"name": "amount.worker.vcpu", "min": "{{{{ {hr_ref} }}}}"}}]
+            }},
+            "parameterSpace": {{
+                "taskParameterDefinitions": [
+                    {{"name": "F", "type": "STRING", "range": ["{{{{ {range_ref} }}}}"]}}
+                ]
+            }},
+            "script": {{"actions": {{"onRun": {{"command": "echo"}}}}}}
+        }}]
+    }}"#
+    )
+}
+
+fn full_err(s: &str) -> String {
+    decode_job_template(
+        yaml_val(s),
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err(&format!("Expected error for: {s}"))
+    .to_string()
+}
+
+/// Bindings that evaluate are visible to host requirements and ranges.
+#[test]
+fn step_let_feeds_host_requirements_and_range() {
+    decode_ok(&job_with_let_in_hr_and_range(
+        r#""b = Param.N + 1", "t = 'x' * b""#,
+        "t",
+    ));
+}
+
+/// A binding that fails to evaluate is reported by the host-requirements
+/// pass and the step body at `let[j]`, and by the range pass at the step,
+/// where the failed name is unbound.
+#[test]
+fn step_let_evaluation_failure_diagnostics() {
+    let msg = full_err(&job_with_let_in_hr_and_range(
+        r#""b = Param.N + 1", "t = str(b)""#,
+        "t",
+    ));
+    assert_eq!(
+        msg,
+        "Model validation error: 4 validation errors for JobTemplate\n\
+         steps[0] -> let[1]:\n\
+         \tInvalid expression in let binding 't': Unknown function: 'str'\n  \
+         t = str(b)\n      \
+         ^~~~~~\n\
+         steps[0]:\n\
+         \tlet binding 't': Unknown function: 'str'\n  \
+         str(b)\n  \
+         ^~~~~~\n\
+         steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\
+         \tFailed to parse interpolation expression at [0, 7]. Undefined variable: 't'. Did you mean: b\n  \
+         t\n  \
+         ^\n\
+         steps[0] -> let[1]:\n\
+         \tInvalid expression in let binding 't': Unknown function: 'str'\n  \
+         t = str(b)\n      \
+         ^~~~~~"
+    );
+}
+
+/// A structural error with no evaluation failure is reported by the
+/// host-requirements pass and the step body; the range pass sees the
+/// evaluated binding and reports nothing.
+#[test]
+fn step_let_structural_error_diagnostics() {
+    let msg = full_err(&job_with_let_in_hr_and_range(
+        r#""b = Param.N + 1", "Tt = 'x'""#,
+        "Tt",
+    ));
+    assert_eq!(
+        msg,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> let[1]:\n\
+         \tname 'Tt' must start with lowercase letter or underscore.\n\
+         steps[0] -> let[1]:\n\
+         \tname 'Tt' must start with lowercase letter or underscore."
+    );
+}
+
+/// Let-binding errors are reported before the host-requirement errors of
+/// the same step.
+#[test]
+fn step_let_errors_precede_host_requirement_errors() {
+    let msg = full_err(&job_with_let_in_hr_and_range_ext(
+        r#""EXPR", "FEATURE_BUNDLE_1""#,
+        r#""b = Param.N + 1", "t = str(b)""#,
+        "nope",
+        "b",
+    ));
+    assert_eq!(
+        msg,
+        [
+            "Model validation error: 4 validation errors for JobTemplate",
+            "steps[0] -> let[1]:",
+            "\tInvalid expression in let binding 't': Unknown function: 'str'",
+            "  t = str(b)",
+            "      ^~~~~~",
+            "steps[0] -> hostRequirements -> amounts[0] -> min:",
+            "\tFailed to parse interpolation expression at [0, 10]. Undefined variable: 'nope'. Did you mean one of: b, t",
+            "  nope",
+            "  ^~~~",
+            "steps[0]:",
+            "\tlet binding 't': Unknown function: 'str'",
+            "  str(b)",
+            "  ^~~~~~",
+            "steps[0] -> let[1]:",
+            "\tInvalid expression in let binding 't': Unknown function: 'str'",
+            "  t = str(b)",
+            "      ^~~~~~",
+        ]
+        .join("\n")
+    );
+}
+
+/// When a binding fails, the range pass evaluates the bindings with
+/// `Job.Name` and `Step.Name` in scope.
+#[test]
+fn step_let_failure_range_sees_job_and_step_names() {
+    let msg = full_err(&job_with_let_in_hr_and_range_ext(
+        r#""EXPR", "FEATURE_BUNDLE_1""#,
+        r#""t = str(1)", "s = Step.Name + Job.Name""#,
+        "1",
+        "s",
+    ));
+    assert_eq!(
+        msg,
+        [
+            "Model validation error: 3 validation errors for JobTemplate",
+            "steps[0] -> let[0]:",
+            "\tInvalid expression in let binding 't': Unknown function: 'str'",
+            "  t = str(1)",
+            "      ^~~~~~",
+            "steps[0]:",
+            "\tlet binding 't': Unknown function: 'str'",
+            "  str(1)",
+            "  ^~~~~~",
+            "steps[0] -> let[0]:",
+            "\tInvalid expression in let binding 't': Unknown function: 'str'",
+            "  t = str(1)",
+            "      ^~~~~~",
+        ]
+        .join("\n")
+    );
+}
+
+/// When a binding fails, the range pass skips bindings with no `=`, an
+/// empty name, or an empty expression.
+#[test]
+fn step_let_failure_range_skips_malformed_bindings() {
+    let msg = full_err(&job_with_let_in_hr_and_range_ext(
+        r#""EXPR", "FEATURE_BUNDLE_1""#,
+        r#""t = str(1)", "c =", "= 2", "d 3""#,
+        "1",
+        "'x'",
+    ));
+    let let_errors = [
+        "steps[0] -> let[0]:",
+        "\tInvalid expression in let binding 't': Unknown function: 'str'",
+        "  t = str(1)",
+        "      ^~~~~~",
+        "steps[0] -> let[1]:",
+        "\tbinding 'c' has no expression after '='.",
+        "steps[0] -> let[2]:",
+        "\thas empty name.",
+        "steps[0] -> let[3]:",
+        "\tmissing '=' in 'd 3'.",
+    ];
+    let mut expected = vec!["Model validation error: 9 validation errors for JobTemplate"];
+    expected.extend(let_errors);
+    expected.extend([
+        "steps[0]:",
+        "\tlet binding 't': Unknown function: 'str'",
+        "  str(1)",
+        "  ^~~~~~",
+    ]);
+    expected.extend(let_errors);
+    assert_eq!(msg, expected.join("\n"));
+}
+
+/// Without EXPR, step-level bindings are rejected and are not visible to
+/// host requirements or ranges.
+#[test]
+fn step_let_without_expr_is_not_in_scope() {
+    let msg = full_err(&job_with_let_in_hr_and_range_ext(
+        r#""FEATURE_BUNDLE_1""#,
+        r#""b = 1""#,
+        "b",
+        "b",
+    ));
+    assert_eq!(
+        msg,
+        [
+            "Model validation error: 3 validation errors for JobTemplate",
+            "steps[0] -> hostRequirements -> amounts[0] -> min:",
+            "\tFailed to parse interpolation expression at [0, 7]. Undefined variable: 'b'.",
+            "  b",
+            "  ^",
+            "steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:",
+            "\tFailed to parse interpolation expression at [0, 7]. Undefined variable: 'b'.",
+            "  b",
+            "  ^",
+            "steps[0] -> let:",
+            "\t'let' requires the EXPR extension.",
+        ]
+        .join("\n")
+    );
+}
+
+/// When a binding fails to parse, the range pass reports the parse error at
+/// the step.
+#[test]
+fn step_let_parse_failure_diagnostics() {
+    let msg = full_err(&job_with_let_in_hr_and_range_ext(
+        r#""EXPR", "FEATURE_BUNDLE_1""#,
+        r#""x = (""#,
+        "1",
+        "'a'",
+    ));
+    let let_error = [
+        "steps[0] -> let[0]:",
+        "\tInvalid expression in let binding 'x': Syntax error: unexpected EOF while parsing",
+        "  x = (",
+        "      ^",
+    ];
+    let mut expected = vec!["Model validation error: 3 validation errors for JobTemplate"];
+    expected.extend(let_error);
+    expected.extend([
+        "steps[0]:",
+        "\tlet binding 'x': Syntax error: unexpected EOF while parsing",
+        "  (",
+        "  ^",
+    ]);
+    expected.extend(let_error);
+    assert_eq!(msg, expected.join("\n"));
+}
+
+/// Each step's host requirements see that step's own bindings, and errors
+/// come in this order: every step's host requirements, then the job
+/// environments, then each step's remaining checks.
+#[test]
+fn step_let_scopes_and_error_order_across_steps() {
+    let s = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "jobEnvironments": [{"name": "J", "variables": {"V": "{{ nope_env }}"}}],
+        "steps": [
+            {
+                "name": "A",
+                "let": ["v = 2"],
+                "hostRequirements": {
+                    "amounts": [{"name": "amount.worker.vcpu", "min": "{{ v }}", "max": "{{ nope_a }}"}]
+                },
+                "script": {"actions": {"onRun": {"command": "echo", "args": ["{{ v }}", "{{ nope_a2 }}"]}}}
+            },
+            {
+                "name": "B",
+                "let": ["w = 'x'"],
+                "hostRequirements": {
+                    "amounts": [{"name": "amount.worker.vcpu", "min": "{{ w }}"}]
+                },
+                "script": {"actions": {"onRun": {"command": "echo", "args": ["{{ w }}", "{{ nope_b }}"]}}}
+            },
+            {
+                "name": "C",
+                "script": {"actions": {"onRun": {"command": "echo"}}}
+            }
+        ]
+    }"#;
+    assert_eq!(
+        full_err(s),
+        [
+            "Model validation error: 5 validation errors for JobTemplate",
+            "steps[0] -> hostRequirements -> amounts[0] -> max:",
+            "\tFailed to parse interpolation expression at [0, 12]. Undefined variable: 'nope_a'.",
+            "  nope_a",
+            "  ^~~~~~",
+            "steps[1] -> hostRequirements -> amounts[0] -> min:",
+            "\tFailed to parse interpolation expression at [0, 7]. Cannot coerce string to float?",
+            "  w",
+            "  ^",
+            "jobEnvironments[0] -> variables -> V:",
+            "\tFailed to parse interpolation expression at [0, 14]. Undefined variable: 'nope_env'.",
+            "  nope_env",
+            "  ^~~~~~~~",
+            "steps[0] -> script -> actions -> onRun -> args[1]:",
+            "\tFailed to parse interpolation expression at [0, 13]. Undefined variable: 'nope_a2'.",
+            "  nope_a2",
+            "  ^~~~~~~",
+            "steps[1] -> script -> actions -> onRun -> args[1]:",
+            "\tFailed to parse interpolation expression at [0, 12]. Undefined variable: 'nope_b'.",
+            "  nope_b",
+            "  ^~~~~~",
+        ]
+        .join("\n")
+    );
+}
+
+/// After a binding fails, the step body still sees every binding: those
+/// that evaluated with their values, the failed one as unresolved.
+#[test]
+fn step_let_failure_body_sees_evaluated_bindings() {
+    let s = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR"],
+        "steps": [{
+            "name": "S",
+            "let": ["b = 1", "t = str(b)"],
+            "parameterSpace": {
+                "taskParameterDefinitions": [{"name": "F", "type": "INT", "range": "1-{{ b }}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "echo", "args": ["{{ b }}", "{{ t }}"]}}}
+        }]
+    }"#;
+    assert_eq!(
+        full_err(s),
+        [
+            "Model validation error: 2 validation errors for JobTemplate",
+            "steps[0]:",
+            "\tlet binding 't': Unknown function: 'str'",
+            "  str(b)",
+            "  ^~~~~~",
+            "steps[0] -> let[1]:",
+            "\tInvalid expression in let binding 't': Unknown function: 'str'",
+            "  t = str(b)",
+            "      ^~~~~~",
+        ]
+        .join("\n")
+    );
+}
+
+/// After a binding fails, the step body's template-scope fields still see
+/// `Step.Name` and the bindings that read it.
+#[test]
+fn step_let_failure_timeout_sees_step_name() {
+    let s = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "steps": [{
+            "name": "S",
+            "let": ["s = Step.Name", "b = int('nope')"],
+            "parameterSpace": {
+                "taskParameterDefinitions": [{"name": "F", "type": "INT", "range": "1-3"}]
+            },
+            "script": {"actions": {"onRun": {
+                "command": "echo",
+                "timeout": "{{ len(Step.Name) + len(s) }}"
+            }}}
+        }]
+    }"#;
+    assert_eq!(
+        full_err(s),
+        [
+            "Model validation error: 2 validation errors for JobTemplate",
+            "steps[0]:",
+            "\tlet binding 'b': Cannot convert 'nope' to int",
+            "  int('nope')",
+            "  ^~~~~~~~~~~",
+            "steps[0] -> let[1]:",
+            "\tInvalid expression in let binding 'b': Cannot convert 'nope' to int",
+            "  b = int('nope')",
+            "      ^~~~~~~~~~~",
+        ]
+        .join("\n")
+    );
+}
+
+/// A step's body sees its own bindings, not those of a later step whose
+/// host requirements were checked with its bindings.
+#[test]
+fn step_let_body_sees_only_its_own_bindings() {
+    let s = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "steps": [
+            {
+                "name": "A",
+                "let": ["c = 1"],
+                "script": {"actions": {"onRun": {"command": "echo", "args": ["{{ b }}"]}}}
+            },
+            {
+                "name": "B",
+                "let": ["b = 1"],
+                "hostRequirements": {
+                    "amounts": [{"name": "amount.worker.vcpu", "min": "{{ b }}"}]
+                },
+                "script": {"actions": {"onRun": {"command": "echo"}}}
+            }
+        ]
+    }"#;
+    assert_eq!(
+        full_err(s),
+        [
+            "Model validation error: 1 validation error for JobTemplate",
+            "steps[0] -> script -> actions -> onRun -> args[0]:",
+            "\tFailed to parse interpolation expression at [0, 7]. Undefined variable: 'b'. Did you mean: c",
+            "  b",
+            "  ^",
+        ]
+        .join("\n")
+    );
+}
+
+/// Bindings shared from host requirements leave `Job.Name` and `Step.Name`
+/// in scope for the step's ranges and body.
+#[test]
+fn step_let_shared_scope_keeps_job_and_step_names() {
+    decode_ok(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "steps": [{
+            "name": "S",
+            "let": ["a = 1"],
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.vcpu", "min": 1}]
+            },
+            "parameterSpace": {
+                "taskParameterDefinitions": [
+                    {"name": "F", "type": "STRING", "range": ["{{ Job.Name }}-{{ Step.Name }}"]}
+                ]
+            },
+            "script": {"actions": {"onRun": {
+                "command": "echo",
+                "args": ["{{ a }}"],
+                "timeout": "{{ len(Step.Name) + 10 }}"
+            }}}
+        }]
+    }"#,
+    );
+}
