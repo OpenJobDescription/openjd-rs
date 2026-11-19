@@ -82,8 +82,8 @@ fn empty_result_dispatches_as_the_empty_list() {
 fn empty_result_constructs_the_empty_path() {
     // `path` has a `list[nulltype]` signature beside `list[string]`, so a
     // comprehension that keeps no string builds `path('.')`, as
-    // `PurePosixPath()` does. Without it, validation accepted these and
-    // the run failed with "No matching signature for path(list[nulltype])".
+    // `PurePosixPath()` does: a run that keeps nothing must not fail
+    // dispatch with "No matching signature for path(list[nulltype])".
     assert_stages(
         "path([s for s in Param.LS if s == 'z'])",
         "unresolved[path]",

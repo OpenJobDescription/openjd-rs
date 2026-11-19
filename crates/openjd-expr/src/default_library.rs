@@ -875,7 +875,7 @@ mod tests {
         // function taking a concrete `list[X]` needs an overload with
         // `list[nulltype]` in that position, and the other parameters the
         // same, or `f([])` and a comprehension that keeps nothing match no
-        // signature (`path([])` did).
+        // signature.
         let lib = FunctionLibrary::for_profile(
             &crate::ExprProfile::latest().with_host_context(crate::HostContext::Unresolved),
         );

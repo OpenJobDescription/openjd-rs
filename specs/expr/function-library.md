@@ -310,8 +310,8 @@ nothing to `int`.
 
 An overload with a `list[nulltype]` parameter (this one, `sum(list[nulltype])`,
 `min`/`max(list[nulltype])`, `flatten(list[nulltype])`, `join(list[nulltype],
-string)`, `path(list[nulltype])`, …) specializes a general overload for the empty list. Signature
-matching lets an argument of unknown element type (`list[T3]`, `list[any]`,
+string)`, `path(list[nulltype])`, …) specializes a general overload for the
+empty list. Signature matching lets an argument of unknown element type (`list[T3]`, `list[any]`,
 `any`) match it, but at run time only an empty list selects it, so for the
 type-only dispatch above (and `derive_return_type`) it applies only to an
 argument whose type is exactly `list[nulltype]`; any other argument may be
