@@ -651,8 +651,8 @@ Display produces the canonical spec form (e.g., `"list[int]"`, `"int?"`,
 - Single-member unions unwrap to that member.
 
 These mirror the EXPR spec's Union Type Normalization and Unknown Type
-Normalization rules, so `ExprType::union(vec![a, b])` always produces
-the spec's canonical form.
+Normalization rules, so the `Ok` value of `ExprType::union(vec![a, b])`
+is always the spec's canonical form.
 
 ## Values (`value::*`)
 

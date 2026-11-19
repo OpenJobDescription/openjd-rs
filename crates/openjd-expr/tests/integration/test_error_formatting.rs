@@ -1648,3 +1648,29 @@ fn type_too_deep_in_a_conditional_branch() {
         ],
     );
 }
+
+#[test]
+fn type_too_deep_in_a_boolean_operand() {
+    assert_err_exact(
+        "C and [X]",
+        &type_at_the_limit(),
+        &[
+            "Type nesting depth exceeded limit (160)\n",
+            "  C and [X]\n",
+            "        ^~~",
+        ],
+    );
+}
+
+#[test]
+fn type_too_deep_in_a_comprehension_body() {
+    assert_err_exact(
+        "[[X] for x in [1, 2] if C]",
+        &type_at_the_limit(),
+        &[
+            "Type nesting depth exceeded limit (160)\n",
+            "  [[X] for x in [1, 2] if C]\n",
+            "   ^~~",
+        ],
+    );
+}

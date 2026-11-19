@@ -108,9 +108,10 @@ aborted the process.
 
 `parse` stops at 10 levels of nesting (a parsed type is at most 11 deep), the
 function library's signatures are at most 4 deep, and list values a template
-builds nest at most two lists, so no parsed type and no concrete value an
-evaluation builds comes near the limit. (A value built through the Rust API,
-such as an unresolved value of a deep type, can.) Static
+builds nest at most two lists, so no parsed type and no concrete value built
+from a template's values comes near the limit. (A value built through the Rust
+API, such as an unresolved value of a deep type, can, and so can the values an
+evaluation derives from it.) Static
 typing builds deeper types, because the type of an unresolved value keeps
 every form a run might produce. A comprehension over an unresolved value is
 `list[T | nulltype]` (§1.3.7), two levels over its element, so nesting

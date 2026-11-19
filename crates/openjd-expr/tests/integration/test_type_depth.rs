@@ -963,6 +963,33 @@ fn concatenation_join_past_the_limit_is_an_error() {
     }
 }
 
+/// Two concrete lists whose element types are a list of a union each,
+/// within the nesting rule, join a level deeper than the deeper one: past
+/// the limit for `make_list` and for a list literal, in either order.
+#[test]
+fn concrete_list_elements_whose_join_passes_the_limit_are_errors() {
+    let shallow = u(vec![
+        ExprType::parse("list[list[nulltype] | list[any]]").unwrap(),
+        ExprType::STRING,
+    ]);
+    let deep = u(vec![deep_list(MAX_TYPE_DEPTH - 2), ExprType::STRING]);
+    let ua = ExprValue::ListList(vec![], shallow, 0);
+    let ub = ExprValue::ListList(vec![], deep, 0);
+    let e = ExprValue::make_list(vec![ua.clone(), ub.clone()], ExprType::NULLTYPE)
+        .expect_err("the join is past the limit");
+    assert!(
+        matches!(e.kind(), ExpressionErrorKind::TypeTooDeep { limit: 160 }),
+        "{:?}",
+        e.kind()
+    );
+    let mut st = SymbolTable::new();
+    st.set("UA", ua).unwrap();
+    st.set("UB", ub).unwrap();
+    for expr in ["[UA, UB]", "[UB, UA]"] {
+        assert_eval_too_deep(expr, None, &st);
+    }
+}
+
 /// More paths whose join or merge recurses and can add a level below the
 /// top: a comprehension's list type merging an iterable's list members at
 /// depth, concatenation typing past the form cap, and the list-element

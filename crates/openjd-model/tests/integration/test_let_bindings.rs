@@ -1855,12 +1855,20 @@ fn format_string_past_the_type_depth_limit_fails_at_that_field() {
     };
     // `b2` is 159 deep, so `[b2]` is at the limit and `[[b2]]` past it.
     decode_ok(&template("{{ len([b2]) }}"));
-    check_err(
-        &template("{{ len([[b2]]) }}"),
-        &[
-            "steps[0] -> script -> actions -> onRun -> args[0]:\n",
-            "Type nesting depth exceeded limit (160)\n  len([[b2]])\n      ^~~~~~",
-        ],
+    let err = decode_job_template(
+        yaml_val(&template("{{ len([[b2]]) }}")),
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("[[b2]] is past the limit")
+    .to_string();
+    // The whole error, so a caret too long or on another node fails.
+    assert_eq!(
+        err,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         steps[0] -> script -> actions -> onRun -> args[0]:\n\
+         \tFailed to parse interpolation expression at [0, 17]. \
+         Type nesting depth exceeded limit (160)\n  len([[b2]])\n      ^~~~~~"
     );
 }
 

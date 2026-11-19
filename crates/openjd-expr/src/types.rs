@@ -40,7 +40,9 @@ use crate::error::{ExpressionError, ExpressionErrorKind};
 /// [`ExprType::parse`] stops at 10 levels of nesting (11 deep), the function
 /// library's signatures are at most 4 deep, and list values a template
 /// builds nest at most two lists, so no parsed type and no concrete value
-/// an evaluation builds comes near the limit. Static
+/// built from a template's values comes near the limit. (A value built
+/// through the Rust API, and values an evaluation derives from it, can.)
+/// Static
 /// typing builds deeper types: a list comprehension over an unresolved
 /// value is `list[T | nulltype]`, two levels over its element, so the
 /// deepest comprehension nesting
