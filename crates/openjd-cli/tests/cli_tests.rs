@@ -4627,7 +4627,11 @@ steps:
                 "stdout: {stdout}\nstderr: {stderr}"
             );
             assert!(
-                stdout.contains(r"Cannot convert 'C:\a\5' to int"),
+                stdout.contains(
+                    "Action failed to run: Failed to resolve argument: Cannot convert \
+                     'C:\\a\\5' to int\n  int(path(\"C:\\\\a\\\\5\").name)\n  \
+                     ^~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+                ),
                 "stdout: {stdout}\nstderr: {stderr}"
             );
         }

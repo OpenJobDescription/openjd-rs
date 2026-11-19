@@ -129,6 +129,41 @@ fn host_scope_literal_path_type_errors_are_still_reported() {
 }
 
 #[test]
+fn template_scope_paths_are_unresolved_in_host_scope() {
+    // A path a step-level let builds is TEMPLATE scope (POSIX), but the
+    // session converts it to the worker's format before host-scope fields
+    // use it (specs/sessions/session.md, `to_symtab(PathFormat::host())`),
+    // so a host-scope check can't fold it in POSIX either.
+    let mut failures = Vec::new();
+    for (lets, expr) in [
+        (vec![r#"p = path("C:\\a\\b")"#], "p.parts[2]"),
+        (vec![r#"p = path("/x")"#], r#"int((p / "a\\5").name)"#),
+        (vec![r#"q = [path("C:\\a\\b")]"#], "q[0].parts[2]"),
+        (
+            vec![r#"p = path("C:\\#################################\\b")"#],
+            "p.with_number(1)",
+        ),
+    ] {
+        for field in ["arg", "let", "step env script let"] {
+            let mut t = template(expr, field);
+            t["steps"][0]["let"] = serde_json::json!(lets);
+            let jt = match decode(t) {
+                Ok(jt) => jt,
+                Err(e) => {
+                    failures.push(format!("{field}: {lets:?} {expr}\n  validation: {e}"));
+                    continue;
+                }
+            };
+            let ctx = jt.default_validation_context();
+            if let Err(e) = create_job(&jt, &HashMap::new(), &ctx) {
+                failures.push(format!("{field}: {lets:?} {expr}\n  create_job: {e}"));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
 fn template_scope_literal_paths_stay_posix() {
     // The job name and a step-level let are TEMPLATE scope, which is POSIX:
     // C:\a\b is one path component there.

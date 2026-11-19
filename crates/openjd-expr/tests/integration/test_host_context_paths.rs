@@ -98,7 +98,34 @@ fn type_errors_on_literal_paths_are_still_reported_before_the_host() {
          path('/a').startswith('/')\n  ~~~~~~~~~~~^~~~~~~~~~~~~~~"
     );
     let e = eval_in("path(1)", &lib, PathFormat::Posix).unwrap_err();
-    assert!(e.starts_with("No matching signature for path(int)"), "{e}");
+    assert_eq!(
+        e,
+        "No matching signature for path(int)\n  path(1)\n  ^~~~~~~"
+    );
+}
+
+#[test]
+fn with_number_on_a_concrete_path_stays_concrete_before_the_host() {
+    // Only `with_number(string, int)` reads a string as a path; a path
+    // receiver already carries its format, so its result is still folded.
+    let lib = library(HostContext::Unresolved);
+    let mut st = SymbolTable::new();
+    st.set(
+        "P",
+        ExprValue::new_path("/a/f_%04d.exr".to_string(), PathFormat::Posix),
+    )
+    .unwrap();
+    let v = ParsedExpression::new("P.with_number(3)")
+        .and_then(|p| {
+            p.with_library(&lib)
+                .with_path_format(PathFormat::Posix)
+                .evaluate(&[&st])
+        })
+        .unwrap();
+    assert_eq!(
+        v,
+        ExprValue::new_path("/a/f_0003.exr".to_string(), PathFormat::Posix)
+    );
 }
 
 #[test]

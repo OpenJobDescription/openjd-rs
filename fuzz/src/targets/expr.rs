@@ -682,8 +682,9 @@ pub fn check_expression(
                     );
                 }
                 // A static fold holds for a worker in either format: the
-                // validation library leaves every format-dependent value
-                // (a literal path) unresolved.
+                // static symbols are all unresolved, and the validation
+                // library leaves a literal path unresolved, so no
+                // format-dependent value is folded.
                 if !sv.is_unresolved() {
                     oracle!(
                         sv.equals(cv),

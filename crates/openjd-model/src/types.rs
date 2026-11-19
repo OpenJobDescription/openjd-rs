@@ -699,8 +699,10 @@ impl ModelProfile {
     ///
     /// The `host_context` argument is a caller responsibility because
     /// the model has no opinion on it — template validation uses
-    /// [`HostContext::Unresolved`](openjd_expr::HostContext::Unresolved),
-    /// runtime session work uses
+    /// [`HostContext::Unresolved`](openjd_expr::HostContext::Unresolved)
+    /// for host-scope (SESSION/TASK) fields, where it also leaves literal
+    /// paths unresolved because the worker's path format isn't known, and
+    /// `HostContext::None` for TEMPLATE-scope fields; runtime session work uses
     /// [`HostContext::WithRules`](openjd_expr::HostContext::WithRules),
     /// and pure-template work (e.g. resolving the job name) uses
     /// [`HostContext::None`](openjd_expr::HostContext::None).

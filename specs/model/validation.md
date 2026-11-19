@@ -363,12 +363,22 @@ host-scope field (step and environment script actions, embedded files,
 environment variables, and script-level `let` bindings): `host_lib`
 returns `unresolved[path]` from `path()` there, so the path, and everything
 computed from it, is checked by type only, as a `PATH` job parameter is.
+The same holds for a path that a TEMPLATE-scope step-level `let` binding
+computed: the session converts it to the worker's format before host-scope
+fields use it (`SerializedSymbolTable::to_symtab(PathFormat::host())`, see
+specs/sessions/session.md), so when the step-level bindings are copied into
+the task-scope symbol table (and from there into step environments),
+`unresolve_template_paths` replaces every value whose type contains `path`
+with `unresolved[T]`. Job creation does the same for its host-scope check
+tables (`build_task_check_symtab`, `build_env_check_symtab`).
 Whether `C:\a\b` has one component or three is decided by the worker's
 format when the session runs it (Expression Language "Path Format"). This
 is what keeps validation from rejecting an expression that a worker runs:
 `int(path('C:\\a\\5').name)` folded under POSIX fails, but a Windows
 worker gives `5`. A value error that every worker hits, such as
 `path('/a').relative_to(path('/b'))`, is reported by the session instead.
+Type errors the function signatures show, such as
+`path('/a').startswith('/')`, are still reported at validation.
 TEMPLATE-scope expressions (`template_lib`) still build concrete POSIX
 paths.
 

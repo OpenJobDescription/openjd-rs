@@ -562,14 +562,20 @@ Everything downstream of such a value is unresolved as well, so a literal
 path in a host-scope field behaves like a `PATH` job parameter, which is
 already unresolved there. A value error on it (`int(path('C:\\a\\5').name)`
 under POSIX, `relative_to` of unrelated paths) is reported when the
-expression runs on the worker rather than at validation; type errors
-(`path('/a').startswith('/')`) are still reported, since the signatures are
-unchanged. Folding in one format instead, as validation did before, rejected
+expression runs on the worker rather than at validation. A type error that the
+signatures show (`path('/a').startswith('/')`, `path(1)`) is still reported,
+since the signatures are unchanged; one that depends on a value computed from
+the path, such as a list comprehension filter over `.parts`, is reported at
+run time, as it is for a `PATH` parameter. Folding in one format instead, as validation did before, rejected
 expressions that a worker using the other format runs (openjd-rs#377), and
 gave wrong resolved values and length bounds for them. The other path
 functions take a `path` argument, which is now unresolved whenever it comes
-from a literal; a concrete `path` can only come from TEMPLATE scope, which
-is POSIX.
+from a literal. A concrete `path` computed in TEMPLATE scope, such as a
+step-level `let` binding, is converted to the worker's format by the session,
+so openjd-model also binds it unresolved in its host-scope check symbol tables
+(see [model validation.md § Path Format](../model/validation.md#path-format));
+`with_number(path, int)` keeps folding a concrete `path`, since the value
+carries its format.
 
 `register_unresolved_host_context_functions` makes these changes with the
 crate-private `FunctionLibrary::make_unresolved(name, matches)`, which
