@@ -545,6 +545,39 @@ This allows the type checker to verify that calls to host-context functions
 are well-typed without requiring actual rules. The validation stub takes no
 arguments — rules don't matter for a signature-only check.
 
+#### Path format before the host is known
+
+The worker's path format is host state too: whether `C:\a\b` is one path
+component (POSIX) or three (Windows) depends on the worker that runs the
+expression. So a `HostContext::Unresolved` library also returns
+`unresolved[T]` from the functions that read a literal string as a
+filesystem path, even when their arguments are concrete:
+
+| Function | Overloads made unresolved | Result |
+|---|---|---|
+| `path` | every overload (`(string)`, `(list[string])`, and any added later) | `unresolved[path]` |
+| `with_number` | `(string, int) -> string` | `unresolved[string]` |
+
+Everything downstream of such a value is unresolved as well, so a literal
+path in a host-scope field behaves like a `PATH` job parameter, which is
+already unresolved there. A value error on it (`int(path('C:\\a\\5').name)`
+under POSIX, `relative_to` of unrelated paths) is reported when the
+expression runs on the worker rather than at validation; type errors
+(`path('/a').startswith('/')`) are still reported, since the signatures are
+unchanged. Folding in one format instead, as validation did before, rejected
+expressions that a worker using the other format runs (openjd-rs#377), and
+gave wrong resolved values and length bounds for them. The other path
+functions take a `path` argument, which is now unresolved whenever it comes
+from a literal; a concrete `path` can only come from TEMPLATE scope, which
+is POSIX.
+
+`register_unresolved_host_context_functions` makes these changes with the
+crate-private `FunctionLibrary::make_unresolved(name, matches)`, which
+replaces the implementation of each matching overload and leaves its
+signature alone. TEMPLATE-scope evaluation (`HostContext::None`) and run
+time (`HostContext::WithRules`) keep building concrete paths, in POSIX and
+the worker's format respectively.
+
 ### Low-level primitives
 
 `FunctionLibrary::for_profile` composes internally from two crate-public

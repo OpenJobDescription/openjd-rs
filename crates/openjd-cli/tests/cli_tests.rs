@@ -4571,3 +4571,65 @@ steps:
         );
     }
 }
+
+/// A literal path in a host-scope field is resolved by the worker, in its
+/// own path format, so `check` and `run`'s validation don't fold it in
+/// POSIX: `C:\a\5` has the name `5` on Windows (openjd-rs#377).
+mod host_scope_literal_paths {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    fn template() -> NamedTempFile {
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            f,
+            r#"specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: J
+steps:
+  - name: S
+    script:
+      actions:
+        onRun:
+          command: python
+          args: ["-c", "print('VALUE:{{{{ int(path(\"C:\\\\a\\\\5\").name) }}}}')"]
+"#
+        )
+        .unwrap();
+        f
+    }
+
+    #[test]
+    fn check_accepts_a_windows_path_literal() {
+        let f = template();
+        let (code, stdout, stderr) = run_cli(&["check", f.path().to_str().unwrap()]);
+        assert_eq!(code, 0, "stdout: {stdout}\nstderr: {stderr}");
+        assert!(
+            stdout.contains("passes validation checks"),
+            "stdout: {stdout}"
+        );
+    }
+
+    #[test]
+    fn run_resolves_a_path_literal_in_the_worker_format() {
+        let f = template();
+        let (code, stdout, stderr) = run_cli(&["run", f.path().to_str().unwrap()]);
+        if cfg!(windows) {
+            assert_eq!(code, 0, "stdout: {stdout}\nstderr: {stderr}");
+            assert!(stdout.contains("VALUE:5"), "stdout: {stdout}");
+        } else {
+            // A POSIX worker reads `C:\a\5` as one component, so the run
+            // fails; validation passed.
+            assert_ne!(code, 0, "stdout: {stdout}\nstderr: {stderr}");
+            assert!(
+                !stderr.contains("validation error"),
+                "stdout: {stdout}\nstderr: {stderr}"
+            );
+            assert!(
+                stdout.contains(r"Cannot convert 'C:\a\5' to int"),
+                "stdout: {stdout}\nstderr: {stderr}"
+            );
+        }
+    }
+}

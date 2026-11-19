@@ -333,7 +333,10 @@ Two libraries control available functions in expressions:
 - **`host_lib`** — Task/session-scope expressions. Built from a profile with
   `HostContext::Unresolved` so `apply_path_mapping` type-checks against its
   signature (a stub returning `Unresolved(path)`) without real rules being
-  available at validation time.
+  available at validation time. In this library `path()` and
+  `with_number(string, int)` also return `unresolved[T]` for literal
+  arguments, because the worker's path format isn't known either (see Path
+  Format below).
 
 Both libraries are obtained from
 `openjd_expr::FunctionLibrary::for_profile(&profile)`. The model's
@@ -354,6 +357,20 @@ re-checks (which read POSIX-format values out of their check symbol
 tables) and makes validation outcomes independent of the OS running
 them — a template accepted by `check` on Linux is accepted on Windows
 and vice versa.
+
+The POSIX format never applies to a path built from a literal in a
+host-scope field (step and environment script actions, embedded files,
+environment variables, and script-level `let` bindings): `host_lib`
+returns `unresolved[path]` from `path()` there, so the path, and everything
+computed from it, is checked by type only, as a `PATH` job parameter is.
+Whether `C:\a\b` has one component or three is decided by the worker's
+format when the session runs it (Expression Language "Path Format"). This
+is what keeps validation from rejecting an expression that a worker runs:
+`int(path('C:\\a\\5').name)` folded under POSIX fails, but a Windows
+worker gives `5`. A value error that every worker hits, such as
+`path('/a').relative_to(path('/b'))`, is reported by the session instead.
+TEMPLATE-scope expressions (`template_lib`) still build concrete POSIX
+paths.
 
 ### Spec-Mandated Resolved-Value Constraints
 

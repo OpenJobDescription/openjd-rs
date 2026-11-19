@@ -426,7 +426,9 @@ parsed it with, never the latest profile, so syntax the profile does
 not enable is refused here exactly as at template validation (and a
 crate upgrade cannot make job creation accept what pass 8 refused, or
 vice versa) — then evaluated under `PathFormat::Posix` with the
-caller's budgets. A failure is a check failure like any other: reported
+caller's budgets (in the host-scope blocks, whose library is
+`HostContext::Unresolved`, `path()` on a literal is `unresolved[path]`
+instead; see [validation.md § Path Format](validation.md#path-format)). A failure is a check failure like any other: reported
 at the binding's path — `steps[i] -> let[j]`,
 `steps[i] -> script -> let[j]`,
 `steps[i] -> stepEnvironments[k] -> script -> let[j]`,

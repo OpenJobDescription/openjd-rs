@@ -883,6 +883,11 @@ fn check_resolved_constraint(
 /// with each other and with the POSIX-format values `create_job` seeds
 /// into its check symbol tables, and makes validation outcomes
 /// independent of the OS running them.
+///
+/// A path built from a literal in a host-scope field is not folded in
+/// POSIX: the host-scope library (`HostContext::Unresolved`) returns
+/// `unresolved[path]` from `path()`, because the worker's path format
+/// isn't known yet (specs/model/validation.md § Path Format).
 struct FsEval<'a> {
     lib: &'a FunctionLibrary,
     memory_limit: Option<usize>,

@@ -35,6 +35,8 @@ mod test_format_strings;
 mod test_function_context;
 #[path = "integration/test_function_library.rs"]
 mod test_function_library;
+#[path = "integration/test_host_context_paths.rs"]
+mod test_host_context_paths;
 #[path = "integration/test_int64_bounds.rs"]
 mod test_int64_bounds;
 #[path = "integration/test_list_json_display.rs"]

@@ -487,7 +487,9 @@ with the fallible `HostContext::with_rules(rules)` — see
 [function-library.md § Host Context](function-library.md#host-context).
 During template validation, when rules aren't available yet, callers build
 the profile with `HostContext::Unresolved` instead, which registers a stub
-that returns `Unresolved(path)` for type checking.
+that returns `Unresolved(path)` for type checking (and makes `path()` on a
+literal unresolved too, since the worker's path format isn't known; see
+[function-library.md § Path format before the host is known](function-library.md#path-format-before-the-host-is-known)).
 
 The function charges `path.len()` string operations before mapping, and the
 result's length after a rule applies. The trie walk is linear in the path

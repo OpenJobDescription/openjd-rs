@@ -90,18 +90,6 @@ pub mod known {
              openjd-for-js, which uses `{:?}`) does not use the spec spelling.",
         ),
         (
-            "expr-static-fold-host-path-format",
-            "Template validation folds path operations on literals in the validating host's \
-             path format, so a format-dependent condition (`is_absolute(path('../a') / \
-             path('C:\\\\'))`) is folded for the submitting machine, not the worker: an \
-             expression typed `list[nulltype]` (always empty) on Linux yields a non-empty list \
-             on a Windows worker, and an expression whose branch fails only on Linux \
-             (`([] if path('C:\\\\x').is_absolute() else [False]) + range_expr('1')`) is \
-             rejected on Linux though it runs on a Windows worker. The other way round, \
-             `[nosuch(1) for v in re_findall('a', path('a/b'))]` folds to `[]` on Linux and fails \
-             on a Windows worker, where the path separator makes the pattern a word boundary.",
-        ),
-        (
             "expr-escape-segment-cap",
             "`escape_format_string` writes each `{{` and `}}` as its own interpolation \
              (`}}` becomes `{{ \"}\" + \"}\" }}`), and literal text between them \

@@ -35,6 +35,8 @@ mod test_feature_bundle_1;
 mod test_float_number_repr;
 #[path = "integration/test_host_requirements.rs"]
 mod test_host_requirements;
+#[path = "integration/test_host_scope_literal_paths.rs"]
+mod test_host_scope_literal_paths;
 #[path = "integration/test_job_cancelation_serde.rs"]
 mod test_job_cancelation_serde;
 #[path = "integration/test_job_creation_resolved_values.rs"]

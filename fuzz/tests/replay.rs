@@ -331,45 +331,6 @@ fn known_issue_reproducers_reproduce() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-/// `expr-static-fold-host-path-format` explains only mismatches the path
-/// format causes: a mismatch from another cause, in an expression that
-/// merely mentions a path, is still reported as that other cause alone.
-/// (`known_issue_reproducers_reproduce` checks only that an id is recorded.)
-#[test]
-fn host_path_fold_does_not_claim_other_mismatches() {
-    use openjd_fuzz::known::take_recorded;
-    install_hook();
-    // The range-slice reproducer's expression, wrapped in a path condition
-    // whose branches are the same, with its control bytes.
-    let base = std::fs::read(
-        root().join("regressions/expr_eval_text/known-expr-range-slice-static-type--param-step"),
-    )
-    .unwrap();
-    let ctl = &base[base.iter().position(|&b| b == 0).unwrap()..];
-    let mut data =
-        b"Session.R[::Session.N] if path('a').is_absolute() else Session.R[::Session.N]".to_vec();
-    data.extend_from_slice(ctl);
-    let (_, target) = TARGETS
-        .iter()
-        .find(|(n, _)| *n == "expr_eval_text")
-        .unwrap();
-    take_recorded();
-    IN_REPLAY.with(|r| r.set(true));
-    let outcome = catch_unwind(AssertUnwindSafe(|| target(&data)));
-    IN_REPLAY.with(|r| r.set(false));
-    assert!(
-        outcome.is_ok(),
-        "unexpected oracle violation: {}",
-        LAST_PANIC.with(|p| p.borrow().clone())
-    );
-    let hit = take_recorded();
-    assert_eq!(
-        hit,
-        BTreeSet::from(["expr-range-slice-static-type".to_string()]),
-        "recorded known issues"
-    );
-}
-
 #[test]
 fn expression_dictionary_covers_the_library() {
     let dict = std::fs::read_to_string(root().join("dicts/expr.dict")).unwrap();

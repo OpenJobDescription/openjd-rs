@@ -138,6 +138,22 @@ impl FunctionLibrary {
             .unwrap_or(&[])
     }
 
+    /// Replace the implementation of every overload of `name` whose
+    /// signature satisfies `matches` with one that returns
+    /// `unresolved[R]`, `R` being that overload's return type. The
+    /// signatures stay as they are, so type checking is unchanged; only a
+    /// call with concrete arguments, which would otherwise be evaluated,
+    /// gives an unresolved value instead. A name with no overloads is left
+    /// alone.
+    pub(crate) fn make_unresolved(&mut self, name: &str, matches: impl Fn(&ExprType) -> bool) {
+        for entry in self.functions.get_mut(name).into_iter().flatten() {
+            if matches(&entry.signature) {
+                let ret = entry.signature.sig_return().clone();
+                entry.implementation = Arc::new(move |_, _| Ok(ExprValue::unresolved(ret.clone())));
+            }
+        }
+    }
+
     /// Merge another library's registrations into this one.
     #[must_use]
     pub fn merge(mut self, other: FunctionLibrary) -> Self {

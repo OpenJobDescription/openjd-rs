@@ -112,11 +112,8 @@ formats, and requires:
   `expr-speculative-budget-rejection`; a negative-step range slice used as a
   list, `expr-range-slice-static-type`; a `flatten` that reads an empty list,
   or a rejection about a list's element type after one,
-  `expr-flatten-empty-element-type`; a type error in a generated expression
-  through an unbound-return signature, `expr-unbound-return-typevar`; and, for
-  an expression that involves paths,
-  a rejection in the host's path format where the static pass in the run's
-  format accepts, `expr-static-fold-host-path-format`;
+  `expr-flatten-empty-element-type`; and a type error in a generated expression
+  through an unbound-return signature, `expr-unbound-return-typevar`;
 - determinism; evaluation metrics within their limits; a target-typed result
   satisfies its target; the result survives the template → session transport
   boundary unchanged;
