@@ -15,6 +15,7 @@
 #![cfg(unix)]
 
 use std::process::Command;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use openjd_expr::{ExprType, ExprValue, ParsedExpression, PathFormat, SymbolTable};
 
@@ -108,9 +109,15 @@ fn repr_sh_of(value: ExprValue) -> String {
     }
 }
 
+static SHELL_DIR_ID: AtomicU32 = AtomicU32::new(0);
+
 /// Run every output through one `sh` process and return the words it read for
 /// each. The script prints each case's word count, then each word, all NUL
 /// terminated, so empty words and words holding newlines stay unambiguous.
+///
+/// `sh` runs in a fresh empty directory, so if a quoting bug lets an input
+/// such as `a>b` act as a redirection, the file lands there and not in the
+/// source tree.
 fn shell_words(outputs: &[String]) -> Vec<Vec<String>> {
     let mut script = String::new();
     for out in outputs {
@@ -122,11 +129,19 @@ fn shell_words(outputs: &[String]) -> Vec<Vec<String>> {
         script
             .push_str("\nprintf '%s\\0' \"$#\"\nfor w in \"$@\"; do printf '%s\\0' \"$w\"; done\n");
     }
+    let dir = std::env::temp_dir().join(format!(
+        "openjd_repr_sh_words_{}_{}",
+        std::process::id(),
+        SHELL_DIR_ID.fetch_add(1, Ordering::Relaxed),
+    ));
+    std::fs::create_dir(&dir).expect("create a directory for sh");
     let result = Command::new("sh")
         .arg("-c")
         .arg(&script)
-        .output()
-        .expect("run sh");
+        .current_dir(&dir)
+        .output();
+    std::fs::remove_dir_all(&dir).expect("remove the directory for sh");
+    let result = result.expect("run sh");
     assert!(
         result.status.success(),
         "sh failed: {}\nscript:\n{script}",

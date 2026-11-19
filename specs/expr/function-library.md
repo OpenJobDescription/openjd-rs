@@ -731,7 +731,8 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   signature dispatch.
 - **`repr_sh` output contract.** Expression Language §2.2.6 defines `repr_sh`
   by what a POSIX shell reads back, not by its bytes: unquoted in a command's
-  arguments, a `string` or `path` (in its string form) is read as exactly one
+  arguments in a non-interactive shell (the spec lists the cases outside the
+  property), a `string` or `path` (in its string form) is read as exactly one
   word equal to the input, and a list of N items, quoted and joined with single
   spaces, as N words in order. An empty string gives `''`, an empty list the
   empty string, and a NUL anywhere in the input is an evaluation error
