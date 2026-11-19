@@ -771,14 +771,20 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   least two characters), all elements are joined with `/` verbatim and no
   normalization is applied — `path(["s3://bucket", "a", "", "b"])` is
   `s3://bucket/a//b`.
-  An empty list of parts takes the `(list[nulltype]) -> path` overload and is
-  `path('.')` in every format, as `PurePosixPath()` and `PureWindowsPath()`
-  are, so `path([]) / 'a'` is `a`. Every function with a concrete `list[X]`
-  parameter has such an overload (a unit test in `default_library.rs` checks
-  this). Dispatch coerces arguments only INT→FLOAT and PATH→STRING (see
-  [Three-Phase Dispatch](#three-phase-dispatch)), not by the 2026-02
-  Expression Language §1.2.3 `list[nulltype]` → `list[T]` rule, so without
-  the overload `f([])` matches no signature.
+  An empty list of parts is `path('.')` in every format, as `PurePosixPath()`
+  and `PureWindowsPath()` are, so `path([]) / 'a'` is `a`. The `[]` literal
+  and a comprehension that keeps nothing are typed `list[nulltype]` and take
+  the `(list[nulltype]) -> path` overload; an empty `list[string]` value takes
+  `(list[string]) -> path`.
+- **Empty-list overloads stand in for the `list[nulltype]` → `list[T]`
+  coercion.** The 2026-02 Expression Language §1.2.3 makes the empty list
+  coercible to any list type, and §1.2.4 applies coercion to function
+  arguments. Dispatch coerces arguments only INT→FLOAT and PATH→STRING (see
+  [Three-Phase Dispatch](#three-phase-dispatch)), so this crate meets that
+  rule by registering a `list[nulltype]` overload beside every concrete
+  `list[X]` parameter, with the other parameters the same. A unit test in
+  `default_library.rs` checks that none is missing. Without one, `f([])`
+  matches no signature.
 - **Slicing a `range_expr`** returns `range_expr` for positive step, `list[int]` for
   negative step (§2.1.8)
 - **`sum` of an empty `list[float]`** is the float `0.0`, as its
