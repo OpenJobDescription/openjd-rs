@@ -674,6 +674,16 @@ pub fn re_replace_fn(ctx: Ctx, a: &[ExprValue]) -> R {
     Ok(ExprValue::String(result.into_owned()))
 }
 
+/// Reject what `re_sub` doesn't support in a replacement (Expression
+/// Language §2.2.5): a group reference (`\1`, `\g<...>`, `$1`, `${...}`),
+/// and then a control character.
+///
+/// A control character is one in Unicode general category `Cc` (U+0000 to
+/// U+001F and U+007F to U+009F) other than tab, newline and carriage return.
+/// The point is a group reference written in a non-raw string: `'\1'`
+/// decodes to U+0001 before it gets here, so the group-reference scan
+/// can't see it (#311). Tab, newline and carriage return are allowed because
+/// replacements commonly need them.
 fn validate_regex_replacement(repl: &str) -> Result<(), ExpressionError> {
     let bytes = repl.as_bytes();
     for i in 0..bytes.len() {
@@ -699,6 +709,15 @@ fn validate_regex_replacement(repl: &str) -> Result<(), ExpressionError> {
                 "Group references in replacement strings are not supported",
             ));
         }
+    }
+    if let Some(c) = repl
+        .chars()
+        .find(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+    {
+        return Err(ExpressionError::new(format!(
+            "Control characters in replacement strings are not supported (U+{:04X})",
+            u32::from(c)
+        )));
     }
     Ok(())
 }

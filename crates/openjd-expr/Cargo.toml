@@ -1,6 +1,6 @@
 [package]
 name = "openjd-expr"
-version = "0.15.0"
+version = "0.17.0"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -42,14 +42,18 @@ ryu = { workspace = true }
 # can change the AST (rustpython-ruff 0.16.10 replaced `ExprCompare::left` and
 # `comparators` with `operands`), which breaks any build that resolves without
 # our Cargo.lock (downstream users, cargo-semver-checks in release-plz). Bump all
-# three together, review the upstream AST changes, and keep
-# tests/integration/test_parser_work_bound.rs passing when updating.
+# three together (a bump of one alone leaves two versions of a ruff crate in the
+# graph and doesn't compile; the `ruff` group in .github/dependabot.yml keeps
+# them in one PR), review the upstream AST changes, and keep
+# tests/integration/test_parser_work_bound.rs passing when updating. Every bump
+# is a breaking change for openjd-expr: see "Bumping the ruff crates" in
+# specs/expr/parser.md for the PR title and the release PR.
 #
 # The `stacker` feature lets the parser grow its stack on deep recursion
 # (`-` * 65535 + `1` overflows a 32 MB stack without it). Keep it on.
-ruff_python_parser = { version = "=0.0.21", features = ["stacker"] }
-ruff_python_ast = "=0.0.21"
-ruff_text_size = "=0.0.21"
+ruff_python_parser = { version = "=0.0.22", features = ["stacker"] }
+ruff_python_ast = "=0.0.22"
+ruff_text_size = "=0.0.22"
 
 # NFKC-normalizes non-ASCII identifiers the same way the parser does, so a
 # keyword placeholder can be checked against every name the parser will see.

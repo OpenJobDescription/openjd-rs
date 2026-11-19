@@ -79,7 +79,7 @@ Windows-specific steps; call `cargo fuzz` directly only with the same flag and
 | `sessions_framer` | Cross-user helper `LineFramer`, `fit_out_payload`, protocol `Command` parsing | Helper and session decoders agree byte for byte; framing independent of chunking; every response line under the cap |
 | `sessions_embedded_files` | `EmbeddedFiles::allocate_file_paths`, `convert_line_endings` | Allocated paths stay inside the files directory; every filename template validation accepts, the session accepts; line counts preserved |
 | `sessions_state` | `Session::clear_ending_only` over random `set_state_for_test` sequences | Reported state matches a reference model of the stored state and ending-only flag; `clear_ending_only` succeeds only from `ReadyEnding` (then `Ready`), else `InvalidState` with no change |
-| `snapshots_decode_text` | `decode_manifest` / `decode_v2023` / `decode_v2025` + `validate` + all encoders | Encoding deterministic; decode(encode(m)) preserves files and metadata; re-encoding is a fixed point |
+| `snapshots_decode_text` | `decode_manifest` / `decode_v2023` / `decode_v2023_try_for_each_file` / `decode_v2023_try_for_each_file_from_reader` / `decode_v2025` + `validate` + all encoders | Encoding deterministic; decode(encode(m)) preserves files and metadata; re-encoding is a fixed point; the streaming v2023 decoders agree with each other and with `decode_v2023` except in their documented differences |
 | `snapshots_ops_gen` | `diff_snapshots`, `compose_*`, `subtree_snapshot`, `join_snapshot`, `partition_manifest`, `filter_manifest`, `entries_differ`, `common_root` | `diff(a, a)` empty; `compose(a, [diff(a, b)]) == b`; compose of diffs ≡ sequential compose; subtree/join stays inside; partitions cover every file; filters keep only matches |
 | `cli_args` | CLI `--job-param`, `--task-param`, `--tasks`, `--path-mapping-rules`, `--extensions` parsers (source-included from the bin crate) | `Name=Value` parses to that pair; one task param per argument; only supported extensions accepted |
 
@@ -89,8 +89,7 @@ and concretely with values of type `T`, under both POSIX and Windows path
 formats, and requires:
 
 - the concrete value belongs to the static type, and a statically folded value
-  equals the run-time value (type soundness — the most frequent bug class in
-  this repo's history: #300, #316, #329, #396, #434, ...);
+  equals the run-time value (type soundness);
 - a statically accepted expression never fails at run time with an
   undefined-symbol, unknown-function, unsupported-syntax, or type error;
 - determinism; evaluation metrics within their limits; a target-typed result
@@ -98,18 +97,17 @@ formats, and requires:
   boundary unchanged;
 - **peak heap during evaluation within a constant factor of the memory limit**,
   measured by a tracking global allocator (`src/alloc.rs`). This catches
-  "allocate, then check the budget" bugs (#284, `zfill('5', -1)`) that a check
+  "allocate, then check the budget" bugs (`zfill('5', -1)`) that a check
   on the result value cannot see.
 
 **`pipeline`** (every model target) runs preprocess → `create_job` → parameter
 space iteration → dependency graph → run-time resolution, and requires:
-preprocessing is idempotent (#384, #388); `create_job` is deterministic and
+preprocessing is idempotent; `create_job` is deterministic and
 Eq/Hash agree; `len()` matches iteration, `get(i)` equals the i-th iterated
-set, and every iterated set passes `contains`/`validate_containment` (#398,
-20c7876); topological order respects every dependency; and **a template that
+set, and every iterated set passes `contains`/`validate_containment`; topological order respects every dependency; and **a template that
 validates and instantiates never fails at run time with a static error** when
 its actions, `let` bindings, and embedded files are resolved the way the
-session resolves them (#349, #397, #421, #315, #361).
+session resolves them.
 
 ## Enforcement
 
@@ -166,7 +164,9 @@ OPENJD_FUZZ_KNOWN=model-preprocess-path-idempotence cargo test --manifest-path f
 ```
 
 When a known issue is fixed, change its `known_issue!` to `oracle!` and delete
-the entry, so the fuzzer guards the fix.
+the entry, so the fuzzer guards the fix. Rename its reproducers after the
+behavior they check (no `known-` prefix, and no `fixed-` or issue-number
+marker): `regressions/` describes what is checked, not which change fixed it.
 
 ## Adding a target
 

@@ -269,6 +269,42 @@ fn allow_depth_just_below_limit() {
     assert_eq!(v.to_display_string(), "1");
 }
 
+/// A slice bound has the same depth limit as an index: AST validation walks
+/// slice bounds at the slice's own depth, as the evaluator does. 63 nested
+/// unary `-` fit in an index, in a lower bound and in a step; 64 don't.
+#[test]
+fn slice_bound_depth_limit_matches_index() {
+    let minus = |n: usize| "-".repeat(n);
+    let fits = [
+        (format!("[1, 2][{}0]", minus(63)), "1"),
+        (format!("'abcdef'[{}1:]", minus(63)), "f"),
+        (format!("'abcdef'[::{}1]", minus(63)), "fedcba"),
+    ];
+    for (expr, want) in &fits {
+        let v = ParsedExpression::new(expr)
+            .and_then(|p| p.evaluate(&SymbolTable::new()))
+            .unwrap_or_else(|e| panic!("{expr}: {e}"));
+        assert_eq!(v.to_display_string(), *want, "{expr}");
+    }
+    for expr in [
+        format!("[1, 2][{}0]", minus(64)),
+        format!("'abcdef'[{}1:]", minus(64)),
+        format!("'abcdef'[::{}1]", minus(64)),
+    ] {
+        expect_too_deep(&expr);
+    }
+    // The parser reports it, with the caret on the innermost operand.
+    let expr = format!("'abcdef'[{}1:]", minus(64));
+    let err = ParsedExpression::new(&expr).expect_err("64 levels in a slice bound");
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "Expression nesting depth (65) exceeded limit (64)\n  {expr}\n  {}^",
+            " ".repeat(9 + 64)
+        )
+    );
+}
+
 #[test]
 fn allow_modest_binop_chain() {
     // 50-term chain — well below limit

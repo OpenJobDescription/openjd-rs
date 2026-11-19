@@ -1,6 +1,6 @@
 [package]
 name = "openjd-sessions"
-version = "0.10.0"
+version = "0.11.1"
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
@@ -31,8 +31,8 @@ fuzzing = []
 workspace = true
 
 [dependencies]
-openjd-expr = { path = "../openjd-expr", version = "0.15.0" }
-openjd-model = { path = "../openjd-model", version = "0.16.0" }
+openjd-expr = { path = "../openjd-expr", version = "0.17.0" }
+openjd-model = { path = "../openjd-model", version = "0.16.2" }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -48,7 +48,7 @@ getrandom = "0.4"
 futures-util = "0.3.32"
 
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.31", features = ["signal", "process", "user", "fs"] }
+nix = { version = "0.32", features = ["signal", "process", "user", "fs"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [
@@ -74,7 +74,7 @@ windows = { version = "0.62", features = [
 [build-dependencies]
 # Helper needs nix with "poll" (parent [dependencies] has signal/process/user/fs but not poll)
 [target.'cfg(unix)'.build-dependencies]
-nix = { version = "0.31", features = ["signal", "process", "poll"] }
+nix = { version = "0.32", features = ["signal", "process", "poll"] }
 
 [target.'cfg(windows)'.build-dependencies]
 windows = { version = "0.62", features = [

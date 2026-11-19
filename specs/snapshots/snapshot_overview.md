@@ -213,6 +213,8 @@ See [snapshot_data_cache.md](snapshot_data_cache.md) for detailed documentation.
 10. **`DashMap`** for concurrent upload deduplication. Lock-free concurrent hash map avoids contention.
 11. **`rayon`** for parallel hashing in the HASH operation. True CPU parallelism without GIL.
 12. **Separate compose functions** (`compose_snapshot_with_diffs` and `compose_diffs`) make input/output type relationships explicit at compile time.
+13. **Typed, single-parse manifest decoding.** The decoders read only the members they use, straight into typed values (`codec/raw.rs`), and never build a `serde_json::Value` tree, whose per-entry maps cost several times the JSON text. Reading follows the same rules as `Value`'s accessors (a value of the wrong type is absent, the last duplicate key wins), and ignored members are still fully parsed, so invalid JSON anywhere is rejected. See [snapshot_codec.md](snapshot_codec.md#decoding).
+14. **Callback-based streaming decode for v2023.** `decode_v2023_try_for_each_file` passes each entry to a closure as it is parsed, rather than returning an iterator. serde_json drives parsing, and it can only hand nested values to a visitor, not pause mid-document. A pull iterator on one thread would need a different JSON parser or a reimplementation of serde_json's parsing rules. A caller who wants pull-style or async consumption can run the decode on its own thread (for example `tokio::task::spawn_blocking`) and send entries through a bounded channel, which also gives backpressure. A closure returning `Result<(), E>` keeps the same reading rules and error messages as `decode_v2023`, and lets the caller stop by returning an error. Only v2023 is supported. In v2025's sorted keys, `hashAlg` and `specificationVersion` follow `dirs` and `files`, so a v2025 document cannot be checked before its entries.
 
 ## Constants
 
@@ -235,6 +237,9 @@ openjd-snapshots/src/
 ├── hash.rs             # HashAlgorithm, hash_data(), hash_file(), hash_file_chunked()
 ├── path_util.rs        # normalize_path(), is_absolute_path()
 ├── codec.rs            # Encode/decode v2023 and v2025 JSON formats
+├── codec/
+│   ├── raw.rs          # Lenient typed view of a manifest document, read in one parse
+│   └── stream.rs       # Streaming v2023 decode: entries passed to a callback as parsed
 ├── error.rs            # SnapshotError, Result<T>
 └── ops/
     ├── mod.rs          # Re-exports

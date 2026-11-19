@@ -7,19 +7,19 @@ Parsing is the entry point to the crate — all other operations work on the par
 
 ```rust
 pub fn decode_job_template(
-    template: serde_yaml::Value,
+    template: serde_json::Value,
     supported_extensions: Option<&[&str]>,
     caller_limits: &CallerLimits,
 ) -> Result<JobTemplate, ModelError>
 
 pub fn decode_environment_template(
-    template: serde_yaml::Value,
+    template: serde_json::Value,
     supported_extensions: Option<&[&str]>,
     caller_limits: &CallerLimits,
 ) -> Result<EnvironmentTemplate, ModelError>
 
 pub fn decode_template(
-    template: serde_yaml::Value,
+    template: serde_json::Value,
     supported_extensions: Option<&[&str]>,
     caller_limits: &CallerLimits,
 ) -> Result<DecodedTemplate, ModelError>
@@ -28,7 +28,7 @@ pub fn document_string_to_object(
     document: &str,
     doc_type: DocumentType,
     caller_limits: &CallerLimits,
-) -> Result<serde_yaml::Value, ModelError>
+) -> Result<serde_json::Value, ModelError>
 ```
 
 ### Types
@@ -53,8 +53,10 @@ live in the `parse` module; passes 5–9 live in the `validate_v2023_09` module 
 
 ### Pass 1: Raw Parsing
 
-`document_string_to_object` parses a raw string into a `serde_yaml::Value` tree. The
-`DocumentType` parameter selects JSON or YAML parsing. This pass catches syntax errors
+`document_string_to_object` parses a raw string into a `serde_json::Value` tree. The
+`DocumentType` parameter selects the parser: `serde_json::from_str` for JSON, or
+`serde_saphyr::from_str_with_options` for YAML, which deserializes YAML straight into a
+`serde_json::Value` with a nesting-depth budget of `MAX_DOCUMENT_DEPTH` (128). This pass catches syntax errors
 (malformed YAML, invalid JSON).
 
 Booleans, nulls and non-finite floats in YAML resolve by the YAML 1.2 Core schema, with
@@ -74,7 +76,7 @@ Integers don't strictly follow the Core schema: `1_000` and `0b101` are read as 
 the same way.
 
 Callers typically handle this pass themselves — the `decode_*` functions accept a
-pre-parsed `serde_yaml::Value`.
+pre-parsed `serde_json::Value`.
 
 ### Pass 2: Version Dispatch
 
@@ -92,7 +94,7 @@ Unrecognized versions produce `ModelError::UnsupportedSchema`.
 
 ### Pass 3: Serde Deserialization
 
-The value tree is deserialized into the appropriate struct via `serde_yaml::from_value`.
+The value tree is deserialized into the appropriate struct via `serde_json::from_value`.
 All template types use `#[serde(deny_unknown_fields)]`, so unexpected fields produce errors.
 
 Custom deserializers handle:
@@ -128,9 +130,9 @@ as a single `ModelError::DecodeValidation` or `ModelError::ModelValidation`.
 
 ## Design Decisions
 
-### serde_yaml::Value as Input Type
+### serde_json::Value as Input Type
 
-The decode functions accept `serde_yaml::Value` rather than `&str` because:
+The decode functions accept `serde_json::Value` rather than `&str` because:
 
 1. Callers may need to inspect the raw value tree before decoding (e.g., to read
    `specificationVersion` for routing)

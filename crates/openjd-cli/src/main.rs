@@ -26,11 +26,11 @@ fn format_log_timestamp() -> String {
         .map(|s| s.as_str())
         .unwrap_or("relative");
     match fmt {
-        "local" => chrono::Local::now()
-            .format("%Y-%m-%dT%H:%M:%S%.3f")
+        "local" => jiff::Zoned::now()
+            .strftime("%Y-%m-%dT%H:%M:%S%.3f")
             .to_string(),
-        "utc" => chrono::Utc::now()
-            .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        "utc" => jiff::Timestamp::now()
+            .strftime("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string(),
         _ => {
             let start = SESSION_START.get().copied().unwrap_or_else(Instant::now);

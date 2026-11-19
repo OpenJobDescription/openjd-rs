@@ -26,10 +26,10 @@ implementation in Rust.
 
 ## Normative References
 
-- [2026-02-Expression-Language.md](../../../openjd-specifications/wiki/2026-02-Expression-Language.md) — Formal language specification
-- [RFC 0005 — Expression Language](../../../openjd-specifications/rfcs/0005-expression-language.md) — Language design and rationale
-- [RFC 0006 — Expression Function Library](../../../openjd-specifications/rfcs/0006-expression-function-library.md) — Operators and built-in functions
-- [RFC 0007 — Extended Parameter Types](../../../openjd-specifications/rfcs/0007-extend-parameter-types.md) — BOOL, LIST[T], RANGE_EXPR parameter types
+- [2026-02-Expression-Language.md](https://github.com/OpenJobDescription/openjd-specifications/wiki/2026-02-Expression-Language) — Formal language specification
+- [RFC 0005 — Expression Language](https://github.com/OpenJobDescription/openjd-specifications/blob/mainline/rfcs/0005-expression-language.md) — Language design and rationale
+- [RFC 0006 — Expression Function Library](https://github.com/OpenJobDescription/openjd-specifications/blob/mainline/rfcs/0006-expression-function-library.md) — Operators and built-in functions
+- [RFC 0007 — Extended Parameter Types](https://github.com/OpenJobDescription/openjd-specifications/blob/mainline/rfcs/0007-extend-parameter-types.md) — BOOL, LIST[T], RANGE_EXPR parameter types
 
 ## Python Reference Implementation
 

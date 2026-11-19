@@ -71,14 +71,9 @@ pub fn hash_file_chunked(
 ) -> std::io::Result<Vec<String>>;
 ```
 
-`expected_size` is mandatory on `hash_file_chunked`. Content-addressed
-hashing requires the file on disk to match what the manifest claims,
-so the function checks the actual file size against `expected_size`
-before hashing and returns `io::ErrorKind::InvalidData` on mismatch.
-This lets callers detect file-size drift (for example, a file that
-was truncated or extended after being recorded in a manifest) without
-a separate stat call, and guarantees that the returned chunk hashes
-describe exactly the bytes the caller intended to hash.
+`hash_file_chunked` returns `io::ErrorKind::InvalidData` if the file's size
+is not `expected_size`. See
+[snapshot_manifest_types.md § File Chunked Hashing](snapshot_manifest_types.md#file-chunked-hashing).
 
 Re-exported at the crate root:
 
@@ -134,15 +129,10 @@ pub fn recompute_total_size(&mut self); // saturates at u64::MAX
 pub fn common_root(&self) -> Option<String>;
 ```
 
-`common_root` returns the longest directory prefix that is an ancestor (or
-equal to) every meaningful non-deleted path in the manifest. Files contribute
-their parent directory; empty dirs contribute themselves; non-empty dirs
-(those with a strict descendant declared elsewhere in the manifest) are
-ignored so that a dir entry like `/` does not collapse the result toward
-root when it merely contains other declared entries. Returns `None` if the
-manifest is empty (or all entries are deleted). Composes with
-[`subtree_snapshot`] to extract a relative-path subtree from an absolute
-manifest without the caller needing to know a root path.
+`common_root` returns the longest directory prefix shared by the manifest's
+non-deleted entries, or `None` if there are none. Combined with
+[`subtree_snapshot`], it extracts a relative-path subtree from an absolute
+manifest. See [snapshot_manifest_types.md § Common Root](snapshot_manifest_types.md#common-root).
 
 #### Methods (where `P: ValidatePaths, K: ValidateKind`)
 
@@ -299,20 +289,12 @@ pub fn encode_snapshot_v2025(m: &Snapshot) -> Result<String>;
 pub fn encode_snapshot_diff_v2025(m: &SnapshotDiff) -> Result<String>;
 ```
 
-Both v2023 encoders write `totalSize` as the sum of the encoded entries'
-sizes and return `SnapshotError::Validation` if that sum exceeds `u64::MAX`;
-they never write a clamped total. The v2025 encoders write the manifest's
-`total_size` field as is, which `recompute_total_size` may have clamped to
-`u64::MAX`.
-
-This is an intentional divergence from Python. Python's v2023 encoder uses
-arbitrary-precision integers, so it writes the exact sum (for example
-`18446744073709551616` for two `2^63`-byte files), and Python reads that
-back. Rust stores sizes as `u64`, so it cannot represent such a manifest: the
-v2023 encoders reject it rather than write a `totalSize` that disagrees with
-the entries, and `decode_v2023` rejects a `totalSize` above `u64::MAX` as
-`missing or invalid totalSize`. No real file set reaches this size; the limit
-matters only for crafted manifests.
+The v2023 encoders write `totalSize` as the sum of the entries' sizes and
+return `SnapshotError::Validation` if that sum exceeds `u64::MAX`. Python's
+encoder instead writes the exact sum, and `decode_v2023` rejects such a
+`totalSize`. The v2025 encoders write the manifest's `total_size` field as is.
+See
+[snapshot_codec.md § Encoding](snapshot_codec.md#encoding).
 
 The generic `encode_v2025` is also public via the `codec` module path:
 
@@ -338,6 +320,68 @@ structurally; they differ only in the phantom `Kind` parameter of the
 returned manifest. `decode_v2023_as_diff` is a convenience for callers that
 want to feed a v2023-formatted manifest into a diff-consuming pipeline like
 [`compose_snapshot_with_diffs`] without reconstructing the manifest.
+
+`decode_manifest` picks v2023 when the document has a `manifestVersion` key,
+otherwise v2025 when it has a `specificationVersion` key, and otherwise fails.
+
+The decoders fail with `SnapshotError::Validation`. Text that is not valid
+JSON anywhere in the document is rejected. A member of the wrong JSON type
+is treated as absent, a repeated key takes its last value, and unknown
+members are ignored. Duplicate paths are rejected. See
+[snapshot_codec.md § Decoding](snapshot_codec.md#decoding) for the full
+reading rules, error order, and memory constraints.
+
+### Streaming v2023 Decode
+
+```rust
+#[non_exhaustive]
+pub struct V2023Summary {
+    pub hash_alg: HashAlgorithm,
+    pub total_size: u64,
+    pub total_files: usize,
+}
+
+pub fn decode_v2023_try_for_each_file<F, E>(json: &str, f: F) -> Result<V2023Summary, E>
+where
+    F: FnMut(HashAlgorithm, FileEntry) -> Result<(), E>,
+    E: From<SnapshotError>;
+
+pub fn decode_v2023_try_for_each_file_from_reader<R, F, E>(reader: R, f: F) -> Result<V2023Summary, E>
+where
+    R: std::io::Read,
+    F: FnMut(HashAlgorithm, FileEntry) -> Result<(), E>,
+    E: From<SnapshotError>;
+```
+
+These decode a v2023 manifest without building it. Each element of `paths`
+is converted to a `FileEntry` and passed to `f`, with the manifest's hash
+algorithm, as soon as it is parsed, so memory use does not depend on the
+number of entries. The returned summary holds the hash algorithm, the
+recorded `totalSize`, and the number of entries delivered. There is no v2025
+equivalent.
+
+The callback's error type `E` is the function's error type: an error the
+callback returns stops the decode and is returned unchanged, and decode
+errors are converted with `From<SnapshotError>`. Unless the callback
+returns an `Err` of a concrete type somewhere, it has to name `E`, as in
+`Ok::<_, SnapshotError>(())`, since `?` inside it converts into any `E`.
+
+The reader form returns read errors as `SnapshotError::Io`, and reads to the
+end of input before returning. Pass it a buffered reader.
+
+Values are read, entries checked, and errors worded as `decode_v2023` does,
+except that:
+
+- `manifestVersion` and `hashAlg` must come before `paths` (as they do in
+  `encode_snapshot_v2023` output) and must not appear again after it, and
+  `paths` must appear only once;
+- errors are reported mostly in document order, after earlier entries have
+  been delivered, so after any error the caller should discard the entries
+  it received;
+- duplicate paths are not rejected.
+
+See [snapshot_codec.md § Streaming v2023 Decode](snapshot_codec.md#streaming-v2023-decode)
+for the exact error messages and memory profile.
 
 ## Data Cache
 
@@ -455,41 +499,30 @@ impl S3DataCache {
 
 Implements `AsyncDataCache` (with `copy_from` for S3-to-S3 server-side copy),
 `MultipartDataCache`, and `RangeReadDataCache`. By default `copy_from` performs
-a single `CopyObject` with no extra `HeadObject`. Calling `with_copy_config`
-opts in to size-aware routing: `copy_from` then issues one `HeadObject` and uses
-parallel multipart `UploadPartCopy` for sources above the configured threshold
-(required both to copy sources > 5 GiB and to parallelize large cross-region
-copies).
+a single `CopyObject`, which S3 limits to sources of 5 GiB. `with_copy_config`
+opts in to multipart `UploadPartCopy` above a size threshold, at the cost of
+one `HeadObject` per copy. See
+[snapshot_data_cache.md § Server-Side Copy](snapshot_data_cache.md#server-side-copy-copy_from).
 
 ### S3CopyConfig
 
-`TransferConfig`-style tuning for `S3DataCache::copy_from`. Used to control when
-a server-side copy switches from a single `CopyObject` to a parallel multipart
-`UploadPartCopy`, and how that multipart copy is sized and parallelized.
+Tuning for `S3DataCache::copy_from`: when a server-side copy switches from a
+single `CopyObject` to a parallel multipart `UploadPartCopy`, and how that
+multipart copy is sized and parallelized.
 
 ```rust
 pub struct S3CopyConfig {
-    /// Sources strictly larger than this use multipart UploadPartCopy.
-    /// Default 5 MiB — a performance cutoff, since parallel multipart copy
-    /// beats single CopyObject for cross-region transfers at every size at or
-    /// above S3's 5 MiB minimum part size. Clamped to 5 GiB at copy time (the
-    /// CopyObject ceiling).
-    pub multipart_threshold: u64,
-    /// Target size of each UploadPartCopy part. Default 5 MiB (the S3 minimum
-    /// part size, which maximizes parallelism). Grown automatically to keep
-    /// the part count <= 10,000 and clamped to the S3 part-size range
-    /// (5 MiB..=5 GiB).
-    pub part_size: u64,
-    /// Maximum number of concurrent UploadPartCopy requests per object.
-    /// Default 64.
-    pub max_concurrency: usize,
+    pub multipart_threshold: u64, // sources strictly larger use multipart; clamped to 5 GiB
+    pub part_size: u64,           // grown to keep <= 10,000 parts; clamped to 5 MiB..=5 GiB
+    pub max_concurrency: usize,   // concurrent UploadPartCopy requests per object
 }
 
 pub const S3_MAX_SINGLE_COPY_BYTES: u64 = 5 * 1024 * 1024 * 1024;
 ```
 
-Implements `Default` (5 MiB threshold, 5 MiB parts, concurrency 64) — the
-empirically validated cross-region copy settings.
+Implements `Default` (5 MiB threshold, 5 MiB parts, concurrency 64). See
+[snapshot_data_cache.md](snapshot_data_cache.md#transferconfig-style-copy-tuning-s3copyconfig)
+for how the defaults were chosen.
 
 ### CacheValidationState
 
@@ -523,12 +556,11 @@ impl HashCache {
 }
 ```
 
-`HashCache::new` and `S3CheckCache::new` create `cache_dir` if needed, open
-the database, and request WAL journaling. If SQLite cannot use WAL they still
-succeed and log a warning. They fail with `SnapshotError::Io` if `cache_dir`
-cannot be created, and with `SnapshotError::Cache` on SQLite errors,
-including a failed WAL PRAGMA. A `Cache` error names the database file, for
-example `Cache error: <cache_dir>/hash_cache.db: database is locked`. See
+`HashCache::new` and `S3CheckCache::new` create `cache_dir` if needed and
+open the database. They fail with `SnapshotError::Io` if `cache_dir` cannot
+be created, and with `SnapshotError::Cache` on SQLite errors; a `Cache` error
+names the database file. If SQLite cannot use WAL journaling they still
+succeed and log a warning. See
 [snapshot_hash_cache.md § Journal Mode](snapshot_hash_cache.md#journal-mode).
 
 ## S3 Check Cache
@@ -544,8 +576,7 @@ impl S3CheckCache {
 }
 ```
 
-`S3CheckCache::new` has the same journal-mode and error behavior as
-`HashCache::new` (see above).
+See [Hash Cache](#hash-cache) for `S3CheckCache::new`'s error behavior.
 
 ## Operations
 
@@ -749,11 +780,8 @@ pub fn entries_differ(
 pub struct DiffOptions {
     pub parent_manifest_hash: Option<String>,
     pub ignore_hashes: bool,
-    /// Dual-purpose flag: ignores `runnable` when comparing, *and* copies the
-    /// parent's `runnable` into the diff entry for modified files. The
-    /// ignore-on-compare half is delegated to `entries_differ` via its
-    /// `ignore_runnable` parameter; the copy-on-emit half is handled inside
-    /// `diff_snapshots`.
+    /// Ignores `runnable` when comparing, and copies the parent's `runnable`
+    /// into the diff entry for modified files.
     pub preserve_runnable: bool,
 }
 ```

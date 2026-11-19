@@ -327,11 +327,11 @@ fn floor_exactly_i64_min_ok() {
 #[test]
 fn round_float_i64_min_ndigits() {
     // Negating i64::MIN previously panicked in debug builds. Rounding
-    // any float at 10^|huge| precision is 0.
-    assert_eq!(
-        eval("round(1.5, -9223372036854775808)").to_display_string(),
-        "0.0"
-    );
+    // any float at 10^|huge| precision is the int 0.
+    assert!(matches!(
+        eval("round(1.5, -9223372036854775808)"),
+        ExprValue::Int(0)
+    ));
 }
 #[test]
 fn round_int_i64_min_ndigits() {
