@@ -5,11 +5,11 @@
 //! The `ExprType` nesting depth limit, [`MAX_TYPE_DEPTH`].
 //!
 //! Every walk over a type (`==`, `Hash`, `Display`, `Drop`, `satisfies`,
-//! coercion) is recursive, so a type built deep enough through the Rust
-//! API used to overflow the stack and abort the process. The constructors
-//! now reject a type deeper than the limit, and these tests check every
-//! way to build one, and that a type at the limit is safe to walk on a
-//! small stack.
+//! coercion) is recursive, so a type nested deeper than the limit must be
+//! an error, not a stack overflow that aborts the process. The
+//! constructors reject a type deeper than the limit, and these tests check
+//! every way to build one, and that a type at the limit is safe to walk on
+//! a small stack.
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -72,9 +72,9 @@ fn every_constant_is_one_level_deep() {
     }
 }
 
-/// The issue's reproduction: wrapping `int` in 50,000 lists aborted the
-/// process with a stack overflow in `coerce`, `==`, `Hash` or `Drop`. Now
-/// the wrap that would pass the limit fails and nothing deeper exists.
+/// The issue's reproduction: wrapping `int` in 50,000 lists must not abort
+/// the process with a stack overflow in `coerce`, `==`, `Hash` or `Drop`.
+/// The wrap that would pass the limit fails and nothing deeper exists.
 #[test]
 fn building_50_000_levels_stops_at_the_limit() {
     let mut ty = ExprType::INT;

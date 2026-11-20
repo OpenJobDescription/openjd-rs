@@ -1890,7 +1890,7 @@ fn format_string_past_the_type_depth_limit_fails_at_that_field() {
 /// before in 30 comprehensions, also fails at the first binding past the
 /// limit. Each later binding is typed too (a failed one is rebound as
 /// `unresolved[any]`), which takes under a second in a debug build; without
-/// the limit a release build took over 5 minutes.
+/// the limit a release build would take over 5 minutes.
 #[test]
 fn longest_let_chain_past_the_type_depth_limit_fails_at_that_binding() {
     let mut bindings = vec!["a0 = Param.N".to_string()];

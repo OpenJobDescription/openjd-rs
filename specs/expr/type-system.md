@@ -103,9 +103,9 @@ type (`==`, `Hash`, `Display`, `Debug`, `Serialize`, the derived `Drop`,
 `tests/integration/test_type_depth.rs` runs each of them on types at the limit
 on a 2 MiB thread. Measured on Linux x86-64, a debug build needs between
 384 KiB and 416 KiB for them, and a release build about 80 KiB, less than the
-128 KiB minimum thread stack there, so no requested stack size fails. Before the
-limit, a type built 50,000 deep through the Rust API overflowed the stack in
-those walks and aborted the process.
+128 KiB minimum thread stack there, so no requested stack size fails. Without the
+limit, a type built 50,000 deep through the Rust API would overflow the stack in
+those walks and abort the process.
 
 `parse` stops at 10 levels of nesting (a parsed type is at most 11 deep), the
 function library's signatures are at most 4 deep, and list values a template
@@ -131,17 +131,17 @@ levels compound along a chain of comprehensions each iterating over the one
 before: three comprehensions with 11 wraps each already pass the limit, three
 with 29 (about 1.4 KB of source) type as 176 deep, and within the expression depth and input length limits one
 expression can type as about 1,860 deep. A chain of `let` bindings each
-nesting the one before goes further. Such a template now fails validation
+nesting the one before goes further. Such a template fails validation
 with `TypeTooDeep` at the expression or binding that passes the limit, while
 a run of it would succeed. (Whole-field FLOAT, STRING and PATH task parameter
 range expressions are the exception: validation doesn't type them at all, so
 this limit doesn't apply to them there.) This is a deliberate Rust-only hardening limit,
 like `MAX_EXPRESSION_DEPTH` and `MAX_PARSE_INPUT_LEN`, which also reject
-input the specification allows. Without it, the same templates took seconds
-to minutes to validate, and the deepest overflowed a 2 MiB stack (a type
+input the specification allows. Without it, the same templates would take seconds
+to minutes to validate, and the deepest would overflow a 2 MiB stack (a type
 about 1,640 deep in a debug build). Raising the limit to cover them would
 need several MiB of stack in a debug build: evaluating one 1,862-deep type
-needed 2 to 4 MiB, and the walks over the most deeply nested shape need
+needs 2 to 4 MiB, and the walks over the most deeply nested shape need
 about three times what lists need.
 
 `ExprValue::expr_type` stays infallible. An `Unresolved(T)` value is
