@@ -120,7 +120,6 @@ pub(crate) struct ScriptRunnerBase {
     pub helper: Option<crate::cross_user_helper::CrossUserHelper>,
     #[cfg(windows)]
     pub helper: Option<crate::cross_user_helper::CrossUserHelperWin>,
-    pub cancel_writer: Option<std::fs::File>,
     /// The action's [`crate::cross_user_helper::HelperRunGate`], set with
     /// `helper`, so a cancel that arrives before the helper's Run command is
     /// written right after it.
@@ -149,7 +148,6 @@ impl ScriptRunnerBase {
             echo_openjd_directives: true,
             limits: crate::limits::SessionLimits::default(),
             helper: None,
-            cancel_writer: None,
             helper_run_gate: None,
         }
     }
@@ -202,7 +200,6 @@ impl ScriptRunnerBase {
                 &mut filter,
                 &self.session_id,
                 message_tx,
-                self.cancel_writer.as_ref(),
                 self.helper_run_gate.as_deref(),
                 &self.cancel_token,
             )

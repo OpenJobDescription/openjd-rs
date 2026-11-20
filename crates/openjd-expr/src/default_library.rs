@@ -629,6 +629,15 @@ fn path_ops() -> FunctionLibrary {
         crate::functions::misc::path_fn,
     )
     .expect("bad builtin signature");
+    // The empty list of parts is `path('.')`, as `PurePosixPath()` is
+    // (§2.3). Dispatch does not coerce `list[nulltype]` to `list[string]`,
+    // so without this overload `path([])` matches no signature.
+    lib.register_sig(
+        "path",
+        "(list[nulltype]) -> path",
+        crate::functions::misc::path_fn,
+    )
+    .expect("bad builtin signature");
     lib.register_sig("__truediv__", "(path, string) -> path", path_div)
         .expect("bad builtin signature");
     lib.register_sig("__truediv__", "(path, path) -> path", path_div)
@@ -872,6 +881,52 @@ mod tests {
             .max()
             .unwrap();
         assert_eq!(deepest, 4);
+    }
+
+    #[test]
+    fn every_concrete_list_parameter_has_an_empty_list_overload() {
+        // Dispatch does not apply the `list[nulltype]` -> `list[T]`
+        // coercion (2026-02 Expression Language §1.2.3) to arguments, so a
+        // function taking a concrete `list[X]` needs an overload with
+        // `list[nulltype]` in that position, and the other parameters the
+        // same, or `f([])` and a comprehension that keeps nothing match no
+        // signature.
+        let lib = FunctionLibrary::for_profile(
+            &crate::ExprProfile::latest().with_host_context(crate::HostContext::Unresolved),
+        );
+        let empty = ExprType::list(ExprType::NULLTYPE);
+        let mut missing = Vec::new();
+        for name in lib.function_names() {
+            let sigs = lib.get_signatures(name);
+            for e in sigs {
+                let params = e.signature.sig_params();
+                for (i, p) in params.iter().enumerate() {
+                    if !p.is_list() || !p.is_concrete() || *p == empty {
+                        continue;
+                    }
+                    let covered = sigs.iter().any(|o| {
+                        let op = o.signature.sig_params();
+                        op.len() == params.len()
+                            && op.iter().zip(params).enumerate().all(|(j, (a, b))| {
+                                if j == i {
+                                    *a == empty
+                                } else {
+                                    a == b
+                                }
+                            })
+                    });
+                    if !covered {
+                        missing.push(format!("{name}{}", e.signature));
+                    }
+                }
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(
+            missing.is_empty(),
+            "no list[nulltype] overload: {missing:#?}"
+        );
     }
 
     #[test]

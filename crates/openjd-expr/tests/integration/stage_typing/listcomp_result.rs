@@ -79,6 +79,36 @@ fn empty_result_dispatches_as_the_empty_list() {
 }
 
 #[test]
+fn empty_result_constructs_the_empty_path() {
+    // `path` has a `list[nulltype]` signature beside `list[string]`, so a
+    // comprehension that keeps no string builds `path('.')`, as
+    // `PurePosixPath()` does: a run that keeps nothing must not fail
+    // dispatch with "No matching signature for path(list[nulltype])".
+    assert_stages(
+        "path([s for s in Param.LS if s == 'z'])",
+        "unresolved[path]",
+        "path",
+        "path",
+        ".",
+    );
+    assert_stages(
+        "path([s for s in Param.LS if not Task.Param.C])",
+        "unresolved[path]",
+        "unresolved[path]",
+        "path",
+        ".",
+    );
+    assert_stages(
+        "path([] if Task.Param.C else Param.LS)",
+        "unresolved[path]",
+        "unresolved[path]",
+        "path",
+        ".",
+    );
+    assert_stages("path([]) / 'a'", "path", "path", "path", "a");
+}
+
+#[test]
 fn empty_literal_iterable_gives_the_untyped_empty_list() {
     // The body never runs and is not type-checked: `x * 2` with `x` of no
     // type is never evaluated.
