@@ -78,7 +78,7 @@ fn is_static_error(e: &ExpressionError) -> bool {
 /// The static `ExpressionError` behind a model error, if any: an
 /// expression error, or the source of a `create_job` format-string failure
 /// (job name, host-requirement names, range values).
-fn model_static_error(e: &ModelError) -> Option<&ExpressionError> {
+pub fn model_static_error(e: &ModelError) -> Option<&ExpressionError> {
     match e {
         ModelError::Expression(x) if is_static_error(x) => Some(x),
         ModelError::FormatStringError {

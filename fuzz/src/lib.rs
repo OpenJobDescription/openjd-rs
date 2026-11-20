@@ -111,8 +111,9 @@ pub mod known {
             "Signatures whose return type variable no parameter binds (`__add__: (list[T1], \
              list[T2]) -> list[T3]`, `(list[T1], range_expr) -> list[T2]`) lose the element type \
              statically, so a value can fall outside its static type: \
-             `([L] + [[1.5] for v in E]).flatten() + range_expr('1-3')` with an empty `E` is \
-             `list[float]` statically and `[1, 2, 3]` at run time. An expression that runs can \
+             `([L] + [[1.5] for v in E]).flatten() + range_expr('1-3')`, with `L` an empty \
+             `list[float]` and `E` an empty list, is `list[float]` statically and `[1, 2, 3]` at \
+             run time. An expression that runs can \
              also be rejected: the same expression wrapped in `range_expr(...)` is refused with \
              `No matching signature for range_expr(list[float])`, though it evaluates to `1-3`.",
         ),
@@ -132,17 +133,19 @@ pub mod known {
             "A stepped slice of an unresolved `range_expr` is typed `range_expr` whatever the \
              step (evaluator.rs, the unresolved slice path), but a negative step gives \
              `list[int]` (specs/expr/function-library.md; the signature returns \
-             `range_expr | list[int]`), so `R[::-1]` gives a value outside its static type, \
-             and an operation that needs the list is rejected though it runs: \
-             `sorted(R[::-1])` fails validation with `No matching signature for \
-             sorted(range_expr)`.",
+             `range_expr | list[int]`), so `R[::-1]` gives a value outside its static type (also \
+             nested in a list, or where a branch that used it as a list was dropped), and an \
+             operation that needs the list is rejected though it runs: `sorted(R[::-1])` fails \
+             validation with `No matching signature for sorted(range_expr)`.",
         ),
         (
             "expr-flatten-empty-element-type",
             "`flatten` of a list of empty typed lists returns an untyped empty list \
              (`list[nulltype]`), so what follows loses the element type: \
              `flatten([Param.F]).sum()` with an empty `list[float]` parameter is `float` \
-             statically and `0` (an int) at run time, while `sum(Param.F)` is `0.0`.",
+             statically and `0` (an int) at run time, while `sum(Param.F)` is `0.0`; and with an \
+             empty `list[bool]` parameter it is rejected statically (`sum() is not available \
+             for list[bool]`) though it evaluates to `0`.",
         ),
         (
             "expr-dispatch-derive-mismatch",

@@ -108,10 +108,12 @@ formats, and requires:
   rejected on purpose (specs/expr/evaluator.md). `expr_format_string` doesn't
   check this direction. Known issues explain some rejections: a budget error in
   a sub-expression the static pass evaluated speculatively (a conditional
-  branch, an `and` / `or` operand, a comprehension), `expr-speculative-budget-rejection`;
-  a negative-step range slice used as a list, `expr-range-slice-static-type`;
-  a generated expression through an unbound-return signature,
-  `expr-unbound-return-typevar`; and, for an expression that involves paths,
+  branch, an `and` / `or` operand, a comprehension, a chained comparison),
+  `expr-speculative-budget-rejection`; a negative-step range slice used as a
+  list, `expr-range-slice-static-type`; a `flatten` that reads an empty list,
+  `expr-flatten-empty-element-type`; a type error in a generated expression
+  through an unbound-return signature, `expr-unbound-return-typevar`; and, for
+  an expression that involves paths,
   a rejection in the host's path format where the static pass in the run's
   format accepts, `expr-static-fold-host-path-format`;
 - determinism; evaluation metrics within their limits; a target-typed result
