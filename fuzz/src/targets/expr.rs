@@ -202,12 +202,19 @@ pub struct GateContext {
 
 impl GateContext {
     /// The context for code `code` (string literals blanked) run against
-    /// the values of `env`. `generated` is `Some` for generator output and
-    /// says whether it used an unbound-return signature.
-    pub fn new(code: String, env: &Env, generated: Option<bool>) -> Self {
+    /// the values of `env` it reads (`accessed`). `generated` is `Some` for
+    /// generator output and says whether it used an unbound-return
+    /// signature.
+    pub fn new(
+        code: String,
+        env: &Env,
+        accessed: &std::collections::HashSet<String>,
+        generated: Option<bool>,
+    ) -> Self {
         let values: Vec<&ExprValue> = env
             .symbols
             .iter()
+            .filter(|s| accessed.contains(&s.name))
             .filter_map(|s| env.concrete.get_value(&s.name))
             .collect();
         Self {
@@ -234,13 +241,14 @@ fn holds_list_int(v: &ExprValue) -> bool {
             .is_some_and(|xs| xs.iter().any(holds_list_int))
 }
 
-/// The known issues that can explain a run-time value `cv` outside its
-/// static type `st`.
-fn type_gap_known_issues(ctx: &GateContext, st: &ExprType, cv: &ExprValue) -> Vec<&'static str> {
+/// The known issue that can explain a run-time value `cv` outside its
+/// static type `st`, or `None` when none does. The gates are checked in
+/// order and the first that applies is reported.
+fn type_gap_known_issue(ctx: &GateContext, st: &ExprType, cv: &ExprValue) -> Option<&'static str> {
     // A negative-step slice of a range gives a `list[int]` where the static
     // type has a `range_expr`, or drops the branch that typed it.
     if ctx.range && has_negative_step_slice(&ctx.code) && holds_list_int(cv) {
-        return vec!["expr-range-slice-static-type"];
+        return Some("expr-range-slice-static-type");
     }
     // The signature loses a list's element type, so only a list value in a
     // list type counts, or a number of the other kind after a reduction
@@ -253,14 +261,17 @@ fn type_gap_known_issues(ctx: &GateContext, st: &ExprType, cv: &ExprValue) -> Ve
     if (ctx.unbound_return || has_type_var(st))
         && ((cv.is_list() && st.code() == TypeCode::List) || numbers(st, &cv.expr_type()))
     {
-        return vec!["expr-unbound-return-typevar"];
+        return Some("expr-unbound-return-typevar");
     }
-    // An empty list read, or the `0` an empty untyped list sums to (the
-    // emptiness can come from an operation, `[x] * 0`).
-    if calls_fn(&ctx.code, "flatten") && (ctx.empty_list || matches!(cv, ExprValue::Int(0))) {
-        return vec!["expr-flatten-empty-element-type"];
+    // An empty list read, or the `0` an empty untyped list sums to where the
+    // static type is a float (the emptiness can come from an operation,
+    // `[x] * 0`).
+    if calls_fn(&ctx.code, "flatten")
+        && (ctx.empty_list || (matches!(cv, ExprValue::Int(0)) && *st == ExprType::FLOAT))
+    {
+        return Some("expr-flatten-empty-element-type");
     }
-    Vec::new()
+    None
 }
 
 /// Does `code` (string literals blanked) call a host-context function?
@@ -294,7 +305,8 @@ fn rejection_known_issue(ctx: &GateContext, e: &ExpressionError) -> Option<&'sta
     } else if calls_fn(&ctx.code, "flatten")
         && (ctx.empty_list
             || message.contains("element type")
-            || message.contains("is not available for list["))
+            || message.contains("is not available for list[")
+            || (message.starts_with("No matching signature for ") && message.contains("(list[")))
     {
         // An untyped empty list from `flatten` is accepted where the typed
         // one is refused (the emptiness can come from an operation).
@@ -309,10 +321,11 @@ fn rejection_known_issue(ctx: &GateContext, e: &ExpressionError) -> Option<&'sta
     }
 }
 
-/// Does `code` (string literals blanked) use a construct the static pass
-/// evaluates speculatively when it can't resolve the deciding value: a
-/// conditional, `and` / `or`, a comprehension, or a chained comparison
-/// (specs/expr/evaluator.md, speculative evaluation)?
+/// Does `code` (string literals blanked) hold a construct the static pass
+/// may evaluate speculatively when it can't resolve the deciding value
+/// (specs/expr/evaluator.md, speculative evaluation): ` if `, ` and `,
+/// ` or ` or ` for `, or two or more comparison operators, as a chained
+/// comparison has? A textual test: the construct need not be speculative.
 fn has_speculative_construct(code: &str) -> bool {
     let comparisons = ["<", ">", "==", "!=", " in ", " is "]
         .iter()
@@ -596,8 +609,12 @@ pub fn check_expression(
     generated: Option<bool>,
 ) {
     let src = parsed.expression();
-    let well_typed = generated.is_some();
-    let ctx = GateContext::new(blank_string_literals(src), env, generated);
+    let ctx = GateContext::new(
+        blank_string_literals(src),
+        env,
+        parsed.accessed_symbols(),
+        generated,
+    );
     let runtime = runtime_library(&env.rules);
     let validation = validation_library();
 
@@ -658,12 +675,12 @@ pub fn check_expression(
                 let st = static_type(sv);
                 let ct = cv.expr_type();
                 let mismatch = !fits(cv, &st);
-                // Every known issue that can explain the mismatch is recorded
-                // (the cause is ambiguous when several apply); a mismatch none
-                // explains is a new bug.
+                // The known issue that explains the mismatch, and the
+                // host-path fold when it does too, are recorded; a mismatch
+                // none explains is a new bug.
                 let mut explained: Vec<&'static str> = Vec::new();
                 if mismatch {
-                    explained = type_gap_known_issues(&ctx, &st, cv);
+                    explained.extend(type_gap_known_issue(&ctx, &st, cv));
                     // The static pass folds path operations in the host's
                     // format; in the other format a folded condition can go
                     // the other way. Only when the fold is the cause: the
@@ -699,6 +716,18 @@ pub fn check_expression(
                     );
                 }
             }
+            // The static pass folded a path operation in the host's format
+            // and dropped what this run's format evaluates; checked in this
+            // run's format, it rejects.
+            (Ok(sv), Err(e))
+                if fmt != PathFormat::host()
+                    && involves_paths(src, env)
+                    && static_pass(fmt).is_err() =>
+            {
+                crate::known::hit("expr-static-fold-host-path-format", || {
+                    format!("{src:?}: accepted statically in the host's format ({sv:?}) but fails in {fmt:?}: {e}")
+                })
+            }
             (Ok(sv), Err(e)) => {
                 // The "statically folded" oracle above compares in the
                 // host's format only; so does this one.
@@ -717,7 +746,7 @@ pub fn check_expression(
             // is not well-typed by construction, so for text only a
             // rejection some value causes counts: a name error in a branch
             // no run takes is rejected on purpose (specs/expr/evaluator.md).
-            (Err(e), Ok(cv)) if well_typed || !is_value_independent_error(e) => {
+            (Err(e), Ok(cv)) if ctx.well_typed || !is_value_independent_error(e) => {
                 let msg = || {
                     format!(
                         "{src:?} evaluates to {cv:?} ({fmt:?}) but static checking rejects it: {e}"
@@ -1125,7 +1154,8 @@ pub fn format_string(data: &[u8]) {
         path_format(&mut u)
     };
     let env = Env::new(&mut u, symbols, fmt);
-    let ctx = GateContext::new(interpolation_code(text), &env, None);
+    let accessed: std::collections::HashSet<String> = names.iter().cloned().collect();
+    let ctx = GateContext::new(interpolation_code(text), &env, &accessed, None);
     let runtime = runtime_library(&env.rules);
     let validation = validation_library();
     let target = if one_in(&mut u, 3) {
@@ -1209,12 +1239,10 @@ pub fn format_string(data: &[u8]) {
                     let msg = || {
                         format!("{text:?}: static resolved_type {st} but resolution gives {rv:?}")
                     };
-                    if fits(rv, st) || matches!(rv, ExprValue::Null) {
-                    } else {
-                        let explained = type_gap_known_issues(&ctx, st, rv);
-                        oracle!(!explained.is_empty(), "{}", msg());
-                        for id in explained {
-                            crate::known::hit(id, msg);
+                    if !fits(rv, st) && !matches!(rv, ExprValue::Null) {
+                        match type_gap_known_issue(&ctx, st, rv) {
+                            Some(id) => crate::known::hit(id, msg),
+                            None => oracle!(false, "{}", msg()),
                         }
                     }
                 }

@@ -660,6 +660,64 @@ fn expression_oracles_fire() {
     );
     // A chained comparison is speculative.
     assert!(budget("1 < 2 < len(Param.X * 100000)").is_none());
+    // A gate reads only the values the expression reads: an unread range
+    // or empty list excuses nothing.
+    let v = simulated_violation(
+        "Param.L[::-1]",
+        &[
+            ("Param.L", un(ExprType::list(s.clone()))),
+            ("Param.R", un(ExprType::RANGE_EXPR)),
+        ],
+        &[
+            ("Param.L", ExprValue::ListInt(vec![1, 2])),
+            (
+                "Param.R",
+                ExprValue::RangeExpr(
+                    <openjd_expr::RangeExpr as std::str::FromStr>::from_str("1-3").unwrap(),
+                ),
+            ),
+        ],
+        Some(false),
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static type list[string]")),
+        "{v:?}"
+    );
+    // The range-slice gate needs a `list[int]` in the value.
+    let v = simulated_violation(
+        "Param.X if len(Param.R[::-1]) > 0 else Param.X",
+        &[
+            ("Param.X", un(ExprType::INT)),
+            ("Param.R", un(ExprType::RANGE_EXPR)),
+        ],
+        &[
+            ("Param.X", ExprValue::String("a".into())),
+            (
+                "Param.R",
+                ExprValue::RangeExpr(
+                    <openjd_expr::RangeExpr as std::str::FromStr>::from_str("1-3").unwrap(),
+                ),
+            ),
+        ],
+        Some(false),
+    );
+    assert!(
+        v.as_deref().is_some_and(|m| m.contains("static type int")),
+        "{v:?}"
+    );
+    // The flatten gate's `0` is an empty sum only where a float is expected.
+    let v = simulated_violation(
+        "Param.X if len(flatten([[1]])) > 0 else Param.X",
+        &[("Param.X", un(s.clone()))],
+        &[("Param.X", int(0))],
+        Some(false),
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static type string")),
+        "{v:?}"
+    );
     // Accepted statically, then a value-dependent failure: allowed.
     let v = simulated_violation(
         "upper(Param.X)",

@@ -97,7 +97,9 @@ pub mod known {
              expression typed `list[nulltype]` (always empty) on Linux yields a non-empty list \
              on a Windows worker, and an expression whose branch fails only on Linux \
              (`([] if path('C:\\\\x').is_absolute() else [False]) + range_expr('1')`) is \
-             rejected on Linux though it runs on a Windows worker.",
+             rejected on Linux though it runs on a Windows worker. The other way round, \
+             `[nosuch(1) for v in re_findall('a', path('a/b'))]` folds to `[]` on Linux and fails \
+             on a Windows worker, where the path separator makes the pattern a word boundary.",
         ),
         (
             "expr-escape-segment-cap",
