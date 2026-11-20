@@ -134,9 +134,9 @@ mode) drift. When two implementations are genuinely necessary — a crate
 boundary such as the sessions helper, wasm32 vs native, a documented
 streaming trade-off — the copies MUST cross-reference each other at both
 sites and MUST be pinned by an equivalence test that fails when either copy
-changes alone. Existing pins to model: openjd-expr's
+changes alone. Existing equivalence pins: openjd-expr's
 `tests/integration/test_coercion_drift.rs` and the sessions helper framer
-equivalence test in `crates/openjd-sessions/src/subprocess.rs`. Incidentally
+test in `crates/openjd-sessions/src/subprocess.rs`. Incidentally
 similar code that encodes no shared rule is not a Q10 finding.
 
 ## 3. Evidence
