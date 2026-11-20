@@ -1016,12 +1016,23 @@ fn literal_arg_over_cap_fails() {
 
 #[test]
 fn literal_command_over_cap_fails() {
-    // The raw-text pass caps command text at 1024; an opted-in cap below
-    // that still applies to a literal command.
+    // §5.1 sets no maximum command length. The opt-in caller cap applies below
+    // and above the former 1024-character model baseline; without it, commands
+    // pass up to the general 1 MiB `FormatString` guard.
     check_err_limits(
         &job_with_command(&"A".repeat(150)),
         &arg_cap(100),
         &["steps[0] -> script -> actions -> onRun -> command:\n\tis 150 characters, exceeding the maximum of 100."],
+    );
+    check_err_limits(
+        &job_with_command(&"A".repeat(3000)),
+        &arg_cap(2000),
+        &["steps[0] -> script -> actions -> onRun -> command:\n\tis 3000 characters, exceeding the maximum of 2000."],
+    );
+    check_ok_limits(&job_with_command(&"A".repeat(3000)), &arg_cap(3000));
+    check_ok_limits(
+        &job_with_command(&"A".repeat(3000)),
+        &CallerLimits::default(),
     );
 }
 

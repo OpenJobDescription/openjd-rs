@@ -51,7 +51,10 @@ pub struct EffectiveLimits {
     pub max_task_param_range_len: usize,
     pub max_task_param_string_len: usize,
     pub max_job_param_string_len: usize,
-    pub max_command_len: usize,
+    // There is deliberately no command-length limit here: §5.1
+    // `<CommandString>` states that the specification imposes no maximum
+    // string length. A host that wants to bound command length has
+    // `CallerLimits::max_resolved_arg_len`.
     pub max_description_len: usize,
     /// §4.4.2: maximum characters in an environment variable value (resolved).
     pub max_env_var_value_len: usize,
@@ -89,7 +92,6 @@ impl EffectiveLimits {
             max_task_param_range_len: 1024,
             max_task_param_string_len: 1024,
             max_job_param_string_len: 1024,
-            max_command_len: 1024,
             max_description_len: 2048,
             // §4.4.2: environment variable value, 2048 characters. Its own
             // field even though it matches max_description_len today — the

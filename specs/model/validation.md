@@ -150,8 +150,8 @@ The largest pass. Validates template structure using `EffectiveRules`. Key check
   amounts, because the caller collects through `?`. Decode accumulates every violation.
 - Parameter space: ≤16 task parameters, no duplicate names, type allowed,
   range validation per type, combination expression validation
-- Script actions: command non-empty, length limits, `Task.File.*` references
-  must match embedded file names
+- Script actions: command non-empty (no length limit, §5.1), no control
+  characters, `Task.File.*` references must match embedded file names
 - Embedded files: no duplicate names, type must be `TEXT`, valid identifier names,
   data required; `filename` must be a single safe path component — non-empty, no
   path separators (`/` or `\`), no null characters, and not `.` or `..`
