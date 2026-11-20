@@ -4,6 +4,25 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.17.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.16.2...openjd-model-v0.17.0) - 2026-11-20
+
+### Bug fixes
+
+- [**breaking**] Bound ExprType nesting depth with fallible constructors ([#578](https://github.com/OpenJobDescription/openjd-rs/pull/578)) ([#578](https://github.com/OpenJobDescription/openjd-rs/pull/578))
+
+- Remove command length cap ([#561](https://github.com/OpenJobDescription/openjd-rs/pull/561)) ([#561](https://github.com/OpenJobDescription/openjd-rs/pull/561))
+
+
+### Documentation
+
+- Add quality criterion Q10, comments and specs describe the current code ([#577](https://github.com/OpenJobDescription/openjd-rs/pull/577)) ([#577](https://github.com/OpenJobDescription/openjd-rs/pull/577))
+
+
+### Performance
+
+- Evaluate step-level let bindings once per step in pass 8 ([#572](https://github.com/OpenJobDescription/openjd-rs/pull/572)) ([#572](https://github.com/OpenJobDescription/openjd-rs/pull/572))
+
+
 ## [0.16.2](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.16.1...openjd-model-v0.16.2) - 2026-11-19
 
 ### Miscellaneous
