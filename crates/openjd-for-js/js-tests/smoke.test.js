@@ -1580,9 +1580,9 @@ describe("task counts above 2^32 (wasm32)", () => {
   });
 
   it("charges the operation budget for concatenating two ranges of 2^31 values", () => {
-    // The two lengths sum to 2^32, which wraps a 32-bit usize to 0 and
-    // used to skip the budget (then trap building 2^32 values). The charge
-    // saturates at usize::MAX instead, so the count reads "at least".
+    // The two lengths sum to 2^32, which wraps a 32-bit usize to 0, so a
+    // wrapping charge would skip the budget (then trap building 2^32 values).
+    // The charge saturates at usize::MAX instead, so the count reads "at least".
     const st = new mod.SymbolTable();
     try {
       expect(() =>

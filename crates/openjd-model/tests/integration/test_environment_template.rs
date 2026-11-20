@@ -1027,7 +1027,7 @@ fn env_template_job_name_requires_expr() {
 // ══════════════════════════════════════════════════════════════
 // Environment template 'let' bindings — ported from Python
 // EnvironmentTemplate let-binding extension validation tests
-// (previously skipped; see test_let_bindings.rs).
+// (see also test_let_bindings.rs).
 // ══════════════════════════════════════════════════════════════
 
 #[test]

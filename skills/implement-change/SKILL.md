@@ -88,7 +88,9 @@ current behavior follow quality-criteria §3: cite `file:line`, or run it.
 - Route the change through the existing implementation of any rule it
   touches rather than adding a parallel copy. If a second implementation is
   genuinely necessary, add the cross-references and the equivalence pin in
-  the same change (Q10).
+  the same change (Q11).
+- Write spec text and comments about the code as it is, not about the change
+  or what it replaced. That history goes in the commit message (Q10).
 - Strike through resolved report items in the same change (Q9).
 
 ### 4. Gate
@@ -173,6 +175,8 @@ Instruct the auditor to:
 - apply the criteria to the change **and its blast radius**: the code that
   calls what changed, specs and docs anywhere in the repo that describe it
   (Q8), and tests that should have changed but did not;
+- check every spec line, doc comment, and code comment the diff adds or
+  edits against Q10: it describes the code as it is, not the change;
 - check that the diff does what the scope statement says, no more and no
   less. Unrequested scope is a finding;
 - return each finding with its criterion ID, severity (§5), label (§4), and
@@ -291,8 +295,8 @@ audit goes. It never permits skipping one.
 
 | Change | Auditors per round | Criteria emphasis |
 |--------|--------------------|-------------------|
-| Docs, comments, or specs only, with no behavior change | 1 | Q1, Q8 (does the text match the code?), Q9 |
-| CI workflows, skills, or process docs | 1 | Q1, Q8, Q9 (workflows parse, and any tool allowlist covers the new instructions) |
+| Docs, comments, or specs only, with no behavior change | 1 | Q1, Q8 (does the text match the code?), Q9, Q10 |
+| CI workflows, skills, or process docs | 1 | Q1, Q8, Q9 (workflows parse, and any tool allowlist covers the new instructions), Q10 |
 | Dependency or lockfile bump | 1 | Q9 (`cargo deny`, MSRV), Q2 (API breakage in dependents' use), Q8 |
 | Ordinary code change inside one crate | 1 | All criteria, Q4 with at least one mutation per new behavior |
 | Public API change, cross-crate change, or new feature | 2–4 with disjoint angles (§6 "Verifier rules", item 1), each mutation auditor in its own worktree | All criteria |

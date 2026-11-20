@@ -21,19 +21,18 @@ Ruff, publishes them about weekly as `0.0.x`, and makes no stability promise.
 - ruff is actively maintained (daily commits, backed by Astral)
 - rustpython-parser has had no substantive code changes since early 2025
 
-**Why not the `rustpython-ruff_*` crates.** Until #489 the crate used
-`rustpython-ruff_python_parser`, which the RustPython project publishes from its
-own fork of ruff. Its 0.16.10 is not the same code as Astral's: the fork adds
-CPython-style syntax-error hints ("invalid syntax. Perhaps you forgot a
-comma?") that parse ahead speculatively, rewind, and parse the same tokens
-again. The hints nest inside brackets, so an invalid expression's parse time
-doubled with each unclosed bracket level (`"f(a " * 24 + "x"`, 97 bytes, took
-12 s), and a run of juxtaposed tokens inside one bracket was cubic in its
-length. Expressions are untrusted template input, so that was a denial of
-service. Astral's parser has no such hints and parses every one of those inputs
-in milliseconds. `tests/integration/test_parser_work_bound.rs` holds the
-reproducers with a time bound, so a parser bump that brings the behavior back
-fails CI.
+**Why not the `rustpython-ruff_*` crates.** The RustPython project publishes
+`rustpython-ruff_python_parser` from its own fork of ruff. Its 0.16.10 is not the
+same code as Astral's: the fork adds CPython-style syntax-error hints ("invalid
+syntax. Perhaps you forgot a comma?") that parse ahead speculatively, rewind,
+and parse the same tokens again. The hints nest inside brackets, so an invalid
+expression's parse time doubles with each unclosed bracket level
+(`"f(a " * 24 + "x"`, 97 bytes, takes 12 s), and a run of juxtaposed tokens
+inside one bracket is cubic in its length. Expressions are untrusted template
+input, so that is a denial of service. Astral's parser has no such hints and
+parses every one of those inputs in milliseconds.
+`tests/integration/test_parser_work_bound.rs` holds the reproducers with a time
+bound, so a parser bump that introduces the behavior fails CI.
 
 ```toml
 ruff_python_parser = { version = "=0.0.22", features = ["stacker"] }
@@ -147,14 +146,14 @@ renames keywords before parsing and restores them after.
 
 > **The lexer, not a text search, finds the keywords.** The lexer marks string
 > literals, so a keyword inside a literal is never a keyword token and is never
-> rewritten. Searching the source text for the first `.keyword` instead — the
-> original implementation — rewrote literals, so `'a.class' + X.class` evaluated
-> to `"a.alassc1"` instead of `"a.classc1"`, silently and with no error raised.
+> rewritten. Searching the source text for the first `.keyword` instead would
+> rewrite literals, so `'a.class' + X.class` would evaluate to `"a.alassc1"`
+> instead of `"a.classc1"`, silently and with no error raised.
 >
-> **One pass, not one parse per keyword.** Until #489 the rename ran after a failed
-> parse, at the offset the parser objected to, and re-parsed the whole expression
-> once per keyword. That was quadratic: 64 KB of `a.if.if...` took 89 s, and a
-> 24 KB template stalled `openjd check` for 11 s. The lexer pass is linear.
+> **One pass, not one parse per keyword.** Renaming after a failed parse, at the
+> offset the parser objects to, and re-parsing the whole expression once per
+> keyword is quadratic: 64 KB of `a.if.if...` takes 89 s that way, and a 24 KB
+> template stalls `openjd check` for 11 s. The lexer pass is linear.
 >
 > The keyword is delimited by the lexer's token, so `.assert` is not read as `.as`
 > followed by junk. All offsets involved are byte offsets.
@@ -410,25 +409,24 @@ expression as written, and error messages show only the relevant line with its
 columns (see [error-formatting.md](error-formatting.md)).
 
 A multi-line expression may end in a `#` comment, as in parentheses in Python. Because
-the parser no longer sees an enclosing `(`, a few multi-line forms that this crate
-used to reject with a specific message (`x := \n1` as "Walrus operator (:=) is not
-supported", `a\nfor a in b` as "Generator expressions are not supported; use a list comprehension")
-now get a plain syntax error, and multi-line `yield` (`yield\n1`), which main accepted
-and failed at evaluation, is now a syntax error, as the same expressions on one line
-always were. Conversely a leading byte-order mark (U+FEFF) on a multi-line expression is
-now ignored, as it is on one line. Parenthesized mode is therefore not quite the same as
-writing the parentheses: `(yield\n1)` still parses.
+the parser sees no enclosing `(`, a multi-line expression is accepted or rejected as the
+same expression on one line is. `x := \n1` and `a\nfor a in b` get a plain syntax
+error, where the parenthesized forms get a specific message ("Walrus operator (:=) is
+not supported", "Generator expressions are not supported; use a list comprehension"),
+multi-line `yield` (`yield\n1`) is a syntax error, and a leading byte-order mark
+(U+FEFF) is ignored. Parenthesized mode is therefore not quite the same as writing the
+parentheses: `(yield\n1)` still parses.
 
 A syntax error at a single point, such as end of input, underlines the line that
 point is on: the whole expression when it has one line, and otherwise that line (for
 end of input, the last line), since the caret display shows one line.
 
-Until #489 the expression was wrapped in `(...)` before parsing instead. That shifted
-every offset by one byte, which three consumers each undid separately and one didn't
-(the caret for a multi-line binary operator landed one byte right of the operator; an
-operator at the end of a line also needed the caret scan to skip the line break),
-and syntax errors could mention a `)` the author never wrote (`Param.A\nParam.B`
-gave ``Expected `)`, found identifier``).
+The expression is not wrapped in `(...)` before parsing, because that would shift
+every offset by one byte, which every consumer would have to undo (a consumer that
+didn't would put the caret for a multi-line binary operator one byte right of the
+operator, and an operator at the end of a line would also need the caret scan to skip
+the line break), and syntax errors could mention a `)` the author never wrote
+(`Param.A\nParam.B` would give ``Expected `)`, found identifier``).
 
 ## Divergence from Python
 

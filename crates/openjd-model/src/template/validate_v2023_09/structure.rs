@@ -296,13 +296,7 @@ pub fn validate_structure(
 
         // Script actions
         if let Some(script) = &step.script {
-            validate_step_script(
-                script,
-                &path_field(&step_path, "script"),
-                limits,
-                rules,
-                errors,
-            );
+            validate_step_script(script, &path_field(&step_path, "script"), rules, errors);
         }
 
         // SimpleAction fields (§8): validate the desugared script with the
@@ -325,13 +319,7 @@ pub fn validate_structure(
                     );
                 }
                 let mut scratch = ValidationErrors::default();
-                validate_step_script(
-                    &kind.desugar(&step.name, sa),
-                    &[],
-                    limits,
-                    rules,
-                    &mut scratch,
-                );
+                validate_step_script(&kind.desugar(&step.name, sa), &[], rules, &mut scratch);
                 errors.extend_remapped(scratch, |rel| {
                     let mut p = sa_path.clone();
                     p.extend(kind.remap_desugared_path(rel));
@@ -432,13 +420,7 @@ pub fn validate_single_environment(
             );
         }
         for (name, action) in script.actions.iter_named() {
-            validate_action(
-                action,
-                &path_field(&actions_path, name),
-                limits,
-                rules,
-                errors,
-            );
+            validate_action(action, &path_field(&actions_path, name), rules, errors);
         }
         if let Some(files) = &script.embedded_files {
             let files_path = path_field(&script_path, "embeddedFiles");
@@ -457,12 +439,11 @@ pub fn validate_single_environment(
 fn validate_step_script(
     script: &StepScript,
     script_path: &[PathElement],
-    limits: &super::EffectiveLimits,
     rules: &EffectiveRules,
     errors: &mut ValidationErrors,
 ) {
     let action_path = path_field(&path_field(script_path, "actions"), "onRun");
-    validate_action(&script.actions.on_run, &action_path, limits, rules, errors);
+    validate_action(&script.actions.on_run, &action_path, rules, errors);
 
     // Task.File.* references
     let file_names: HashSet<String> = script
@@ -511,19 +492,12 @@ fn validate_step_script(
 fn validate_action(
     action: &Action,
     path: &[PathElement],
-    limits: &super::EffectiveLimits,
     rules: &EffectiveRules,
     errors: &mut ValidationErrors,
 ) {
     let cmd = action.command.raw();
     if cmd.is_empty() {
         errors.add(&path_field(path, "command"), "must not be empty.");
-    }
-    if cmd.chars().count() > limits.max_command_len {
-        errors.add(
-            &path_field(path, "command"),
-            format!("exceeds {} characters.", limits.max_command_len),
-        );
     }
     if cmd.chars().any(|c| c.is_control()) {
         errors.add(&path_field(path, "command"), "contains control characters.");

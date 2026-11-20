@@ -87,9 +87,9 @@ async fn test_initialize_with_root_dir() {
 
 /// A relative `session_root_directory` is absolutized when the session is
 /// created, so all derived paths (working dir, embedded-files dir) are rooted.
-/// Regression test: previously a relative root produced a relative files
-/// directory, which made every named embedded file fail the containment check
-/// with a spurious "unsafe filename" error.
+/// Regression test: a relative root must not produce a relative files
+/// directory, which would make every named embedded file fail the containment
+/// check with a spurious "unsafe filename" error.
 #[tokio::test]
 async fn test_relative_session_root_is_absolutized() {
     // Unique relative directory name resolved against the process CWD.
@@ -4007,8 +4007,8 @@ mod cancel_escalation {
 /// to the helper, but doesn't call `session.cancel_action()`.
 ///
 /// The process dies from the external kill before the tokio select loop
-/// processes the token cancellation. Without the fix, the callback reports
-/// `Failed`; with the fix it reports `Canceled`.
+/// processes the token cancellation. The callback must still report
+/// `Canceled`, not `Failed`.
 #[cfg(unix)]
 #[tokio::test]
 async fn test_parent_token_cancel_with_external_kill_reports_canceled() {
@@ -4478,8 +4478,8 @@ async fn test_cancel_handle_reusable_across_actions() {
 // ══════════════════════════════════════════════════════════════
 
 /// RFC 0008 wrap seeding resolves the wrapped (inner) action's timeout;
-/// an unresolvable expression there previously returned early with the
-/// session stuck in Running forever and nothing logged.
+/// an unresolvable expression there must report a Failed action, not
+/// return early with the session stuck in Running and nothing logged.
 #[tokio::test]
 async fn test_wrap_seed_failure_reports_failed_action() {
     let tmp = TempDir::new().unwrap();

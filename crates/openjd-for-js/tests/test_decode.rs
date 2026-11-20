@@ -15,9 +15,9 @@
 //! * The `decode*_from_object` path accepts a pre-parsed JS object
 //!   (on the Rust side, a `serde_json::Value`) and skips string parsing.
 //!
-//! The tests here close finding F2 from the security review: untrusted
+//! The tests here cover finding F2 from the security review: untrusted
 //! YAML input must go through the depth-budgeted parser, not the
-//! deprecated `serde_yaml 0.9` that the bindings previously used.
+//! deprecated `serde_yaml 0.9`.
 
 use openjd_for_js::model::{
     decode_environment_template_from_object, decode_environment_template_str,

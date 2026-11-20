@@ -481,7 +481,6 @@ fn range_counts_call_plus_iterations_v2() {
 
 // === TestOperationAccountingGaps ===
 // Verify that functions which do O(N) work charge the operation budget.
-// These were previously uncharged (took `_: Ctx`).
 
 #[test]
 fn sorted_charges_per_element() {

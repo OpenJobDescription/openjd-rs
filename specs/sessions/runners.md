@@ -218,9 +218,8 @@ Step scripts use the same two-phase flow as environment scripts: paths first,
 then let bindings, then file contents. `Task.File.*` is therefore available to
 script-level `let` bindings, mirroring `Env.File.*` in environment scripts —
 and matching decode-time validation, which seeds `Task.File.*` into the
-let-binding scope. (An earlier revision evaluated step let bindings before
-file allocation, which made `Task.File.*` in a `let` validate but fail at
-runtime.)
+let-binding scope. (Evaluating step let bindings before file allocation would
+make `Task.File.*` in a `let` validate but fail at runtime.)
 
 
 ## resolve_action_timeout

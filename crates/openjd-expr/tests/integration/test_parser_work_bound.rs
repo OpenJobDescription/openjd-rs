@@ -7,23 +7,24 @@
 //! The one known exception is unclosed nested f-strings, which are
 //! quadratic (see `nested_f_strings_are_bounded`).
 //!
-//! The `rustpython-ruff_python_parser` 0.16.10 crate this crate used to
-//! depend on computed CPython-style error hints by parsing ahead, rewinding,
-//! and parsing the same tokens again. Hints nested inside brackets, so each
-//! unclosed bracket level doubled the work (`"f(a " * 24 + "x"`, 97 bytes,
-//! took 12 s in a release build), and a long run of juxtaposed tokens inside
-//! one bracket was cubic (`"[" + "a " * 2000`, 4 KB, took 3.7 s). An
-//! expression is untrusted template input, so that was a denial of service
-//! on `openjd check` and job creation.
+//! A parser that computes CPython-style error hints by parsing ahead,
+//! rewinding, and parsing the same tokens again, as the
+//! `rustpython-ruff_python_parser` 0.16.10 crate does, nests those hints
+//! inside brackets. With that crate each unclosed bracket level doubles the
+//! work (`"f(a " * 24 + "x"`, 97 bytes, takes 12 s in a release build), and a
+//! long run of juxtaposed tokens inside one bracket is cubic
+//! (`"[" + "a " * 2000`, 4 KB, takes 3.7 s). An expression is untrusted
+//! template input, so that behavior is a denial of service on `openjd check`
+//! and job creation.
 //!
 //! Each input below is one of the shapes measured for #489. Most are sized
-//! so the old parser would take minutes or more in a release build; the
+//! so that crate would take minutes or more in a release build; the
 //! single fuzz reproducer is kept as found (2.5 s in release, over the bound
 //! only in a debug build), and its repeated form covers it in release. Each
 //! must be rejected with an error within [`TIME_BOUND`]. The bound is far above what a linear parser
 //! needs (tens of milliseconds in a debug build) so that a slow CI machine
 //! cannot flake, and far below what the exponential or cubic behavior costs,
-//! so a parser change that brings it back fails here instead of hanging.
+//! so a parser change that introduces it fails here instead of hanging.
 
 use openjd_expr::{FormatString, ParsedExpression, SymbolTable, MAX_PARSE_INPUT_LEN};
 use std::sync::mpsc;
@@ -33,7 +34,7 @@ use std::time::{Duration, Instant};
 const TIME_BOUND: Duration = Duration::from_secs(10);
 
 /// The 363-byte fuzz reproducer from #489 (mostly `.`, ten brackets left
-/// open). It took 2.5 s to parse with the old parser in a release build.
+/// open). It takes 2.5 s to parse with the 0.16.10 parser in a release build.
 const FUZZ_SLOW_DOTS: &str = "ginaen([manifestVersion.......................(............(..............................join.................(.....................n.................(...........................destination_55555path.(..............data............................@....so, 1],.so[vted().d(......destination_55555path.(..............data................................so, dx in e";
 
 /// Run `f` on its own thread and fail the test if it doesn't finish within
@@ -117,9 +118,9 @@ fn unclosed_comprehensions_missing_in() {
 
 #[test]
 fn unclosed_calls_with_string_then_name() {
-    // A string literal next to a name: the old parser's
+    // A string literal next to a name: the 0.16.10 parser's
     // "Is this intended to be part of the string?" hint, the steepest case
-    // measured (`"f(\"a\" b " * 12`, 84 bytes, took 9 s).
+    // measured (`"f(\"a\" b " * 12`, 84 bytes, takes 9 s).
     expect_fast_syntax_error("f(\"a\" b x40", format!("{}x", "f(\"a\" b ".repeat(40)));
 }
 
@@ -130,7 +131,7 @@ fn unclosed_subscripts_with_juxtaposed_index() {
 
 #[test]
 fn closed_if_call_brackets() {
-    // Closing the brackets doesn't help the old parser: the doubling comes
+    // Closing the brackets doesn't help the 0.16.10 parser: the doubling comes
     // from the hints inside them.
     expect_fast_syntax_error(
         "[i f( x40 closed",
@@ -170,9 +171,9 @@ fn repeated_fuzz_reproducer_at_length_cap() {
 #[test]
 fn keyword_attribute_chain_at_length_cap() {
     // Contextual keywords used as attribute names are renamed in one lexer
-    // pass. openjd-expr used to re-parse the whole expression once per
-    // keyword, which took 89 s for this input in a release build. It is
-    // valid syntax, so the AST depth limit rejects it after parsing.
+    // pass. Re-parsing the whole expression once per keyword instead takes
+    // 89 s for this input in a release build. It is valid syntax, so the AST
+    // depth limit rejects it after parsing.
     let expr = format!("a{}", fill(".if", 1));
     let msg = within_bound("a.if.if... 64 KB", move || {
         ParsedExpression::new(&expr)

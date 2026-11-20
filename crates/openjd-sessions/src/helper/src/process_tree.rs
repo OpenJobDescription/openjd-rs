@@ -136,7 +136,7 @@ mod tests {
     #[test]
     fn unreadable_child_stays_traversable_with_parent_bound() {
         // A child whose creation time is unreadable under a validated parent is
-        // no longer pruned: it is recorded carrying the parent's creation time
+        // not pruned: it is recorded carrying the parent's creation time
         // so its own descendants remain reachable. kill_process_checked will
         // no-op on the unreadable node at kill time.
         let parents = [(20u32, 10u32)];

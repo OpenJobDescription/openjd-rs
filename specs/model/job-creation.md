@@ -531,9 +531,8 @@ here and pass there. Callers lowering the budgets accept that
 granularity. Resolved-value constraint violations (the table above)
 are always reported.
 
-Cost note: job creation previously did not evaluate these fields, so the pass
-adds work proportional to what a single worker would do anyway — done
-once at submission instead of per-task-per-worker.
+Cost note: the pass does work proportional to what a single worker would
+do anyway, once at submission rather than per task per worker.
 
 ### convert_environment
 

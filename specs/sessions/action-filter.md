@@ -105,10 +105,10 @@ every recognised directive line passes through to the log
 parsed and acted on (progress, status, env-var changes, redacted-value
 registration, …) but the lines themselves are filtered out
 (`pass_through = false`). This applies uniformly to **every** directive,
-including `openjd_redacted_env`. Earlier revisions of this code special-cased
-`RedactedEnv` to always pass through, but that diverged from Python's
-`_action_filter.py`, which routes every recognised directive through
-`return not self._suppress_filtered`. The behaviour is now unified.
+including `openjd_redacted_env`. `RedactedEnv` is not special-cased to always
+pass through, because that would diverge from Python's `_action_filter.py`,
+which routes every recognised directive through
+`return not self._suppress_filtered`.
 
 ### Why Vec instead of Option for callbacks
 

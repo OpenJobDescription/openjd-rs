@@ -4,18 +4,18 @@
 //! Tests for the `supportedExtensions` parameter on decode entry
 //! points, plus the `getSupportedExtensions` helper.
 //!
-//! Resolves F8: every decode call previously used a JS-binding-local
-//! hardcoded list of supported extensions. That list diverged from
-//! the CLI's list and silently lagged `openjd-model`'s
-//! `ModelExtension` authority. Hosts could not tighten the set —
-//! e.g. a template-viewer extension had no way to disable EXPR.
+//! Covers finding F8: the decode calls take their supported extensions
+//! from `openjd-model`'s `ModelExtension` authority, not from a
+//! JS-binding-local hardcoded list that can diverge from the CLI's list
+//! and lag `ModelExtension`, and hosts can tighten the set (e.g. a
+//! template-viewer extension can disable EXPR).
 //!
-//! The new surface:
+//! The surface:
 //!
 //! * Every decode entry point takes an optional trailing
 //!   `supportedExtensions: Option<Vec<String>>` argument.
 //! * Omitted / `None` means "use the full default from
-//!   `ModelExtension::ALL`" — which is now the one authoritative
+//!   `ModelExtension::ALL`" — the one authoritative
 //!   source in `openjd-model`.
 //! * An empty slice `[]` disables every extension.
 //! * An unknown extension name in the list is rejected by the

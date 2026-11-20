@@ -126,7 +126,40 @@ New source files covered by `scripts/check_copyright_headers.sh` MUST carry
 the copyright header. Work that resolves a report item MUST strike that item
 through in the same change, as described in `AGENTS.md`.
 
-**Q10. One home per rule.** A semantic rule — a spec constraint, a parse or
+**Q10. Text describes the current code.** Specs, doc comments, and code
+comments, including those in tests, MUST describe the code as it is. They
+MUST NOT narrate the change that produced it or the implementation it
+replaced, with wording such as "before this change", "previously", "used
+to", "no longer", "was changed to", "the old code", or "now X instead of Y".
+That history belongs in the commit message and the PR description. In the
+tree it means nothing to a reader who never saw the old code. Two kinds of
+text remain allowed:
+
+- A regression test MAY state, in the present tense, the failure it guards
+  against.
+- Rationale MAY explain why the code does not use an alternative design, as
+  long as it is stated as a reason for the current code ("X is done this way
+  because Y would ...") rather than as a history of it.
+
+The listed words are signals to check, not banned words. "After the new DACL
+is applied, the file no longer inherits ACEs" describes what the code does at
+run time, and is fine. So is a comparison with how the Python reference
+implementation behaves. A document whose stated purpose is a plan or a record
+of how work was done, such as a migration plan, is not a description of the
+code and is outside Q10.
+
+For example, a spec that says "(Before this change, the runner and each
+handle took their own dup of the pipe, and a failed dup left that handle
+unable to cancel.)" narrates history. As rationale for the current design, it
+reads: "The runner and its handles share one dup of the pipe, because a
+separate dup per handle can fail and leave that handle unable to cancel." In
+the same way, a test comment "a lost cancel used to leave the action running"
+becomes "a cancel must reach the helper even when the dup fails".
+
+A Q10 finding is low severity, or medium when a reader could take the past
+behavior it describes for the current behavior.
+
+**Q11. One home per rule.** A semantic rule — a spec constraint, a parse or
 coercion rule, a wire format, a classification, a policy constant — SHOULD
 have a single implementation that every path routes through. Parallel copies
 of a rule (per platform, per entry point, per format version, per execution
@@ -137,7 +170,7 @@ sites and MUST be pinned by an equivalence test that fails when either copy
 changes alone. Existing equivalence pins: openjd-expr's
 `tests/integration/test_coercion_drift.rs` and the sessions helper framer
 test in `crates/openjd-sessions/src/subprocess.rs`. Incidentally
-similar code that encodes no shared rule is not a Q10 finding.
+similar code that encodes no shared rule is not a Q11 finding.
 
 ## 3. Evidence
 
@@ -182,7 +215,7 @@ consequence, not the effort needed to fix it.
 | Severity | Meaning | Examples |
 |----------|---------|----------|
 | **high** | Wrong behavior, or a statement people will act on that is false. | Incorrect results, panics on reachable input, conformance violations, security issues, `public-api.md` contradicting the code or the public API listing, a spec that contradicts the code in an area other work relies on |
-| **medium** | Correct today, but quality has degraded in a way that will cause defects or cost later. | Specified behavior with no test that would catch its breakage, misleading or unlocated error messages, inconsistent public naming, undocumented Python divergences, a rule implemented twice without the cross-references and equivalence pin Q10 requires, avoidable super-linear algorithms on realistic inputs, missing `///` docs |
+| **medium** | Correct today, but quality has degraded in a way that will cause defects or cost later. | Specified behavior with no test that would catch its breakage, misleading or unlocated error messages, inconsistent public naming, undocumented Python divergences, a rule implemented twice without the cross-references and equivalence pin Q11 requires, avoidable super-linear algorithms on realistic inputs, missing `///` docs |
 | **low** | Polish. | Wording, internal naming, test organization, minor duplication that encodes no rule, idiomatic rewrites with no behavioral effect |
 
 A report's prioritized recommendations MAY reorder findings by value or
@@ -231,9 +264,9 @@ leaving the file behind.
 
 ### Verifier rules
 1. When several verifiers run, they MUST get disjoint slices and different
-   angles, chosen from: spec fidelity (Q1, Q2, Q8), implementation correctness
-   (Q3, Q5, Q6, Q10), test adequacy by mutation (Q4), and Python divergence
-   (Q7).
+   angles, chosen from: spec fidelity (Q1, Q2, Q8, Q10), implementation
+   correctness (Q3, Q5, Q6, Q11), test adequacy by mutation (Q4), and Python
+   divergence (Q7).
 2. Each verifier MUST be told that it is one of several and will not see the
    others' results, so that it checks rather than defers.
 3. Each finding comes back labelled as in §4.

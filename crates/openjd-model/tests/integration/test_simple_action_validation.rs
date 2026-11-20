@@ -204,8 +204,8 @@ fn session_symbol_in_timeout_is_rejected() {
 
 #[test]
 fn let_without_expr_is_rejected_at_sugar_let() {
-    // Previously the SimpleAction `let` was only examined when EXPR was on,
-    // so a `let` without EXPR passed `check` and was silently ignored.
+    // The SimpleAction `let` must be examined even when EXPR is off, so a
+    // `let` without EXPR fails `check` rather than being silently ignored.
     check_err(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -401,9 +401,10 @@ fn two_sugar_fields_each_validated_at_their_own_path() {
 
 #[test]
 fn non_ascii_step_name_desugars_and_validates() {
-    // Used to panic in `desugar` at the generated file reference (the
-    // sanitizer kept `char::is_alphanumeric` characters the expression
-    // parser rejects). Now sanitized to ASCII as in the Python reference.
+    // The name is sanitized to ASCII as in the Python reference, so
+    // `desugar` must not panic at the generated file reference
+    // (`char::is_alphanumeric` admits characters the expression parser
+    // rejects).
     decode_ok(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",
@@ -507,9 +508,9 @@ fn control_characters_in_arg_reported_at_authored_index() {
 
 #[test]
 fn static_script_over_data_cap_fails_check() {
-    // Follow-up item 4's motivating case: a 500-char `bash:` body under
-    // `max_resolved_data_len: 100` used to pass `check` and fail only at
-    // `create_job`, at `steps[0] -> script -> embeddedFiles[0] -> data`.
+    // A 500-char `bash:` body under `max_resolved_data_len: 100` must fail
+    // `check`, not pass it and fail only at `create_job`, at
+    // `steps[0] -> script -> embeddedFiles[0] -> data`.
     let s = format!(
         r#"{{
         "specificationVersion": "jobtemplate-2023-09",

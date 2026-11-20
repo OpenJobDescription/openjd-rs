@@ -295,9 +295,9 @@ fn optional_int_coerces_string_to_int() {
 
 // ── Union targets accept whatever their members accept ────────────────
 
-/// A union target must accept at least everything its members accept.
-/// Previously list members were skipped entirely, so adding an alternative
-/// to a target could *remove* an accepted conversion.
+/// A union target must accept at least everything its members accept,
+/// list members included, so adding an alternative to a target never
+/// *removes* an accepted conversion.
 #[test]
 fn union_target_accepts_what_its_list_member_accepts() {
     let range = ExprValue::RangeExpr(RangeExpr::from_values(vec![1, 2, 3]).unwrap());

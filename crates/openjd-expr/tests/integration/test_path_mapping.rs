@@ -189,7 +189,7 @@ fn posix_rule_with_backslash_in_source_needs_literal_match() {
             .as_deref(),
         Some("/mnt/x/f")
     );
-    // ...and the slash-separated spelling is now a different path entirely.
+    // ...and the slash-separated spelling is a different path entirely.
     assert_eq!(
         rule.apply_with_format("/home/user/f", PathFormat::Posix),
         None

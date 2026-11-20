@@ -736,8 +736,9 @@ fn path_valued_let_binding_in_arg_passes_job_creation_checks() {
 /// template validation (iterable unresolved) and resolves cleanly in
 /// every session (everything bound). It must pass job creation as an
 /// unresolved value, not fail it. Regression test: the concrete-
-/// iterable path in `eval_listcomp` used to hard-error on an
-/// unresolved filter condition, rejecting this template at submission.
+/// iterable path in `eval_listcomp` must not hard-error on an
+/// unresolved filter condition, which would reject this template at
+/// submission.
 #[test]
 fn listcomp_with_task_param_filter_over_bound_param_passes_create_job() {
     let template = r#"{
