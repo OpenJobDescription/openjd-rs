@@ -156,24 +156,51 @@ pub(crate) fn write_helper(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use crate::session_user::SessionUser;
+    use crate::session_user::FakeSessionUser;
 
     /// Session user whose group cannot be resolved on this host.
-    #[derive(Debug)]
-    struct FakeUser;
-    impl SessionUser for FakeUser {
-        fn user(&self) -> &str {
-            "nobody"
-        }
-        fn group(&self) -> &str {
-            "openjd_nonexistent_group_586"
-        }
-        fn is_process_user(&self) -> bool {
-            false
-        }
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
+    fn unresolvable_user() -> FakeSessionUser {
+        FakeSessionUser::with_group("openjd_nonexistent_group_586")
+    }
+
+    /// Session user whose group is the process's own effective group, so the
+    /// chown succeeds without a second OS user or extra privileges.
+    fn own_group_user() -> (FakeSessionUser, nix::unistd::Gid) {
+        let egid = nix::unistd::getegid();
+        let group = nix::unistd::Group::from_gid(egid)
+            .unwrap()
+            .expect("process effective group has a name");
+        (FakeSessionUser::with_group(&group.name), egid)
+    }
+
+    /// The helpers directory and the helper binary are group r-x (0o750) with
+    /// the session user's group — enough for the job user to traverse and
+    /// execute, never to write or modify.
+    #[test]
+    fn helpers_dir_and_binary_are_0o750_with_the_session_group() {
+        use std::os::unix::fs::MetadataExt;
+        use std::os::unix::fs::PermissionsExt;
+
+        let (user, egid) = own_group_user();
+        let tmp = tempfile::tempdir().unwrap();
+
+        let dir = create_helpers_dir(tmp.path(), Some(&user)).unwrap();
+        let meta = std::fs::metadata(&dir).unwrap();
+        assert_eq!(
+            meta.permissions().mode() & 0o7777,
+            0o750,
+            "helpers dir mode"
+        );
+        assert_eq!(meta.gid(), egid.as_raw(), "helpers dir group");
+
+        let bin = write_helper(&dir, &user).unwrap();
+        let meta = std::fs::metadata(&bin).unwrap();
+        assert_eq!(
+            meta.permissions().mode() & 0o7777,
+            0o750,
+            "helper binary mode"
+        );
+        assert_eq!(meta.gid(), egid.as_raw(), "helper binary group");
     }
 
     /// The helpers directory must never be group-accessible unless its group
@@ -182,7 +209,7 @@ mod tests {
     #[test]
     fn create_helpers_dir_fails_closed_when_group_lookup_fails() {
         let tmp = tempfile::tempdir().unwrap();
-        let msg = match create_helpers_dir(tmp.path(), Some(&FakeUser)) {
+        let msg = match create_helpers_dir(tmp.path(), Some(&unresolvable_user())) {
             Ok(dir) => panic!(
                 "helpers dir with an unresolvable group must fail, created {}",
                 dir.display()
@@ -216,7 +243,7 @@ mod tests {
     #[test]
     fn write_helper_fails_closed_when_group_lookup_fails() {
         let tmp = tempfile::tempdir().unwrap();
-        let msg = match write_helper(tmp.path(), &FakeUser) {
+        let msg = match write_helper(tmp.path(), &unresolvable_user()) {
             Ok(path) => panic!(
                 "helper write with an unresolvable group must fail, created {}",
                 path.display()

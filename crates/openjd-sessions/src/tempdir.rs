@@ -688,27 +688,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn tempdir_new_cross_user_fails_closed_when_group_lookup_fails() {
-        use crate::session_user::SessionUser;
-
-        #[derive(Debug)]
-        struct FakeUser;
-        impl SessionUser for FakeUser {
-            fn user(&self) -> &str {
-                "nobody"
-            }
-            fn group(&self) -> &str {
-                "openjd_nonexistent_group_586"
-            }
-            fn is_process_user(&self) -> bool {
-                false
-            }
-            fn as_any(&self) -> &dyn std::any::Any {
-                self
-            }
-        }
-
+        let user = crate::session_user::FakeSessionUser::with_group("openjd_nonexistent_group_586");
         let parent = tempfile::tempdir().unwrap();
-        let result = TempDir::new(Some(parent.path()), Some("t-"), Some(&FakeUser));
+        let result = TempDir::new(Some(parent.path()), Some("t-"), Some(&user));
         let msg = match result {
             Ok(td) => panic!(
                 "cross-user TempDir with an unresolvable group must fail, created {}",

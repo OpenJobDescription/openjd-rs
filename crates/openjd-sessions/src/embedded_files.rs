@@ -104,12 +104,12 @@ pub fn write_embedded_file_with_options(
 /// Set `path`'s group to the session user's group, then widen its mode to
 /// `mode`.
 ///
-/// The single implementation of the cross-user permission rule (see
-/// `docs/dev/quality-criteria.md` Q10): every path that grants the session
-/// group access to a session file or directory routes through here. It fails
-/// closed — when the group lookup, the chown, or the chmod fails, the error
-/// propagates and the mode is never widened, so group access is never
-/// granted to a group other than the session user's.
+/// The single implementation of the cross-user permission rule: every path
+/// that grants the session group access to a session file or directory
+/// routes through here. It fails closed — when the group lookup, the chown,
+/// or the chmod fails, the error propagates and the mode is never widened,
+/// so group access is never granted to a group other than the session
+/// user's.
 #[cfg(unix)]
 pub(crate) fn chown_group_then_widen(
     path: &Path,
@@ -726,27 +726,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_chown_for_user_nonexistent_group_returns_error() {
-        use crate::session_user::SessionUser;
-
-        #[derive(Debug)]
-        struct FakeUser;
-        impl SessionUser for FakeUser {
-            fn user(&self) -> &str {
-                "nobody"
-            }
-            fn group(&self) -> &str {
-                "nonexistent_group_xyz_12345"
-            }
-            fn is_process_user(&self) -> bool {
-                false
-            }
-            fn as_any(&self) -> &dyn std::any::Any {
-                self
-            }
-        }
-
+        let user = crate::session_user::FakeSessionUser::with_group("nonexistent_group_xyz_12345");
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        let result = chown_for_user(tmp.path(), &FakeUser, false);
+        let result = chown_for_user(tmp.path(), &user, false);
         assert!(result.is_err(), "chown with nonexistent group should fail");
         let msg = result.unwrap_err().to_string();
         assert!(
