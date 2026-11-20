@@ -74,7 +74,7 @@ This skill applies the criteria with these settings:
 
 - **Scope**: the whole crate (its specs, source, and tests), plus anything the
   crate's concepts reach under Q8.
-- **Criteria**: all of Q1–Q8 and Q11. For Q9, check only what step 6 below
+- **Criteria**: all of Q1–Q8, Q10, and Q11. For Q9, check only what step 6 below
   runs (build, test, and warnings).
 - **Verification** (quality-criteria §6): subagents are REQUIRED. Use all
   four angles and give each a disjoint slice. Each mutation subagent works in
