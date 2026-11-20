@@ -894,7 +894,7 @@ mod tests {
         let lib = FunctionLibrary::for_profile(
             &crate::ExprProfile::latest().with_host_context(crate::HostContext::Unresolved),
         );
-        let empty = ExprType::list(ExprType::NULLTYPE);
+        let empty = ExprType::list(ExprType::NULLTYPE).unwrap();
         let mut missing = Vec::new();
         for name in lib.function_names() {
             let sigs = lib.get_signatures(name);
