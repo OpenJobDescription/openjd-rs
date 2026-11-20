@@ -57,6 +57,23 @@ pub fn validation_library() -> Arc<FunctionLibrary> {
     FunctionLibrary::for_profile(&ExprProfile::latest().with_host_context(HostContext::Unresolved))
 }
 
+/// The host-context functions (`apply_path_mapping`): `Unresolved` stubs
+/// in the validation-time library, real only with a host context.
+pub fn host_context_functions() -> &'static [String] {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let without = FunctionLibrary::for_profile(&ExprProfile::latest());
+        let lib = validation_library();
+        let mut names: Vec<String> = lib
+            .function_names()
+            .filter(|n| without.get_signatures(n).is_empty())
+            .map(str::to_string)
+            .collect();
+        names.sort_unstable();
+        names
+    })
+}
+
 /// Every bare function, method, and property name the library knows, for
 /// dictionaries and seed text.
 pub fn library_tokens() -> Vec<String> {

@@ -472,6 +472,53 @@ fn simulated_violation(
         .then(|| LAST_PANIC.with(|p| p.borrow().clone()))
 }
 
+/// [`simulated_violation`] with static values instead of `Unresolved`
+/// placeholders, for well-typed input: the static pass computes with
+/// `statics` and the run with `values`.
+fn simulated_violation_with_static_values(
+    src: &str,
+    statics: &[(&str, openjd_expr::ExprValue)],
+    values: &[(&str, openjd_expr::ExprValue)],
+) -> Option<String> {
+    use openjd_expr::{ParsedExpression, SymbolTable};
+    use openjd_fuzz::gen::expr::Symbol;
+    use openjd_fuzz::targets::expr::{check_expression, Env};
+    install_hook();
+    let mut unresolved = SymbolTable::new();
+    let mut symbols = Vec::new();
+    for (name, v) in statics {
+        unresolved.set(name, v.clone()).unwrap();
+        symbols.push(Symbol {
+            name: name.to_string(),
+            ty: v.expr_type(),
+        });
+    }
+    let mut concrete = SymbolTable::new();
+    for (name, v) in values {
+        concrete.set(name, v.clone()).unwrap();
+    }
+    let env = Env {
+        symbols,
+        concrete,
+        unresolved,
+        rules: Vec::new(),
+    };
+    let parsed = ParsedExpression::new(src).unwrap();
+    IN_REPLAY.with(|r| r.set(true));
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        check_expression(
+            &parsed,
+            &env,
+            &mut arbitrary::Unstructured::new(&[0; 16]),
+            Some(false),
+        )
+    }));
+    IN_REPLAY.with(|r| r.set(false));
+    outcome
+        .is_err()
+        .then(|| LAST_PANIC.with(|p| p.borrow().clone()))
+}
+
 /// Each hard oracle of `check_expression` fires on the disagreement it
 /// guards against, and the allowed direction passes.
 #[test]
@@ -522,6 +569,76 @@ fn expression_oracles_fire() {
             .is_some_and(|m| m.contains("accepted statically")),
         "{v:?}"
     );
+    // Rejected statically for a reason some value causes, though the text
+    // runs: a violation for text too.
+    let v = simulated_violation(
+        "Param.X + 1",
+        &[("Param.X", s.clone())],
+        &[("Param.X", int(1))],
+        None,
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static checking rejects it")),
+        "{v:?}"
+    );
+    // A name error in a branch no run takes is rejected on purpose.
+    let v = simulated_violation(
+        "1 if Param.B else nosuch(1)",
+        &[("Param.B", ExprType::BOOL)],
+        &[("Param.B", ExprValue::Bool(true))],
+        None,
+    );
+    assert!(v.is_none(), "{v:?}");
+    // A budget error the static pass alone hits (a longer static value
+    // simulates an over-charge): a violation without a speculative
+    // construct, the known issue with one.
+    let long = ExprValue::String("x".repeat(100));
+    let short = ExprValue::String("x".into());
+    let budget = |src: &str| {
+        simulated_violation_with_static_values(
+            src,
+            &[("Param.X", long.clone())],
+            &[("Param.X", short.clone())],
+        )
+    };
+    let v = budget("len(Param.X * 100000) > 0");
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static checking rejects it")),
+        "{v:?}"
+    );
+    assert!(budget("len(Param.X * 100000) > 0 or False").is_none());
+    // A list value outside its list type is excused only for a generated
+    // expression through an unbound-return signature.
+    let ls = ExprType::list(ExprType::STRING);
+    let li = ExprValue::ListInt(vec![1]);
+    let v = simulated_violation(
+        "Param.L",
+        &[("Param.L", ls.clone())],
+        &[("Param.L", li.clone())],
+        None,
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static type list[string]")),
+        "{v:?}"
+    );
+    let v = simulated_violation(
+        "Param.L",
+        &[("Param.L", ls)],
+        &[("Param.L", li)],
+        Some(true),
+    );
+    assert!(v.is_none(), "{v:?}");
+    // A value folded around a host-context function is not strict.
+    let v = simulated_violation(
+        "(path('/a').relative_to(apply_path_mapping('/b')) == path('x')) and False",
+        &[],
+        &[],
+        None,
+    );
+    assert!(v.is_none(), "{v:?}");
     // Accepted statically, then a value-dependent failure: allowed.
     let v = simulated_violation(
         "upper(Param.X)",

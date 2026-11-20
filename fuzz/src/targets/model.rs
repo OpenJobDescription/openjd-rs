@@ -75,12 +75,15 @@ fn is_static_error(e: &ExpressionError) -> bool {
     crate::targets::expr::is_static_miss(e)
 }
 
-/// The static `ExpressionError` behind a model error, if any. A
-/// `create_job` format-string failure (job name, host-requirement names,
-/// range values) keeps only the message today, so it isn't checked yet.
+/// The static `ExpressionError` behind a model error, if any: an
+/// expression error, or the source of a `create_job` format-string failure
+/// (job name, host-requirement names, range values).
 fn model_static_error(e: &ModelError) -> Option<&ExpressionError> {
     match e {
         ModelError::Expression(x) if is_static_error(x) => Some(x),
+        ModelError::FormatStringError {
+            source: Some(x), ..
+        } if is_static_error(x) => Some(x),
         _ => None,
     }
 }

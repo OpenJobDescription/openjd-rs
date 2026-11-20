@@ -99,8 +99,9 @@ fn comparable(a: &str, b: &str) -> bool {
     }
 }
 
-/// Whether `src` can touch a PATH value: a PATH symbol it names, or a path
-/// function (`expr-static-fold-host-path-format` needs one).
+/// Whether `src` can touch a PATH value: a PATH symbol it names, or the
+/// text `path` anywhere in it, as in the `path()` that builds one from a
+/// literal (`expr-static-fold-host-path-format` needs one).
 fn involves_paths(src: &str, env: &Env) -> bool {
     src.contains("path")
         || env
@@ -202,7 +203,45 @@ fn type_gap_known_issues(
     if (unbound_return || has_type_var(st)) && cv.is_list() && st.code() == TypeCode::List {
         return vec!["expr-unbound-return-typevar"];
     }
+    // An int where the static type has a float, after a `flatten`.
+    if calls_fn(code, "flatten")
+        && st.to_string().contains("float")
+        && cv.expr_type().to_string().contains("int")
+    {
+        return vec!["expr-flatten-empty-element-type"];
+    }
     Vec::new()
+}
+
+/// Does `code` (string literals blanked) call a host-context function?
+fn calls_host_context(code: &str) -> bool {
+    crate::gen::expr::host_context_functions()
+        .iter()
+        .any(|f| calls_fn(code, f))
+}
+
+/// The known issues that can explain a static rejection of an expression
+/// that runs, for expression code `code` (string literals blanked), or
+/// `None` when nothing does. `e` is the static error.
+fn rejection_known_issue(
+    e: &ExpressionError,
+    code: &str,
+    unbound_return: bool,
+) -> Option<&'static str> {
+    if is_budget_error(e) && has_speculative_construct(code) {
+        // A budget error in a sub-expression the static pass evaluated
+        // speculatively is never absorbed (specs/expr/evaluator.md), so one
+        // no run evaluates can reject the expression.
+        Some("expr-speculative-budget-rejection")
+    } else if has_negative_step_slice(code) && e.to_string().contains("range_expr") {
+        // A negative-step slice of a range typed `range_expr`, refused
+        // where only a list fits.
+        Some("expr-range-slice-static-type")
+    } else if unbound_return {
+        Some("expr-unbound-return-typevar")
+    } else {
+        None
+    }
 }
 
 /// Does `code` (string literals blanked) use a construct the static pass
@@ -239,9 +278,10 @@ fn interpolation_code(text: &str) -> String {
 /// - `folded`: the static pass computed the value from literals alone, so
 ///   it knew everything the run did, and the run must agree with it (the
 ///   `Ok` case is the "statically folded" oracle in [`check_expression`]). A
-///   value folded around an unresolved symbol doesn't count: `Param.S and
-///   False` folds to `False` statically, though a run evaluates `Param.S`
-///   first and can fail there;
+///   value folded around an unresolved value doesn't count: `Param.X < 0 <
+///   0` folds to `False` statically, though a run evaluates `Param.X < 0`
+///   first and can fail there. Neither does one folded around a
+///   host-context function, which is an `Unresolved` stub statically;
 /// - an undefined symbol, an unknown function, a member no type has, or
 ///   unsupported syntax, which don't depend on values;
 /// - an ordering of operands the library orders, which is a run-time bug
@@ -594,37 +634,35 @@ pub fn check_expression(
                 // host's format only; so does this one.
                 let folded = (!sv.is_unresolved()
                     && fmt == PathFormat::host()
-                    && parsed.accessed_symbols().is_empty())
+                    && parsed.accessed_symbols().is_empty()
+                    && !calls_host_context(&blank_string_literals(src)))
                 .then_some(sv);
                 check_accepted_then_fails(e, folded, || {
                     format!("{src:?}: accepted statically ({sv:?}) but run-time evaluation fails with {e}")
                 });
             }
-            // Static typing must not reject an expression that runs.
-            (Err(e), Ok(cv)) if well_typed => {
+            // Static typing must not reject an expression that runs. Text
+            // is not well-typed by construction, so for text only a
+            // rejection some value causes counts: a name error in a branch
+            // no run takes is rejected on purpose (specs/expr/evaluator.md).
+            (Err(e), Ok(cv)) if well_typed || !is_value_independent_error(e) => {
+                let msg = || {
+                    format!(
+                        "{src:?} evaluates to {cv:?} ({fmt:?}) but static checking rejects it: {e}"
+                    )
+                };
                 if fmt != PathFormat::host() && involves_paths(src, env) && static_pass(fmt).is_ok()
                 {
                     // The static pass folded a path operation in the host's
                     // format and refused a branch this run's format doesn't
                     // take; checked in this run's format, it accepts.
-                    crate::known::hit("expr-static-fold-host-path-format", || {
-                        format!("well-typed {src:?} evaluates to {cv:?} ({fmt:?}) but static checking in the host's format rejects it: {e}")
-                    });
-                } else if is_budget_error(e)
-                    && has_speculative_construct(&blank_string_literals(src))
+                    crate::known::hit("expr-static-fold-host-path-format", msg);
+                } else if let Some(id) =
+                    rejection_known_issue(e, &blank_string_literals(src), unbound_return)
                 {
-                    // A budget error in a sub-expression the static pass
-                    // evaluated speculatively is never absorbed
-                    // (specs/expr/evaluator.md), so one no run evaluates can
-                    // reject the expression.
-                    crate::known::hit("expr-speculative-budget-rejection", || {
-                        format!("well-typed {src:?} evaluates to {cv:?} but static checking rejects it: {e}")
-                    });
+                    crate::known::hit(id, msg);
                 } else {
-                    oracle!(
-                        false,
-                        "well-typed {src:?} evaluates to {cv:?} but static checking rejects it: {e}"
-                    );
+                    oracle!(false, "{}", msg());
                 }
             }
             _ => {}
@@ -1113,9 +1151,11 @@ pub fn format_string(data: &[u8]) {
                 }
                 Err(e) => check_accepted_then_fails(
                     e,
-                    sr.resolved_value
-                        .as_ref()
-                        .filter(|_| fmt == PathFormat::host() && names.is_empty()),
+                    sr.resolved_value.as_ref().filter(|_| {
+                        fmt == PathFormat::host()
+                            && names.is_empty()
+                            && !calls_host_context(&interpolation_code(text))
+                    }),
                     || format!("{text:?}: validates but resolution fails with {e}"),
                 ),
             }
