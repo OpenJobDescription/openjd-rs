@@ -176,6 +176,12 @@ mod tests {
     /// The helpers directory and the helper binary are group r-x (0o750) with
     /// the session user's group — enough for the job user to traverse and
     /// execute, never to write or modify.
+    ///
+    /// The gid assertions here are decisive only where new files start with a
+    /// group other than the process egid; the chown itself is pinned against
+    /// a real second group by the Docker cross-user suite
+    /// (`test_cross_user_tempdir_permissions`), through the same
+    /// `chown_group_then_widen`. This test's teeth are the 0o750 modes.
     #[test]
     fn helpers_dir_and_binary_are_0o750_with_the_session_group() {
         use std::os::unix::fs::MetadataExt;
