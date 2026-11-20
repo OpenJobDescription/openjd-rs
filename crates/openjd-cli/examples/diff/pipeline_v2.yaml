@@ -1,0 +1,23 @@
+# The new side: renamed, a Resolution parameter, a new command and a Composite step.
+specificationVersion: jobtemplate-2023-09
+name: Shot010-final
+parameterDefinitions:
+  - {name: Frames, type: STRING, default: "1-3"}
+  - {name: Quality, type: STRING, default: draft}
+  - {name: Resolution, type: INT, default: 1080}
+steps:
+  - name: Render
+    parameterSpace:
+      taskParameterDefinitions:
+        - {name: Frame, type: INT, range: "{{Param.Frames}}"}
+    script:
+      actions:
+        onRun:
+          command: render-gpu
+          args: ["--quality", "{{Param.Quality}}", "--height", "{{Param.Resolution}}",
+                 "--frame", "{{Task.Param.Frame}}"]
+  - name: Composite
+    dependencies: [{dependsOn: Render}]
+    script:
+      actions:
+        onRun: {command: composite, args: ["--frames", "{{Param.Frames}}"]}

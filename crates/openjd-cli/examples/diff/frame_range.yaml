@@ -1,0 +1,13 @@
+# One template diffed under two parameter sets: Frames sets the task range.
+specificationVersion: jobtemplate-2023-09
+name: Shot010
+parameterDefinitions:
+  - {name: Frames, type: STRING, default: "1-3"}
+steps:
+  - name: Render
+    parameterSpace:
+      taskParameterDefinitions:
+        - {name: Frame, type: INT, range: "{{Param.Frames}}"}
+    script:
+      actions:
+        onRun: {command: render, args: ["--frame", "{{Task.Param.Frame}}"]}

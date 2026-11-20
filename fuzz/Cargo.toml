@@ -196,6 +196,14 @@ bench = false
 required-features = ["libfuzzer"]
 
 [[bin]]
+name = "model_job_diff"
+path = "fuzz_targets/model_job_diff.rs"
+test = false
+doc = false
+bench = false
+required-features = ["libfuzzer"]
+
+[[bin]]
 name = "sessions_directives"
 path = "fuzz_targets/sessions_directives.rs"
 test = false

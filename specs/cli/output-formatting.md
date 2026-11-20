@@ -13,6 +13,7 @@ terminal output) and programmatic consumption (parseable structured output).
 | `check` | No | Plain text only |
 | `summary` | Yes | `human-readable` |
 | `run` | Yes | `human-readable` |
+| `diff` | Yes | `human-readable` |
 
 The `check` command produces only a single success/error message and doesn't benefit from
 structured output. Adding `--output` support would be straightforward but low value.
@@ -29,6 +30,13 @@ JSON and YAML outputs include `status` and `message` fields, following the Pytho
 
 This convention enables simple programmatic checks (`jq .status`) without parsing the
 full output.
+
+`diff` is an exception. Its document is data, not a command result: it prints a
+`TemplateDiff`, and has no `status` or `message`. A failure prints `ERROR: …` on stderr and
+exits 1, as for every command, and `diff` puts `changed` first in its document. Its keys
+are camelCase (`oldJob`, `oldIndex`), because they are the serde form of the openjd-model
+types, while `summary` and `run` use snake_case (`total_environments`). See
+[diff.md](diff.md).
 
 ### Summary Command Output
 
@@ -159,6 +167,15 @@ pub fn print_cli_result(result: &dyn CliResult, format: &str) {
 This ensures JSON and YAML outputs contain identical structured data — the only difference
 is the serialization format.
 
+`diff` is an exception: it serializes its top-level struct (the `TemplateDiff` document,
+whose `oldJob` and `newJob` are `JobDocument`s) directly with `serde_json::to_string_pretty`
+or `serde_saphyr::to_string`, not through one `serde_json::Value`, so its fields print in the
+structs' order rather than sorted.
+Inside the `diff` document, each `job` tree node and each change's `raw` is a `Value`, so
+their keys are sorted. Neither depends on key order: `taskParameterDefinitions` is a list
+in definition order in every job document (see `specs/model/host-support.md`, "Host
+encoding").
+
 ### JSON/YAML Construction
 
 Each command builds a result struct that implements the `CliResult` trait in `src/common.rs`:
@@ -166,7 +183,8 @@ Each command builds a result struct that implements the `CliResult` trait in `sr
 `src/run/result.rs`. Its `Display` impl gives the human-readable output, and its
 `to_json_value` builds the `serde_json::Value` by hand with `serde_json::Map` and the
 `serde_json::json!()` macro rather than `#[derive(Serialize)]`. So the output field names and
-which fields are omitted are set in `to_json_value`, not by the struct's field types.
+which fields are omitted are set in `to_json_value`, not by the struct's field types. `diff` is
+the exception above: its schema is the serde form of the openjd-model types.
 
 This mirrors the Python CLI, whose result dataclasses (`OpenJDCliResult`,
 `OpenJDJobSummaryResult`, etc.) are rendered by the `@print_cli_result` decorator.

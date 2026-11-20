@@ -14,6 +14,11 @@ use std::path::PathBuf;
 /// Supports `Key=Value`, `file://path` (JSON/YAML), and inline JSON `{...}`.
 /// `float_params` names the FLOAT parameters the templates define, so that a
 /// number given to one is a float value (see `json_val_to_expr`).
+///
+/// Later arguments win. A null value, such as `{"A": null}` inline or in a
+/// JSON file, removes the parameter, so the template default applies, as
+/// deadline's job bundle parameter handling does. deadline's `-p` rejects a
+/// null (deadline-cloud mainline). A file that is only `null` is rejected.
 pub fn parse_cli_parameters(
     args: &[String],
     float_params: &HashSet<String>,
@@ -40,15 +45,18 @@ pub fn parse_cli_parameters(
                 &crate::common::caller_limits(),
             )
             .map_err(|_| format!("Job parameter file '{}' should contain a dictionary.", arg))?;
-            for (k, v) in value.as_object().unwrap() {
-                params.insert(k.clone(), json_val_to_expr(v, float_params.contains(k)));
+            let obj = value.as_object().ok_or_else(|| {
+                format!("Job parameter file '{arg}' should contain a dictionary.")
+            })?;
+            for (k, v) in obj {
+                set_json_param(&mut params, k, v, float_params.contains(k));
             }
         } else if arg.starts_with('{') && arg.ends_with('}') {
             let value: serde_json::Value = serde_json::from_str(arg)
                 .map_err(|_| format!("Job parameter string ('{arg}') not formatted correctly. It must be key=value pairs, inline JSON, or a path to a JSON or YAML document prefixed with 'file://'."))?;
             if let Some(obj) = value.as_object() {
                 for (k, v) in obj {
-                    params.insert(k.clone(), json_val_to_expr(v, float_params.contains(k)));
+                    set_json_param(&mut params, k, v, float_params.contains(k));
                 }
             } else {
                 return Err(format!("Job parameter ('{arg}') must contain a dictionary mapping job parameters to their value.").into());
@@ -82,6 +90,22 @@ pub fn float_parameter_names(
         .filter(|p| p.job_param_type() == openjd_model::types::JobParameterType::Float)
         .map(|p| p.name().to_string())
         .collect()
+}
+
+/// Set a parameter from a JSON or YAML value. A null means the value is not
+/// given, so it removes any earlier value and the template default applies.
+/// `float_param` says the parameter is a FLOAT (see `json_val_to_expr`).
+fn set_json_param(
+    params: &mut HashMap<String, openjd_expr::ExprValue>,
+    key: &str,
+    v: &serde_json::Value,
+    float_param: bool,
+) {
+    if v.is_null() {
+        params.remove(key);
+    } else {
+        params.insert(key.to_string(), json_val_to_expr(v, float_param));
+    }
 }
 
 /// A parameter value from a JSON or YAML document. `float_param` says the

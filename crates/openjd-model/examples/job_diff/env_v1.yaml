@@ -1,0 +1,9 @@
+specificationVersion: environment-2023-09
+environment:
+  name: Conda
+  variables:
+    CONDA_PACKAGES: blender
+  script:
+    actions:
+      onEnter: {command: conda-activate.sh}
+      onExit: {command: conda-deactivate.sh}
