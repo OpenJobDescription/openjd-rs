@@ -75,10 +75,16 @@ mod test_range_expr_canonical;
 mod test_regex_validation;
 #[path = "integration/test_repr_pwsh_roundtrip.rs"]
 mod test_repr_pwsh_roundtrip;
+#[path = "integration/test_repr_sh_shell_words.rs"]
+mod test_repr_sh_shell_words;
 #[path = "integration/test_rfc_examples.rs"]
 mod test_rfc_examples;
+#[path = "integration/test_round_cpython.rs"]
+mod test_round_cpython;
 #[path = "integration/test_slicing.rs"]
 mod test_slicing;
+#[path = "integration/test_string_escapes.rs"]
+mod test_string_escapes;
 #[path = "integration/test_string_operation_counting.rs"]
 mod test_string_operation_counting;
 #[path = "integration/test_strings.rs"]

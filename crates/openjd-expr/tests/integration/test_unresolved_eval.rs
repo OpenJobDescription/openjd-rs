@@ -1696,6 +1696,32 @@ fn round_float_unresolved_ndigits_returns_union() {
     assert_eq!(r.expr_type(), tp("unresolved[float | int]"));
 }
 
+#[test]
+fn round_unresolved_float_literal_ndigits_returns_union() {
+    // Static types come from the signature alone, so a literal ndigits does
+    // not narrow the type: round(float, int) -> float | int.
+    let st = st_unresolved(vec![("X", "float")]);
+    assert_eq!(
+        eval_u("round(X, -1)", &st).expr_type(),
+        tp("unresolved[float | int]")
+    );
+    assert_eq!(
+        eval_u("round(X, 2)", &st).expr_type(),
+        tp("unresolved[float | int]")
+    );
+}
+
+#[test]
+fn round_unresolved_result_accepted_where_int_needed() {
+    // A `float | int` result may be an int, so an int-only parameter accepts
+    // it statically; evaluation then checks the value it gets.
+    let st = st_unresolved(vec![("X", "float")]);
+    assert_eq!(
+        eval_u("range(round(X, -1))", &st).expr_type(),
+        tp("unresolved[list[int]]")
+    );
+}
+
 // === List comprehension filter: unresolved type checking ===
 
 /// Over an unresolved iterable, a filter that can never be a boolean fails

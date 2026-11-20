@@ -1699,6 +1699,192 @@ fn check_embedded_files_data(
     }
 }
 
+/// A step's template-scope symtab with its step-level `let` bindings
+/// evaluated in, built by [`step_let_scope`] (or from [`RetainedBindings`])
+/// and shared by the sites of one step when evaluating them reported
+/// nothing.
+struct StepLetScope {
+    symtab: SymbolTable,
+    names: HashSet<String>,
+}
+
+/// Most bytes [`RetainedBindings`] may hold across all steps at once. This
+/// is the extra peak memory sharing with host requirements costs; real
+/// templates keep a few kilobytes.
+const RETAINED_SCOPE_BUDGET: usize = 4 * 1024 * 1024;
+
+/// A step's clean `let` values, kept from the host-requirements loop for the
+/// step's ranges and body. Only the bindings are kept, not the symtab, and
+/// only values whose heap size is known exactly, so [`Self::bytes`] plus
+/// [`Self::DEQUE_MIN_BYTES`] is at least the bytes their allocations request
+/// (allocator rounding is not counted).
+struct RetainedBindings {
+    step: usize,
+    bindings: Vec<(String, ExprValue)>,
+    bytes: usize,
+}
+
+impl RetainedBindings {
+    /// The deque's smallest nonzero buffer (four entries) less what the
+    /// first entry's charge covers, charged before anything is kept.
+    const DEQUE_MIN_BYTES: usize = 2 * std::mem::size_of::<Self>();
+
+    /// The scope's bindings, or `None` when there are none (nothing to save)
+    /// or a value's heap size is not known exactly.
+    fn from_scope(step: usize, scope: StepLetScope) -> Option<Self> {
+        if scope.names.is_empty() {
+            return None;
+        }
+        // The deque holding entries may have twice the capacity it uses
+        // (its smallest buffer is charged up front, see `DEQUE_MIN_BYTES`).
+        let mut bytes = 2 * std::mem::size_of::<Self>()
+            + scope.names.len() * std::mem::size_of::<(String, ExprValue)>();
+        let mut bindings = Vec::with_capacity(scope.names.len());
+        for name in scope.names {
+            let value = scope.symtab.get_value(&name)?.clone();
+            bytes += name.capacity() + exact_heap_size(&value)?;
+            bindings.push((name, value));
+        }
+        Some(Self {
+            step,
+            bindings,
+            bytes,
+        })
+    }
+
+    /// Bytes charged: twice this entry's deque slot (for spare capacity),
+    /// the bindings vector, and each name's and value's allocation.
+    fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    /// The step's scope again: the base symtab with the bindings set in.
+    fn into_scope(self, base: SymbolTable) -> StepLetScope {
+        let mut symtab = base;
+        let mut names = HashSet::with_capacity(self.bindings.len());
+        for (name, value) in self.bindings {
+            let _ = symtab.set(&name, value);
+            names.insert(name);
+        }
+        StepLetScope { symtab, names }
+    }
+}
+
+/// Heap bytes a scalar value owns, or `None` for lists, ranges, unresolved
+/// types with parameters, and any variant added later, whose allocation this
+/// crate cannot measure.
+fn exact_heap_size(value: &ExprValue) -> Option<usize> {
+    match value {
+        ExprValue::Null | ExprValue::Bool(_) | ExprValue::Int(_) => Some(0),
+        // A parameterless type (`unresolved[int]`) owns no heap.
+        ExprValue::Unresolved(t) if t.params().is_empty() => Some(0),
+        // `memory_size` counts a float's preserved spelling exactly.
+        ExprValue::Float(_) => Some(value.memory_size() - std::mem::size_of::<ExprValue>()),
+        ExprValue::String(s) | ExprValue::Path { value: s, .. } => Some(s.capacity()),
+        _ => None,
+    }
+}
+
+/// The template-scope base symtab for a step: Param.* (non-PATH), RawParam.*,
+/// and with EXPR Job.Name and Step.Name.
+fn step_base_symtab(jt: &JobTemplate, expr_active: bool) -> SymbolTable {
+    let mut symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
+    if expr_active {
+        symtab
+            .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
+            .expect("symtab");
+        symtab
+            .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
+            .expect("symtab");
+    }
+    symtab
+}
+
+/// The template-scope symtab for a step's job-creation-stage fields:
+/// [`step_base_symtab`] with the step-level `let` bindings, evaluated with
+/// `validate_let_bindings`, which reports into `errors`.
+fn step_let_scope(
+    jt: &JobTemplate,
+    step: &StepTemplate,
+    step_path: &[PathElement],
+    expr_active: bool,
+    ev: &FsEval<'_>,
+    profile: &openjd_expr::ExprProfile,
+    errors: &mut ValidationErrors,
+) -> StepLetScope {
+    let mut symtab = step_base_symtab(jt, expr_active);
+    let mut names = HashSet::new();
+    if let (true, Some(bindings)) = (expr_active, &step.let_bindings) {
+        validate_let_bindings(
+            bindings,
+            &path_field(step_path, "let"),
+            &HashSet::new(),
+            &mut names,
+            &mut symtab,
+            ev,
+            profile,
+            errors,
+        );
+    }
+    StepLetScope { symtab, names }
+}
+
+/// The parameterSpace range symtab when the step's bindings are not clean.
+///
+/// Range expressions see a failed binding as unbound, and the failure is
+/// reported at the step as `let binding '<name>'`. For clean bindings the
+/// result equals [`StepLetScope::symtab`], so this runs only for the others,
+/// to keep their diagnostics. Bindings are only evaluated (and so only fail
+/// to be clean) with EXPR.
+fn range_symtab_for_unclean_lets(
+    jt: &JobTemplate,
+    step: &StepTemplate,
+    step_path: &[PathElement],
+    template_ev: &FsEval<'_>,
+    template_profile: &openjd_expr::ExprProfile,
+    errors: &mut ValidationErrors,
+) -> SymbolTable {
+    let mut range_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
+    range_symtab
+        .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
+        .expect("symtab");
+    range_symtab
+        .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
+        .expect("symtab");
+    if let Some(bindings) = &step.let_bindings {
+        for binding in bindings {
+            if let Some(eq_pos) = binding.find('=') {
+                let name = binding[..eq_pos].trim();
+                let expr_str = binding[eq_pos + 1..].trim();
+                if !name.is_empty() && !expr_str.is_empty() {
+                    match openjd_expr::eval::ParsedExpression::with_profile(
+                        expr_str,
+                        template_profile,
+                    ) {
+                        Ok(parsed) => {
+                            match template_ev
+                                .budgeted(parsed.with_library(template_ev.lib))
+                                .evaluate(&[&range_symtab as &SymbolTable])
+                            {
+                                Ok(val) => {
+                                    let _ = range_symtab.set(name, val);
+                                }
+                                Err(e) => {
+                                    errors.add(step_path, format!("let binding '{name}': {e}"));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            errors.add(step_path, format!("let binding '{name}': {e}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    range_symtab
+}
+
 pub fn validate_format_strings(
     jt: &JobTemplate,
     ctx: &ValidationContext,
@@ -1754,33 +1940,26 @@ pub fn validate_format_strings(
     );
 
     // ── Host requirements: template scope + step let bindings ──
+    // A clean scope's bindings are kept for the step's ranges and body while
+    // all kept bindings stay within `RETAINED_SCOPE_BUDGET`; past it, those
+    // sites evaluate the bindings again.
+    let mut retained: std::collections::VecDeque<RetainedBindings> = Default::default();
+    let mut retained_bytes = RetainedBindings::DEQUE_MIN_BYTES;
     for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
         if let Some(hr) = &step.host_requirements {
-            // Build a symtab with Param/RawParam + step let bindings
-            let mut hr_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
-            if expr_active {
-                hr_symtab
-                    .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                hr_symtab
-                    .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                if let Some(bindings) = &step.let_bindings {
-                    let let_path = path_field(&step_path, "let");
-                    let mut hr_let_names = HashSet::new();
-                    validate_let_bindings(
-                        bindings,
-                        &let_path,
-                        &HashSet::new(),
-                        &mut hr_let_names,
-                        &mut hr_symtab,
-                        &template_ev,
-                        &template_profile,
-                        errors,
-                    );
-                }
-            }
+            let before = errors.len();
+            let scope = step_let_scope(
+                jt,
+                step,
+                &step_path,
+                expr_active,
+                &template_ev,
+                &template_profile,
+                errors,
+            );
+            let clean = errors.len() == before;
+            let hr_symtab = &scope.symtab;
             let hr_path = path_field(&step_path, "hostRequirements");
             // §3.3.1.1 / §3.3.2.1: a capability name is `@fmtstring`, and its
             // constraints apply to the resolved name. The name's
@@ -1800,7 +1979,7 @@ pub fn validate_format_strings(
                     let amt_path = path_index(&amounts_path, j);
                     let sr = validate_fs_with(
                         &amt.name,
-                        &hr_symtab,
+                        hr_symtab,
                         &template_ev,
                         &path_field(&amt_path, "name"),
                         Some(&name_constraint),
@@ -1810,7 +1989,7 @@ pub fn validate_format_strings(
                     if let Some(min) = &amt.min {
                         validate_fs_with(
                             min,
-                            &hr_symtab,
+                            hr_symtab,
                             &template_ev,
                             &path_field(&amt_path, "min"),
                             Some(&ResolvedConstraint::Float {
@@ -1823,7 +2002,7 @@ pub fn validate_format_strings(
                     if let Some(max) = &amt.max {
                         validate_fs_with(
                             max,
-                            &hr_symtab,
+                            hr_symtab,
                             &template_ev,
                             &path_field(&amt_path, "max"),
                             Some(&ResolvedConstraint::Float {
@@ -1852,7 +2031,7 @@ pub fn validate_format_strings(
                     let attr_path = path_index(&attrs_path, j);
                     let sr = validate_fs_with(
                         &attr.name,
-                        &hr_symtab,
+                        hr_symtab,
                         &template_ev,
                         &path_field(&attr_path, "name"),
                         Some(&name_constraint),
@@ -1880,7 +2059,7 @@ pub fn validate_format_strings(
                         for (k, v) in any_of.iter().enumerate() {
                             validate_fs_with(
                                 v,
-                                &hr_symtab,
+                                hr_symtab,
                                 &template_ev,
                                 &path_index(&path_field(&attr_path, "anyOf"), k),
                                 Some(&attr_constraint),
@@ -1892,7 +2071,7 @@ pub fn validate_format_strings(
                         for (k, v) in all_of.iter().enumerate() {
                             validate_fs_with(
                                 v,
-                                &hr_symtab,
+                                hr_symtab,
                                 &template_ev,
                                 &path_index(&path_field(&attr_path, "allOf"), k),
                                 Some(&attr_constraint),
@@ -1908,6 +2087,15 @@ pub fn validate_format_strings(
                     &attrs_path,
                     errors,
                 );
+            }
+            if clean {
+                if let Some(kept) = RetainedBindings::from_scope(i, scope) {
+                    let bytes = kept.bytes();
+                    if retained_bytes + bytes <= RETAINED_SCOPE_BUDGET {
+                        retained_bytes += bytes;
+                        retained.push_back(kept);
+                    }
+                }
             }
         }
     }
@@ -1976,56 +2164,49 @@ pub fn validate_format_strings(
     for (i, step) in jt.steps.iter().enumerate() {
         let step_path = vec![PathElement::Field("steps".into()), PathElement::Index(i)];
 
-        // Task parameter ranges use TEMPLATE scope (no PATH Param.*)
+        // Task parameter ranges use TEMPLATE scope (no PATH Param.*).
+        // Step-level let bindings are in template scope and must be visible
+        // in parameterSpace range expressions. When they are clean, the
+        // ranges and the step body below share one evaluation of them.
+        let mut shared_scope = match retained.front() {
+            Some(kept) if kept.step == i => retained
+                .pop_front()
+                .map(|kept| kept.into_scope(step_base_symtab(jt, expr_active))),
+            _ => None,
+        };
         if let Some(ps) = &step.parameter_space {
             let ps_path = path_field(&step_path, "parameterSpace");
             let tpd_path = path_field(&ps_path, "taskParameterDefinitions");
-            let mut range_symtab = build_template_scope_symtab(jt.parameter_definitions.as_deref());
-            if expr_active {
-                range_symtab
-                    .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                range_symtab
-                    .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
-                    .expect("symtab");
-                // Step-level let bindings are in template scope and must be
-                // visible in parameterSpace range expressions.
-                if let Some(bindings) = &step.let_bindings {
-                    for binding in bindings {
-                        if let Some(eq_pos) = binding.find('=') {
-                            let name = binding[..eq_pos].trim();
-                            let expr_str = binding[eq_pos + 1..].trim();
-                            if !name.is_empty() && !expr_str.is_empty() {
-                                match openjd_expr::eval::ParsedExpression::with_profile(
-                                    expr_str,
-                                    &template_profile,
-                                ) {
-                                    Ok(parsed) => {
-                                        match template_ev
-                                            .budgeted(parsed.with_library(template_ev.lib))
-                                            .evaluate(&[&range_symtab as &SymbolTable])
-                                        {
-                                            Ok(val) => {
-                                                let _ = range_symtab.set(name, val);
-                                            }
-                                            Err(e) => {
-                                                errors.add(
-                                                    &step_path,
-                                                    format!("let binding '{name}': {e}"),
-                                                );
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        errors
-                                            .add(&step_path, format!("let binding '{name}': {e}"));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            // Shared only when evaluating them reported nothing (also when
+            // it did not run: no EXPR, or no bindings).
+            if shared_scope.is_none() {
+                let mut let_errors = ValidationErrors::default();
+                let scope = step_let_scope(
+                    jt,
+                    step,
+                    &step_path,
+                    expr_active,
+                    &template_ev,
+                    &template_profile,
+                    &mut let_errors,
+                );
+                shared_scope = let_errors.is_empty().then_some(scope);
             }
+            let unclean_range_symtab;
+            let range_symtab = match &shared_scope {
+                Some(scope) => &scope.symtab,
+                None => {
+                    unclean_range_symtab = range_symtab_for_unclean_lets(
+                        jt,
+                        step,
+                        &step_path,
+                        &template_ev,
+                        &template_profile,
+                        errors,
+                    );
+                    &unclean_range_symtab
+                }
+            };
             for (j, tp) in ps.task_parameter_definitions.iter().enumerate() {
                 let p_path = path_index(&tpd_path, j);
                 // §3.4.2: a STRING/PATH range element may be at most 1024
@@ -2056,7 +2237,7 @@ pub fn validate_format_strings(
                         validate_int_range_fs(
                             &t.range,
                             numeric_item_constraint,
-                            &range_symtab,
+                            range_symtab,
                             &template_ev,
                             &path_field(&p_path, "range"),
                             errors,
@@ -2071,7 +2252,7 @@ pub fn validate_format_strings(
                                 if let crate::template::FloatRangeItem::FormatString(fs) = item {
                                     validate_fs_with(
                                         fs,
-                                        &range_symtab,
+                                        range_symtab,
                                         &template_ev,
                                         &path_index(&path_field(&p_path, "range"), k),
                                         numeric_item_constraint,
@@ -2086,7 +2267,7 @@ pub fn validate_format_strings(
                             for (k, item) in items.iter().enumerate() {
                                 validate_fs_with(
                                     item,
-                                    &range_symtab,
+                                    range_symtab,
                                     &template_ev,
                                     &path_index(&path_field(&p_path, "range"), k),
                                     Some(&string_range_item_constraint),
@@ -2100,7 +2281,7 @@ pub fn validate_format_strings(
                             for (k, item) in items.iter().enumerate() {
                                 validate_fs_with(
                                     item,
-                                    &range_symtab,
+                                    range_symtab,
                                     &template_ev,
                                     &path_index(&path_field(&p_path, "range"), k),
                                     Some(&path_range_item_constraint),
@@ -2113,7 +2294,7 @@ pub fn validate_format_strings(
                         validate_int_range_fs(
                             &t.range,
                             numeric_item_constraint,
-                            &range_symtab,
+                            range_symtab,
                             &template_ev,
                             &path_field(&p_path, "range"),
                             errors,
@@ -2128,7 +2309,7 @@ pub fn validate_format_strings(
                         {
                             validate_fs_with(
                                 fs,
-                                &range_symtab,
+                                range_symtab,
                                 &template_ev,
                                 &path_field(&chunks_path, "defaultTaskCount"),
                                 Some(&ResolvedConstraint::Int {
@@ -2146,7 +2327,7 @@ pub fn validate_format_strings(
                         {
                             validate_fs_with(
                                 fs,
-                                &range_symtab,
+                                range_symtab,
                                 &template_ev,
                                 &path_field(&chunks_path, "targetRuntimeSeconds"),
                                 Some(&ResolvedConstraint::Int {
@@ -2172,36 +2353,30 @@ pub fn validate_format_strings(
         // step let bindings and for `timeout`/`notifyPeriodInSeconds`
         // (plain @fmtstring: resolved at job creation, before any session
         // exists).
-        let mut step_template_symtab =
-            build_template_scope_symtab(jt.parameter_definitions.as_deref());
-        if expr_active {
-            step_template_symtab
-                .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
-                .expect("symtab");
-            step_template_symtab
-                .set("Step.Name", ExprValue::unresolved(ExprType::STRING))
-                .expect("symtab");
-        }
+        let StepLetScope {
+            symtab: step_template_symtab,
+            names: step_let_names,
+        } = match shared_scope {
+            Some(scope) => scope,
+            None => step_let_scope(
+                jt,
+                step,
+                &step_path,
+                expr_active,
+                &template_ev,
+                &template_profile,
+                errors,
+            ),
+        };
 
-        // Let bindings: validate and evaluate into symtab if EXPR, reject if not.
+        // Let bindings: evaluated above if EXPR, rejected if not.
         // Step-level let bindings are TEMPLATE scope (template_lib, no Session.*, no PATH Param.*).
         // Script-level let bindings are TASK scope (host_lib).
-        if let Some(bindings) = &step.let_bindings {
+        if step.let_bindings.is_some() {
             let let_path = path_field(&step_path, "let");
             if !expr_active {
                 errors.add(&let_path, "'let' requires the EXPR extension.");
             } else {
-                let mut step_let_names = HashSet::new();
-                validate_let_bindings(
-                    bindings,
-                    &let_path,
-                    &HashSet::new(),
-                    &mut step_let_names,
-                    &mut step_template_symtab,
-                    &template_ev,
-                    &template_profile,
-                    errors,
-                );
                 // Copy evaluated let bindings into task_symtab so script-level code can use them
                 for name in &step_let_names {
                     if let Some(val) = step_template_symtab.get_value(name) {
@@ -2210,6 +2385,7 @@ pub fn validate_format_strings(
                 }
             }
         }
+        drop(step_let_names);
 
         if let Some(script) = &step.script {
             validate_step_script_format_strings(
@@ -2872,6 +3048,31 @@ pub(crate) fn check_carried_forward_let_bindings(
             &ev,
             &profile,
             errors,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The charge for one kept binding covers its deque slots, its entry in
+    /// the bindings vector, its name, and its value.
+    #[test]
+    fn retained_bindings_charge_every_allocation() {
+        let mut symtab = SymbolTable::new();
+        symtab.set("ab", ExprValue::String("xyz".into())).unwrap();
+        let scope = StepLetScope {
+            symtab,
+            names: HashSet::from(["ab".to_string()]),
+        };
+        let kept = RetainedBindings::from_scope(0, scope).unwrap();
+        assert_eq!(
+            kept.bytes(),
+            2 * std::mem::size_of::<RetainedBindings>()
+                + std::mem::size_of::<(String, ExprValue)>()
+                + 2
+                + 3
         );
     }
 }

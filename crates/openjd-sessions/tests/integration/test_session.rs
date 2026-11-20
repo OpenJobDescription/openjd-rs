@@ -3389,7 +3389,10 @@ mod cancel_escalation {
         (s, writer_path)
     }
 
-    /// With no time_limit, the default notify period is 5s.
+    /// No action is running, so no cancel method is recorded: with no
+    /// time_limit the command falls back to the 5s default notify period.
+    /// (A running action's command follows its own method; see the
+    /// `handle_cancel_*` tests below.)
     #[tokio::test(flavor = "multi_thread")]
     async fn default_grace_sends_notify_then_terminate() {
         let tmp = TempDir::new().unwrap();
@@ -3417,7 +3420,7 @@ mod cancel_escalation {
         );
     }
 
-    /// Custom grace (8s) — e.g. set via a job template's cancelation timeout.
+    /// No cancel method recorded: an 8s time_limit is used as the grace.
     #[tokio::test(flavor = "multi_thread")]
     async fn custom_grace_8s_sends_correct_notify_period() {
         let tmp = TempDir::new().unwrap();
@@ -3521,8 +3524,17 @@ mod cancel_escalation {
             *delivered_clone.lock().unwrap() = Some(handle.cancel(None, false));
         });
 
+        // A NOTIFY_THEN_TERMINATE(5) step: the handle's command carries the
+        // declared grace. (An undeclared step is TERMINATE; see
+        // `handle_cancel_on_terminate_action_writes_terminate`.)
         let r = s
-            .run_task("t", &step("sh", vec!["-c", "sleep 30"]), None, None, None)
+            .run_task(
+                "t",
+                &step_with_ntt_cancel("sh", vec!["-c", "sleep 30"], 5),
+                None,
+                None,
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(r.state, ActionState::Canceled);
@@ -3661,15 +3673,328 @@ mod cancel_escalation {
         );
     }
 
-    /// Actions that do not declare notifyThenTerminate keep the legacy
-    /// behavior: the caller's time_limit is used as-is.
-    #[tokio::test(flavor = "multi_thread")]
-    async fn handle_cancel_without_declared_cancelation_passes_time_limit_through() {
+    /// An action that declares no cancelation is a TERMINATE action, and
+    /// the same-user path kills it at once whatever the time_limit
+    /// (`subprocess.rs`). The helper command must be TERMINATE too, not
+    /// NOTIFY_THEN_TERMINATE with the time_limit or a default grace.
+    async fn assert_terminate_action_writes_terminate(time_limit: Option<Duration>) {
         let script = step("sh", vec!["-c", "sleep 30"]);
-        let msgs = run_and_handle_cancel(&script, Some(Duration::from_secs(60))).await;
+        let msgs = run_and_handle_cancel(&script, time_limit).await;
+        assert_eq!(msgs.len(), 1, "time_limit {time_limit:?}: {msgs:?}");
+        assert_eq!(
+            msgs[0]["cancel"].as_str().unwrap(),
+            "TERMINATE",
+            "a TERMINATE action must get a TERMINATE command, time_limit {time_limit:?}"
+        );
+        assert!(
+            msgs[0].get("notifyPeriodInSeconds").is_none(),
+            "TERMINATE should not include notifyPeriodInSeconds"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_terminate_action_writes_terminate() {
+        assert_terminate_action_writes_terminate(None).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_terminate_action_ignores_time_limit() {
+        assert_terminate_action_writes_terminate(Some(Duration::from_secs(60))).await;
+    }
+
+    /// `run_subprocess` runs its command as a TERMINATE action, so a handle
+    /// cancel must write TERMINATE for it too.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_run_subprocess_writes_terminate() {
+        let tmp = TempDir::new().unwrap();
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        let writer_path = tmp.path().join("cancel_writer.log");
+        let writer = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&writer_path)
+            .unwrap();
+        s.set_cancel_writer_for_test(writer);
+
+        let handle = s.cancel_handle();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            handle.cancel(None, false);
+        });
+
+        let r = s
+            .run_subprocess("sleep", Some(&["30".to_string()]), None, None, true, None)
+            .await
+            .unwrap();
+        assert_eq!(r.state, ActionState::Canceled);
+        let msgs = read_cancel_messages(&writer_path);
+        assert_eq!(msgs.len(), 1, "{msgs:?}");
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "TERMINATE");
+    }
+
+    /// `cancelation` declaring NOTIFY_THEN_TERMINATE, with `secs` as the
+    /// notify period or no period.
+    fn ntt_cancelation(secs: Option<u64>) -> Option<CancelationMode> {
+        Some(CancelationMode::NotifyThenTerminate {
+            notify_period_in_seconds: secs.map(|n| fs(&n.to_string())),
+        })
+    }
+
+    fn sleep_action(cancelation: Option<CancelationMode>) -> Action {
+        let mut a = action("sh", vec!["-c", "sleep 30"]);
+        a.cancelation = cancelation;
+        a
+    }
+
+    fn env(
+        name: &str,
+        on_enter: Option<Action>,
+        on_wrap_env_enter: Option<Action>,
+        on_exit: Option<Action>,
+    ) -> Environment {
+        wrap_env(name, on_enter, on_wrap_env_enter, None, None, on_exit)
+    }
+
+    fn wrap_env(
+        name: &str,
+        on_enter: Option<Action>,
+        on_wrap_env_enter: Option<Action>,
+        on_wrap_task_run: Option<Action>,
+        on_wrap_env_exit: Option<Action>,
+        on_exit: Option<Action>,
+    ) -> Environment {
+        Environment {
+            name: name.into(),
+            description: None,
+            script: Some(EnvironmentScript {
+                let_bindings: None,
+                actions: EnvironmentActions {
+                    on_enter,
+                    on_wrap_env_enter,
+                    on_wrap_task_run,
+                    on_wrap_env_exit,
+                    on_exit,
+                },
+                embedded_files: None,
+            }),
+            variables: None,
+            resolved_symtab: None,
+        }
+    }
+
+    /// A session with an injected cancel pipe, and a handle that cancels
+    /// whatever runs 200 ms after `arm` is called.
+    fn session_and_pipe(tmp: &TempDir) -> (Session, std::path::PathBuf) {
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        let writer_path = tmp.path().join("cancel_writer.log");
+        let writer = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&writer_path)
+            .unwrap();
+        s.set_cancel_writer_for_test(writer);
+        (s, writer_path)
+    }
+
+    fn arm(s: &Session, time_limit: Option<Duration>) {
+        let handle = s.cancel_handle();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            assert!(handle.cancel(time_limit, false), "nothing was running");
+        });
+    }
+
+    /// Cancel `env`'s onEnter through the handle and return the command.
+    async fn env_enter_cancel_command(
+        s: &mut Session,
+        path: &std::path::Path,
+        env: &Environment,
+    ) -> serde_json::Value {
+        arm(s, None);
+        let _ = s.enter_environment(env, None, None, None).await;
+        let msgs = read_cancel_messages(path);
+        assert_eq!(msgs.len(), 1, "{msgs:?}");
+        msgs[0].clone()
+    }
+
+    fn assert_command(msg: &serde_json::Value, expected: Option<u64>) {
+        match expected {
+            None => assert_eq!(msg["cancel"].as_str().unwrap(), "TERMINATE", "{msg}"),
+            Some(n) => {
+                assert_eq!(
+                    msg["cancel"].as_str().unwrap(),
+                    "NOTIFY_THEN_TERMINATE",
+                    "{msg}"
+                );
+                assert_eq!(msg["notifyPeriodInSeconds"].as_u64().unwrap(), n, "{msg}");
+            }
+        }
+    }
+
+    /// onEnter records its own method: TERMINATE when it declares none,
+    /// and the environment default of 30 s for NOTIFY_THEN_TERMINATE with
+    /// no period.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_enter_follows_its_cancel_method() {
+        for (cancelation, expected) in [(None, None), (ntt_cancelation(None), Some(30))] {
+            let tmp = TempDir::new().unwrap();
+            let (mut s, path) = session_and_pipe(&tmp);
+            let e = env("E", Some(sleep_action(cancelation)), None, None);
+            let msg = env_enter_cancel_command(&mut s, &path, &e).await;
+            assert_command(&msg, expected);
+        }
+    }
+
+    /// onExit records its own method, as onEnter does.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_exit_follows_its_cancel_method() {
+        for (cancelation, expected) in [(None, None), (ntt_cancelation(None), Some(30))] {
+            let tmp = TempDir::new().unwrap();
+            let (mut s, path) = session_and_pipe(&tmp);
+            let e = env("E", None, None, Some(sleep_action(cancelation)));
+            let id = s.enter_environment(&e, None, None, None).await.unwrap();
+            arm(&s, None);
+            let _ = s.exit_environment(&id, None, true, None).await;
+            let msgs = read_cancel_messages(&path);
+            assert_eq!(msgs.len(), 1, "{msgs:?}");
+            assert_command(&msgs[0], expected);
+        }
+    }
+
+    /// A task that declares NOTIFY_THEN_TERMINATE with no period records
+    /// the task default of 120 s.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_task_without_notify_period_uses_task_default() {
+        let script = StepScript {
+            let_bindings: None,
+            actions: StepActions {
+                on_run: sleep_action(ntt_cancelation(None)),
+            },
+            embedded_files: None,
+        };
+        let msgs = run_and_handle_cancel(&script, None).await;
         assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "NOTIFY_THEN_TERMINATE");
-        assert_eq!(msgs[0]["notifyPeriodInSeconds"].as_u64().unwrap(), 60);
+        assert_command(&msgs[0], Some(120));
+    }
+
+    /// When a wrap environment's onWrapEnvEnter replaces an inner onEnter,
+    /// the method recorded is the wrap action's, not the inner action's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_wrapped_enter_follows_the_wrap_action() {
+        for (wrap_cancel, inner_cancel, expected) in wrap_cases() {
+            let tmp = TempDir::new().unwrap();
+            let (mut s, path) = session_and_pipe(&tmp);
+            let outer = env(
+                "Outer",
+                Some(action("true", vec![])),
+                Some(sleep_action(wrap_cancel)),
+                None,
+            );
+            s.enter_environment(&outer, None, None, None).await.unwrap();
+            let inner = env("Inner", Some(sleep_action(inner_cancel)), None, None);
+            let msg = env_enter_cancel_command(&mut s, &path, &inner).await;
+            assert_command(&msg, expected);
+        }
+    }
+
+    /// The two cases each wrap test runs: a NOTIFY_THEN_TERMINATE(7) wrap
+    /// action over an inner action that declares nothing (expect NTT 7),
+    /// and a wrap action that declares nothing over an inner NTT(7)
+    /// (expect TERMINATE).
+    fn wrap_cases() -> [(
+        Option<CancelationMode>,
+        Option<CancelationMode>,
+        Option<u64>,
+    ); 2] {
+        [
+            (ntt_cancelation(Some(7)), None, Some(7)),
+            (None, ntt_cancelation(Some(7)), None),
+        ]
+    }
+
+    /// When onWrapEnvExit replaces an inner onExit, the recorded method is
+    /// the wrap action's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_wrapped_exit_follows_the_wrap_action() {
+        for (wrap_cancel, inner_cancel, expected) in wrap_cases() {
+            let tmp = TempDir::new().unwrap();
+            let (mut s, path) = session_and_pipe(&tmp);
+            let outer = wrap_env(
+                "Outer",
+                Some(action("true", vec![])),
+                None,
+                None,
+                Some(sleep_action(wrap_cancel)),
+                None,
+            );
+            s.enter_environment(&outer, None, None, None).await.unwrap();
+            let inner = env("Inner", None, None, Some(sleep_action(inner_cancel)));
+            let id = s.enter_environment(&inner, None, None, None).await.unwrap();
+            arm(&s, None);
+            let _ = s.exit_environment(&id, None, true, None).await;
+            let msgs = read_cancel_messages(&path);
+            assert_eq!(msgs.len(), 1, "{msgs:?}");
+            assert_command(&msgs[0], expected);
+        }
+    }
+
+    /// When onWrapTaskRun replaces a task's onRun, the recorded method is
+    /// the wrap action's.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_on_wrapped_task_follows_the_wrap_action() {
+        for (wrap_cancel, inner_cancel, expected) in wrap_cases() {
+            let tmp = TempDir::new().unwrap();
+            let (mut s, path) = session_and_pipe(&tmp);
+            let outer = wrap_env(
+                "Outer",
+                Some(action("true", vec![])),
+                None,
+                Some(sleep_action(wrap_cancel)),
+                None,
+                None,
+            );
+            s.enter_environment(&outer, None, None, None).await.unwrap();
+            let script = StepScript {
+                let_bindings: None,
+                actions: StepActions {
+                    on_run: sleep_action(inner_cancel),
+                },
+                embedded_files: None,
+            };
+            arm(&s, None);
+            let _ = s.run_task("t", &script, None, None, None).await;
+            let msgs = read_cancel_messages(&path);
+            assert_eq!(msgs.len(), 1, "{msgs:?}");
+            assert_command(&msgs[0], expected);
+        }
+    }
+
+    /// Once an action has ended, a handle reports that nothing is running
+    /// (session.md § SessionCancelHandle) and writes no command.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_after_action_ended_finds_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let (mut s, path) = session_and_pipe(&tmp);
+        let handle = s.cancel_handle();
+        s.run_subprocess("true", None, None, None, true, None)
+            .await
+            .unwrap();
+        assert!(
+            !handle.cancel(None, false),
+            "the handle reported a running action after it ended"
+        );
+        assert!(read_cancel_messages(&path).is_empty());
+    }
+
+    /// A time_limit under one second truncates to zero whole seconds on the
+    /// wire, so a NOTIFY_THEN_TERMINATE action gets TERMINATE rather than a
+    /// grace longer than the caller allowed.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn handle_cancel_sub_second_time_limit_writes_terminate() {
+        let script = step_with_ntt_cancel("sh", vec!["-c", "sleep 30"], 3);
+        let msgs = run_and_handle_cancel(&script, Some(Duration::from_millis(500))).await;
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["cancel"].as_str().unwrap(), "TERMINATE");
     }
 }
 
@@ -4275,4 +4600,57 @@ async fn test_runner_resolution_error_records_fail_message() {
         msg.contains("No.Such.Symbol"),
         "fail_message should identify the unresolvable symbol, got: {msg}"
     );
+}
+
+/// Same-user counterpart of the cross-user cancel-before-Run tests in
+/// `test_cross_user.rs`: a canceller that spins on a `SessionCancelHandle`
+/// from before the task starts cancels it right after it registers. The
+/// same-user loop spawns the process and then kills it, so the 6 s task
+/// ends at once and never prints FINISHED. Three runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn spinning_cancel_handle_stops_task_at_once() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    for run in 0..3 {
+        let tmp = TempDir::new().unwrap();
+        let mut s = Session::new_for_test(tmp.path().to_path_buf());
+        let handle = s.cancel_handle();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_spinner = stop.clone();
+        let spinner = std::thread::spawn(move || {
+            while !stop_spinner.load(Ordering::Relaxed) {
+                if handle.cancel(None, false) {
+                    return true;
+                }
+                std::hint::spin_loop();
+            }
+            false
+        });
+        let started = std::time::Instant::now();
+        let r = s
+            .run_task(
+                "t",
+                &step("sh", vec!["-c", "sleep 6; echo FINISHED"]),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+        let elapsed = started.elapsed();
+        stop.store(true, Ordering::Relaxed);
+        assert!(
+            spinner.join().unwrap(),
+            "run {run}: the handle must find the task"
+        );
+        assert_eq!(r.state, ActionState::Canceled, "run {run}");
+        assert!(
+            !r.stdout.contains("FINISHED"),
+            "run {run}: stdout: {}",
+            r.stdout
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "run {run}: the task must be killed at once, took {elapsed:?}"
+        );
+    }
 }

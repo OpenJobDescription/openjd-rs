@@ -34,7 +34,8 @@ Session::with_config(user=job-user)
   │           --auth-token <TOKEN>
   │    (1 second login cost, paid once; token passed as CLI arg)
   │
-  └─ Dup helper stdin fd → cancel_writer (for cancel_action from any thread)
+  └─ Dup helper stdin fd → cancel_writer (for cancel_action and cancel handles
+       from any thread)
        │
        └─ Helper process (running as job-user)
             ├─ Parses --auth-token from argv at startup
@@ -48,6 +49,7 @@ Session::with_config(user=job-user)
 session.enter_environment(...)   ─── stdin JSON (+token) ──→ helper ──→ fork/exec onEnter
 session.run_task(...)            ─── stdin JSON (+token) ──→ helper ──→ fork/exec command
 session.cancel_action(...)       ─── cancel_writer (+token) ──→ helper stdin ──→ killpg child
+  (before Run: held by the run gate, then sent after Run through the helper's stdin)
 session.cleanup()                ─── {"shutdown":true, "token":...} ──→ helper exits
 ```
 
@@ -445,18 +447,33 @@ fresh 22-byte `getrandom` buffer), formats the helper argv as
 `[helper_path, "--auth-token", <TOKEN>]`, and stores the string on the
 struct. `send_command` takes the caller's serde_json body and merges
 `"token"` into it before writing; callers cannot forget to include it.
-`auth_token` exposes the string so `run_via_helper` can include it when
-writing cancel commands through the dup'd `cancel_writer` (which doesn't
-go through `send_command`).
+`auth_token` exposes the string so the session can store it and include it
+in the cancel commands it writes through the dup'd `cancel_writer` (which
+doesn't go through `send_command`).
 
 Reading is done via the `AsyncHelperReader` trait (see below).
 
 ### Cancel via dup'd stdin fd
 
 At spawn time, the helper's stdin fd is `dup()`d into a separate `File` handle
-stored as `Session.cancel_writer`. This allows `cancel_action` to write cancel
-commands to the helper's stdin from any thread, even while the helper struct
-is owned by a runner during action execution.
+stored as `Session.cancel_writer`, an `Arc<File>`. This allows `cancel_action`
+and `SessionCancelHandle::cancel` to write cancel commands to the helper's
+stdin from any thread, even while the helper struct is owned by a runner during
+action execution. A failed dup fails session setup, so a session with a helper
+always has this pipe.
+
+This is the only dup the cancel paths use. Every `SessionCancelHandle` shares
+the session's `Arc<File>` (`&File` implements `Write`), so getting a handle
+can't fail. `run_via_helper` writes its own cancel commands (the timeout, a
+bare token cancel, and a cancel held before Run) with `send_command`, through
+the helper's own stdin, which the runner owns during the action. So no cancel
+depends on a dup made after setup, which could fail when the process is out
+of file descriptors. (Before this, the runner and each handle took their own
+dup; a failed one left a timeout, a bare token cancel, or a handle cancel
+after Run with nothing to write, and the action ran to completion while it
+was still reported `Canceled`.) A test-only seam,
+`Session::fail_cancel_pipe_dup_for_test` (feature `test-utils`), makes every
+later dup of the pipe fail, so tests check that no cancel path needs one.
 
 ```rust
 // In CrossUserHelper::spawn:
@@ -464,15 +481,17 @@ let raw_fd = child_stdin.as_raw_fd();
 let dup_fd = nix::unistd::dup(raw_fd)?;
 let cancel_writer = File::from_raw_fd(dup_fd);
 
-// In Session::cancel_action (token is the helper's 22-char auth_token):
-if let Some(ref mut writer) = self.cancel_writer {
-    writeln!(
-        writer,
-        r#"{{"token":"{token}","cancel":"NOTIFY_THEN_TERMINATE","notifyPeriodInSeconds":5}}"#,
-        token = self.helper_auth_token,
-    )?;
-    writer.flush()?;
-}
+// In Session::cancel_action (token is the helper's 22-char auth_token;
+// method is the action's recorded cancel method). The action's run gate
+// writes now if the helper has the action's Run command, and otherwise
+// holds the cancel for run_via_helper (see "Cancel before Run" below):
+run_gate.deliver_cancel(time_limit, || {
+    if let Some(ref writer) = self.cancel_writer {
+        let line = format!("{}\n", helper_cancel_line(token, method, time_limit));
+        writer.write_all(line.as_bytes())?;  // one write per line
+        writer.flush()?;
+    }
+});
 ```
 
 The session stores the token string alongside the `cancel_writer` so the
@@ -481,11 +500,137 @@ a runner). The token is copied once at helper spawn and never mutated.
 Because the alphabet excludes `"` and `\`, the token can be embedded
 verbatim in the JSON literal — no escaping required.
 
+### Choosing the cancel command
+
+Every cancel command the session writes comes from one builder,
+`cross_user_helper::helper_cancel_line(token, method, time_limit)`.
+`cancel_action` and `SessionCancelHandle::cancel` call it with the caller's
+`time_limit`; `run_via_helper`'s timeout and bare-token branches call it with
+no `time_limit`; and `run_via_helper` calls it for a cancel held before Run
+with that cancel's `time_limit` (see [Cancel before Run](#cancel-before-run)). It picks the wire method the way the same-user loop picks its
+signal (`subprocess.rs`):
+
+| Action's cancel method | Command |
+|---|---|
+| `Terminate` (including an action that declares no cancelation, and `run_subprocess`) | `TERMINATE`, whatever the `time_limit` |
+| `NotifyThenTerminate { terminate_delay }` | grace = the smaller of `time_limit` and `terminate_delay` (`terminate_delay` alone without a `time_limit`), truncated to whole seconds; `TERMINATE` if that is 0, else `NOTIFY_THEN_TERMINATE` with that many seconds |
+
+`notifyPeriodInSeconds` is a whole number of seconds, so a grace under one
+second (a sub-second `time_limit`, or `Some(0)`) gives `TERMINATE`: truncating
+never extends the grace past the caller's bound. The same-user loop keeps the
+sub-second grace (it notifies and kills after the exact `Duration`), which the
+wire can't express.
+
+The method is the one `runner::cancel_method_for_action` resolves for the
+action that will run, recorded in the shared cancel state once any wrap hook
+has been applied. The session resolves it against the action's symbol table
+before the script's `let` bindings, and the runner after them. They agree for
+every cancelation a template can declare, because validation keeps
+cancelation fields at template scope; a job built through the API whose
+cancelation refers to a `let` binding fails to resolve in the session and gets
+the command below. When no method is recorded because it failed to resolve,
+a cancel after Run from `cancel_action` or the handle passes the builder a `NotifyThenTerminate` whose
+grace is the `time_limit`, or `DEFAULT_CANCEL_NOTIFY_PERIOD_SECS` (5) without
+one; so a `time_limit` under one second gives `TERMINATE`. A cancel that lands
+before the method is recorded is also before Run, so the run gate holds it and
+`run_via_helper` builds its command from the runner's method (below).
+
+### Cancel before Run
+
+The helper applies a cancel only while it runs a command. With no command
+running, the Unix helper reads a cancel line and drops it (`helper/src/main.rs`
+`run_unix`); the Windows helper's stdin thread queues it, and the next Run
+applies it (`run_windows`, `runner_win.rs`). `cancel_action` and
+`SessionCancelHandle` find an action as soon as it registers, which is before
+`run_via_helper` writes the Run command, so a cancel in that window was lost on
+Unix. Each action registers a
+`cross_user_helper::HelperRunGate`, which orders these cancels against Run
+under one lock:
+
+- `cancel_action` and the handle call `HelperRunGate::deliver_cancel`. Once
+  Run is written, it writes their command at once. Before that, it holds the
+  cancel's `time_limit` and writes nothing; a later cancel before Run
+  replaces it, as the same-user loop reads only the watch channel's latest
+  value.
+- `run_via_helper` calls `HelperRunGate::start_run`, which writes Run and
+  then the held cancel, if any, before it releases the lock. That command is
+  `helper_cancel_line(None, config.cancel_method, time_limit)` (`send_command`
+  adds the token), the
+  runner's method with the held `time_limit`, which is what the same-user
+  loop applies. It goes through the helper's own stdin (`send_command`). If
+  that write fails, the action isn't failed: the run loop goes on reading
+  the helper's responses.
+
+So every one of these cancels follows Run in pipe order, and it is written
+once: by the canceller or by `run_via_helper`, never both. As on the same-user
+path, which spawns the process and then signals it, the action starts and is
+then cancelled by its own method. Refusing to send Run would also stop the
+work, but the action would then end without starting, unlike same-user.
+`run_via_helper` counts a held cancel as delivered: it alone makes the exit
+`Canceled` (a guard, since the session's cancellers have already sent the
+watch value), and neither the timeout nor the token branch sends a second
+command. The canceller sends the watch value before it writes or holds the
+command, and cancels the token last, so a helper that kills the process and
+reports its exit at once still has the exit classified `Canceled`, and the
+token branch still sees the watch has fired. Each cancel command is one
+write of a whole line, so on Unix (a write under `PIPE_BUF` is atomic) two
+cancel commands written at the same moment (a handle and the timeout or
+token branch, which write through the helper's buffered stdin and flush
+it after each command) don't interleave. The lock also keeps a cancel line out of the middle of a Run line
+longer than the pipe's atomic write size. Each action has its own gate, so a
+held cancel for an action whose Run is never written (its setup failed) is
+dropped with it. The gate isn't closed when the action ends: a cancel that
+lands after the action exits is written to a helper with no command running,
+as before (dropped on Unix, queued for the next Run on Windows). Only a
+session with a helper uses the gate; a same-user session writes a
+test-injected cancel pipe at once.
+
+A test-only hook (`Session::set_before_helper_run_hook_for_test`, feature
+`test-utils`) runs right before `start_run` takes the lock, so a test can
+cancel in this window deterministically.
+
+A test-only `#[path]` include of `helper/src/protocol.rs` (as for
+`framer.rs`) parses every command the builder produces with the helper's own
+`Command` deserializer.
+
 ### Timeout
 
 Action timeouts use `tokio::time::sleep` in a `select!` branch within the
 async `run_via_helper`. When the timeout fires, a cancel command is written
-to the helper's stdin via the `cancel_writer`. No OS thread needed.
+to the helper's stdin with `send_command`. No OS thread needed.
+
+### External cancel token
+
+A cross-user action can also be canceled through the session-wide
+`SessionConfig.cancel_token` with a bare `token.cancel()`, rather than through
+`cancel_action` / `SessionCancelHandle`. Each action's token is a child of it.
+`run_via_helper` takes the per-action
+`CancellationToken` and awaits it in a third `select!` branch, mirroring the
+same-user loop. When that branch fires it writes a cancel command to the
+helper's stdin with `send_command` (which adds the token), built from the
+action's configured cancel method and no
+`time_limit`, as the timeout branch does (see
+[Choosing the cancel command](#choosing-the-cancel-command)): `TERMINATE` for a `TERMINATE` action, `NOTIFY_THEN_TERMINATE`
+with the declared grace period otherwise, which is what the same-user loop
+applies for a token cancel. The exit is classified `Timeout` if the timeout
+fired, otherwise `Canceled` when the watch channel fired, the token is
+cancelled, **or** a cancel held before Run was written.
+
+`run_via_helper` itself sends at most one cancel command per action, whichever
+of the timeout, a bare token cancel and a cancel held before Run comes first. As in the same-user loop,
+the timeout branch is disabled once a cancel has been delivered, so a cancel
+whose grace period outlasts the timeout still ends `Canceled`, and a later
+token cancel doesn't follow a timeout with a second command (which would reset
+the helper's escalation deadline). Once Run is written, `cancel_action` /
+`SessionCancelHandle` always write their own command, so a later handle cancel
+can still shorten or reset the helper's deadline; before Run the gate keeps only
+the latest one.
+
+`cancel_action` / `SessionCancelHandle` fire the watch channel and write the
+pipe command (or have the run gate hold it) before canceling the token, so the token branch
+checks `cancel_request_rx.has_changed()` and skips a second write when the
+watch channel already delivered — only a bare token cancel reaches the helper
+through this branch.
 
 ### Helper ownership during actions
 
@@ -495,7 +640,8 @@ borrow conflicts with `&mut self` on Session:
 ```rust
 // In Session::enter_environment:
 let mut runner = EnvironmentScriptRunner::new(...)
-    .with_helper(self.helper.take().unwrap());
+    .with_helper(self.helper.take().unwrap())
+    .with_helper_run_gate(run_gate);  // from cancel.set_action
 
 let result = self.drive_action(runner.enter(...), &mut rx, &id).await?;
 
@@ -560,9 +706,21 @@ async fn run_via_helper(
     filter: &mut ActionFilter,
     session_id: &str,
     message_tx: UnboundedSender<ActionMessage>,
-    cancel_writer: Option<&File>,
+    run_gate: Option<&HelperRunGate>,
+    cancel_token: &CancellationToken,
 ) -> Result<SubprocessResult, SessionError> {
-    helper.send_command(&cmd)?;
+    // Run, then any cancel held for it (see "Cancel before Run").
+    match run_gate {
+        Some(gate) => gate.start_run(
+            helper,
+            |h| h.send_command(&cmd),
+            // send_cancel_command(h, &config.cancel_method, limit, ..):
+            // helper_cancel_line(None, ..) sent with h.send_command; a
+            // failure is logged, not returned.
+            |h, limit| { /* ... */ Ok(()) },
+        )?,
+        None => helper.send_command(&cmd)?,
+    }
 
     let timeout_fut = match config.timeout {
         Some(d) => tokio::time::sleep(d).boxed(),
@@ -573,10 +731,19 @@ async fn run_via_helper(
     loop {
         tokio::select! {
             resp = helper.async_reader().next_response() => {
-                // process pid/out/exited/error, feed through ActionFilter
+                // process pid/out/exited/error, feed through ActionFilter;
+                // classify Timeout if the timeout fired, else Canceled when
+                // the watch channel fired, the token is cancelled, OR a
+                // cancel held before Run was written
             }
-            _ = &mut timeout_fut, if !timed_out => {
-                // write cancel to helper via cancel_writer
+            // The reader future is dropped before a branch body runs, so
+            // the bodies below can call send_command on the helper.
+            _ = cancel_token.cancelled(), if !token_seen => {
+                // bare external token cancel: send_cancel_command(helper,
+                // ..) unless the watch channel already fired
+            }
+            _ = &mut timeout_fut, if !timed_out && !cancel_delivered => {
+                // send_cancel_command(helper, ..)
             }
         }
     }
@@ -647,6 +814,8 @@ Additional token-focused tests added in `helper/tests/test_helper_protocol.rs`:
 - **Environment**: Job-user login env from `sudo -i` + per-action overrides
 - **Stdin sharing**: Single `BufReader` shared between main loop and runner (critical for cancel)
 - **Cancel mechanism**: Dup'd stdin fd on Session, writable from any thread
+  and shared with every cancel handle; `run_via_helper` writes its own
+  cancels through the helper's stdin
 - **Authentication**: Random 128-bit per-helper token rendered as 22 ASCII
   characters from a 64-char URL-safe alphabet (direct `byte & 0x3F` draw,
   no rejection sampling, no encoder dependency); passed once via

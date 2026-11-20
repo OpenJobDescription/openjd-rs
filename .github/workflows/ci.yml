@@ -132,9 +132,8 @@ jobs:
     # workspace-only rebuilds, with no measurable change in test run time
     # (the slow tests wait on subprocesses, not CPU). Setting it via env
     # keeps output in target/release/, which build.rs (helper binary) and
-    # the artifact upload rely on. clippy-all-features and
-    # cross-user-windows must use the same value to reuse this job's cache,
-    # and the value is part of the cache key.
+    # the artifact upload rely on. cross-user-windows must use the same
+    # value to reuse this job's cache, and the value is part of the cache key.
     env:
       CARGO_PROFILE_RELEASE_OPT_LEVEL: 1
     strategy:
@@ -200,8 +199,15 @@ jobs:
         run: cp crates/openjd-sessions/src/helper/Cargo.bundled.toml crates/openjd-sessions/src/helper/Cargo.toml
       - name: Build workspace (lib, bin, tests)
         run: cargo test --release --workspace --exclude openjd-for-js --all-targets --no-run
+      # Linux lints with every feature on, so optional-feature code (the
+      # openjd-snapshots `bench` binary, openjd-sessions `fuzzing` and
+      # `test-utils`) is checked on every PR. On Linux no code is compiled
+      # only with a feature off, so this covers everything the default-feature
+      # run would. macOS and Windows keep default features, which lints the
+      # Windows code that `test-utils` changes (openjd-sessions'
+      # `win32_permissions` visibility) the way it ships.
       - name: Run cargo clippy
-        run: cargo clippy --release --all-targets --workspace --exclude openjd-for-js -- -D warnings
+        run: cargo clippy --release --all-targets --workspace --exclude openjd-for-js ${{ matrix.os == 'ubuntu-latest' && '--all-features' || '' }} -- -D warnings
       - name: Run helper clippy
         run: cargo clippy --release --manifest-path crates/openjd-sessions/src/helper/Cargo.toml -- -D warnings
       # Use cargo-nextest for the workspace test step. Nextest runs each
@@ -303,47 +309,6 @@ jobs:
             target
             crates/openjd-sessions/src/helper/target
           key: ${{ steps.cache.outputs.cache-primary-key }}
-
-  # Full-feature clippy exercises optional-feature code paths (like the
-  # openjd-snapshots `bench` feature that pulls in clap, rand, tempfile, and
-  # aws-config). It adds ~1-2 minutes on top of the regular clippy run and
-  # rarely surfaces issues the feature-unified clippy misses, so run it only
-  # on `main` pushes instead of gating every PR on it.
-  clippy-all-features:
-    name: Clippy (all features)
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    # Must match build-test so its cache is reusable.
-    env:
-      CARGO_PROFILE_RELEASE_OPT_LEVEL: 1
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - name: Install rust stable with clippy
-        run: |
-          rustup toolchain install stable --profile minimal --component clippy
-          rustup override set stable
-      - name: Compute rustc hash
-        id: rustc
-        shell: bash
-        run: echo "hash=$(rustc --version --verbose | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
-      # Restore-only: build-test(ubuntu) owns the cache write. Saving from
-      # here too would race with that job on pushes to main.
-      - name: Restore build-test cache (read-only)
-        uses: actions/cache/restore@v6
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-            crates/openjd-sessions/src/helper/target
-          key: rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-ubuntu-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-ubuntu-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('.cargo/config.toml') }}-
-            rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-ubuntu-latest-${{ steps.rustc.outputs.hash }}-
-            rust-release-o${{ env.CARGO_PROFILE_RELEASE_OPT_LEVEL }}-ubuntu-latest-
-      - name: Run cargo clippy (all features)
-        run: cargo clippy --release --all-features --all-targets --workspace --exclude openjd-for-js -- -D warnings
 
   conformance:
     name: Conformance (${{ matrix.os }})

@@ -57,19 +57,27 @@ MSRV: **1.97.0** (enforced in CI).
 
 ## Crate Map
 
+Normal (non-dev) dependencies between workspace crates, from `cargo metadata --no-deps`:
+
 ```
 openjd-cli
 ├── openjd-sessions
 │   ├── openjd-model
 │   │   └── openjd-expr
 │   └── openjd-expr
-└── openjd-model
+├── openjd-model
+└── openjd-expr
 
-openjd-snapshots (standalone, experimental)
-openjd-for-js (depends on openjd-model + openjd-expr, experimental)
+openjd-for-js (experimental)
+├── openjd-model
+└── openjd-expr
+
+openjd-snapshots (experimental, no workspace dependencies)
 ```
 
-Changes to `openjd-expr` can affect all other crates. `openjd-snapshots` has no in-workspace dependents.
+Changes to `openjd-expr` can affect every crate except `openjd-snapshots`, which neither depends on nor is depended on by any other workspace crate.
+
+[`specs/architecture.md`](specs/architecture.md) has the full project layout and each crate's responsibilities. The sections below are short summaries of where things are.
 
 ### openjd-expr (`crates/openjd-expr`)
 
@@ -79,10 +87,10 @@ Expression language implementation. The most mature crate.
 - **Values** (`src/value.rs`) — `ExprValue` enum with typed list variants (`ListBool`, `ListInt`, `ListFloat`, `ListString`, `ListPath`, `ListList`), float passthrough for preserving original string representations, and `Unresolved` for static type checking.
 - **Parser** (`src/eval/parse.rs`) — Uses `ruff_python_parser` to parse Python expression syntax. Handles contextual keywords via same-length identifier replacement.
 - **Evaluator** (`src/eval/evaluator.rs`) — Walks the ruff AST with memory-bounded and operation-bounded execution. Implements arithmetic, comparison, logical ops, conditionals, function calls, method calls, list comprehensions, slicing, string operations, path operations, regex, and repr functions.
-- **Format strings** (`src/format_string.rs`) — Parses `{{Param.Name}}` and `{{Expr.Name}}` syntax in template strings.
+- **Format strings** (`src/format_string.rs`) — Parses `{{Param.Name}}` and `{{Expr.Name}}` syntax in template strings. `openjd-model` re-exports this module.
 - **Range expressions** (`src/range_expr.rs`) — Parses range expressions like `1-10`, `1-100:10`, `1,5,10-20`.
 - **Path mapping** (`src/path_mapping.rs`) — Applies source→destination path mapping rules.
-- **Symbol table** (`src/symbol_table.rs`) — Hierarchical key-value store supporting dotted paths (`Param.Frame`).
+- **Symbol table** (`src/symbol_table.rs`) — Hierarchical key-value store supporting dotted paths (`Param.Frame`). `openjd-model` re-exports this module.
 
 Spec entry point: `specs/expr/README.md`
 
@@ -90,9 +98,9 @@ Spec entry point: `specs/expr/README.md`
 
 Template parsing, validation, and job creation. Parses YAML/JSON templates, validates against the 2023-09 schema, resolves format strings, and creates job structures.
 
-- **Parsing** (`src/parse.rs`) — Serde-based YAML/JSON deserialization with post-deserialization validation.
+- **Parsing** (`src/template/parse.rs`) — Serde-based YAML/JSON deserialization with post-deserialization validation.
 - **Template types** (`src/template/`) — All v2023-09 model types including parameters, steps, environments, actions, host requirements.
-- **Validation** (`src/validate.rs`, `src/validate/`) — Structural and cross-field constraint validation with Pydantic-compatible error paths.
+- **Validation** (`src/template/validation/`, `src/template/validate_v2023_09/`) — Structural and cross-field constraint validation with Pydantic-compatible error paths. `validation/` holds the revision-neutral entry points and re-exports the limits and rule types; `validate_v2023_09/` holds the 2023-09 passes, including format string checks.
 - **Job creation** (`src/job/`) — Instantiates jobs from templates: parameter resolution, format string evaluation, parameter space iteration, step dependency graphs.
 - **Capabilities** (`src/capabilities.rs`) — Host requirement capability matching.
 
@@ -106,7 +114,7 @@ Local job execution runtime. Manages session lifecycle, runs actions via subproc
 - **Subprocess** (`src/subprocess.rs`) — Process spawning, I/O streaming, signal handling (SIGTERM/SIGKILL), process tree management.
 - **Action filter** (`src/action_filter.rs`) — Real-time stdout/stderr message parsing, redaction, and annotation.
 - **Cross-user** (`src/cross_user_helper.rs`) — Subprocess execution as a different OS user via an embedded helper binary.
-- **Embedded helper** (`src/helper/`) — **Separate Cargo project** with its own `Cargo.toml` and `Cargo.lock`. Built by `build.rs` and embedded into the sessions binary. CI runs clippy and tests on it independently. Platform-specific runners: `src/helper/src/runner.rs` (Unix) and `runner_win.rs` (Windows).
+- **Embedded helper** (`src/helper/`) — **Separate Cargo project**, not a workspace member. Git tracks its manifest as `Cargo.bundled.toml`, so that packaging `openjd-sessions` doesn't treat the directory as a separate crate; its `Cargo.toml` and `Cargo.lock` are untracked. `build.rs` copies it into `OUT_DIR`, builds it there, and embeds the binary into the sessions crate. CI copies `Cargo.bundled.toml` to `Cargo.toml` and runs fmt, cargo-deny, clippy and tests on it independently. Platform-specific runners: `src/helper/src/runner.rs` (Unix) and `runner_win.rs` (Windows).
 - **Platform-specific code** — `win32.rs`, `win32_permissions.rs`, `win32_locate.rs`, `win32_file_locks.rs`, `win32_remove.rs` use `#[cfg(target_os = "windows")]`. Cross-user tests require Docker (Linux) or a test user account (Windows).
 
 Spec entry point: `specs/sessions/README.md`
@@ -135,7 +143,7 @@ Job attachments: content-addressed file tree snapshots with xxHash3 hashing, man
 - **Manifest** (`src/manifest.rs`) — Manifest types, serialization (v2023 and v2025 formats), validation.
 - **Operations** (`src/ops/`) — collect, hash, filter, subtree, partition, join, compose, diff, hash_upload, download.
 - **Caching** (`src/hash_cache.rs`, `src/data_cache.rs`, `src/s3_check_cache.rs`, `src/sqlite_wal.rs`) — Local hash cache, S3 data cache, upload deduplication.
-- **Codec** (`src/codec.rs`) — Binary encoding/decoding for manifest formats.
+- **Codec** (`src/codec.rs`, `src/codec/`) — Encoding and decoding of the v2023 and v2025 JSON manifest formats, including a streaming v2023 decoder.
 
 Spec entry point: `specs/snapshots/README.md`
 
@@ -161,18 +169,20 @@ The structure:
 
 ```
 specs/
-├── architecture.md              # Top-level crate structure and design
-├── expr/README.md               # → expr spec index
-├── model/README.md              # → model spec index
-├── sessions/README.md           # → sessions spec index
-├── snapshots/README.md          # → snapshots spec index
-├── cli/README.md                # → cli spec index
-├── job-attachments-snapshots.md # Cross-cutting design doc
-├── rust-port-agent-method.md    # Porting methodology from Python
-└── windows-cross-user-helper.md # Cross-cutting Windows design
+├── architecture.md                # Top-level crate structure and design
+├── expr/README.md                 # → expr spec index
+├── model/README.md                # → model spec index
+├── sessions/README.md             # → sessions spec index
+├── snapshots/README.md            # → snapshots spec index
+├── cli/README.md                  # → cli spec index
+├── openjd-for-js/spec.md          # openjd-for-js spec (a single document)
+├── job-attachments-snapshots.md   # Cross-cutting design doc
+├── snapshots-benchmarking-plan.md # How to benchmark openjd-snapshots
+├── rust-port-agent-method.md      # Porting methodology from Python
+└── windows-cross-user-helper.md   # Cross-cutting Windows design
 ```
 
-Start with `specs/<crate>/README.md` for any crate. It indexes all spec documents for that crate and explains the relationships between them.
+Start with `specs/<crate>/README.md` for any crate. Each README indexes all spec documents for its crate and explains the relationships between them. `openjd-for-js` has a single spec, `specs/openjd-for-js/spec.md`.
 
 ### Report-driven development
 
@@ -220,7 +230,7 @@ When writing tests that check for validation or evaluation failures, assert on t
 
 **openjd-expr: assert message + expression + caret**
 
-Every expression evaluation error test must assert the multi-line error including the message, the expression source line, and the caret indicator. See `tests/test_error_formatting.rs`:
+Every expression evaluation error test must assert the multi-line error including the message, the expression source line, and the caret indicator. See `crates/openjd-expr/tests/integration/test_error_formatting.rs`:
 
 ```rust
 #[test] fn type_error_in_middle() {
@@ -234,7 +244,7 @@ Every expression evaluation error test must assert the multi-line error includin
 
 **openjd-model: assert path + message**
 
-Every template validation error test must assert the field path and message, matching the Python Pydantic error format. See `tests/test_error_messages.rs`:
+Every template validation error test must assert the field path and message, matching the Python Pydantic error format. See `crates/openjd-model/tests/integration/test_error_messages.rs`:
 
 ```rust
 #[test]
@@ -267,7 +277,7 @@ PRs run these checks (all must pass):
 |-----|-------------|
 | **Rustfmt** | `cargo fmt --all -- --check` (nightly) — includes the helper sub-crate |
 | **cargo-deny** | Licenses, bans, sources, and advisories — workspace and helper sub-crate |
-| **Clippy** | `cargo clippy` on Linux, Windows, macOS — includes the helper binary |
+| **Clippy** | `cargo clippy` on Linux, Windows, macOS — includes the helper binary; all features on Linux |
 | **Build** | Release build on all three platforms |
 | **Test** | `cargo test --workspace` + helper tests on all three platforms |
 | **Conformance** | Full OpenJD conformance suite (1,038 tests) on all three platforms |

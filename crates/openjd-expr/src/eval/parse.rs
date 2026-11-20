@@ -703,13 +703,20 @@ fn parse_inner(
         }
         _ => ruff_python_parser::parse_expression(&source),
     };
-    let expr_node = match parsed {
+    let mut expr_node = match parsed {
         Ok(parsed) => parsed.into_expr(),
         Err(e) => return Err(syntax_error(&e, expr_str)),
     };
 
     // Structural validation (matches Python implementation)
     validate_structure(&expr_node, expr_str, profile)?;
+    // Only a CR needs this pass, so skip the AST walk without one. It runs
+    // after `validate_structure`, which bounds the AST's depth.
+    // The keyword renames don't touch string literals, so the text as
+    // written serves for both the literals and any caret.
+    if expr_str.contains('\r') {
+        normalize_string_line_breaks(&mut expr_node, expr_str)?;
+    }
     let mut accessed_symbols = HashSet::new();
     let mut called_functions = HashSet::new();
     let mut local_bindings = HashSet::new();
@@ -797,6 +804,159 @@ fn syntax_error_message(
         }
     }
     error.to_string()
+}
+
+/// Reject a `\u` or `\U` escape whose value is a surrogate code point
+/// (U+D800 to U+DFFF) in a non-raw string literal (Expression Language
+/// §1.1.5). A string can't hold a surrogate, and ruff's lexer replaces one
+/// with U+FFFD without saying so, where CPython keeps it. The parser has
+/// already checked every escape's syntax, so this pass only finds where each
+/// escape starts and reads the hex digits after `\u` and `\U`.
+fn reject_surrogate_escapes(
+    part: &ast::StringLiteral,
+    source: &str,
+) -> Result<(), ExpressionError> {
+    if part.flags.prefix().is_raw() {
+        return Ok(());
+    }
+    let start = part.content_range().start().to_usize();
+    let end = part.content_range().end().to_usize();
+    let Some(content) = source.get(start..end) else {
+        return Ok(());
+    };
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'\\' {
+            i += 1;
+            continue;
+        }
+        let digits = match bytes.get(i + 1) {
+            Some(b'u') => 4,
+            Some(b'U') => 8,
+            // Any other escape, including `\\`, is two bytes long as far as
+            // finding the next escape goes: what follows its second byte
+            // (octal or hex digits, `{name}`) never holds a backslash.
+            _ => {
+                i += 2;
+                continue;
+            }
+        };
+        let escape_end = i + 2 + digits;
+        if let Some(value) = content
+            .get(i + 2..escape_end)
+            .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+        {
+            if (0xD800..=0xDFFF).contains(&value) {
+                let escape = &content[i..escape_end];
+                return Err(ExpressionError::new(format!(
+                    "Syntax error: {escape} is a surrogate code point, which a string can't hold"
+                ))
+                .with_span(source, start + i, start + escape_end));
+            }
+        }
+        i = escape_end;
+    }
+    Ok(())
+}
+
+/// Give every string literal the value CPython gives it when a CR LF or a
+/// lone CR is written inside it (Expression Language §1.1.5): CPython reads
+/// source with universal newlines, so each of those line breaks is one LF
+/// before any escape is decoded. ruff's lexer keeps them as written. A CR
+/// that an escape produces (`'\r'`, `'\x0d'`) isn't a line break in the
+/// source, so it stays.
+///
+/// The source text isn't rewritten, so every offset the parser reported,
+/// and every caret built from one, still points into the text as written.
+/// Instead each literal part whose source holds a CR is decoded again, by
+/// parsing that part alone with its line breaks made LF. That keeps ruff's
+/// decoding of every escape, including a backslash before the line break,
+/// which continues the line in a non-raw string and stays in a raw one.
+fn normalize_string_line_breaks(expr: &mut ast::Expr, source: &str) -> Result<(), ExpressionError> {
+    use ast::visitor::transformer::{walk_expr, Transformer};
+    use std::cell::RefCell;
+
+    struct Normalizer<'s> {
+        source: &'s str,
+        error: RefCell<Option<ExpressionError>>,
+    }
+
+    impl Normalizer<'_> {
+        /// The part's value with its source line breaks read as LF, or
+        /// `None` if its source has no CR.
+        fn decode(&self, part: &ast::StringLiteral) -> Result<Option<Box<str>>, ExpressionError> {
+            let start = part.range.start().to_usize();
+            let end = part.range.end().to_usize();
+            let Some(text) = self.source.get(start..end) else {
+                return Ok(None);
+            };
+            if !text.contains('\r') {
+                return Ok(None);
+            }
+            let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+            // The part already lexed as a string literal, and making each
+            // line break LF can't end it early or start an escape, so this
+            // parse doesn't fail, and no test can reach the error below. It
+            // stays as a guard: if the parse did fail, keeping the CR would
+            // give a wrong value without saying so.
+            match ruff_python_parser::parse_expression(&normalized).map(|p| p.into_expr()) {
+                Ok(ast::Expr::StringLiteral(s)) if !s.value.is_implicit_concatenated() => {
+                    Ok(Some(s.value.to_str().into()))
+                }
+                _ => Err(ExpressionError::new(
+                    "Internal error: a string literal with a line break in it could not be decoded",
+                )
+                .with_span(self.source, start, end)),
+            }
+        }
+    }
+
+    impl Transformer for Normalizer<'_> {
+        fn visit_expr(&self, expr: &mut ast::Expr) {
+            if self.error.borrow().is_some() {
+                return;
+            }
+            let ast::Expr::StringLiteral(s) = expr else {
+                walk_expr(self, expr);
+                return;
+            };
+            let mut parts: Vec<ast::StringLiteral> = s.value.iter().cloned().collect();
+            let mut changed = false;
+            for part in &mut parts {
+                match self.decode(part) {
+                    Ok(Some(value)) => {
+                        part.value = value;
+                        changed = true;
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        *self.error.borrow_mut() = Some(e);
+                        return;
+                    }
+                }
+            }
+            // Rebuild the value rather than edit its parts in place: an
+            // implicitly concatenated value caches the joined string.
+            if changed {
+                s.value = if parts.len() == 1 {
+                    ast::StringLiteralValue::single(parts.remove(0))
+                } else {
+                    ast::StringLiteralValue::concatenated(parts)
+                };
+            }
+        }
+    }
+
+    let normalizer = Normalizer {
+        source,
+        error: RefCell::new(None),
+    };
+    normalizer.visit_expr(expr);
+    match normalizer.error.into_inner() {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 /// Validate structural constraints on the AST that can't be caught by the parser.
@@ -939,11 +1099,19 @@ fn validate_structure_inner(
             validate_structure_inner(&s.value, source, depth + 1, profile)?;
             validate_structure_inner(&s.slice, source, depth + 1, profile)?;
         }
+        // The evaluator evaluates slice bounds straight from the subscript,
+        // so a bound sits at the slice's own depth, not one level below it.
+        ast::Expr::Slice(sl) => {
+            for bound in [&sl.lower, &sl.upper, &sl.step].into_iter().flatten() {
+                validate_structure_inner(bound, source, depth, profile)?;
+            }
+        }
         ast::Expr::Attribute(a) => {
             validate_structure_inner(&a.value, source, depth + 1, profile)?;
         }
         ast::Expr::StringLiteral(s) => {
             for part in &s.value {
+                reject_surrogate_escapes(part, source)?;
                 if matches!(
                     part.flags.prefix(),
                     ruff_python_ast::str_prefix::StringLiteralPrefix::Unicode

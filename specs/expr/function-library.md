@@ -310,8 +310,8 @@ nothing to `int`.
 
 An overload with a `list[nulltype]` parameter (this one, `sum(list[nulltype])`,
 `min`/`max(list[nulltype])`, `flatten(list[nulltype])`, `join(list[nulltype],
-string)`, …) specializes a general overload for the empty list. Signature
-matching lets an argument of unknown element type (`list[T3]`, `list[any]`,
+string)`, `path(list[nulltype])`, …) specializes a general overload for the
+empty list. Signature matching lets an argument of unknown element type (`list[T3]`, `list[any]`,
 `any`) match it, but at run time only an empty list selects it, so for the
 type-only dispatch above (and `derive_return_type`) it applies only to an
 argument whose type is exactly `list[nulltype]`; any other argument may be
@@ -620,7 +620,23 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   quotient, which would lose precision for large quotients.
 - **Float floor division** derives its quotient from that remainder before rounding
   toward negative infinity. This avoids flooring an already-rounded direct quotient.
-- **`round()`** uses banker's rounding / round-half-even (§2.2.2)
+- **`round()`** uses banker's rounding / round-half-even (§2.2.2) on the exact value
+  of its input, as Python's `round` does, with no intermediate f64 scaling.
+  `round(x: float)` and `round(x: float, ndigits)` with `ndigits` ≤ 0 return `int`, and
+  a result outside the 64-bit signed range is an integer overflow error. The range is
+  checked on the exact result, so `round(-9223372036854775808.0, -1)`, which is
+  −9223372036854775810, overflows. These `int` results, and `round(x: int, ndigits)`,
+  use exact integer arithmetic on the magnitude in u128 (10^19 exceeds i64), then apply
+  the sign and check the range. A float of at least 2^127 rounds to 0 or overflows,
+  decided by comparing its exact decimal digits with `10^k / 2`. Every i64 rounds to 0
+  when `ndigits` ≤ −20, and every float when `ndigits` ≤ −309.
+- **`round(x, ndigits)` with `ndigits` > 0** returns a `float` whose display keeps
+  `ndigits` decimal places (`round(3.5, 2)` is `3.50`). The exact value is formatted to `ndigits` places
+  (Rust's `{:.n}` rounds the exact value half-to-even) and that text is parsed back,
+  which is CPython's algorithm: `round(2.675, 2)` is `2.67`, because 2.675 is stored
+  just below 2.675. The registered signature is `(float, int) -> float | int`: static
+  typing uses signatures only, so a literal `ndigits` does not narrow the type, and a
+  caller that needs an `int` or a `float` gets the value checked when it evaluates.
 - **String classification** (`isdigit`, `isalpha`, `isalnum`, `isspace`,
   `isupper`, `islower`, §2.2.4) matches Python's `str` methods of the same
   name exactly, not Rust's `char` predicates, which use different Unicode
@@ -708,11 +724,41 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   a trailing newline in Python but is end-of-haystack only in Rust
   (Python's `$` ≈ Rust's `(?:\n?\z)`); the intersection dialect allows `$`,
   so results differ on newline-terminated input.
+- **`re_sub` replacements** are literal text (§2.2.5). `validate_regex_replacement`
+  rejects a group reference (a backslash followed by a digit, `\g<...>`, or `$`
+  followed by a digit or `{`) with "Group references in replacement strings are not
+  supported", and then a
+  control character with "Control characters in replacement strings are not
+  supported (U+0001)", naming the first one. A control character is one in Unicode
+  general category `Cc` (`char::is_control`: U+0000 to U+001F and U+007F to U+009F)
+  other than tab, newline and carriage return, which replacements commonly need. The
+  control-character rule catches a group reference written in a non-raw string:
+  `'\1'` reaches `re_sub` already decoded to U+0001 (openjd-rs#311). The pattern and
+  the input string are not checked.
 - **`repr_sh/cmd/pwsh`** produce shell-safe quoting per platform conventions (§2.2.6).
   `repr_pwsh` renders nested lists as nested array literals, using the unary
   comma for a one-element outer list (`@(,@(1, 2))`) since `@(@(1, 2))`
   flattens in PowerShell. `repr_sh` and `repr_cmd` reject nested lists at
   signature dispatch.
+- **`repr_sh` output contract.** Expression Language §2.2.6 defines `repr_sh`
+  by what a POSIX shell reads back, not by its bytes: unquoted in a command's
+  arguments in a non-interactive shell (the spec lists the cases outside the
+  property), a `string` or `path` (in its string form) is read as exactly one
+  word equal to the input, and a list of N items, quoted and joined with single
+  spaces, as N words in order. An empty string gives `''`, an empty list the
+  empty string, and a NUL anywhere in the input is an evaluation error
+  (`Cannot shell-quote string: ...` or `Cannot shell-quote list: ...`).
+  `bool`, `int`, `float`, `nulltype`, `range_expr`, nested lists and lists of
+  anything other than strings or paths have no signature. Quoting is the `shlex` crate's `try_quote`, which differs in bytes
+  from Python's `shlex.quote` on some inputs, and both conform: `it's` is
+  `"it's"` here and `'it'"'"'s'` in Python, `a\b` is `"a\\b"` here, and
+  `a=b` is `'a=b'` here where Python leaves it bare. The spec requires no
+  particular form, so this crate's bytes may change with the `shlex` crate.
+  `tests/integration/test_repr_sh_shell_words.rs` (Unix only) runs every
+  output through `sh` and checks the words it reads back, over each ASCII
+  character, quotes, expansions, globs, operators, whitespace, non-ASCII
+  input, paths and lists. The byte-level tests in `test_strings.rs` pin the
+  current quoting.
 - **Path operations** are format-aware (POSIX/Windows/URI) without using `std::path` (§2.3)
 - **`path(list[string])` constructor** follows Python `PurePosixPath(*parts)` /
   `PureWindowsPath(*parts)` semantics: an absolute component in the list resets the
@@ -725,6 +771,20 @@ sections 2.1 (Operators) and 2.2 (Built-in Functions). Key implementation choice
   least two characters), all elements are joined with `/` verbatim and no
   normalization is applied — `path(["s3://bucket", "a", "", "b"])` is
   `s3://bucket/a//b`.
+  An empty list of parts is `path('.')` in every format, as `PurePosixPath()`
+  and `PureWindowsPath()` are, so `path([]) / 'a'` is `a`. The `[]` literal
+  and a comprehension that keeps nothing are typed `list[nulltype]` and take
+  the `(list[nulltype]) -> path` overload; an empty `list[string]` value takes
+  `(list[string]) -> path`.
+- **Empty-list overloads stand in for the `list[nulltype]` → `list[T]`
+  coercion.** The 2026-02 Expression Language §1.2.3 makes the empty list
+  coercible to any list type, and §1.2.4 applies coercion to function
+  arguments. Dispatch coerces arguments only INT→FLOAT and PATH→STRING (see
+  [Three-Phase Dispatch](#three-phase-dispatch)), so this crate meets that
+  rule by registering a `list[nulltype]` overload beside every concrete
+  `list[X]` parameter, with the other parameters the same. A unit test in
+  `default_library.rs` checks that none is missing. Without one, `f([])`
+  matches no signature.
 - **Slicing a `range_expr`** returns `range_expr` for positive step, `list[int]` for
   negative step (§2.1.8)
 - **`sum` of an empty `list[float]`** is the float `0.0`, as its

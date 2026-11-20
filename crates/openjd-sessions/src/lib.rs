@@ -46,6 +46,15 @@ pub mod win32_permissions;
 #[path = "helper/src/framer.rs"]
 mod helper_framer;
 
+// The helper's wire protocol, included under test only so
+// `cross_user_helper::helper_cancel_line`'s output can be parsed by the
+// helper's own `Command` deserializer. The session doesn't use it at run
+// time, so most of its items are unused here.
+#[cfg(test)]
+#[path = "helper/src/protocol.rs"]
+#[allow(dead_code)]
+mod helper_protocol;
+
 /// Crate-internal parsers exposed for the fuzz harness in `fuzz/`.
 ///
 /// Subprocess stdout is the most attacker-controlled input the session

@@ -152,7 +152,7 @@ parameter definitions are arrays of `{"name", "type"}` objects. Optional fields
 ### YAML Format
 
 The YAML output contains the same structured data as JSON, serialized via
-`serde_yaml::to_string()`. Both formats share the same `serde_json::Value` construction
+`serde_saphyr::to_string()`. Both formats share the same `serde_json::Value` construction
 code, so they are always in sync.
 
 ## Step Summary Output
@@ -215,8 +215,8 @@ names:
 
 | Aspect | Python | Rust |
 |--------|--------|------|
-| Result type | `OpenJDJobSummaryResult` / `OpenJDStepSummaryResult` dataclasses | Inline output in `output_*_summary()` functions |
-| Output decorator | `@print_cli_result` handles format dispatch | Manual `match` on output format string |
+| Result type | `OpenJDJobSummaryResult` / `OpenJDStepSummaryResult` dataclasses | `JobSummaryResult` / `StepSummaryResult` structs implementing `CliResult` |
+| Output decorator | `@print_cli_result` handles format dispatch | The shared `print_cli_result` function in `src/common.rs` |
 | JSON/YAML parity | Identical structured output in both | Identical — same value, different serializer |
 | Parameter display | Shows `description` field | Shows `value` field |
 
