@@ -144,7 +144,7 @@ lock_packages() {
 # consume raw bytes, where a dictionary only adds noise.
 dict_args() {
     case "$1" in
-        *_gen | expr_int_range | expr_value | expr_function_call | expr_path | \
+        *_gen | model_job_diff | expr_int_range | expr_value | expr_function_call | expr_path | \
             expr_symbol_table | sessions_framer | sessions_embedded_files | sessions_state) ;;
         *) echo "-dict=$FUZZ_DIR/dicts/expr.dict" ;;
     esac

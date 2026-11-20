@@ -42,6 +42,7 @@ pub const TARGETS: &[(&str, Target)] = &[
     ("model_job_gen", model::job_gen),
     ("model_env_gen", model::env_gen),
     ("model_misc", model::misc),
+    ("model_job_diff", model::job_diff),
     ("sessions_directives", sessions::directives),
     ("sessions_framer", sessions::framer),
     ("sessions_embedded_files", sessions::embedded_files),

@@ -1,0 +1,16 @@
+# The old side of a template edit: every frame is rendered for the left eye.
+specificationVersion: jobtemplate-2023-09
+name: Shot010
+parameterDefinitions:
+  - {name: Frames, type: STRING, default: "1-3"}
+steps:
+  - name: Render
+    parameterSpace:
+      taskParameterDefinitions:
+        - {name: Frame, type: INT, range: "{{Param.Frames}}"}
+        - {name: Eye, type: STRING, range: [left]}
+    script:
+      actions:
+        onRun:
+          command: render
+          args: ["--frame", "{{Task.Param.Frame}}", "--eye", "{{Task.Param.Eye}}"]

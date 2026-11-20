@@ -23,7 +23,13 @@ pub use openjd_expr::symbol_table;
 pub use openjd_expr::symbol_table::SymbolTable;
 
 #[cfg(test)]
+mod test_job_apply;
+#[cfg(test)]
+mod test_job_diff;
+#[cfg(test)]
 mod test_lazy_param_space;
+#[cfg(test)]
+mod test_task_delta;
 
 pub use error::ModelError;
 pub use error::{DiagnosticSpan, ErrorDetail};

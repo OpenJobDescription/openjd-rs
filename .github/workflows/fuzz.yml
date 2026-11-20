@@ -53,7 +53,7 @@ env:
   # Pinned so a broken nightly cannot randomly fail the job; bump deliberately
   # (and keep scripts/fuzz.sh and scripts/check_fuzz_api_coverage.py in step).
   FUZZ_TOOLCHAIN: nightly-2026-10-07
-  # Per target, run one after another (22 targets: ~5 min on a PR, ~66 min
+  # Per target, run one after another (23 targets: ~6 min on a PR, ~69 min
   # nightly). The committed corpus is a good start and the grown corpus is
   # cached across runs, so short runs keep accumulating coverage. Only the
   # nightly (and main/manual) runs save it, so the nightly budget sets how
@@ -162,7 +162,7 @@ jobs:
   fuzz:
     name: Fuzz
     runs-on: ubuntu-latest
-    # Nightly: FUZZ_SECONDS_NIGHTLY for each target (~66 min), plus the
+    # Nightly: FUZZ_SECONDS_NIGHTLY for each target (~69 min), plus the
     # build (~10 min cold) and the corpus minimization. A manual run gets the
     # 6 h maximum, since it picks its own seconds and targets: keep
     # seconds x targets well inside it. PRs and pushes to main fuzz

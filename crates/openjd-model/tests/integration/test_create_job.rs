@@ -913,6 +913,41 @@ fn test_posix_path_is_relative_under_windows_format() {
 }
 
 #[test]
+fn test_double_slash_path_is_absolute_under_both_formats() {
+    // The diff gallery and CLI tests use `//srv/a` so their output is the same on
+    // every host: it is a UNC path under Windows and absolute under POSIX.
+    let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);
+    let jt = decode_job_template(jt_val, None, &CallerLimits::default()).unwrap();
+    let mut input = JobParameterInputValues::new();
+    input.insert(
+        "Dir".into(),
+        openjd_expr::ExprValue::String("//srv/a".into()),
+    );
+    for (format, dir) in [
+        (PathFormat::Posix, "/cwd"),
+        (PathFormat::Windows, "C:\\cwd"),
+    ] {
+        let result = preprocess_job_parameters(
+            &jt,
+            &input,
+            &[],
+            &openjd_model::PathParameterOptions {
+                job_template_dir: dir,
+                current_working_dir: dir,
+                allow_template_dir_walk_up: true,
+                path_format: format,
+                allow_uri_path_values: true,
+            },
+        )
+        .unwrap();
+        match &result["Dir"].value {
+            openjd_expr::ExprValue::String(s) => assert_eq!(s, "//srv/a", "{format:?}"),
+            other => panic!("Expected String, got {:?}", other),
+        }
+    }
+}
+
+#[test]
 fn test_windows_absolute_path_recognized_with_windows_format() {
     // C:\foo is absolute under PathFormat::Windows — should not be joined
     let jt_val = minimal_job_template(r#"{"name": "Dir", "type": "PATH"}"#);

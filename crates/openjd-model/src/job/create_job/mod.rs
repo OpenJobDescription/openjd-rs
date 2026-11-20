@@ -28,6 +28,7 @@ pub use parameters::{
     build_symbol_table, merge_job_parameter_definitions, preprocess_job_parameters,
     MergedParameterDefinition, PathParameterOptions,
 };
+pub(crate) use parameters::{preprocess_job_parameters_except, preprocess_named_job_parameters};
 
 /// Caller evaluation budgets applied to every expression evaluation job
 /// creation performs (format-string resolution, `let` bindings, task

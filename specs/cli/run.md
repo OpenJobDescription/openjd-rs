@@ -24,7 +24,7 @@ openjd run <PATH> [--step <STEP>] [-p <KEY=VALUE>]... [-t <KEY=VALUE>]...
 |----------|------|----------|---------|-------------|
 | `path` | `PathBuf` | Yes | — | Path to the job template file |
 | `--step` | `Option<String>` | No | — | Step to run (auto-selects if single step; runs all if omitted with multi-step job) |
-| `-p`, `--parameter` | `Vec<String>` | No | — | Job parameters |
+| `-p`, `--job-param` | `Vec<String>` | No | — | Job parameters. Hidden alias `--parameter` |
 | `-t`, `--task-param` | `Vec<String>` | No | — | Explicit task parameter values for a single task |
 | `--tasks` | `Option<String>` | No | — | JSON array or file of task parameter sets |
 | `--maximum-tasks` | `i64` | No | `-1` | Max tasks to run (-1 = all) |
@@ -54,7 +54,7 @@ pub struct RunArgs {
     pub path: PathBuf,
     #[arg(long)]
     pub step: Option<String>,
-    #[arg(short = 'p', long = "parameter")]
+    #[arg(short = 'p', long = "job-param", alias = "parameter")]
     pub parameters: Vec<String>,
     #[arg(long = "task-param", short = 't', action = clap::ArgAction::Append,
           conflicts_with_all = ["tasks", "maximum_tasks"])]

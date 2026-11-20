@@ -45,6 +45,9 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::str::FromStr;
 
+mod job_diff;
+pub use job_diff::job_diff;
+
 fn all_extensions() -> Vec<&'static str> {
     ModelExtension::ALL.iter().map(|e| e.as_str()).collect()
 }

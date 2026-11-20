@@ -1,0 +1,36 @@
+specificationVersion: jobtemplate-2023-09
+name: ShotRender
+parameterDefinitions:
+  - {name: Frames, type: STRING, default: "1-12"}
+  - {name: Scene, type: STRING, default: shot010.blend}
+jobEnvironments:
+  - name: Conda
+    variables:
+      CONDA_PACKAGES: blender=4.2
+      PYTHONUNBUFFERED: "1"
+steps:
+  - name: Prep
+    script:
+      actions:
+        onRun: {command: prep.sh, args: ["{{Param.Scene}}"]}
+  - name: Render
+    dependencies: [{dependsOn: Prep}]
+    parameterSpace:
+      taskParameterDefinitions:
+        - {name: Frame, type: INT, range: "{{Param.Frames}}"}
+    script:
+      actions:
+        onRun: {command: blender, args: ["-b", "{{Param.Scene}}", "-f", "{{Task.Param.Frame}}"]}
+  - name: Denoise
+    dependencies: [{dependsOn: Render}]
+    stepEnvironments:
+      - name: Gpu
+        variables: {CUDA_VISIBLE_DEVICES: "0"}
+    script:
+      actions:
+        onRun: {command: oidn, args: ["frames"]}
+  - name: Encode
+    dependencies: [{dependsOn: Denoise}]
+    script:
+      actions:
+        onRun: {command: ffmpeg, args: ["-i", "frames/%04d.png", "-crf", "18", "out.mp4"]}
