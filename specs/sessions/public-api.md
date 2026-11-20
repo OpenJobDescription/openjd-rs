@@ -990,7 +990,9 @@ pub struct TempDir { /* private fields */ }
 impl TempDir {
     /// `dir`: parent directory (defaults to `openjd_temp_dir(None)`).
     /// `prefix`: name prefix for the new subdirectory.
-    /// `user`: if cross-user, sets group ownership and 0o770 perms.
+    /// `user`: if cross-user, sets group ownership and 0o770 perms;
+    /// fails with `SessionError::PathPermissions` (never widening the
+    /// mode) when the user's group cannot be resolved or set.
     pub fn new(
         dir: Option<&Path>,
         prefix: Option<&str>,

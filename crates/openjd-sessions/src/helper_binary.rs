@@ -55,22 +55,8 @@ pub(crate) fn create_helpers_dir(
         })?;
 
         if let Some(u) = user.filter(|u| !u.is_process_user()) {
-            if let Ok(Some(grp)) = nix::unistd::Group::from_name(u.group()) {
-                nix::unistd::chown(&dir, None, Some(grp.gid)).map_err(|e| {
-                    SessionError::PathPermissions {
-                        path: dir.display().to_string(),
-                        reason: e.to_string(),
-                    }
-                })?;
-            }
-            // Now that the group is correct, grant group r-x.
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o750)).map_err(
-                |source| SessionError::WorkingDirectory {
-                    path: dir.clone(),
-                    source,
-                },
-            )?;
+            // Group ownership, then owner rwx + group r-x.
+            crate::embedded_files::chown_group_then_widen(&dir, u, 0o750)?;
         }
     }
 
@@ -136,21 +122,8 @@ pub(crate) fn write_helper(
 
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(Some(grp)) = nix::unistd::Group::from_name(user.group()) {
-            nix::unistd::chown(&path, None, Some(grp.gid)).map_err(|e| {
-                SessionError::PathPermissions {
-                    path: path.display().to_string(),
-                    reason: e.to_string(),
-                }
-            })?;
-        }
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o750)).map_err(
-            |source| SessionError::WorkingDirectory {
-                path: path.clone(),
-                source,
-            },
-        )?;
+        // Group ownership, then owner rwx + group r-x.
+        crate::embedded_files::chown_group_then_widen(&path, user, 0o750)?;
     }
 
     #[cfg(windows)]
@@ -178,4 +151,82 @@ pub(crate) fn write_helper(
     }
 
     Ok(path)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::session_user::SessionUser;
+
+    /// Session user whose group cannot be resolved on this host.
+    #[derive(Debug)]
+    struct FakeUser;
+    impl SessionUser for FakeUser {
+        fn user(&self) -> &str {
+            "nobody"
+        }
+        fn group(&self) -> &str {
+            "openjd_nonexistent_group_586"
+        }
+        fn is_process_user(&self) -> bool {
+            false
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    /// The helpers directory must never be group-accessible unless its group
+    /// was set to the session user's group: a failed group lookup is an
+    /// error, not a silent skip followed by a 0o750 widen.
+    #[test]
+    fn create_helpers_dir_fails_closed_when_group_lookup_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let msg = match create_helpers_dir(tmp.path(), Some(&FakeUser)) {
+            Ok(dir) => panic!(
+                "helpers dir with an unresolvable group must fail, created {}",
+                dir.display()
+            ),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            msg.starts_with("Failed to set permissions on '")
+                && msg.ends_with("': Group 'openjd_nonexistent_group_586' not found"),
+            "unexpected error message: {msg}"
+        );
+
+        // The directory the failed call leaves behind keeps its creation mode
+        // (0o700 before umask): no group or other access.
+        use std::os::unix::fs::PermissionsExt;
+        let leftover = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .map(|e| e.unwrap())
+            .find(|e| e.file_name().to_string_lossy().starts_with(".helpers-"))
+            .expect("helpers dir should exist");
+        let mode = leftover.metadata().unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o077,
+            0,
+            "helpers dir must stay owner-only: {mode:o}"
+        );
+    }
+
+    /// The helper binary's permissions must never be set unless its group was
+    /// set to the session user's group.
+    #[test]
+    fn write_helper_fails_closed_when_group_lookup_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let msg = match write_helper(tmp.path(), &FakeUser) {
+            Ok(path) => panic!(
+                "helper write with an unresolvable group must fail, created {}",
+                path.display()
+            ),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            msg.starts_with("Failed to set permissions on '")
+                && msg.ends_with("': Group 'openjd_nonexistent_group_586' not found"),
+            "unexpected error message: {msg}"
+        );
+    }
 }

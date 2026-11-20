@@ -74,6 +74,11 @@ user's group, then permissions are widened to 0o750 (owner rwx, group
 r-x). The helper binary inside is chmod'd 0o750 with the same group. The
 job user can traverse and execute but cannot write or delete.
 
+Both the chown-then-widen steps go through `chown_group_then_widen()` in
+`embedded_files.rs`, which fails closed: a failed group lookup, chown, or
+chmod aborts session construction with `SessionError::PathPermissions`, and
+the 0o750 widen never happens without the group set.
+
 ### Windows permissions
 
 On Windows, the session working directory's DACL grants the session user
