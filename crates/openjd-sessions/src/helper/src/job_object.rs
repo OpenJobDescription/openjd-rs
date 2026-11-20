@@ -35,8 +35,8 @@
 //!
 //! If `setup()` fails (e.g. a sandboxed environment that forbids job
 //! object creation), we log a warning to stderr and continue without the
-//! guard. The helper still works; it just leaks descendants on crash the
-//! way it did before this module existed. Returning an error from `setup`
+//! guard. The helper still works; it just leaks descendants if it
+//! crashes. Returning an error from `setup`
 //! and falling back gracefully is preferable to refusing to start the
 //! helper, since the workload-execution path itself doesn't depend on the
 //! job object.

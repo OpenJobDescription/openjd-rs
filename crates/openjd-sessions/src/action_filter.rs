@@ -1659,11 +1659,10 @@ mod tests {
 
     // === redacted_env honors suppress_filtered like every other directive ===
     //
-    // Earlier the Rust implementation special-cased `RedactedEnv` to *always*
-    // pass through, which diverged from Python (where `_action_filter.py`
-    // applies `return not self._suppress_filtered` uniformly, including for
-    // `openjd_redacted_env`). These tests pin the unified behavior down so it
-    // doesn't regress.
+    // `RedactedEnv` must not be special-cased to *always* pass through, which
+    // would diverge from Python (where `_action_filter.py` applies
+    // `return not self._suppress_filtered` uniformly, including for
+    // `openjd_redacted_env`). These tests pin the uniform behavior.
 
     #[test]
     fn test_redacted_env_echo_passes_through_with_value_redacted() {

@@ -1149,7 +1149,7 @@ fn with_name_on_windows_host_uri_with_single_segment() {
 
 #[test]
 fn with_name_on_windows_host_https_scheme() {
-    // The fix must apply to every URI scheme, not just `s3://`.
+    // URI handling must apply to every URI scheme, not just `s3://`.
     // `https://` exercises a different authority shape (host +
     // optional port + path) but goes through the same
     // `uri_path::is_uri` detection.

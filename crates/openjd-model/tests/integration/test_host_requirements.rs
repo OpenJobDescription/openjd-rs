@@ -1268,9 +1268,8 @@ fn amounts_of(job: &job::Job) -> &[job::AmountRequirement] {
 
 // ── Each bound is re-checked on the resolved value ──
 
-/// `max` is `<positivefloat>`, so a resolved `0` is out of range. This is the
-/// case the old code accepted: it only checked that the text parsed as a finite
-/// number.
+/// `max` is `<positivefloat>`, so a resolved `0` is out of range even though
+/// its text parses as a finite number.
 #[test]
 fn test_resolved_amount_max_zero_rejected() {
     create_amounts_err(

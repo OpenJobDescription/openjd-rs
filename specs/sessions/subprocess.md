@@ -473,8 +473,8 @@ and the kill share a handle, the PID can't change between them. If the open
 fails or the times differ, the process is skipped.
 
 Requesting both rights in one `OpenProcess` is all-or-nothing: a process whose
-DACL grants terminate but not query can no longer be killed, where a
-terminate-only open would have succeeded. That is deliberate, because giving up
+DACL grants terminate but not query can't be killed, though a
+terminate-only open would succeed. That is deliberate, because giving up
 the same-handle read reopens the gap it closes. Protected (PPL) processes can
 also refuse the query and are skipped.
 

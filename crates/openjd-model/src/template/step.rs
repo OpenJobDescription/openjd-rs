@@ -384,7 +384,8 @@ mod tests {
     fn desugar_sanitizes_step_name_to_ascii_identifier() {
         // `²` and `½` are `char::is_alphanumeric` but not identifier
         // characters; `١` (Arabic-Indic one) is a non-ASCII digit. Each
-        // used to panic at the generated `{{Task.File.<name>}}` reference.
+        // must be sanitized, not panic at the generated
+        // `{{Task.File.<name>}}` reference.
         for (name, expected) in [
             ("²x", "_x_script"),
             ("a½", "a__script"),

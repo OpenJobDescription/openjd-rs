@@ -2730,9 +2730,8 @@ mod tests {
 
     // ── Chunk metadata for non-adaptive spaces ──
     // The reference implementation reports the chunked parameter's name and chunk size
-    // for any CHUNK[INT] parameter. Both were previously derived from adaptive detection,
-    // so both went silent the moment a space was not adaptive — including when a chunk
-    // override made an adaptive space static.
+    // for any CHUNK[INT] parameter. Both getters must report them for a space that is not
+    // adaptive too, including an adaptive space that a chunk override made static.
 
     fn noncontiguous_static_chunk_param(expr: &str, default_task_count: u64) -> job::TaskParameter {
         job::TaskParameter::ChunkInt {
@@ -2777,8 +2776,8 @@ mod tests {
         assert!(adaptive.chunks_adaptive());
         assert_eq!(adaptive.chunks_default_task_count(), Some(5));
 
-        // The override suppresses adaptive chunking, which previously also dropped both
-        // getters even though the caller had just supplied the size.
+        // The override suppresses adaptive chunking; both getters must still report the
+        // parameter and the size the caller just supplied.
         let overridden =
             StepParameterSpaceIterator::new_with_chunk_override(&space, Some(1)).unwrap();
         assert!(!overridden.chunks_adaptive());
@@ -2808,8 +2807,8 @@ mod tests {
     }
 
     // ── Random access for contiguous chunking ──
-    // Contiguous chunking used to force sequential iteration, so `get` and `__getitem__`
-    // declined for any contiguous chunked space while `len` still reported a count.
+    // `get` and `__getitem__` must give random access into a contiguous chunked space,
+    // consistent with the count `len` reports, rather than forcing sequential iteration.
 
     /// The chunk string at `index`, via random access.
     fn chunk_via_get(iter: &StepParameterSpaceIterator, index: u64) -> String {

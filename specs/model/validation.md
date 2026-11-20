@@ -248,13 +248,12 @@ through the **same helper**, so a `bash:` step is validated exactly as
 its `script:` equivalent would be — the design goal that job creation
 "re-runs exactly the checks pass 8 applies" holds for sugar too. Each
 field gets a clone of the task symtab, so its `let` bindings do not leak
-into a sibling field. Consequences worth naming, because they changed
-behaviour (all of these previously passed `check`): a SimpleAction `let`
-without EXPR is now rejected (it was silently ignored); undefined
+into a sibling field. Consequences worth naming: a SimpleAction `let`
+without EXPR is rejected, not ignored; undefined
 references in `script`/`args`/`timeout`/`notifyPeriodInSeconds` are
 checked at decode; a static `script` over an opted-in
-`max_resolved_data_len` fails `check` (it used to surface only at
-`create_job`); and the pass-6 structural checks now reach the sugar —
+`max_resolved_data_len` fails `check`, not only `create_job`; and the
+pass-6 structural checks reach the sugar —
 `script: ""`, `args: []`, control characters in `args[k]`, literal
 `timeout: 0` / `notifyPeriodInSeconds: 700`, and a dangling
 `{{Task.File.Other}}` in `args`.
@@ -290,8 +289,7 @@ for an authored `script`).
 
 `SimpleAction.script` is a `FormatString` (the spec types it `<DataString>`,
 `@fmtstring[host]`), so malformed `{{ ... }}` syntax fails at parse time
-like every other format-string field; it no longer survives to job
-creation.
+like every other format-string field, not at job creation.
 
 ### Let Binding Validation
 

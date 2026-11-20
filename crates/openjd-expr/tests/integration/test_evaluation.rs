@@ -163,23 +163,21 @@ fn multiline_conditional() {
 }
 #[test]
 fn multiline_float_passthrough_not_misaligned() {
-    // Regression: multi-line sources used to be wrapped in "(...)" before
-    // parsing, shifting AST offsets by 1; float passthrough once sliced the
-    // unwrapped source with the shifted range, displaying "2.5 " instead of
-    // "12.5". They are now parsed in the parser's parenthesized mode with no
-    // shift at all; this pins that the offsets still line up.
+    // Regression: float passthrough slices the source with AST offsets, so a
+    // range shifted by 1 displays "2.5 " instead of "12.5". Multi-line
+    // sources are parsed in the parser's parenthesized mode with no shift;
+    // this pins that the offsets line up with the source.
     assert_eq!(eval("12.5 if True else\n0.0").to_display_string(), "12.5");
     assert_eq!(
         eval("12.5 if False else\n30.25").to_display_string(),
         "30.25"
     );
 }
-// Regression: the contextual-keyword retry scanned `source` for the first
-// `.keyword` and rewrote it, with no idea where the parser had actually
-// objected. For `'a.class' + X.class` the first match is inside the string
-// literal, so the literal was rewritten and the expression evaluated to
-// "a.alassc1" — a silently wrong value, with no error surfaced. The rename
-// now runs on the lexer's tokens, and a literal is a single string token.
+// Regression: a contextual-keyword retry that scans `source` for the first
+// `.keyword` and rewrites it, with no idea where the parser objected, finds
+// the match inside the string literal of `'a.class' + X.class` and evaluates
+// to "a.alassc1" — a silently wrong value, with no error surfaced. The rename
+// runs on the lexer's tokens, and a literal is a single string token.
 #[test]
 fn keyword_rename_leaves_string_literals_alone() {
     let mut st = SymbolTable::new();
@@ -192,9 +190,9 @@ fn keyword_rename_leaves_string_literals_alone() {
 
 #[test]
 fn keyword_rename_leaves_literals_alone_in_either_order() {
-    // The literal after the keyword access was never the failing case (the
-    // scan found the real one first), so it is the negative control: both
-    // orders must now agree.
+    // A literal after the keyword access does not fool a source scan (the
+    // scan finds the real one first), so it is the negative control: both
+    // orders must agree.
     let mut st = SymbolTable::new();
     st.set("X.class", "c1").unwrap();
     assert_eq!(
@@ -279,7 +277,7 @@ fn keyword_rename_requires_attribute_position() {
 
 #[test]
 fn keyword_rename_offsets_are_bytes_not_chars() {
-    // The old boundary check indexed `source.chars().nth(byte_offset)`, mixing
+    // A boundary check that indexes `source.chars().nth(byte_offset)` mixes
     // a byte offset into a char index. With multi-byte characters ahead of the
     // attribute the two diverge, and `.if` inside `.iffy` could pass the
     // "followed by a non-identifier" check and be rewritten. `.iffy` is not a
@@ -302,10 +300,9 @@ fn keyword_rename_offsets_are_bytes_not_chars() {
 
 #[test]
 fn keyword_rename_multiline_offsets_line_up() {
-    // Multi-line sources used to be parsed wrapped in "(...)", so offsets
-    // sat one byte right of `source`, and a rename that didn't undo the
-    // shift landed on the character after the keyword. The rename now runs
-    // on lexer tokens of the source itself; this pins that it still hits the
+    // A rename at an offset one byte right of `source` would land on the
+    // character after the keyword. The rename runs on lexer tokens of the
+    // source itself; this pins that in a multi-line source it hits the
     // keyword and skips the literal.
     let mut st = SymbolTable::new();
     st.set("X.class", "c1").unwrap();
@@ -319,12 +316,11 @@ fn keyword_rename_multiline_offsets_line_up() {
     );
 }
 
-// Regression: a keyword placeholder was checked only against the raw text,
-// but the parser NFKC-normalizes non-ASCII identifiers. Fullwidth `ｂｓ`
-// therefore parsed as `bs`, the placeholder for `is`, and was mapped back to
-// `Param.is`: this evaluated to "isis", and `accessed_symbols` listed only
-// `Param.is`. Placeholders are now checked against every identifier as the
-// parser sees it.
+// Regression: the parser NFKC-normalizes non-ASCII identifiers, so keyword
+// placeholders are checked against every identifier as the parser sees it,
+// not only against the raw text. Fullwidth `ｂｓ` parses as `bs`, the
+// first-choice placeholder for `is`; mapping it back to `Param.is` would
+// evaluate to "isis" with `accessed_symbols` listing only `Param.is`.
 #[test]
 fn keyword_placeholder_avoids_fullwidth_identifiers() {
     let mut st = SymbolTable::new();
@@ -379,8 +375,8 @@ fn keyword_placeholder_avoids_other_nfkc_forms() {
 
 #[test]
 fn keyword_placeholder_avoids_normalized_bare_names() {
-    // Guard, not a regression test: this passed before the fix too, because
-    // a bare first segment is never mapped back. A comprehension variable
+    // Guard: a bare first segment is never mapped back, so this holds
+    // whichever placeholder is chosen. A comprehension variable
     // written in fullwidth is the name `af`, the first-choice placeholder
     // for `if`, and the variable and the keyword attribute must stay apart.
     let mut st = SymbolTable::new();

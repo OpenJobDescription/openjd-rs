@@ -163,6 +163,8 @@ Spec entry point: `specs/openjd-for-js/spec.md`
 
 The `specs/` directory is the primary resource for understanding each crate's design. Specs and code evolve together — within a coding session, you might edit the code first and then update the spec, or write the spec first and then implement, or iterate on both simultaneously. The order doesn't matter, but **before committing, always confirm the spec and code line up.** If you changed behavior, the spec must reflect it. If you changed the spec, the code must match.
 
+Specs and comments describe the code as it is, not the change that produced it or the implementation it replaced. That history goes in the commit message and the PR description. See [quality-criteria Q10](docs/dev/quality-criteria.md#2-criteria).
+
 Every crate's spec directory must include a `public-api.md` that describes the crate's public API — all public types, functions, traits, and constants, what they are for, and how they fit together. The library crates (expr, model, sessions, snapshots) also have a generated `public-api.txt` listing every public item with its signature (`public-api.<os>.txt` where the API differs by platform). CI checks it against the code. When adding or changing public API surface, regenerate the listing with `bash scripts/check_public_api.sh --update` and update `public-api.md` in the same commit.
 
 The structure:

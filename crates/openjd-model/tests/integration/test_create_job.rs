@@ -3025,8 +3025,8 @@ fn chunks_of(job: &job::Job) -> &job::ResolvedChunks {
     }
 }
 
-/// `defaultTaskCount` has a minimum of 1. The old code clamped with `.max(1)`,
-/// so a resolved `0` silently became a 1-task chunk.
+/// `defaultTaskCount` has a minimum of 1, so a resolved `0` must be rejected,
+/// not clamped with `.max(1)` into a 1-task chunk.
 #[test]
 fn test_resolved_chunk_default_task_count_zero_rejected() {
     let msg = parse_and_create_err(
@@ -6730,7 +6730,7 @@ fn test_supplied_list_bool_value_still_rejects_a_non_boolean_element() {
 
 #[test]
 fn test_supplied_list_int_and_list_float_values_coerce_their_elements() {
-    // The fix is type-driven rather than bool-specific, so the other element types get the
+    // Element coercion is type-driven rather than bool-specific, so the other element types get the
     // same treatment: LIST[INT] accepts int strings because scalar INT does.
     let result = preprocess_supplied(
         r#"{"name": "Ints", "type": "LIST[INT]"},
@@ -7546,15 +7546,15 @@ fn round_trip_options<'a>(td: &'a TestDirs) -> openjd_model::PathParameterOption
 
 #[test]
 fn preprocess_accepts_its_own_empty_list_path_output() {
-    // A LIST[PATH] is a ListString at every length. An empty default used to come out a
-    // ListPath, which the second pass then refused with "Cannot coerce list to LIST[PATH]".
+    // A LIST[PATH] is a ListString at every length. An empty default must not come out a
+    // ListPath, which the second pass refuses with "Cannot coerce list to LIST[PATH]".
     let td = TestDirs::new();
     let (jt, filled) = preprocess_defaults(
         r#"{"name": "Empty", "type": "LIST[PATH]", "default": []}"#,
         &td,
     );
-    // The variant on the way out, so a fix that only taught the second pass to accept a
-    // ListPath would fail here rather than pass.
+    // Check the variant on the way out, so an empty default that comes out a ListPath fails
+    // here even if the second pass accepts it.
     assert!(
         matches!(
             &filled["Empty"].value,
@@ -7666,8 +7666,8 @@ fn preprocess_accepts_its_own_output_for_every_list_type() {
 
 #[test]
 fn a_list_path_value_is_still_refused_for_a_list_string_parameter() {
-    // Guard against widening the fix: a PATH-typed value must not satisfy a
-    // STRING-typed parameter, since session-time path mapping treats them differently.
+    // A PATH-typed value must not satisfy a STRING-typed parameter, since
+    // session-time path mapping treats them differently.
     let td = TestDirs::new();
     let jt = decode_job_template(
         minimal_expr_job_template(r#"{"name": "Strings", "type": "LIST[STRING]"}"#),
@@ -7696,7 +7696,7 @@ fn a_list_path_value_is_still_refused_for_a_list_string_parameter() {
 fn a_submitted_list_path_value_is_refused_at_any_length() {
     // A stored LIST[PATH] is a ListString, because a job parameter holds a path as a
     // string until there is a host context to interpret it in. ListPath carries a
-    // PathFormat, so it is refused at both lengths, not just the one the fix touched.
+    // PathFormat, so it is refused at both lengths, empty and non-empty.
     //
     // Through make_list rather than the variant directly: ListPath's third field is a
     // cached heap size make_list computes, so a hand-built 0 is a shape the crate never
@@ -7866,8 +7866,8 @@ fn path_round_trip(template_json: &str, name: &str, td: &TestDirs) -> (String, S
 #[test]
 fn path_default_whose_joined_value_exceeds_max_length_is_refused_on_the_first_pass() {
     // The issue's repro. "out" is 3 characters, so decode accepts it; the joined path is
-    // longer than 8, so the first pass refuses it. Before #421 the first pass skipped the
-    // check and the second pass refused the joined path it was handed.
+    // longer than 8, so the first pass must refuse it, not skip the check and leave the
+    // second pass to refuse the joined path it is handed.
     let td = TestDirs::new();
     let joined = joined_default(&td, "out");
     let err = first_pass_error(

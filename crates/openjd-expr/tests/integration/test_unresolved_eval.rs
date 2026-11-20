@@ -1829,7 +1829,7 @@ fn join_union_with_empty_list_member_beside_other_list_type() {
 
 #[test]
 fn join_gate2_listcomp_empty_list_beside_unresolved_list() {
-    // Previously gate 2: "List literal contains incompatible types:
+    // Gate 2 must not report "List literal contains incompatible types:
     // list[int], list[nulltype]".
     assert_join_types(
         "[[] if x > 2 else [Task.Param.I] for x in Param.L]",
@@ -1881,7 +1881,7 @@ fn join_gate2_empty_concrete_comprehension_beside_unresolved_list() {
 
 #[test]
 fn join_gate2_listcomp_list_int_beside_list_float() {
-    // Previously gate 2: "list[float], list[int]". At pass 8 the body type
+    // Gate 2 must not report "list[float], list[int]". At pass 8 the body type
     // is a union, so the comprehension is `list[T | nulltype]` (2026-02
     // §1.3.7), its element `list[float] | list[int]` read as the one list
     // type `list[float | int]`.
@@ -1901,7 +1901,7 @@ fn join_gate2_listcomp_list_int_beside_list_float() {
 
 #[test]
 fn join_gate2_listcomp_list_string_beside_list_path() {
-    // Previously gate 2: "list[path], list[string]".
+    // Gate 2 must not report "list[path], list[string]".
     assert_join_types(
         "[[Task.Param.S] if x > 2 else [Task.Param.P] for x in Param.L]",
         "unresolved[list[list[path | string] | nulltype]]",
@@ -1912,7 +1912,7 @@ fn join_gate2_listcomp_list_string_beside_list_path() {
 
 #[test]
 fn join_gate2_listcomp_union_beside_member() {
-    // Previously gate 2: "float | int, int". The values decide whether the
+    // Gate 2 must not report "float | int, int". The values decide whether the
     // run-time list is `list[int]` (here) or `list[float]`, so the hoisted
     // element type is the union of both; at pass 8 the comprehension is
     // also possibly the untyped empty list (§1.3.7).
@@ -2059,9 +2059,9 @@ fn join_optional_elements_drop_null_member() {
 
 #[test]
 fn join_optional_elements_of_incompatible_types_are_rejected() {
-    // Auditor finding B1, probe 1: `int?` beside `string?` previously
-    // joined member-wise to `nulltype` and was accepted, although every
-    // run-time value fails (int/string conflict, or a null element).
+    // Auditor finding B1, probe 1: `int?` beside `string?` must not join
+    // member-wise to `nulltype` and be accepted, because every run-time
+    // value fails (int/string conflict, or a null element).
     let [p8, g2, _] = join_states();
     let expr = "[Task.Param.I if Session.HasPathMappingRules else None, \
                 Task.Param.S if Session.HasPathMappingRules else None]";
@@ -2188,9 +2188,9 @@ fn join_gate2_listcomp_null_body_reports_null_element() {
 #[test]
 fn join_always_null_unresolved_element_reports_null_element() {
     // PR #434 review: an unresolved element whose type contributes nothing
-    // to a list (`unresolved[nulltype]`) used to reach the incompatible-
-    // types formatter with a single type, producing "incompatible types:
-    // , and nulltype". Such an element is null on every run, so every
+    // to a list (`unresolved[nulltype]`) must not reach the incompatible-
+    // types formatter with a single type, which produces "incompatible
+    // types: , and nulltype". Such an element is null on every run, so every
     // stage reports the run-time null error of the construct: a list
     // literal's, or a comprehension's (`make_list`'s).
     let [p8, g2, rt] = join_states();
@@ -2341,9 +2341,9 @@ fn assert_boolop(expr: &str, target: Option<&str>, pass8: &str, gate2: &str, run
 
 #[test]
 fn boolop_gate2_or_floordiv_by_later_zero_operand() {
-    // Previously gate 2: "Division by zero" — `Task.Param.I or Param.Z`
-    // returned `Param.Z`, but an int is never falsy, so run time always
-    // returns `Task.Param.I`.
+    // Gate 2 must not report "Division by zero" by taking `Param.Z` as the
+    // result of `Task.Param.I or Param.Z`: an int is never falsy, so run
+    // time always returns `Task.Param.I`.
     assert_boolop(
         "10 // (Task.Param.I or Param.Z)",
         None,
@@ -2355,8 +2355,8 @@ fn boolop_gate2_or_floordiv_by_later_zero_operand() {
 
 #[test]
 fn boolop_gate2_or_index_by_later_out_of_range_operand() {
-    // Previously gate 2: "Index 3 out of bounds for list of length 3"
-    // (and the string equivalent).
+    // Gate 2 must not report "Index 3 out of bounds for list of length 3"
+    // (or the string equivalent).
     assert_boolop(
         "Param.L[Task.Param.I or Param.N]",
         None,
@@ -2375,7 +2375,7 @@ fn boolop_gate2_or_index_by_later_out_of_range_operand() {
 
 #[test]
 fn boolop_gate2_or_bool_target_not_applied_to_later_operand() {
-    // Previously gate 2: "Cannot convert 'abc' to bool". The result is
+    // Gate 2 must not report "Cannot convert 'abc' to bool". The result is
     // `true` (the flag) or `'abc'`, and the bool target applies to the
     // union.
     let [p8, g2, _] = boolop_states(true);
@@ -2411,8 +2411,8 @@ fn boolop_gate2_or_bool_target_not_applied_to_later_operand() {
 
 #[test]
 fn boolop_gate2_or_int_target_not_applied_to_later_float() {
-    // Previously gate 2: "Cannot coerce float to int: 2.5 is not a whole
-    // number". Run time always returns `Task.Param.F` (0.0).
+    // Gate 2 must not report "Cannot coerce float to int: 2.5 is not a
+    // whole number". Run time always returns `Task.Param.F` (0.0).
     assert_boolop(
         "Task.Param.F or Param.F",
         Some("int"),
@@ -2424,7 +2424,7 @@ fn boolop_gate2_or_int_target_not_applied_to_later_float() {
 
 #[test]
 fn boolop_pass8_and_returns_union_of_operand_types() {
-    // Previously typed `unresolved[bool]` and rejected at pass 8 with
+    // Must not be typed `unresolved[bool]` and rejected at pass 8 with
     // "upper() is not available for bool". Run time with the flag true
     // returns `Param.S`.
     let [p8, g2, rt] = boolop_states(true);
@@ -2446,8 +2446,8 @@ fn boolop_pass8_and_returns_union_of_operand_types() {
 
 #[test]
 fn boolop_unresolved_last_operand_keeps_its_type() {
-    // Previously `unresolved[bool]`: the last operand is returned
-    // whatever its value.
+    // Not `unresolved[bool]`: the last operand is returned whatever its
+    // value.
     assert_boolop(
         "Param.N and Task.Param.I",
         None,
@@ -2562,8 +2562,8 @@ fn boolop_stops_after_unresolved_operand_that_always_decides() {
 #[test]
 fn boolop_error_method_on_operand_that_always_decides() {
     // `Task.Param.I` always decides `or`, so the result is an int at run
-    // time and `upper()` fails. (Previously typed `unresolved[string]` at
-    // pass 8 and gate 2 and accepted.)
+    // time and `upper()` fails. (Pass 8 and gate 2 must not type it
+    // `unresolved[string]` and accept it.)
     let expr = "(Task.Param.I or Param.S).upper()";
     for st in boolop_states(true) {
         assert_err_w(
@@ -2611,10 +2611,9 @@ fn boolop_error_no_union_member_matches_operator() {
 fn boolop_nested_cond_and_value_or_fallback_idiom() {
     // `cond and A or B`: the inner `and` returns the flag only as
     // `false`, which passes the outer `or` on, so `bool` is never a
-    // possible result. (Before nested outcomes were kept, the inner
-    // `and` merged to `unresolved[bool | int]` and the outer `or` kept
-    // the `bool`, so the subscript was rejected with "Index must be an
-    // integer".)
+    // possible result. (If the inner `and` merged to
+    // `unresolved[bool | int]` and the outer `or` kept the `bool`, the
+    // subscript would be rejected with "Index must be an integer".)
     assert_boolop(
         "Session.HasPathMappingRules and 1 or 0",
         None,
@@ -2630,7 +2629,7 @@ fn boolop_nested_cond_and_value_or_fallback_idiom() {
         [ExprValue::Int(2), ExprValue::Int(1)],
     );
     let float = |f: f64| ExprValue::Float(value::Float64::new(f).unwrap());
-    // Previously "Cannot use '*' operator with bool | float and int".
+    // Must not report "Cannot use '*' operator with bool | float and int".
     assert_boolop(
         "(Session.HasPathMappingRules and Param.F or 1.0) * 2",
         None,

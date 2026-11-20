@@ -124,8 +124,8 @@ fn job_name_control_char_in_expression_source_passes_when_resolution_clean() {
     // A control character inside expression *source* text never appears
     // in a resolved value — only what the expression evaluates to does.
     // This name's expression source contains a real tab (JSON `\t`), but
-    // it statically resolves to "xa": legal, and previously
-    // over-rejected when the check ran on the whole raw text.
+    // it statically resolves to "xa": legal, so a check on the whole
+    // raw text would over-reject it.
     check_ok(&job_with_name("x{{ 'a' if 1 == 1 else '\t' }}"));
 }
 

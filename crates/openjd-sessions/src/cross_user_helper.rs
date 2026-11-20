@@ -875,10 +875,10 @@ fn send_cancel_command(
 /// next Run.
 /// `Session::cancel_action` and `SessionCancelHandle::cancel` find an action
 /// as soon as it is registered (`CancelFields::set_action`), which is before
-/// [`run_via_helper`] writes its Run command. A cancel written in that
-/// window used to be lost on Unix, while
-/// [`run_via_helper`]'s token branch saw the watch channel had fired and
-/// sent nothing, so the action ran to completion.
+/// [`run_via_helper`] writes its Run command. Without this gate, a cancel
+/// written in that window would be dropped on Unix, while
+/// [`run_via_helper`]'s token branch would see the watch channel had fired
+/// and send nothing, so the action would run to completion.
 ///
 /// Each action gets a new gate when it is registered. Both sides take its
 /// lock:
