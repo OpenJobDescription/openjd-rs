@@ -85,6 +85,10 @@ current behavior follow quality-criteria §3: cite `file:line`, or run it.
   and a new `allow(missing_docs)` is not an option.
 - Search the whole repo for the concepts the change touches, not just the
   crate (Q8).
+- Route the change through the existing implementation of any rule it
+  touches rather than adding a parallel copy. If a second implementation is
+  genuinely necessary, add the cross-references and the equivalence pin in
+  the same change (Q10).
 - Strike through resolved report items in the same change (Q9).
 
 ### 4. Gate

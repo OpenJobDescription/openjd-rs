@@ -126,6 +126,19 @@ New source files covered by `scripts/check_copyright_headers.sh` MUST carry
 the copyright header. Work that resolves a report item MUST strike that item
 through in the same change, as described in `AGENTS.md`.
 
+**Q10. One home per rule.** A semantic rule — a spec constraint, a parse or
+coercion rule, a wire format, a classification, a policy constant — SHOULD
+have a single implementation that every path routes through. Parallel copies
+of a rule (per platform, per entry point, per format version, per execution
+mode) drift. When two implementations are genuinely necessary — a crate
+boundary such as the sessions helper, wasm32 vs native, a documented
+streaming trade-off — the copies MUST cross-reference each other at both
+sites and MUST be pinned by an equivalence test that fails when either copy
+changes alone. Existing pins to model: openjd-expr's
+`tests/integration/test_coercion_drift.rs` and the sessions helper framer
+equivalence test in `crates/openjd-sessions/src/subprocess.rs`. Incidentally
+similar code that encodes no shared rule is not a Q10 finding.
+
 ## 3. Evidence
 
 No claim is accepted on the strength of having been generated. Each kind of
@@ -141,9 +154,12 @@ claim needs a specific kind of evidence:
 | "Python diverges" | the same input run through both implementations, with both outputs |
 | "this is dead code" | a demonstration that it is unreachable |
 | "this is fixed" | the test that failed before the fix, now passing |
+| "these two implementations diverge" | the same input run through both paths, with both outputs |
+| "this pair is pinned" | the equivalence test, by name |
 
-The bug, untested, Python-divergence, dead-code, and fixed claims MUST be
-established by execution, not by reasoning.
+The bug, untested, Python-divergence, dead-code, fixed, and
+two-implementation-divergence claims MUST be established by execution, not by
+reasoning.
 
 ## 4. Finding labels
 
@@ -166,8 +182,8 @@ consequence, not the effort needed to fix it.
 | Severity | Meaning | Examples |
 |----------|---------|----------|
 | **high** | Wrong behavior, or a statement people will act on that is false. | Incorrect results, panics on reachable input, conformance violations, security issues, `public-api.md` contradicting the code or the public API listing, a spec that contradicts the code in an area other work relies on |
-| **medium** | Correct today, but quality has degraded in a way that will cause defects or cost later. | Specified behavior with no test that would catch its breakage, misleading or unlocated error messages, inconsistent public naming, undocumented Python divergences, avoidable super-linear algorithms on realistic inputs, missing `///` docs |
-| **low** | Polish. | Wording, internal naming, test organization, minor duplication, idiomatic rewrites with no behavioral effect |
+| **medium** | Correct today, but quality has degraded in a way that will cause defects or cost later. | Specified behavior with no test that would catch its breakage, misleading or unlocated error messages, inconsistent public naming, undocumented Python divergences, a rule implemented twice without the cross-references and equivalence pin Q10 requires, avoidable super-linear algorithms on realistic inputs, missing `///` docs |
+| **low** | Polish. | Wording, internal naming, test organization, minor duplication that encodes no rule, idiomatic rewrites with no behavioral effect |
 
 A report's prioritized recommendations MAY reorder findings by value or
 dependency, but MUST NOT change their severity.
@@ -216,7 +232,8 @@ leaving the file behind.
 ### Verifier rules
 1. When several verifiers run, they MUST get disjoint slices and different
    angles, chosen from: spec fidelity (Q1, Q2, Q8), implementation correctness
-   (Q3, Q5, Q6), test adequacy by mutation (Q4), and Python divergence (Q7).
+   (Q3, Q5, Q6, Q10), test adequacy by mutation (Q4), and Python divergence
+   (Q7).
 2. Each verifier MUST be told that it is one of several and will not see the
    others' results, so that it checks rather than defers.
 3. Each finding comes back labelled as in §4.
