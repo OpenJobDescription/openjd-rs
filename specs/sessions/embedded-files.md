@@ -191,10 +191,15 @@ For each allocated file:
 
 When a `PosixSessionUser` is set via `with_user()`:
 
-`chown_for_user(path, user)`:
+`chown_for_user(path, user)` delegates to `chown_group_then_widen()`, the
+single implementation of the cross-user permission rule (also used for the
+session working directory, the helpers directory, and the helper binary):
 1. Look up the user's group GID
 2. `chown(path, -1, gid)` — set group ownership without changing owner
 3. Set permissions to allow group read/write (and execute if runnable)
+
+Each step fails closed: an error aborts the sequence, so permissions are
+never widened unless the path's group is the session user's group.
 
 This ensures the cross-user subprocess can read embedded files written by the session
 process. The Python library does the same via `os.chown` and `os.chmod`.

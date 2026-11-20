@@ -65,10 +65,13 @@ impl TempDir {
    that name is an error; there is no retry
 3. Set permissions:
    - Same-user: 0o700 (owner rwx only)
-   - Cross-user: 0o770 (owner + group rwx) after `chown` to set group
-4. If `user` is provided and not the process user:
-   - `chown(path, None, Some(group_gid))` — set group ownership
-   - This allows the cross-user subprocess to read/write in the directory
+   - Cross-user: `chown_group_then_widen()` in `embedded_files.rs` — the
+     single implementation of the cross-user permission rule — sets group
+     ownership to the session user's group, then mode 0o770 (owner + group
+     rwx). This allows the cross-user subprocess to read/write in the
+     directory. It fails closed: a failed group lookup, chown, or chmod is a
+     `SessionError::PathPermissions`, and the mode is never widened without
+     the group set, so group access is never granted to the wrong group
 
 ### Drop implementation — best-effort cleanup
 

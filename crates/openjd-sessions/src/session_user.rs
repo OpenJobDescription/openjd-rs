@@ -16,6 +16,40 @@ pub trait SessionUser: Send + Sync + std::fmt::Debug {
     fn as_any(&self) -> &dyn std::any::Any;
 }
 
+/// Test double: a cross-user session user (`is_process_user()` is `false`)
+/// with an arbitrary group name, for exercising the group-permission paths
+/// without a real second OS user.
+#[cfg(all(test, unix))]
+#[derive(Debug)]
+pub(crate) struct FakeSessionUser {
+    group: String,
+}
+
+#[cfg(all(test, unix))]
+impl FakeSessionUser {
+    pub(crate) fn with_group(group: &str) -> Self {
+        Self {
+            group: group.to_string(),
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+impl SessionUser for FakeSessionUser {
+    fn user(&self) -> &str {
+        "nobody"
+    }
+    fn group(&self) -> &str {
+        &self.group
+    }
+    fn is_process_user(&self) -> bool {
+        false
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
 // ---------------------------------------------------------------------------
 // POSIX
 // ---------------------------------------------------------------------------
