@@ -4,6 +4,29 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.18.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.17.0...openjd-expr-v0.18.0) - 2026-11-20
+
+### Bug fixes
+
+- [**breaking**] Bound ExprType nesting depth with fallible constructors ([#578](https://github.com/OpenJobDescription/openjd-rs/pull/578)) ([#578](https://github.com/OpenJobDescription/openjd-rs/pull/578))
+
+- Add a path(list[nulltype]) overload for an empty list of parts ([#576](https://github.com/OpenJobDescription/openjd-rs/pull/576)) ([#576](https://github.com/OpenJobDescription/openjd-rs/pull/576))
+
+- [**breaking**] Reject control characters in a re_sub replacement and surrogate escapes ([#570](https://github.com/OpenJobDescription/openjd-rs/pull/570)) ([#570](https://github.com/OpenJobDescription/openjd-rs/pull/570))
+
+
+### Documentation
+
+- Add quality criterion Q10, comments and specs describe the current code ([#577](https://github.com/OpenJobDescription/openjd-rs/pull/577)) ([#577](https://github.com/OpenJobDescription/openjd-rs/pull/577))
+
+- Correct the \N{name} notes on CPython versions ([#574](https://github.com/OpenJobDescription/openjd-rs/pull/574)) ([#574](https://github.com/OpenJobDescription/openjd-rs/pull/574))
+
+
+### Testing
+
+- Check repr_sh by the words a POSIX shell reads back ([#571](https://github.com/OpenJobDescription/openjd-rs/pull/571)) ([#571](https://github.com/OpenJobDescription/openjd-rs/pull/571))
+
+
 ## [0.17.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-expr-v0.16.0...openjd-expr-v0.17.0) - 2026-11-19
 
 ### Bug fixes
