@@ -640,10 +640,10 @@ fn float_range_value(value: ExprValue, limits: &EffectiveLimits) -> Result<Float
     // and this text is what lands on a command line.
     //
     // Over the cap this downgrades to value-only where the STRING
-    // and PATH paths error. Deliberate: before this change a long
-    // <floatstring> was parsed to an f64 and its text discarded,
-    // so erroring would reject templates that were valid, whereas
-    // a STRING element over the cap was always an error.
+    // and PATH paths error. Deliberate: a long <floatstring> is
+    // still a valid value without its text, so erroring would
+    // reject valid templates, whereas a STRING element has no
+    // value apart from its text, so over the cap it errors.
     if text.chars().count() > limits.max_task_param_string_len {
         return Float64::new(value).map_err(|e| e.to_string());
     }

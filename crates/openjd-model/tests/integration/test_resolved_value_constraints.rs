@@ -124,8 +124,8 @@ fn job_name_control_char_in_expression_source_passes_when_resolution_clean() {
     // A control character inside expression *source* text never appears
     // in a resolved value — only what the expression evaluates to does.
     // This name's expression source contains a real tab (JSON `\t`), but
-    // it statically resolves to "xa": legal, and previously
-    // over-rejected when the check ran on the whole raw text.
+    // it statically resolves to "xa": legal, so a check on the whole
+    // raw text would over-reject it.
     check_ok(&job_with_name("x{{ 'a' if 1 == 1 else '\t' }}"));
 }
 
@@ -1016,12 +1016,23 @@ fn literal_arg_over_cap_fails() {
 
 #[test]
 fn literal_command_over_cap_fails() {
-    // The raw-text pass caps command text at 1024; an opted-in cap below
-    // that still applies to a literal command.
+    // §5.1 sets no maximum command length. The opt-in caller cap applies below
+    // and above the former 1024-character model baseline; without it, commands
+    // pass up to the general 1 MiB `FormatString` guard.
     check_err_limits(
         &job_with_command(&"A".repeat(150)),
         &arg_cap(100),
         &["steps[0] -> script -> actions -> onRun -> command:\n\tis 150 characters, exceeding the maximum of 100."],
+    );
+    check_err_limits(
+        &job_with_command(&"A".repeat(3000)),
+        &arg_cap(2000),
+        &["steps[0] -> script -> actions -> onRun -> command:\n\tis 3000 characters, exceeding the maximum of 2000."],
+    );
+    check_ok_limits(&job_with_command(&"A".repeat(3000)), &arg_cap(3000));
+    check_ok_limits(
+        &job_with_command(&"A".repeat(3000)),
+        &CallerLimits::default(),
     );
 }
 

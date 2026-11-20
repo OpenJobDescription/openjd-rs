@@ -489,9 +489,9 @@ async fn test_cross_user_session_cancel_handle_mark_failed_helper_subprocess() {
 /// A bare external `SessionConfig.cancel_token.cancel()` (not
 /// `cancel_action`/`SessionCancelHandle`) must cancel a cross-user helper
 /// subprocess: the token is a parent of every action token, so
-/// `run_via_helper` has to observe it and signal the helper. Before the fix,
-/// `run_via_helper` watched only the watch channel, so a bare token cancel
-/// let the child run to completion and the action reported Success.
+/// `run_via_helper` has to observe it and signal the helper. Watching only
+/// the watch channel would let a bare token cancel leave the child running
+/// to completion and the action reporting Success.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
 async fn test_cross_user_external_token_cancels_helper_subprocess() {
@@ -1014,8 +1014,8 @@ async fn test_cross_user_token_notify_then_terminate_uses_declared_grace() {
 // the helper is sent its Run command, and a helper with no command running
 // drops a cancel. These tests cancel in that window: deterministically from
 // the session's before-Run test hook, and with a canceller that spins on the
-// handle (the auditor's probe). Before the fix the action ran to completion
-// (6 s, prints FINISHED) and was still reported Canceled.
+// handle. The action must stop, not run to completion (6 s, prints FINISHED)
+// while being reported Canceled.
 
 /// A TERMINATE task that sleeps 6 s and then prints FINISHED.
 fn sleep_then_finish_task() -> openjd_model::job::StepScript {
@@ -1222,9 +1222,9 @@ async fn test_cross_user_cancel_before_run_leaves_helper_ready_for_next_action()
 }
 
 // The tests below make every dup of the cancel pipe fail, as when the
-// process is out of file descriptors. No cancel path may depend on one: a
-// cancel that reached no helper used to leave the action running to
-// completion and still report it Canceled.
+// process is out of file descriptors. No cancel path may depend on one,
+// because a cancel that reaches no helper would leave the action running to
+// completion while it is reported Canceled.
 
 /// Without a dup of the cancel pipe, a cancel before Run still reaches a
 /// task, onEnter and onExit: the held cancel goes through the helper's own

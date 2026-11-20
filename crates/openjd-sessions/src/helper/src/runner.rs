@@ -52,10 +52,10 @@ pub fn run_command(
     let mut child_killed = false;
     let mut escalation_deadline: Option<std::time::Instant> = None;
 
-    // Bounded framer replaces read_line: non-UTF-8 no longer aborts the run,
+    // A bounded framer rather than read_line: non-UTF-8 does not abort the run,
     // per-line memory is bounded, and cancel is not starved by a blocking read.
     let mut framer = LineFramer::new();
-    // Single emit path for all read sites: trim_end keeps existing behavior;
+    // Single emit path for all read sites: trim_end drops trailing whitespace;
     // fit_out_payload holds Response::Out within the 128 KiB response limit.
     let mut emit_out = |line: String| {
         let trimmed = line.trim_end();

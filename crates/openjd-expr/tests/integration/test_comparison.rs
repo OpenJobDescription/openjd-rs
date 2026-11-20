@@ -504,9 +504,9 @@ fn list_containment_uses_cross_type_range_equality() {
 // `__contains__(list: list[T], item: T)` has one type variable, so an item
 // whose type is neither the element type nor implicitly coercible to it
 // has no signature and is refused, rather than evaluating to `false` via a
-// loop over `==` (which the spec makes total across types). openjd-rs
-// previously registered `(list[T1], T2)` and returned `false` for every
-// mismatched pair.
+// loop over `==` (which the spec makes total across types). A signature
+// with a separate item type variable, `(list[T1], T2)`, would accept every
+// mismatched pair and return `false`.
 
 #[test]
 fn list_containment_with_incompatible_item_type_is_refused() {
@@ -696,7 +696,7 @@ fn empty_list_generics_keep_nulltype_return_type() {
 
 #[test]
 fn ordering_with_unresolved_operand_yields_unresolved_bool() {
-    // Comparison operands now go through dispatch even when unresolved. The
+    // Comparison operands go through dispatch even when unresolved. The
     // ordering operators are registered `(T1, T2)`, so any pair matches at
     // the signature and a cross-type pair the spec calls an error
     // (`Param.S < 1`) is still only refused at run time by `do_compare`.

@@ -122,7 +122,7 @@ fn list_of_range_lists_is_two_levels_deep() {
 
 #[test]
 fn concatenation_joins_inner_empty_lists() {
-    // F10 of audit round 1: `[[]] + [[1]]` was rejected ("Cannot
+    // F10 of audit round 1: `[[]] + [[1]]` must not be rejected ("Cannot
     // concatenate list[list[nulltype]] and list[list[int]]").
     // Concatenation uses the list literal's join (§2.1.3).
     let st = SymbolTable::new();
@@ -145,9 +145,9 @@ fn concatenation_joins_inner_empty_lists() {
 
 #[test]
 fn concatenation_with_an_empty_side_has_the_common_type() {
-    // H3 of audit round 2: `make_list` took the type from the elements, so
-    // an empty `list[float]` plus `[1]` was `list[int]` (2026-02 §2.1.3
-    // gives `list[float]`).
+    // H3 of audit round 2: an empty `list[float]` plus `[1]` is
+    // `list[float]` (2026-02 §2.1.3), not the `list[int]` that taking the
+    // type from the elements alone would give.
     let st = typed_empty("EF", ExprType::FLOAT);
     let v = eval("EF + [1]", &st);
     assert_eq!(v.expr_type(), tp("list[float]"));

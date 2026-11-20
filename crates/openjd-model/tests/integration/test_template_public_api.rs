@@ -4,14 +4,13 @@
 
 //! Tests covering the public `template::*` surface.
 //!
-//! After promoting `template` from `pub(crate)` to `pub mod` and
-//! re-exporting the per-variant `JobParameterDefinition` inner
-//! struct types, external callers can pattern-match on enum variants
-//! and read per-variant fields by name. This file is a smoke test of
-//! that surface — it exercises every type that is now nameable from
-//! outside the crate, so a future change that accidentally narrows
-//! the public surface (e.g. flipping a `pub use` back to
-//! `#[cfg(test)]`) breaks the build here rather than silently
+//! `template` is a `pub mod` that re-exports the per-variant
+//! `JobParameterDefinition` inner struct types, so external callers
+//! can pattern-match on enum variants and read per-variant fields by
+//! name. This file is a smoke test of that surface — it exercises
+//! every type that is nameable from outside the crate, so a change
+//! that accidentally narrows the public surface (e.g. flipping a
+//! `pub use` to `#[cfg(test)]`) breaks the build here rather than silently
 //! breaking a downstream consumer.
 
 use openjd_model::decode_environment_template;

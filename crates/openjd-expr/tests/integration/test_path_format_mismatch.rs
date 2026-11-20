@@ -12,8 +12,8 @@ fn eval_fmt(expr: &str, st: &SymbolTable, fmt: PathFormat) -> Result<ExprValue, 
     parsed.with_path_format(fmt).evaluate(&symtabs)
 }
 
-/// Property access on a PATH in the other format used to report the
-/// attribute as an undefined variable (`P.suffix`), hiding the real error.
+/// Property access on a PATH in the other format must report the format
+/// mismatch, not the attribute as an undefined variable (`P.suffix`).
 /// Found by the `expr_eval_gen` fuzz target.
 #[test]
 fn mismatch_reported_through_property_access() {

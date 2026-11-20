@@ -633,7 +633,7 @@ fn single_line_two_char_operator_caret_points_at_first_char() {
 #[test]
 fn multiline_two_char_operator_caret_points_at_first_char() {
     // compute_caret_offset scans back from the right operand to the operator,
-    // skipping white space; it now skips the line break too, so an operator
+    // skipping white space and line breaks, so an operator
     // at the end of a line is found.
     assert_err("1 **\n'a'", &["  1 **\n", "  ~~^"]);
     assert_err("1 //\n'a'", &["  1 //\n", "  ~~^"]);
@@ -1304,9 +1304,9 @@ fn multiline_keyword_attributes_resolve() {
 // --- TestMultiLineExpressions: type error variants matching Python ---
 //
 // The caret sits on the operator, as on a single line and as in the original
-// pure-Python implementation. It used to land one byte right of the operator,
-// because multi-line expressions were parsed wrapped in `(...)` and the
-// caret computation didn't undo that shift.
+// pure-Python implementation, not one byte to its right. Multi-line
+// expressions are parsed in the parser's parenthesized mode, which adds no
+// offset shift for the caret computation to undo.
 
 #[test]
 fn multiline_type_error_in_parens() {
@@ -1403,7 +1403,7 @@ Both branches fail in the if/else:
 
 #[test]
 fn format_string_parse_error_carries_caret() {
-    // parse_segments now routes through with_span so the error includes
+    // parse_segments routes through with_span so the error includes
     // the raw format-string source and a caret over the failing {{...}}.
     let err = FormatString::new("hello {{ 1 + }} world").unwrap_err();
     let expected = "\
@@ -1440,8 +1440,8 @@ Expected integer in '1-xx,5'
 
 #[test]
 fn range_expr_parse_error_has_parse_error_kind() {
-    // Previously these all came through ExpressionError::new (Other kind),
-    // losing programmatic classification. Now they carry ParseError kind.
+    // Range expression syntax errors carry the ParseError kind, not Other, so
+    // callers can classify them programmatically.
     let err = ParsedExpression::new("range_expr('1-xx,5')")
         .and_then(|p| p.evaluate(&SymbolTable::new()))
         .unwrap_err();

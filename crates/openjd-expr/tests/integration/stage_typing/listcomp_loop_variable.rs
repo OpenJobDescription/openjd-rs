@@ -78,10 +78,10 @@ fn any_iterable_binds_any() {
 
 #[test]
 fn every_type_variable_iterable_binds_any() {
-    // F2 of audit round 9: a `T1`-typed iterable element (`sorted` of an
-    // `any` was a `list[T1]`), not only `T3`, binds `any`. `sorted` of an
-    // `any` is now `any` (loop 3 round 5); every type variable code is
-    // covered by the unit tests of `comprehension_var`.
+    // F2 of audit round 9: a `T1`-typed iterable element, not only `T3`,
+    // binds `any`. `sorted` of an `any` is itself `any`, so this checks the
+    // end-to-end result; the unit tests of `comprehension_var` cover every
+    // type variable code.
     let [mut p8, _, mut rt] = states();
     p8.set("U", ExprValue::unresolved(ExprType::ANY)).unwrap();
     rt.set("U", ExprValue::ListInt(vec![2, 1])).unwrap();
@@ -92,13 +92,12 @@ fn every_type_variable_iterable_binds_any() {
 
 #[test]
 fn type_variable_element_type_binds_any() {
-    // F1 of audit round 10: over `Param.R + Param.L` (a `list[T2]`) the loop
-    // variable was `T2`, so `x in [1, 2]` failed to type, the comprehension
-    // was `list[nulltype]`, and indexing it was rejected though every run
-    // gives `1` (§1.3.7: a type variable binds `any`).
+    // F1 of audit round 10: a loop variable typed with a type variable binds
+    // `any` (§1.3.7), so `x in [1, 2]` types and indexing the comprehension,
+    // which gives `1` on every run, is accepted.
     let [p8, g2, rt] = states();
     let expr = "[x for x in Param.R + Param.L if x in [1, 2]][0]";
-    // (`Param.R + Param.L` is now a `list[int]`, round 11.)
+    // (`Param.R + Param.L`, a `range_expr` plus a `list[int]`, is a `list[int]`.)
     assert_eq!(eval(expr, &p8).expr_type(), tp("unresolved[int]"));
     for st in [&g2, &rt] {
         assert_eq!(eval(expr, st).to_display_string(), "1");

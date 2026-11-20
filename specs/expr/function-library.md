@@ -369,9 +369,9 @@ language's non-destructive coercions are honoured when binding `T` from both
 arguments (see "Type variable unification" in type-system.md): `1 in [1.0,
 2.0]`, `1.0 in [1, 2]`, `path(['/a']) in ['/a']` and `1.0 in range_expr('1-3')`
 all evaluate and compare by value, and the empty list `[]` accepts any item
-type. The earlier registration `(list[T1], T2)` matched Python's
-value-equality semantics and let a template whose item type could never match
-pass static validation; it was replaced because the spec's static type checking
+type. The overload is not registered as `(list[T1], T2)`: that would match
+Python's value-equality semantics, but it would let a template whose item type
+can never match pass static validation, and the spec's static type checking
 exists to catch exactly that.
 
 Comparison operands go through the same dispatch when they are unresolved, so

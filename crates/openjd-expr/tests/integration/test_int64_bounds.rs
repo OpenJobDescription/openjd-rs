@@ -326,7 +326,7 @@ fn floor_exactly_i64_min_ok() {
 
 #[test]
 fn round_float_i64_min_ndigits() {
-    // Negating i64::MIN previously panicked in debug builds. Rounding
+    // Negating i64::MIN must not panic, even in debug builds. Rounding
     // any float at 10^|huge| precision is the int 0.
     assert!(matches!(
         eval("round(1.5, -9223372036854775808)"),

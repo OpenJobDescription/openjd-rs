@@ -677,10 +677,10 @@ fn element_type_that_is_a_list_of_lists_fails_when_an_element_reaches_it() {
 #[test]
 fn type_variable_element_type_is_not_a_list_of_lists() {
     // F1 of audit round 5: a body typed with a type variable does not say
-    // what its values are; counting `list[list[T1]]` as a list of lists made
-    // the comprehension `list[nulltype]` and its index an error, though
-    // every run builds `[[1, 2]]`. (The body here is now a `list[any]`;
-    // `comprehension_too_deep`'s unit test covers `list[list[T1]]`.)
+    // what its values are, so `list[list[T1]]` must not count as a list of
+    // lists, which would make the comprehension `list[nulltype]` and its
+    // index an error, though every run builds `[[1, 2]]`. (The body here is a
+    // `list[any]`; `comprehension_too_deep`'s unit test covers `list[list[T1]]`.)
     let [p8, g2, rt] = states_with_any_list(
         ExprValue::make_list(vec![], ExprType::list(ExprType::INT).unwrap()).unwrap(),
     );

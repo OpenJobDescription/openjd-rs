@@ -1528,7 +1528,7 @@ fn chained_comparison_carries_middle_operand_once() {
 /// coerced value, so the memory limit applies to what the expression
 /// actually produces. A `range_expr` is a few dozen bytes; coerced to
 /// `list[int]` it becomes 100,000 ints (800 KB), which exceeds a 100 KB
-/// limit. Previously only the small `range_expr` was ever tracked.
+/// limit, so the coerced list, not only the small `range_expr`, is charged.
 #[test]
 fn root_target_coercion_is_charged_at_coerced_size() {
     let st = SymbolTable::new();
@@ -1561,8 +1561,8 @@ fn root_target_coercion_is_charged_at_coerced_size() {
 /// `string`, so `join` receives argument targets and `range(2000)` (16 KB
 /// as `list[int]`) is coerced to `list[string]` (about 55 KB). A 1 MB
 /// string is live at the same time; a further 500 KB then totals 1.51 MB
-/// and fails a 1.5 MB limit. With the old under-count, 39 KB of the 1 MB
-/// string went uncounted and the expression fit.
+/// and fails a 1.5 MB limit. With that under-count, 39 KB of the 1 MB
+/// string would go uncounted and the expression would fit.
 #[test]
 fn call_argument_coercion_releases_what_was_charged() {
     let st = SymbolTable::new();
@@ -1827,10 +1827,10 @@ fn slice_placeholders_are_charged_before_dispatch_releases_them() {
 /// input and the projected result count together. A 1 MB string sliced
 /// whole under a 1.5 MB limit fails at the slice, with the input, the
 /// three placeholders, and the projected result in the figure.
-/// Previously the slice built an untracked `Vec<char>` (4 MB) and index
-/// vector (8 MB), then a result whose capacity had grown to 1048576, and
-/// the expression passed because the input was released before the
-/// result was tracked.
+/// This guards against a slice that builds an untracked `Vec<char>` (4 MB)
+/// and index vector (8 MB), then a result whose capacity has grown to
+/// 1048576, and passes because the input is released before the result is
+/// tracked.
 #[test]
 fn string_slice_budgets_result_before_allocating() {
     let st = SymbolTable::new();
@@ -1863,8 +1863,8 @@ fn string_slice_budgets_result_before_allocating() {
 /// still tracked (it is released by dispatch afterwards), a whole-list
 /// slice of 50,000 ints under a limit that fits the input but not two
 /// copies fails at the slice, and the figure is the input plus the
-/// reservation. Previously the result grew by doubling with no check
-/// until it was complete, and an index vector was allocated alongside.
+/// reservation. This guards against a result that grows by doubling with
+/// no check until it is complete, with an index vector allocated alongside.
 #[test]
 fn list_slice_reserves_result_before_building() {
     let mut st = SymbolTable::new();
