@@ -6042,7 +6042,7 @@ fn create_job_rejects_list_list_int_outer_too_long() {
                     openjd_expr::ExprValue::ListInt(vec![2]),
                     openjd_expr::ExprValue::ListInt(vec![3]),
                 ],
-                openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
+                openjd_expr::ExprType::list(openjd_expr::ExprType::INT).unwrap(),
                 0,
             ),
         },
@@ -6071,7 +6071,7 @@ fn create_job_rejects_list_list_int_inner_too_long() {
             param_type: openjd_model::JobParameterType::ListListInt,
             value: openjd_expr::ExprValue::ListList(
                 vec![openjd_expr::ExprValue::ListInt(vec![1, 2, 3, 4, 5])],
-                openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
+                openjd_expr::ExprType::list(openjd_expr::ExprType::INT).unwrap(),
                 0,
             ),
         },
@@ -6100,7 +6100,7 @@ fn create_job_rejects_list_list_int_inner_item_below_min() {
             param_type: openjd_model::JobParameterType::ListListInt,
             value: openjd_expr::ExprValue::ListList(
                 vec![openjd_expr::ExprValue::ListInt(vec![-1])],
-                openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
+                openjd_expr::ExprType::list(openjd_expr::ExprType::INT).unwrap(),
                 0,
             ),
         },
@@ -6132,7 +6132,7 @@ fn create_job_accepts_list_list_int_within_constraints() {
                     openjd_expr::ExprValue::ListInt(vec![1, 2, 3]),
                     openjd_expr::ExprValue::ListInt(vec![50, 100]),
                 ],
-                openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
+                openjd_expr::ExprType::list(openjd_expr::ExprType::INT).unwrap(),
                 0,
             ),
         },
@@ -8881,7 +8881,7 @@ fn native_list_parameter_values_coerce_like_json_text() {
     // it), but a LIST[LIST[INT]] can hold a list of each.
     let mixed_nested = ExprValue::ListList(
         vec![ints, native_strings(&[" 3", "4\t"])],
-        openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
+        openjd_expr::ExprType::list(openjd_expr::ExprType::INT).unwrap(),
         0,
     );
     let mixed_floats = ExprValue::make_list(
@@ -8910,7 +8910,7 @@ fn native_list_parameter_values_coerce_like_json_text() {
                 "LL",
                 ExprValue::ListList(
                     vec![native_strings(&[" 1", "2"]), native_strings(&["3 "])],
-                    openjd_expr::ExprType::list(openjd_expr::ExprType::STRING),
+                    openjd_expr::ExprType::list(openjd_expr::ExprType::STRING).unwrap(),
                     0,
                 ),
             ),
@@ -8963,7 +8963,7 @@ fn a_native_path_element_is_not_read_as_a_number() {
         (
             (
                 "LL",
-                ExprValue::ListList(vec![paths()], ExprType::list(ExprType::PATH), 0),
+                ExprValue::ListList(vec![paths()], ExprType::list(ExprType::PATH).unwrap(), 0),
             ),
             "Validation error: Parameter 'LL': item[0][0]: Cannot coerce path to INT",
         ),
@@ -8994,9 +8994,9 @@ fn an_empty_native_list_of_lists_becomes_a_list_of_int_lists() {
     // `list[list[int]]`, as the JSON text `[]` does, and joins with other int lists.
     use openjd_expr::{ExprType, ExprValue};
     for element_type in [
-        ExprType::list(ExprType::STRING),
-        ExprType::list(ExprType::BOOL),
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::STRING).unwrap(),
+        ExprType::list(ExprType::BOOL).unwrap(),
+        ExprType::list(ExprType::INT).unwrap(),
         ExprType::NULLTYPE,
     ] {
         let native = ExprValue::ListList(vec![], element_type.clone(), 0);
@@ -9005,7 +9005,7 @@ fn an_empty_native_list_of_lists_becomes_a_list_of_int_lists() {
         let json = preprocess_numeric(NUMERIC_LISTS_TEMPLATE, &[("LL", "[]")]).unwrap();
         assert_eq!(
             values["LL"].value.expr_type(),
-            ExprType::list(ExprType::list(ExprType::INT)),
+            ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap(),
             "{element_type}"
         );
         assert_eq!(values["LL"].value.expr_type(), json["LL"].value.expr_type());
@@ -9036,7 +9036,7 @@ fn native_list_parameter_values_reject_a_bad_element_like_json_text() {
             "Validation error: Parameter 'LI': item[0]: Value 'true' is not a valid integer or integer string.",
         ),
         (
-            ("LL", ExprValue::ListList(vec![native_strings(&["1"]), native_strings(&["2", "x"])], openjd_expr::ExprType::list(openjd_expr::ExprType::STRING), 0)),
+            ("LL", ExprValue::ListList(vec![native_strings(&["1"]), native_strings(&["2", "x"])], openjd_expr::ExprType::list(openjd_expr::ExprType::STRING).unwrap(), 0)),
             ("LL", r#"[["1"], ["2", "x"]]"#),
             "Validation error: Parameter 'LL': item[1][1]: Value 'x' is not a valid integer or integer string.",
         ),
@@ -9068,7 +9068,7 @@ fn native_list_parameter_values_reject_a_bad_element_like_json_text() {
             "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got a string.",
         ),
         (
-            ("LL", ExprValue::ListList(vec![ExprValue::Null], openjd_expr::ExprType::list(openjd_expr::ExprType::INT), 0)),
+            ("LL", ExprValue::ListList(vec![ExprValue::Null], openjd_expr::ExprType::list(openjd_expr::ExprType::INT).unwrap(), 0)),
             ("LL", "[null]"),
             "Validation error: Parameter 'LL': item[0]: Value is not a list for parameter type LIST[INT]. Got null.",
         ),

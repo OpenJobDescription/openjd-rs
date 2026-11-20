@@ -1734,3 +1734,183 @@ fn step_let_shared_scope_keeps_job_and_step_names() {
     }"#,
     );
 }
+
+// ── Expression type depth (MAX_TYPE_DEPTH) ──
+
+/// `binding` nesting `inner` in `n` list comprehensions with an unknown
+/// filter, each typed `list[T | nulltype]`, two type levels over `T`.
+fn nested_comprehensions(inner: &str, n: usize) -> String {
+    (0..n).fold(inner.to_string(), |c, i| {
+        format!("[{c} for v{i} in [1] if Param.C]")
+    })
+}
+
+fn job_with_params_and_script_let(let_bindings: &[String]) -> String {
+    let bindings: Vec<String> = let_bindings
+        .iter()
+        .map(|b| serde_json::to_string(b).unwrap())
+        .collect();
+    format!(
+        r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [
+            {{"name": "N", "type": "INT", "default": 1}},
+            {{"name": "C", "type": "BOOL", "default": false}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "script": {{
+                "let": [{}],
+                "actions": {{"onRun": {{"command": "foo"}}}}
+            }}
+        }}]
+    }}"#,
+        bindings.join(", ")
+    )
+}
+
+/// The deepest comprehension nesting that validates is 31 levels (typed
+/// 63 deep, here inside `len`); a 32nd level passes the type depth limit
+/// and fails validation at that binding, with the whole comprehension
+/// under the caret.
+#[test]
+fn deepest_single_expression_comprehension_validates() {
+    let decode = |n: usize| {
+        decode_job_template(
+            yaml_val(&job_with_params_and_script_let(&[format!(
+                "x = len({})",
+                nested_comprehensions("Param.N", n)
+            )])),
+            Some(&["EXPR"]),
+            &CallerLimits::default(),
+        )
+    };
+    decode(31).expect("the deepest nesting validates");
+    let err = decode(32)
+        .expect_err("32 levels type past the limit")
+        .to_string();
+    let lines: Vec<&str> = err.lines().collect();
+    assert_eq!(
+        lines[..3],
+        [
+            "Model validation error: 1 validation error for JobTemplate",
+            "steps[0] -> script -> let[0]:",
+            "\tInvalid expression in let binding 'x': Type nesting depth exceeded limit (64)",
+        ],
+        "{err}"
+    );
+    // The caret is under the outermost comprehension, the argument of `len`.
+    let comprehension = nested_comprehensions("Param.N", 32);
+    assert_eq!(lines[3], format!("  x = len({comprehension})"), "{err}");
+    assert_eq!(
+        lines[4],
+        format!("{}^{}", " ".repeat(10), "~".repeat(comprehension.len() - 1)),
+        "{err}"
+    );
+}
+
+/// A chain of bindings that each nest the one before builds a type past
+/// the limit; the binding that passes it fails validation.
+#[test]
+fn let_chain_past_the_type_depth_limit_fails_at_that_binding() {
+    let mut bindings = vec!["a0 = Param.N".to_string()];
+    for i in 1..=3 {
+        bindings.push(format!(
+            "a{i} = {}",
+            nested_comprehensions(&format!("a{}", i - 1), 30)
+        ));
+    }
+    let start = std::time::Instant::now();
+    check_err(
+        &job_with_params_and_script_let(&bindings),
+        &[
+            "steps[0] -> script -> let[2]:",
+            "Invalid expression in let binding 'a2': Type nesting depth exceeded limit (64)",
+        ],
+    );
+    // A chain of this length validated in about a second without the
+    // limit, which grows to minutes over a longer chain (the next test).
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(10),
+        "{:?}",
+        start.elapsed()
+    );
+}
+
+/// A format string field (here a command's argument) whose expression
+/// types past the limit fails validation at that field, with the
+/// expression and a caret, as a `let` binding does.
+#[test]
+fn format_string_past_the_type_depth_limit_fails_at_that_field() {
+    let template = |arg: &str| {
+        format!(
+            r#"{{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "extensions": ["EXPR"],
+        "parameterDefinitions": [
+            {{"name": "N", "type": "INT", "default": 1}},
+            {{"name": "C", "type": "BOOL", "default": false}}
+        ],
+        "steps": [{{
+            "name": "S",
+            "script": {{
+                "let": [{}, {}],
+                "actions": {{"onRun": {{"command": "foo", "args": ["{arg}"]}}}}
+            }}
+        }}]
+    }}"#,
+            serde_json::to_string(&format!("b1 = {}", nested_comprehensions("Param.N", 30)))
+                .unwrap(),
+            serde_json::to_string(&format!("b2 = {}", nested_comprehensions("b1", 1))).unwrap(),
+        )
+    };
+    // `b2` is 63 deep, so `[b2]` is at the limit and `[[b2]]` past it.
+    decode_ok(&template("{{ len([b2]) }}"));
+    let err = decode_job_template(
+        yaml_val(&template("{{ len([[b2]]) }}")),
+        Some(&["EXPR", "FEATURE_BUNDLE_1"]),
+        &CallerLimits::default(),
+    )
+    .expect_err("[[b2]] is past the limit")
+    .to_string();
+    // The whole error, so a caret too long or on another node fails.
+    assert_eq!(
+        err,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         steps[0] -> script -> actions -> onRun -> args[0]:\n\
+         \tFailed to parse interpolation expression at [0, 17]. \
+         Type nesting depth exceeded limit (64)\n  len([[b2]])\n      ^~~~~~"
+    );
+}
+
+/// A chain as long as `let` allows (50 bindings), each nesting the one
+/// before in 30 comprehensions, also fails at the first binding past the
+/// limit. Each later binding is typed too (a failed one is rebound as
+/// `unresolved[any]`), which takes under a second in a debug build; without
+/// the limit a release build would take over 5 minutes.
+#[test]
+fn longest_let_chain_past_the_type_depth_limit_fails_at_that_binding() {
+    let mut bindings = vec!["a0 = Param.N".to_string()];
+    for i in 1..50 {
+        bindings.push(format!(
+            "a{i} = {}",
+            nested_comprehensions(&format!("a{}", i - 1), 30)
+        ));
+    }
+    let start = std::time::Instant::now();
+    check_err(
+        &job_with_params_and_script_let(&bindings),
+        &[
+            "steps[0] -> script -> let[2]:",
+            "Invalid expression in let binding 'a2': Type nesting depth exceeded limit (64)",
+        ],
+    );
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
+}

@@ -49,5 +49,5 @@ pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS, MAX_RANGE
 pub use symbol_table::{
     SerializedSymbolTable, SymbolTable, SymbolTableError, MAX_SYMBOL_TABLE_ENTRIES,
 };
-pub use types::{ExprType, TypeCode};
+pub use types::{ExprType, TypeCode, MAX_TYPE_DEPTH};
 pub use value::ExprValue;

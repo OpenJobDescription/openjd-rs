@@ -99,7 +99,10 @@ fn library_function_with_unresolved() {
     let parsed = ParsedExpression::new("custom_add(X, 7)").unwrap();
     let result = parsed.with_library(&lib).evaluate(&[&st]).unwrap();
     assert!(result.is_unresolved());
-    assert_eq!(result.expr_type(), ExprType::unresolved(ExprType::INT));
+    assert_eq!(
+        result.expr_type(),
+        ExprType::unresolved(ExprType::INT).unwrap()
+    );
 }
 
 // ── 3-phase dispatch via call() ──
@@ -348,7 +351,10 @@ fn unresolved_exact_match_returns_unresolved() {
         )
         .unwrap();
     assert!(r.is_unresolved());
-    assert_eq!(r.expr_type(), ExprType::unresolved(ExprType::STRING));
+    assert_eq!(
+        r.expr_type(),
+        ExprType::unresolved(ExprType::STRING).unwrap()
+    );
 }
 
 #[test]
@@ -369,7 +375,10 @@ fn unresolved_coerced_match_returns_unresolved() {
         )
         .unwrap();
     assert!(r.is_unresolved());
-    assert_eq!(r.expr_type(), ExprType::unresolved(ExprType::FLOAT));
+    assert_eq!(
+        r.expr_type(),
+        ExprType::unresolved(ExprType::FLOAT).unwrap()
+    );
 }
 
 #[test]
@@ -384,12 +393,17 @@ fn unresolved_generic_returns_substituted_type() {
     let r = lib
         .call(
             "first",
-            &[ExprValue::unresolved(ExprType::list(ExprType::STRING))],
+            &[ExprValue::unresolved(
+                ExprType::list(ExprType::STRING).unwrap(),
+            )],
             &mut ctx,
         )
         .unwrap();
     assert!(r.is_unresolved());
-    assert_eq!(r.expr_type(), ExprType::unresolved(ExprType::STRING));
+    assert_eq!(
+        r.expr_type(),
+        ExprType::unresolved(ExprType::STRING).unwrap()
+    );
 }
 
 // ── derive_return_type ──
@@ -398,14 +412,18 @@ fn unresolved_generic_returns_substituted_type() {
 fn derive_return_type_no_match_returns_none() {
     let mut lib = FunctionLibrary::new();
     lib.register_sig("f", "(int) -> int", identity).unwrap();
-    assert_eq!(lib.derive_return_type("f", &[ExprType::STRING]), None);
+    assert_eq!(
+        lib.derive_return_type("f", &[ExprType::STRING]).unwrap(),
+        None
+    );
 }
 
 #[test]
 fn derive_return_type_unknown_function_returns_none() {
     let lib = FunctionLibrary::new();
     assert_eq!(
-        lib.derive_return_type("nonexistent", &[ExprType::INT]),
+        lib.derive_return_type("nonexistent", &[ExprType::INT])
+            .unwrap(),
         None
     );
 }
@@ -416,7 +434,7 @@ fn derive_return_type_with_coercion() {
     lib.register_sig("f", "(float) -> float", identity).unwrap();
     // int → coerce to float
     assert_eq!(
-        lib.derive_return_type("f", &[ExprType::INT]),
+        lib.derive_return_type("f", &[ExprType::INT]).unwrap(),
         Some(ExprType::FLOAT)
     );
 }
@@ -427,7 +445,8 @@ fn derive_return_type_generic_substitution() {
     lib.register_sig("first", "(list[T1]) -> T1", identity)
         .unwrap();
     assert_eq!(
-        lib.derive_return_type("first", &[ExprType::list(ExprType::PATH)]),
+        lib.derive_return_type("first", &[ExprType::list(ExprType::PATH).unwrap()])
+            .unwrap(),
         Some(ExprType::PATH)
     );
 }
@@ -437,11 +456,11 @@ fn derive_return_type_union_expansion() {
     let mut lib = FunctionLibrary::new();
     lib.register_sig("f", "(int) -> string", identity).unwrap();
     lib.register_sig("f", "(float) -> path", identity).unwrap();
-    let union_arg = ExprType::union(vec![ExprType::INT, ExprType::FLOAT]);
-    let result = lib.derive_return_type("f", &[union_arg]).unwrap();
+    let union_arg = ExprType::union(vec![ExprType::INT, ExprType::FLOAT]).unwrap();
+    let result = lib.derive_return_type("f", &[union_arg]).unwrap().unwrap();
     assert_eq!(
         result,
-        ExprType::union(vec![ExprType::PATH, ExprType::STRING])
+        ExprType::union(vec![ExprType::PATH, ExprType::STRING]).unwrap()
     );
 }
 

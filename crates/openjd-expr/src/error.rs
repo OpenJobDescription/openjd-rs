@@ -77,6 +77,21 @@ pub enum ExpressionErrorKind {
     #[error("Expression nesting depth ({depth}) exceeded limit ({limit})")]
     ExpressionTooDeep { depth: usize, limit: usize },
 
+    /// Building an [`ExprType`](crate::ExprType) would have made it deeper
+    /// than [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH), as that constant
+    /// defines depth.
+    ///
+    /// Returned by the `ExprType` constructors and by every operation that
+    /// builds a type from other types (substitution, unions, list types),
+    /// so that no type is ever deep enough for a recursive walk over it to
+    /// overflow the stack. Like a budget error, static typing never absorbs
+    /// it in a branch a run might skip.
+    #[error("Type nesting depth exceeded limit ({limit})")]
+    TypeTooDeep {
+        /// The limit, [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH).
+        limit: usize,
+    },
+
     /// A Python syntax feature that is not supported in the expression language.
     #[error("{feature}")]
     UnsupportedSyntax { feature: String },

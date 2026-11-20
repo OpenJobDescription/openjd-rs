@@ -218,7 +218,7 @@ fn test_list_list_int_inner_too_short() {
     };
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![1])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     let err = p.check_value_constraints(&v).unwrap_err();
@@ -1481,7 +1481,7 @@ fn list_list_int_param() -> JobListListIntParameterDefinition {
 fn test_list_list_int_accepts_valid() {
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![1, 2]), ExprValue::ListInt(vec![3])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     assert!(list_list_int_param().check_value_constraints(&v).is_ok());
@@ -1489,7 +1489,7 @@ fn test_list_list_int_accepts_valid() {
 
 #[test]
 fn test_list_list_int_accepts_empty() {
-    let v = ExprValue::ListList(vec![], ExprType::list(ExprType::INT), 0);
+    let v = ExprValue::ListList(vec![], ExprType::list(ExprType::INT).unwrap(), 0);
     assert!(list_list_int_param().check_value_constraints(&v).is_ok());
 }
 
@@ -1497,7 +1497,7 @@ fn test_list_list_int_accepts_empty() {
 fn test_list_list_int_accepts_empty_inner() {
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     assert!(list_list_int_param().check_value_constraints(&v).is_ok());
@@ -1533,7 +1533,7 @@ fn test_list_list_int_rejects_wrong_inner_type() {
     });
     let v = ExprValue::ListList(
         vec![ExprValue::ListString(vec!["a".into()], 0)],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     let err = p.check_value_constraints(&v).unwrap_err();
@@ -1550,7 +1550,7 @@ fn test_list_list_int_at_min_length() {
     p.min_length = Some(2);
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![1]), ExprValue::ListInt(vec![2])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     assert!(p.check_value_constraints(&v).is_ok());
@@ -1562,7 +1562,7 @@ fn test_list_list_int_one_below_min_length() {
     p.min_length = Some(2);
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![1])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     let err = p.check_value_constraints(&v).unwrap_err();
@@ -1578,7 +1578,7 @@ fn test_list_list_int_at_max_length() {
     p.max_length = Some(2);
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![1]), ExprValue::ListInt(vec![2])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     assert!(p.check_value_constraints(&v).is_ok());
@@ -1594,7 +1594,7 @@ fn test_list_list_int_one_above_max_length() {
             ExprValue::ListInt(vec![2]),
             ExprValue::ListInt(vec![3]),
         ],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     let err = p.check_value_constraints(&v).unwrap_err();
@@ -1612,7 +1612,7 @@ fn test_list_list_int_inner_at_min_length() {
     });
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![1, 2])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     assert!(p.check_value_constraints(&v).is_ok());
@@ -1628,7 +1628,7 @@ fn test_list_list_int_inner_too_long() {
     });
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![1, 2, 3])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     let err = p.check_value_constraints(&v).unwrap_err();
@@ -1648,7 +1648,7 @@ fn test_list_list_int_inner_at_max_length() {
     });
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![1, 2])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     assert!(p.check_value_constraints(&v).is_ok());
@@ -1669,7 +1669,7 @@ fn test_list_list_int_inner_item_at_min_value() {
     });
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![0])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     assert!(p.check_value_constraints(&v).is_ok());
@@ -1689,7 +1689,7 @@ fn test_list_list_int_inner_item_below_min_value() {
     });
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![-1])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     let err = p.check_value_constraints(&v).unwrap_err();
@@ -1713,7 +1713,7 @@ fn test_list_list_int_inner_item_at_max_value() {
     });
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![10])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     assert!(p.check_value_constraints(&v).is_ok());
@@ -1733,7 +1733,7 @@ fn test_list_list_int_inner_item_above_max_value() {
     });
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![11])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     let err = p.check_value_constraints(&v).unwrap_err();
@@ -1754,7 +1754,7 @@ fn test_list_list_int_inner_item_in_allowed() {
     });
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![1, 2])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     assert!(p.check_value_constraints(&v).is_ok());
@@ -1774,7 +1774,7 @@ fn test_list_list_int_inner_item_not_in_allowed() {
     });
     let v = ExprValue::ListList(
         vec![ExprValue::ListInt(vec![3])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     let err = p.check_value_constraints(&v).unwrap_err();
@@ -1802,7 +1802,7 @@ fn test_list_list_int_error_reports_correct_indices() {
             ExprValue::ListInt(vec![1, 2]),
             ExprValue::ListInt(vec![3, 99]),
         ],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
         0,
     );
     let err = p.check_value_constraints(&v).unwrap_err();

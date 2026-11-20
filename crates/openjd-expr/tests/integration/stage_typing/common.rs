@@ -36,7 +36,7 @@ pub(crate) fn states() -> [SymbolTable; 3] {
         (
             "Param.EL",
             "list[list[int]]",
-            ExprValue::make_list(vec![], ExprType::list(ExprType::INT)).unwrap(),
+            ExprValue::make_list(vec![], ExprType::list(ExprType::INT).unwrap()).unwrap(),
         ),
     ];
     let tasks = [
@@ -157,7 +157,7 @@ pub(crate) fn states_with_nested_task_list() -> [SymbolTable; 3] {
         "Task.Param.LL",
         ExprValue::make_list(
             vec![ExprValue::ListInt(vec![5, 6])],
-            ExprType::list(ExprType::INT),
+            ExprType::list(ExprType::INT).unwrap(),
         )
         .unwrap(),
     )
@@ -173,7 +173,7 @@ pub(crate) fn states_with_nested_strings() -> [SymbolTable; 3] {
         .unwrap();
     let lls = ExprValue::make_list(
         vec![ExprValue::make_list(vec![ExprValue::String("a".into())], ExprType::STRING).unwrap()],
-        ExprType::list(ExprType::STRING),
+        ExprType::list(ExprType::STRING).unwrap(),
     )
     .unwrap();
     g2.set("Param.LLS", lls.clone()).unwrap();
@@ -188,7 +188,7 @@ pub(crate) fn states_with_matrix() -> [SymbolTable; 3] {
     let [p8, mut g2, mut rt] = states();
     let el = ExprValue::make_list(
         vec![ExprValue::ListInt(vec![1]), ExprValue::ListInt(vec![2, 3])],
-        ExprType::list(ExprType::INT),
+        ExprType::list(ExprType::INT).unwrap(),
     )
     .unwrap();
     g2.set("Param.EL", el.clone()).unwrap();

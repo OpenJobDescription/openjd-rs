@@ -681,8 +681,9 @@ fn type_variable_element_type_is_not_a_list_of_lists() {
     // lists, which would make the comprehension `list[nulltype]` and its
     // index an error, though every run builds `[[1, 2]]`. (The body here is a
     // `list[any]`; `comprehension_too_deep`'s unit test covers `list[list[T1]]`.)
-    let [p8, g2, rt] =
-        states_with_any_list(ExprValue::make_list(vec![], ExprType::list(ExprType::INT)).unwrap());
+    let [p8, g2, rt] = states_with_any_list(
+        ExprValue::make_list(vec![], ExprType::list(ExprType::INT).unwrap()).unwrap(),
+    );
     let expr = "[(Task.Param.A + [[x]])[0] + [2] for x in Param.L][0]";
     for st in [&p8, &g2] {
         assert_eq!(

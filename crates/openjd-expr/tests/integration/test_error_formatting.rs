@@ -1598,3 +1598,79 @@ fn membership_type_mismatch_caret_inside_larger_expression() {
         ],
     );
 }
+
+// === Type nesting depth ===
+
+/// A symbol table with `X`, an unresolved list type at `MAX_TYPE_DEPTH`,
+/// and `C`, an unresolved bool.
+fn type_at_the_limit() -> SymbolTable {
+    let mut t = ExprType::INT;
+    for _ in 1..MAX_TYPE_DEPTH {
+        t = ExprType::list(t).unwrap();
+    }
+    let mut st = SymbolTable::new();
+    st.set("X", ExprValue::unresolved(t)).unwrap();
+    st.set("C", ExprValue::unresolved(ExprType::BOOL)).unwrap();
+    st
+}
+
+/// The whole error, compared exactly: a caret on the wrong node or one
+/// character too long fails.
+fn assert_err_exact(expr: &str, st: &SymbolTable, expected: &[&str]) {
+    let e = eval_err_with(expr, st);
+    assert_eq!(e, expected.concat());
+}
+
+#[test]
+fn type_too_deep_points_at_the_list() {
+    assert_err_exact(
+        "1 + len([X])",
+        &type_at_the_limit(),
+        &[
+            "Type nesting depth exceeded limit (64)\n",
+            "  1 + len([X])\n",
+            "          ^~~",
+        ],
+    );
+}
+
+#[test]
+fn type_too_deep_in_a_conditional_branch() {
+    // The else branch, so the caret can't be mistaken for one over the
+    // whole conditional.
+    assert_err_exact(
+        "1 if C else [X]",
+        &type_at_the_limit(),
+        &[
+            "Type nesting depth exceeded limit (64)\n",
+            "  1 if C else [X]\n",
+            "              ^~~",
+        ],
+    );
+}
+
+#[test]
+fn type_too_deep_in_a_boolean_operand() {
+    assert_err_exact(
+        "C and [X]",
+        &type_at_the_limit(),
+        &[
+            "Type nesting depth exceeded limit (64)\n",
+            "  C and [X]\n",
+            "        ^~~",
+        ],
+    );
+}
+
+#[test]
+fn type_too_deep_in_a_comprehension_body() {
+    assert_err_exact(
+        "[[X] for x in [1, 2] if C]",
+        &type_at_the_limit(),
+        &[
+            "Type nesting depth exceeded limit (64)\n",
+            "  [[X] for x in [1, 2] if C]\n",
+            "   ^~~",
+        ],
+    );
+}

@@ -61,15 +61,18 @@ fn calls_on_union_element_lists_within_the_cap_are_typed_by_their_forms() {
     // empty list.
     let lib = FunctionLibrary::for_profile(&ExprProfile::current());
     assert_eq!(
-        lib.derive_return_type("sorted", &[tp("list[int | float | nulltype]")]),
+        lib.derive_return_type("sorted", &[tp("list[int | float | nulltype]")])
+            .unwrap(),
         Some(tp("list[float | int | nulltype]"))
     );
     assert_eq!(
-        lib.derive_return_type("__getitem__", &[tp("list[any]"), tp("int")]),
+        lib.derive_return_type("__getitem__", &[tp("list[any]"), tp("int")])
+            .unwrap(),
         Some(ExprType::ANY)
     );
     assert_eq!(
-        lib.derive_return_type("__getitem__", &[tp("list[nulltype]"), tp("int")]),
+        lib.derive_return_type("__getitem__", &[tp("list[nulltype]"), tp("int")])
+            .unwrap(),
         Some(ExprType::NORETURN)
     );
 }

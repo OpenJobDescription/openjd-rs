@@ -50,15 +50,115 @@ ExprType::ANY           // TypeCode::Any
 ExprType::T, T1, T2, T3 // Type variables
 ```
 
-Parameterized constructors:
+Parameterized constructors, each returning `Result<ExprType, ExpressionError>`
+(see [Depth limit](#depth-limit)):
 
 ```rust
-ExprType::list(ExprType::INT)                    // list[int]
-ExprType::union(vec![ExprType::INT, ExprType::STRING])  // int | string
-ExprType::unresolved(ExprType::INT)              // unresolved[int]
-ExprType::signature(params, return_type)         // (params) -> return
-ExprType::parse("(list[T1], int) -> T1")         // From spec notation
+ExprType::list(ExprType::INT)?                   // list[int]
+ExprType::union(vec![ExprType::INT, ExprType::STRING])?  // int | string
+ExprType::unresolved(ExprType::INT)?             // unresolved[int]
+ExprType::signature(params, return_type)?        // (params) -> return
+ExprType::new(code, params)?                     // any code, normalized
+ExprType::parse("(list[T1], int) -> T1")?        // From spec notation (Err is a String)
 ```
+
+### Depth limit
+
+A type is at most [`MAX_TYPE_DEPTH`](../../crates/openjd-expr/src/types.rs)
+(64, the same as `MAX_EXPRESSION_DEPTH`) deep. Depth counts the types on the longest path down to one with no
+parameters: `int` is 1, `list[int]` 2, `list[int | string]` 3,
+`(int) -> list[int]` 3. Lists, unions and signatures are a level each.
+`unresolved[T]` is as deep as `T`, so the type of an unresolved value is as
+deep as its constraint. Only a one-parameter `unresolved` counts no level (a
+bare or many-parameter one, which only `ExprType::new` builds, counts one).
+Normalization collapses `unresolved[unresolved[T]]`, so a one-parameter
+`unresolved` is never the parameter of another one-parameter `unresolved`, and
+a type at the limit nests at most 128 levels.
+
+Every way of building a type with parameters goes through one private funnel,
+`ExprType::build`, which computes the depth from the parameters' cached depths
+and returns `ExpressionErrorKind::TypeTooDeep { limit }` ("Type nesting depth
+exceeded limit (64)") past the limit. That covers the five constructors, the
+normalizations inside them (which are checked on the type they build), `parse`,
+and every operation that builds a type from other types: `substitute`,
+`resolve_call`, `FunctionLibrary::derive_return_type` and `get_property_type`,
+and inside the crate the list-element join, `merge_list_union`, list forms,
+comprehension typing and the type-level coercion. `ExprValue::make_list` and
+`make_list_checked` return the error for a list of lists whose element type
+(the elements' join, or the hint of an empty list) is already at the limit. Several of those can build a
+type deeper than their inputs (substituting into `list[T1]`, merging
+`int | list[A] | list[B]` into `int | list[A | B]`, joining union members), so
+they are fallible too. Type variable unification (behind `match_type` and
+`match_call`) never deepens a type, so those stay `Option`. `Clone` copies an
+existing type, the type constants have no parameters, and `ExprType` has no
+`Deserialize` (symbol tables deserialize through `parse`). An evaluation that
+would build a type past the limit fails with the error, including inside a
+conditional branch, a boolean operand or a comprehension that static typing
+evaluates speculatively: like a budget error, `TypeTooDeep` is never absorbed
+there (evaluator.md § Speculative evaluation).
+
+Because no `ExprType` is deeper than the limit, every recursive walk over a
+type (`==`, `Hash`, `Display`, `Debug`, `Serialize`, the derived `Drop`,
+`satisfies`, `match_type`, `substitute`, coercion) is bounded by it.
+`tests/integration/test_type_depth.rs` runs each of them on types at the limit
+on a 2 MiB thread. Measured on Linux x86-64, a debug build needs between
+384 KiB and 416 KiB for them, and a release build about 80 KiB, less than the
+128 KiB minimum thread stack there, so no requested stack size fails. Without the
+limit, a type built 50,000 deep through the Rust API would overflow the stack in
+those walks and abort the process.
+
+`parse` stops at 10 levels of nesting (a parsed type is at most 11 deep), the
+function library's signatures are at most 4 deep, and list values a template
+builds nest at most two lists, so no parsed type and no concrete value built
+from a template's values comes near the limit. (A value built through the Rust
+API, such as an unresolved value of a deep type, can, and so can the values an
+evaluation derives from it.) Static
+typing builds deeper types, because the type of an unresolved value keeps
+every form a run might produce. A comprehension over an unresolved value is
+`list[T | nulltype]` (§1.3.7), two levels over its element: 31 comprehensions
+over an unresolved value, each the body of the next, type as 63 deep and
+validate, and nesting more than 31 that way is rejected with `TypeTooDeep`,
+although `MAX_EXPRESSION_DEPTH` allows about twice as many. A comprehension
+in another's iterable doesn't deepen the type, and the specification's
+samples and conformance templates build no type deeper than 4, the depth of
+the library's own signatures. `test_type_depth.rs` and the model's
+`test_let_bindings.rs` pin the deepest nesting that validates and the first
+that is rejected.
+
+Static typing can be made to go past any fixed limit. Wrapping a
+comprehension body in `([x] if C else 1)` adds two levels per wrap, and the
+levels compound along a chain of comprehensions each iterating over the one
+before: three comprehensions with 11 wraps each already pass the limit, three
+with 29 (about 1.4 KB of source) type as 176 deep, and within the expression depth and input length limits one
+expression can type as about 1,860 deep. A chain of `let` bindings each
+nesting the one before goes further. Such a template fails validation
+with `TypeTooDeep` at the expression or binding that passes the limit, while
+a run of it would succeed. (Whole-field FLOAT, STRING and PATH task parameter
+range expressions are the exception: validation doesn't type them at all, so
+this limit doesn't apply to them there.) This is a deliberate Rust-only hardening limit,
+like `MAX_EXPRESSION_DEPTH` and `MAX_PARSE_INPUT_LEN`, which also reject
+input the specification allows. Without it, the same templates would take seconds
+to minutes to validate, and the deepest would overflow a 2 MiB stack (a type
+about 1,640 deep in a debug build). Raising the limit to cover them would
+need several MiB of stack in a debug build: evaluating one 1,862-deep type
+needs 2 to 4 MiB, and the walks over the most deeply nested shape need
+about three times what lists need.
+
+`ExprValue::expr_type` stays infallible. An `Unresolved(T)` value is
+`unresolved[T]`, as deep as `T`. A `ListList` whose element type hint is
+already at the limit has no list type one level up, so it is `list[any]`; only
+a value built through the API with such a hint gets that. Static typing reads
+such a value as `list[any]`, so typing can accept an expression on it that a
+run rejects: with `LL` such a value and `U` an `unresolved[list[int]]`,
+`LL + U` types as `unresolved[list[any]]`, while a run with `U = []` fails
+with `TypeTooDeep`.
+
+Fixed types written from constants (`list[string]`, `int | nulltype`) use
+crate-private helpers, `ExprType::fixed` in openjd-expr, `types::fixed_type`
+in openjd-model and `runner::nullable` in openjd-sessions, which unwrap the
+constructor's `Result`: such a type is at most 3 deep, so the constructor
+cannot fail. Types derived
+from a caller's or a template's types use `?`.
 
 ## Type Matching and Substitution
 
@@ -67,11 +167,11 @@ concrete argument types, `match_call` determines whether the call is valid and b
 type variables:
 
 ```rust
-let sig = ExprType::parse("(list[T1], int) -> T1");
-let bindings = sig.match_call(&[ExprType::LIST_INT, ExprType::INT]);
+let sig = ExprType::parse("(list[T1], int) -> T1")?;
+let bindings = sig.match_call(&[ExprType::list(ExprType::INT)?, ExprType::INT]);
 // → Some({T1: int})
 
-let ret = sig.sig_return().substitute(&bindings);
+let ret = sig.sig_return().substitute(&bindings.unwrap())?;
 // → int
 ```
 
@@ -80,8 +180,8 @@ Key methods:
 | Method | Purpose |
 |--------|---------|
 | `match_call(&[ExprType]) -> Option<HashMap>` | Match argument types, bind type variables |
-| `resolve_call(&[ExprType]) -> Option<ExprType>` | Match + resolve return type in one step |
-| `substitute(&HashMap) -> ExprType` | Replace type variables with bound types |
+| `resolve_call(&[ExprType]) -> Result<Option<ExprType>, ExpressionError>` | Match + resolve return type in one step |
+| `substitute(&HashMap) -> Result<ExprType, ExpressionError>` | Replace type variables with bound types |
 | `is_symbolic() -> bool` | Contains type variables (T, T1, T2, T3) |
 | `is_concrete() -> bool` | No type variables or unresolved wrappers |
 | `satisfies(&ExprType) -> bool` | Directional: may a value of this type pass unchanged where the argument is required? |
@@ -191,19 +291,20 @@ Session.HasPathMappingRules else Param.F) for x in Param.L]` at job creation is
 `unresolved[list[float | int]]`, since the values decide whether the run-time
 list is `list[int]` or `list[float]`.
 
-Crate-internal helpers (`pub(crate)`, not part of the public API):
+Crate-internal helpers (`pub(crate)`, not part of the public API). Those
+returning a `Result` fail only with `TypeTooDeep` (see [Depth limit](#depth-limit)):
 
 | Method | Purpose |
 |--------|---------|
 | `denotes_runtime_values() -> bool` | Does this type denote a set of runtime values? Gates satisfaction and coercion targets |
-| `erase_type_vars() -> ExprType` | Replace every type variable with `any` — the wildcard reading of unbound variables in coercion sources |
-| `types::list_element_contribution(&ExprType) -> Option<ExprType>` | The type an element contributes to a built list: unwraps `unresolved[T]`; drops a top-level `nulltype` (union member or bare; `None` if nothing is left); keeps `list[nulltype]` members |
-| `types::join_list_element(&ExprType, &ExprType) -> Option<ExprType>` | The list-element join above; `None` on a conflict |
-| `types::comprehension_var(&ExprType) -> ComprehensionVar` | A list comprehension's loop variable for an unresolved iterable of this type (§1.3.7): `Typed(E)` for `list[E]` (`int` for `range_expr`, the union of the members' element types for a union, `nulltype` elements and members contributing nothing, and `any` for `any`, a type variable, a list of one, or a type that cannot be iterated: it may come from typing an operation on values of unknown type), `EmptyOnly` when the iterable can only be `[]` or `null` |
-| `types::comprehension_list_type(&ExprType) -> ExprType` | The type of a comprehension over an unresolved iterable (or with an unresolved filter) from its body's type (§1.3.7): `T` is the body without `nulltype`, its unions of lists merged; `list[T \| nulltype]`, the run that keeps no element included; `list[nulltype]` if nothing is left, the body is `noreturn`, or `T` is a list of lists (`comprehension_too_deep`) |
-| `types::comprehension_too_deep(&ExprType) -> bool` | Is every form of a comprehension element type `T` (each union member's `list_forms`, `nulltype` aside) a list of lists, so the comprehension would nest three levels? |
-| `types::merge_list_union(ExprType) -> ExprType` | A union's list members as the one list type they equal (`list[A] \| list[B]` is `list[A \| B]`), at every depth |
-| `types::list_forms(&ExprType) -> Vec<ExprType>` | The types a type with unions in it stands for (`list[int \| nulltype]` gives `list[int]` and `list[nulltype]`, at every depth); a top-level union has its members' forms (`list[int] \| list[string]` the same as `list[int \| string]`, `int \| string` gives `int` and `string`) |
+| `erase_type_vars() -> Result<ExprType, ExpressionError>` | Replace every type variable with `any` — the wildcard reading of unbound variables in coercion sources |
+| `types::list_element_contribution(&ExprType) -> Result<Option<ExprType>, ExpressionError>` | The type an element contributes to a built list: unwraps `unresolved[T]`; drops a top-level `nulltype` (union member or bare; `None` if nothing is left); keeps `list[nulltype]` members |
+| `types::join_list_element(&ExprType, &ExprType) -> Result<Option<ExprType>, ExpressionError>` | The list-element join above; `Ok(None)` on a conflict |
+| `types::comprehension_var(&ExprType) -> Result<ComprehensionVar, ExpressionError>` | A list comprehension's loop variable for an unresolved iterable of this type (§1.3.7): `Typed(E)` for `list[E]` (`int` for `range_expr`, the union of the members' element types for a union, `nulltype` elements and members contributing nothing, and `any` for `any`, a type variable, a list of one, or a type that cannot be iterated: it may come from typing an operation on values of unknown type), `EmptyOnly` when the iterable can only be `[]` or `null` |
+| `types::comprehension_list_type(&ExprType) -> Result<ExprType, ExpressionError>` | The type of a comprehension over an unresolved iterable (or with an unresolved filter) from its body's type (§1.3.7): `T` is the body without `nulltype`, its unions of lists merged; `list[T \| nulltype]`, the run that keeps no element included; `list[nulltype]` if nothing is left, the body is `noreturn`, or `T` is a list of lists (`comprehension_too_deep`) |
+| `types::comprehension_too_deep(&ExprType) -> Result<bool, ExpressionError>` | Is every form of a comprehension element type `T` (each union member's `list_forms`, `nulltype` aside) a list of lists, so the comprehension would nest three levels? |
+| `types::merge_list_union(ExprType) -> Result<ExprType, ExpressionError>` | A union's list members as the one list type they equal (`list[A] \| list[B]` is `list[A \| B]`), at every depth |
+| `types::list_forms(&ExprType) -> Result<Vec<ExprType>, ExpressionError>` | The types a type with unions in it stands for (`list[int \| nulltype]` gives `list[int]` and `list[nulltype]`, at every depth); a top-level union has its members' forms (`list[int] \| list[string]` the same as `list[int \| string]`, `int \| string` gives `int` and `string`) |
 
 ### Lists with union element types
 

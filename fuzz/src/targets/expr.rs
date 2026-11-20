@@ -668,7 +668,9 @@ pub fn fits(v: &ExprValue, ty: &ExprType) -> bool {
         (TypeCode::TypeVarT2, ExprType::ANY),
         (TypeCode::TypeVarT3, ExprType::ANY),
     ]);
-    let ty = ty.substitute(&wild);
+    let ty = ty
+        .substitute(&wild)
+        .expect("erasing type variables never deepens a type");
     if v.expr_type().satisfies(&ty) {
         return true;
     }
@@ -1736,8 +1738,12 @@ pub fn types(data: &[u8]) {
         if t.code() == TypeCode::Signature {
             // resolve_call agrees with match_call + substitute.
             let args: Vec<ExprType> = t.sig_params().to_vec();
-            let resolved = t.resolve_call(&args);
-            let matched = t.match_call(&args).map(|b| t.sig_return().substitute(&b));
+            let resolved = t.resolve_call(&args).map_err(|e| e.to_string());
+            let matched = t
+                .match_call(&args)
+                .map(|b| t.sig_return().substitute(&b))
+                .transpose()
+                .map_err(|e| e.to_string());
             oracle!(
                 resolved == matched,
                 "{shown}: resolve_call {resolved:?} != match_call+substitute {matched:?}"
@@ -1749,13 +1755,20 @@ pub fn types(data: &[u8]) {
         ] {
             let _ = lib.get_property_type(&t, prop);
         }
-        let rebuilt = ExprType::new(t.code(), t.params().to_vec());
+        let rebuilt = match ExprType::new(t.code(), t.params().to_vec()) {
+            Ok(r) => r,
+            Err(e) => {
+                oracle!(false, "re-normalizing {shown} failed: {e}");
+                return;
+            }
+        };
         oracle!(
             rebuilt == t,
             "re-normalizing {shown} changed it to {rebuilt}"
         );
         oracle!(
-            ExprType::union(vec![t.clone(), t.clone()]) == t || t.code() == TypeCode::Signature,
+            ExprType::union(vec![t.clone(), t.clone()]).ok().as_ref() == Some(&t)
+                || t.code() == TypeCode::Signature,
             "union[{shown}, {shown}] != {shown}"
         );
         // A type containing `noreturn` denotes no values, so nothing (not even
@@ -1949,7 +1962,12 @@ pub fn function_call(data: &[u8]) {
         }
         sig.sig_params()
             .iter()
-            .map(|p| value_of(&mut u, &p.substitute(&bindings), fmt))
+            .map(|p| {
+                let pt = p
+                    .substitute(&bindings)
+                    .expect("a library signature bound to shallow concrete types");
+                value_of(&mut u, &pt, fmt)
+            })
             .collect()
     } else {
         (0..upto(&mut u, 3)).map(|_| value(&mut u, fmt)).collect()
@@ -1978,7 +1996,7 @@ pub fn function_call(data: &[u8]) {
         match lib.derive_return_type(name, &arg_types) {
             // Static derivation coerces (path → string) before trying the
             // overload run-time dispatch picks first.
-            Some(rt)
+            Ok(Some(rt))
                 if !fits(&v, &rt)
                     && ((name == "__add__"
                         && arg_types.first().is_some_and(|t| t.to_string().contains("path")))
@@ -1991,14 +2009,18 @@ pub fn function_call(data: &[u8]) {
                     v.expr_type()
                 )
             }
-            Some(rt) => oracle!(
+            Ok(Some(rt)) => oracle!(
                 fits(&v, &rt),
                 "{name}({arg_types:?}) derives {rt} but returned {v:?} of type {}",
                 v.expr_type()
             ),
-            None => oracle!(
+            Ok(None) => oracle!(
                 false,
                 "{name}({arg_types:?}) succeeded with {v:?} but derive_return_type finds no overload"
+            ),
+            Err(e) => oracle!(
+                false,
+                "{name}({arg_types:?}) succeeded with {v:?} but derive_return_type failed: {e}"
             ),
         }
     }

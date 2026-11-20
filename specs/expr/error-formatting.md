@@ -87,6 +87,7 @@ pub enum ExpressionErrorKind {
     MemoryLimitExceeded { used: usize, limit: usize },
     OperationLimitExceeded { count: usize, limit: usize },
     ExpressionTooDeep { depth: usize, limit: usize },
+    TypeTooDeep       { limit: usize },
     UnsupportedSyntax { feature: String },
     ExplicitFail(String),
     ParseError(String),
@@ -107,6 +108,7 @@ pub enum ExpressionErrorKind {
 | `MemoryLimitExceeded` | Cumulative value memory exceeds configured limit; a saturated count (`usize::MAX`) reads "at least" |
 | `OperationLimitExceeded` | Operation count exceeds configured limit; reports the count and limit, and a saturated count (`usize::MAX`) reads "at least" |
 | `ExpressionTooDeep` | AST nesting depth exceeds `MAX_EXPRESSION_DEPTH`; raised by parser structural validator and by evaluator recursion guard |
+| `TypeTooDeep` | Building an `ExprType` would pass `MAX_TYPE_DEPTH`; raised by the `ExprType` constructors and every operation that builds a type (type-system.md § Depth limit) |
 | `UnsupportedSyntax` | Valid Python syntax not supported by the expression language |
 | `ExplicitFail` | The `fail()` function was called |
 | `ParseError` | Expression could not be parsed |

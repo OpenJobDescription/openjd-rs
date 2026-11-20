@@ -11,8 +11,20 @@ use std::collections::HashMap;
 use std::fmt;
 
 use indexmap::IndexMap;
-use openjd_expr::ExprType;
+use openjd_expr::{ExprType, ExpressionError};
 use serde::{Deserialize, Serialize};
+
+/// A fixed expression type written from constants, such as `list[string]`
+/// or `int | nulltype`, built with one of the fallible `ExprType`
+/// constructors.
+///
+/// Only for such a type, never for one derived from a template or a
+/// caller: it is at most 3 deep, far below
+/// [`MAX_TYPE_DEPTH`](openjd_expr::MAX_TYPE_DEPTH), so the constructor
+/// cannot fail and the panic is unreachable.
+pub(crate) fn fixed_type(t: Result<ExprType, ExpressionError>) -> ExprType {
+    t.expect("a fixed type written from constants is far below MAX_TYPE_DEPTH")
+}
 
 // ── String-typed enums for compile-time safety ──
 
@@ -281,12 +293,14 @@ impl JobParameterType {
             Self::Path => ExprType::PATH,
             Self::Bool => ExprType::BOOL,
             Self::RangeExpr => ExprType::RANGE_EXPR,
-            Self::ListString => ExprType::list(ExprType::STRING),
-            Self::ListInt => ExprType::list(ExprType::INT),
-            Self::ListFloat => ExprType::list(ExprType::FLOAT),
-            Self::ListPath => ExprType::list(ExprType::PATH),
-            Self::ListBool => ExprType::list(ExprType::BOOL),
-            Self::ListListInt => ExprType::list(ExprType::list(ExprType::INT)),
+            Self::ListString => fixed_type(ExprType::list(ExprType::STRING)),
+            Self::ListInt => fixed_type(ExprType::list(ExprType::INT)),
+            Self::ListFloat => fixed_type(ExprType::list(ExprType::FLOAT)),
+            Self::ListPath => fixed_type(ExprType::list(ExprType::PATH)),
+            Self::ListBool => fixed_type(ExprType::list(ExprType::BOOL)),
+            Self::ListListInt => {
+                fixed_type(ExprType::list(fixed_type(ExprType::list(ExprType::INT))))
+            }
         }
     }
 }
@@ -321,11 +335,11 @@ pub enum TaskParameterType {
 /// `string? | list[string]`: a STRING or PATH task parameter's range list
 /// element, or a `hostRequirements` attribute `anyOf`/`allOf` value.
 pub(crate) fn string_list_item_target() -> ExprType {
-    ExprType::union(vec![
+    fixed_type(ExprType::union(vec![
         ExprType::NULLTYPE,
         ExprType::STRING,
-        ExprType::list(ExprType::STRING),
-    ])
+        fixed_type(ExprType::list(ExprType::STRING)),
+    ]))
 }
 
 impl TaskParameterType {
@@ -380,8 +394,9 @@ impl TaskParameterType {
             choices.push(ExprType::INT);
         }
         choices.push(item.clone());
-        choices.push(ExprType::list(item));
-        Some(ExprType::union(choices))
+        // `item` is a scalar, so the union is 3 deep.
+        choices.push(fixed_type(ExprType::list(item)));
+        Some(fixed_type(ExprType::union(choices)))
     }
 
     /// Returns the canonical spec string.
@@ -928,11 +943,11 @@ mod tests {
         assert_eq!(JobParameterType::Path.expr_type(), ExprType::PATH);
         assert_eq!(
             JobParameterType::ListInt.expr_type(),
-            ExprType::list(ExprType::INT)
+            ExprType::list(ExprType::INT).unwrap()
         );
         assert_eq!(
             JobParameterType::ListListInt.expr_type(),
-            ExprType::list(ExprType::list(ExprType::INT))
+            ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap()
         );
     }
 

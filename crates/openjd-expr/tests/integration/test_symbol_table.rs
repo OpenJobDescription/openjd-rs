@@ -629,7 +629,8 @@ fn round_trip_list_list() {
     let inner1 =
         ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
     let inner2 = ExprValue::make_list(vec![ExprValue::Int(3)], ExprType::INT).unwrap();
-    let outer = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
+    let outer =
+        ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT).unwrap()).unwrap();
     let mut st = SymbolTable::new();
     st.set("x", outer).unwrap();
     let rt = round_trip(&st, PathFormat::Posix);

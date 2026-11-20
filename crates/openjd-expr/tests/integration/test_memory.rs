@@ -681,7 +681,7 @@ fn repr_json_preflights_nested_string_output_memory() {
     .unwrap();
     let value = ExprValue::make_list(
         vec![inner.clone(), inner],
-        openjd_expr::ExprType::list(openjd_expr::ExprType::STRING),
+        openjd_expr::ExprType::list(openjd_expr::ExprType::STRING).unwrap(),
     )
     .unwrap();
     let mut st = SymbolTable::new();
@@ -1100,7 +1100,7 @@ fn assert_absorbed_spend(expr: &str) {
     .unwrap();
     st.set(
         "Session.List",
-        ExprValue::unresolved(openjd_expr::ExprType::list(openjd_expr::ExprType::INT)),
+        ExprValue::unresolved(openjd_expr::ExprType::list(openjd_expr::ExprType::INT).unwrap()),
     )
     .unwrap();
     let result = ParsedExpression::new(expr)
@@ -1162,7 +1162,7 @@ fn assert_no_stale_footprint(expr: &str) {
     .unwrap();
     st.set(
         "Session.List",
-        ExprValue::unresolved(openjd_expr::ExprType::list(openjd_expr::ExprType::INT)),
+        ExprValue::unresolved(openjd_expr::ExprType::list(openjd_expr::ExprType::INT).unwrap()),
     )
     .unwrap();
     let result = ParsedExpression::new(expr)
@@ -1222,7 +1222,7 @@ fn comprehension_push_precheck_charges_each_element_once() {
         .expect("five 100 KB elements must fit under a 560 KB limit");
     assert_eq!(
         r.value.expr_type(),
-        openjd_expr::ExprType::list(openjd_expr::ExprType::STRING)
+        openjd_expr::ExprType::list(openjd_expr::ExprType::STRING).unwrap()
     );
 }
 
@@ -1532,7 +1532,7 @@ fn chained_comparison_carries_middle_operand_once() {
 #[test]
 fn root_target_coercion_is_charged_at_coerced_size() {
     let st = SymbolTable::new();
-    let target = openjd_expr::ExprType::list(openjd_expr::ExprType::INT);
+    let target = openjd_expr::ExprType::list(openjd_expr::ExprType::INT).unwrap();
     let e = ParsedExpression::new("range_expr('1-100000')")
         .and_then(|p| {
             p.with_memory_limit(100_000)
@@ -1566,7 +1566,7 @@ fn root_target_coercion_is_charged_at_coerced_size() {
 #[test]
 fn call_argument_coercion_releases_what_was_charged() {
     let st = SymbolTable::new();
-    let target = openjd_expr::ExprType::list(openjd_expr::ExprType::STRING);
+    let target = openjd_expr::ExprType::list(openjd_expr::ExprType::STRING).unwrap();
     let e = ParsedExpression::new("['A' * 1000000, join(range(2000), ','), 'B' * 500000]")
         .and_then(|p| {
             p.with_memory_limit(1_500_000)

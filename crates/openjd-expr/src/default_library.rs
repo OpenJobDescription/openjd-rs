@@ -868,6 +868,21 @@ mod tests {
     use super::*;
     use crate::types::ExprType;
 
+    /// `MAX_TYPE_DEPTH`'s documentation says the library's signatures
+    /// are at most 4 deep, far below the limit.
+    #[test]
+    fn signatures_are_at_most_4_deep() {
+        let mut lib = DEFAULT_LIBRARY.clone();
+        register_unresolved_host_context_functions(&mut lib);
+        let deepest = lib
+            .function_names()
+            .flat_map(|name| lib.get_signatures(name))
+            .map(|e| e.signature.depth())
+            .max()
+            .unwrap();
+        assert_eq!(deepest, 4);
+    }
+
     #[test]
     fn every_concrete_list_parameter_has_an_empty_list_overload() {
         // Dispatch does not apply the `list[nulltype]` -> `list[T]`
@@ -879,7 +894,7 @@ mod tests {
         let lib = FunctionLibrary::for_profile(
             &crate::ExprProfile::latest().with_host_context(crate::HostContext::Unresolved),
         );
-        let empty = ExprType::list(ExprType::NULLTYPE);
+        let empty = ExprType::list(ExprType::NULLTYPE).unwrap();
         let mut missing = Vec::new();
         for name in lib.function_names() {
             let sigs = lib.get_signatures(name);
@@ -937,19 +952,23 @@ mod tests {
         let lib = &*DEFAULT_LIBRARY;
         let tp = |s: &str| ExprType::parse(s).unwrap();
         assert_eq!(
-            lib.derive_return_type("sum", &[tp("list[int | float | nulltype]")]),
+            lib.derive_return_type("sum", &[tp("list[int | float | nulltype]")])
+                .unwrap(),
             Some(tp("float | int"))
         );
         assert_eq!(
-            lib.derive_return_type("__getitem__", &[tp("list[int | nulltype]"), ExprType::INT]),
+            lib.derive_return_type("__getitem__", &[tp("list[int | nulltype]"), ExprType::INT])
+                .unwrap(),
             Some(ExprType::INT)
         );
         assert_eq!(
-            lib.derive_return_type("__getitem__", &[tp("list[nulltype]"), ExprType::INT]),
+            lib.derive_return_type("__getitem__", &[tp("list[nulltype]"), ExprType::INT])
+                .unwrap(),
             Some(ExprType::NORETURN)
         );
         assert_eq!(
-            lib.derive_return_type("upper", &[tp("list[int | nulltype]")]),
+            lib.derive_return_type("upper", &[tp("list[int | nulltype]")])
+                .unwrap(),
             None
         );
         // A top-level union of list types has the same forms as the list
@@ -959,14 +978,16 @@ mod tests {
             lib.derive_return_type(
                 "__getitem__",
                 &[tp("list[int] | list[string]"), ExprType::INT]
-            ),
+            )
+            .unwrap(),
             Some(tp("int | string"))
         );
         assert_eq!(
             lib.derive_return_type(
                 "__contains__",
                 &[tp("list[int] | list[string]"), ExprType::STRING]
-            ),
+            )
+            .unwrap(),
             Some(ExprType::BOOL)
         );
         // A concatenation is refined for the operands as a whole: the
@@ -976,27 +997,32 @@ mod tests {
             lib.derive_return_type(
                 "__add__",
                 &[tp("list[int]"), tp("list[string] | list[nulltype]")]
-            ),
+            )
+            .unwrap(),
             Some(tp("list[int]"))
         );
         // An operand whose element type holds a type variable, at any
         // depth, has elements of unknown type: `list[any]`.
         assert_eq!(
-            lib.derive_return_type("__add__", &[tp("list[T1]"), tp("list[T1]")]),
+            lib.derive_return_type("__add__", &[tp("list[T1]"), tp("list[T1]")])
+                .unwrap(),
             Some(tp("list[any]"))
         );
         assert_eq!(
-            lib.derive_return_type("__add__", &[tp("list[int]"), tp("list[list[T1]]")]),
+            lib.derive_return_type("__add__", &[tp("list[int]"), tp("list[list[T1]]")])
+                .unwrap(),
             Some(tp("list[any]"))
         );
         // An argument's type variable is typed as `any`, so `flatten`'s own
         // `T1` does not capture it, as in `call`.
         assert_eq!(
-            lib.derive_return_type("flatten", &[tp("list[T1]")]),
+            lib.derive_return_type("flatten", &[tp("list[T1]")])
+                .unwrap(),
             Some(tp("list[T1]"))
         );
         assert_eq!(
-            lib.derive_return_type("__getitem__", &[tp("list[T3]"), ExprType::INT]),
+            lib.derive_return_type("__getitem__", &[tp("list[T3]"), ExprType::INT])
+                .unwrap(),
             Some(ExprType::ANY)
         );
     }
@@ -1005,7 +1031,8 @@ mod tests {
     fn derive_return_type_add_int() {
         let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
-            lib.derive_return_type("__add__", &[ExprType::INT, ExprType::INT]),
+            lib.derive_return_type("__add__", &[ExprType::INT, ExprType::INT])
+                .unwrap(),
             Some(ExprType::INT)
         );
     }
@@ -1014,7 +1041,8 @@ mod tests {
     fn derive_return_type_add_float_coercion() {
         let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
-            lib.derive_return_type("__add__", &[ExprType::INT, ExprType::FLOAT]),
+            lib.derive_return_type("__add__", &[ExprType::INT, ExprType::FLOAT])
+                .unwrap(),
             Some(ExprType::FLOAT)
         );
     }
@@ -1025,8 +1053,9 @@ mod tests {
         assert_eq!(
             lib.derive_return_type(
                 "__getitem__",
-                &[ExprType::list(ExprType::STRING), ExprType::INT]
-            ),
+                &[ExprType::list(ExprType::STRING).unwrap(), ExprType::INT]
+            )
+            .unwrap(),
             Some(ExprType::STRING)
         );
     }
@@ -1035,8 +1064,9 @@ mod tests {
     fn derive_return_type_sorted_generic() {
         let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
-            lib.derive_return_type("sorted", &[ExprType::list(ExprType::INT)]),
-            Some(ExprType::list(ExprType::INT))
+            lib.derive_return_type("sorted", &[ExprType::list(ExprType::INT).unwrap()])
+                .unwrap(),
+            Some(ExprType::list(ExprType::INT).unwrap())
         );
     }
 
@@ -1044,19 +1074,23 @@ mod tests {
     fn derive_return_type_comparison_operators() {
         let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
-            lib.derive_return_type("__eq__", &[ExprType::INT, ExprType::INT]),
+            lib.derive_return_type("__eq__", &[ExprType::INT, ExprType::INT])
+                .unwrap(),
             Some(ExprType::BOOL)
         );
         assert_eq!(
-            lib.derive_return_type("__ne__", &[ExprType::STRING, ExprType::STRING]),
+            lib.derive_return_type("__ne__", &[ExprType::STRING, ExprType::STRING])
+                .unwrap(),
             Some(ExprType::BOOL)
         );
         assert_eq!(
-            lib.derive_return_type("__lt__", &[ExprType::INT, ExprType::FLOAT]),
+            lib.derive_return_type("__lt__", &[ExprType::INT, ExprType::FLOAT])
+                .unwrap(),
             Some(ExprType::BOOL)
         );
         assert_eq!(
-            lib.derive_return_type("__ge__", &[ExprType::FLOAT, ExprType::INT]),
+            lib.derive_return_type("__ge__", &[ExprType::FLOAT, ExprType::INT])
+                .unwrap(),
             Some(ExprType::BOOL)
         );
     }
@@ -1067,19 +1101,22 @@ mod tests {
         assert_eq!(
             lib.derive_return_type(
                 "__contains__",
-                &[ExprType::list(ExprType::INT), ExprType::INT]
-            ),
+                &[ExprType::list(ExprType::INT).unwrap(), ExprType::INT]
+            )
+            .unwrap(),
             Some(ExprType::BOOL)
         );
         assert_eq!(
-            lib.derive_return_type("__contains__", &[ExprType::STRING, ExprType::STRING]),
+            lib.derive_return_type("__contains__", &[ExprType::STRING, ExprType::STRING])
+                .unwrap(),
             Some(ExprType::BOOL)
         );
         assert_eq!(
             lib.derive_return_type(
                 "__not_contains__",
-                &[ExprType::list(ExprType::STRING), ExprType::STRING]
-            ),
+                &[ExprType::list(ExprType::STRING).unwrap(), ExprType::STRING]
+            )
+            .unwrap(),
             Some(ExprType::BOOL)
         );
     }
@@ -1091,13 +1128,14 @@ mod tests {
             lib.derive_return_type(
                 "__getitem__",
                 &[
-                    ExprType::list(ExprType::INT),
+                    ExprType::list(ExprType::INT).unwrap(),
                     ExprType::NULLTYPE,
                     ExprType::INT,
                     ExprType::NULLTYPE
                 ]
-            ),
-            Some(ExprType::list(ExprType::INT))
+            )
+            .unwrap(),
+            Some(ExprType::list(ExprType::INT).unwrap())
         );
         assert_eq!(
             lib.derive_return_type(
@@ -1108,7 +1146,8 @@ mod tests {
                     ExprType::NULLTYPE,
                     ExprType::NULLTYPE
                 ]
-            ),
+            )
+            .unwrap(),
             Some(ExprType::STRING)
         );
     }
@@ -1117,18 +1156,18 @@ mod tests {
     fn get_property_type_path() {
         let lib = &*DEFAULT_LIBRARY;
         assert_eq!(
-            lib.get_property_type(&ExprType::PATH, "name"),
+            lib.get_property_type(&ExprType::PATH, "name").unwrap(),
             Some(ExprType::STRING)
         );
         assert_eq!(
-            lib.get_property_type(&ExprType::PATH, "parent"),
+            lib.get_property_type(&ExprType::PATH, "parent").unwrap(),
             Some(ExprType::PATH)
         );
         assert_eq!(
-            lib.get_property_type(&ExprType::PATH, "suffixes"),
-            Some(ExprType::list(ExprType::STRING))
+            lib.get_property_type(&ExprType::PATH, "suffixes").unwrap(),
+            Some(ExprType::list(ExprType::STRING).unwrap())
         );
-        assert_eq!(lib.get_property_type(&ExprType::INT, "name"), None);
+        assert_eq!(lib.get_property_type(&ExprType::INT, "name").unwrap(), None);
     }
 
     #[test]

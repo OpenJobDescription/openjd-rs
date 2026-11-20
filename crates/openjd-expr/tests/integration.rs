@@ -95,6 +95,8 @@ mod test_symbol_table;
 mod test_target_type_propagation;
 #[path = "integration/test_target_type_union.rs"]
 mod test_target_type_union;
+#[path = "integration/test_type_depth.rs"]
+mod test_type_depth;
 #[path = "integration/test_types.rs"]
 mod test_types;
 #[path = "integration/test_types_evaluate.rs"]

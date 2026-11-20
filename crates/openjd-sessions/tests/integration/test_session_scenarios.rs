@@ -100,7 +100,7 @@ fn yaml_to_expr_value(v: &serde_json::Value) -> openjd_expr::ExprValue {
                 openjd_expr::ExprValue::Bool(_) => openjd_expr::ExprType::BOOL,
                 openjd_expr::ExprValue::Path { .. } => openjd_expr::ExprType::PATH,
                 openjd_expr::ExprValue::ListInt(_) => {
-                    openjd_expr::ExprType::list(openjd_expr::ExprType::INT)
+                    openjd_expr::ExprType::list(openjd_expr::ExprType::INT).unwrap()
                 }
                 _ => openjd_expr::ExprType::STRING,
             };

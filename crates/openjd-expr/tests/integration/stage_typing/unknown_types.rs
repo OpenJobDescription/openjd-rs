@@ -23,7 +23,7 @@ fn operation_on_an_argument_of_unknown_type_is_of_unknown_type() {
         "Param.EL",
         ExprValue::make_list(
             vec![ExprValue::ListInt(vec![1]), ExprValue::ListInt(vec![2, 3])],
-            ExprType::list(ExprType::INT),
+            ExprType::list(ExprType::INT).unwrap(),
         )
         .unwrap(),
     )
@@ -53,14 +53,15 @@ fn every_unknown_argument_type_gives_any() {
     for t in ["any", "T", "T1", "T2", "T3"] {
         for (name, args) in [("len", vec![tp(t)]), ("__add__", vec![tp(t), tp("int")])] {
             assert_eq!(
-                lib.derive_return_type(name, &args),
+                lib.derive_return_type(name, &args).unwrap(),
                 Some(ExprType::ANY),
                 "{name}({t})"
             );
         }
     }
     assert_eq!(
-        lib.derive_return_type("__getitem__", &[tp("any"), tp("int")]),
+        lib.derive_return_type("__getitem__", &[tp("any"), tp("int")])
+            .unwrap(),
         Some(ExprType::ANY)
     );
 }
@@ -77,7 +78,7 @@ fn type_variable_index_or_membership_item_is_of_unknown_type() {
         "Param.EL",
         ExprValue::make_list(
             vec![ExprValue::ListInt(vec![1]), ExprValue::ListInt(vec![2, 3])],
-            ExprType::list(ExprType::INT),
+            ExprType::list(ExprType::INT).unwrap(),
         )
         .unwrap(),
     )
@@ -180,7 +181,7 @@ fn membership_in_a_list_of_unknown_elements_is_a_bool() {
         .unwrap();
     rt.set(
         "Param.N",
-        ExprValue::make_list(vec![], ExprType::list(ExprType::INT)).unwrap(),
+        ExprValue::make_list(vec![], ExprType::list(ExprType::INT).unwrap()).unwrap(),
     )
     .unwrap();
     p8.set("Param.S", ExprValue::unresolved(tp("list[string]")))
@@ -372,16 +373,20 @@ fn bare_unresolved_types_do_not_panic() {
     // `ExprType::new`) as a comprehension body, or inside a list element
     // union, panicked in union normalization. It reads as `unresolved[any]`.
     let mut st = states()[0].clone();
-    let bare = ExprType::new(TypeCode::Unresolved, vec![]);
+    let bare = ExprType::new(TypeCode::Unresolved, vec![]).unwrap();
     st.set("Task.Param.X", ExprValue::unresolved(bare.clone()))
         .unwrap();
     let elem = ExprType::new(
         TypeCode::Union,
-        vec![ExprType::INT, ExprType::new(TypeCode::List, vec![bare])],
-    );
+        vec![
+            ExprType::INT,
+            ExprType::new(TypeCode::List, vec![bare]).unwrap(),
+        ],
+    )
+    .unwrap();
     st.set(
         "Task.Param.Y",
-        ExprValue::unresolved(ExprType::new(TypeCode::List, vec![elem])),
+        ExprValue::unresolved(ExprType::new(TypeCode::List, vec![elem]).unwrap()),
     )
     .unwrap();
     for (expr, ty) in [
@@ -399,7 +404,7 @@ fn bare_unresolved_argument_matches_any_signature() {
     let mut st = states()[0].clone();
     st.set(
         "Task.Param.X",
-        ExprValue::unresolved(ExprType::new(TypeCode::Unresolved, vec![])),
+        ExprValue::unresolved(ExprType::new(TypeCode::Unresolved, vec![]).unwrap()),
     )
     .unwrap();
     for (expr, ty) in [

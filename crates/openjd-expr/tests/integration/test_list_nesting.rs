@@ -38,8 +38,11 @@ fn two_levels_nesting_rejected_via_expression() {
 #[test]
 fn make_list_rejects_listlist_element() {
     let inner = ExprValue::make_list(vec![ExprValue::Int(1)], ExprType::INT).unwrap();
-    let mid = ExprValue::make_list(vec![inner], ExprType::list(ExprType::INT)).unwrap();
-    let result = ExprValue::make_list(vec![mid], ExprType::list(ExprType::list(ExprType::INT)));
+    let mid = ExprValue::make_list(vec![inner], ExprType::list(ExprType::INT).unwrap()).unwrap();
+    let result = ExprValue::make_list(
+        vec![mid],
+        ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap(),
+    );
     assert!(result.is_err(), "make_list should reject 3+ nesting levels");
     let err = result.unwrap_err().to_string();
     assert!(
@@ -78,7 +81,10 @@ fn make_list_rejects_unresolved_list_element() {
     // shape whose top-level is_unresolved() is false.
     let inner = ExprValue::make_list(vec![ExprValue::Int(1)], ExprType::INT).unwrap();
     let err = ExprValue::make_list(
-        vec![inner, ExprValue::unresolved(ExprType::list(ExprType::INT))],
+        vec![
+            inner,
+            ExprValue::unresolved(ExprType::list(ExprType::INT).unwrap()),
+        ],
         ExprType::NULLTYPE,
     )
     .unwrap_err()
@@ -111,7 +117,7 @@ fn eval_with_unresolved(expr: &str) -> Result<ExprValue, String> {
         .unwrap();
     st.set(
         "Param.Y",
-        ExprValue::unresolved(ExprType::list(ExprType::INT)),
+        ExprValue::unresolved(ExprType::list(ExprType::INT).unwrap()),
     )
     .unwrap();
     ParsedExpression::new(expr)
@@ -124,7 +130,7 @@ fn list_literal_with_unresolved_element_hoists() {
     let val = eval_with_unresolved("[Param.X, 1]").unwrap();
     assert!(matches!(
         val,
-        ExprValue::Unresolved(ref t) if *t == ExprType::list(ExprType::INT)
+        ExprValue::Unresolved(ref t) if *t == ExprType::list(ExprType::INT).unwrap()
     ));
 }
 
@@ -133,7 +139,7 @@ fn list_literal_with_unresolved_list_element_hoists() {
     let val = eval_with_unresolved("[[1], Param.Y]").unwrap();
     assert!(matches!(
         val,
-        ExprValue::Unresolved(ref t) if *t == ExprType::list(ExprType::list(ExprType::INT))
+        ExprValue::Unresolved(ref t) if *t == ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap()
     ));
 }
 
@@ -146,7 +152,7 @@ fn comprehension_with_unresolved_body_hoists() {
     let val = eval_with_unresolved("[Param.X + i for i in [1, 2]]").unwrap();
     assert!(matches!(
         val,
-        ExprValue::Unresolved(ref t) if *t == ExprType::list(ExprType::INT)
+        ExprValue::Unresolved(ref t) if *t == ExprType::list(ExprType::INT).unwrap()
     ));
 }
 
@@ -157,7 +163,7 @@ fn comprehension_with_partially_unresolved_body_hoists() {
     let val = eval_with_unresolved("[Param.X + i if i > 1 else i for i in [1, 2]]").unwrap();
     assert!(matches!(
         val,
-        ExprValue::Unresolved(ref t) if *t == ExprType::list(ExprType::INT)
+        ExprValue::Unresolved(ref t) if *t == ExprType::list(ExprType::INT).unwrap()
     ));
 }
 

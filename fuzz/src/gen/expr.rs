@@ -169,7 +169,7 @@ impl<'a, 'b> ExprGen<'a, 'b> {
                     ty.clone()
                 } else {
                     let ce = pick(self.u, &SCALAR_TYPES[..5]).clone();
-                    ExprType::list(ce)
+                    ExprType::list(ce).unwrap()
                 }
             }
             _ => ty.clone(),
@@ -205,7 +205,7 @@ impl<'a, 'b> ExprGen<'a, 'b> {
                 } else {
                     // [body for v in src if cond], v bound at a random type.
                     let vt = pick(self.u, &SCALAR_TYPES[..5]).clone();
-                    let src = self.of_type(&ExprType::list(vt.clone()), depth - 1);
+                    let src = self.of_type(&ExprType::list(vt.clone()).unwrap(), depth - 1);
                     let v = format!("v{}", self.next_local);
                     self.next_local += 1;
                     self.locals.push(Symbol {
@@ -269,7 +269,7 @@ impl<'a, 'b> ExprGen<'a, 'b> {
             .sig_params()
             .iter()
             .map(|p| {
-                let pt = p.substitute(&bindings);
+                let pt = p.substitute(&bindings).unwrap();
                 self.optional_arg(&pt, depth)
             })
             .collect();

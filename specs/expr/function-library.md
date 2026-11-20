@@ -206,7 +206,7 @@ The following function families use this pattern:
 let mut lib = FunctionLibrary::new();
 
 // Plain function pointer
-lib.register("abs", ExprType::signature(vec![ExprType::INT], ExprType::INT), abs_int);
+lib.register("abs", ExprType::signature(vec![ExprType::INT], ExprType::INT)?, abs_int);
 
 // From spec notation string (convenient for bulk registration)
 lib.register_sig("abs", "(int) -> int", abs_int);
@@ -401,11 +401,16 @@ The library supports type-level queries without evaluation:
 
 ```rust
 // What type does len(list[int]) return?
-lib.derive_return_type("len", &[ExprType::list(ExprType::INT)])  // → Some(ExprType::INT)
+lib.derive_return_type("len", &[ExprType::list(ExprType::INT)?])  // → Ok(Some(ExprType::INT))
 
 // What type is path.name?
-lib.get_property_type(&ExprType::PATH, "name")  // → Some(ExprType::STRING)
+lib.get_property_type(&ExprType::PATH, "name")  // → Ok(Some(ExprType::STRING))
 ```
+
+Both return `Ok(None)` when no signature matches, and
+`ExpressionErrorKind::TypeTooDeep` when the return type would be deeper than
+`MAX_TYPE_DEPTH` (substituting a deep argument type into `list[T1]`; see
+type-system.md § Depth limit).
 
 This is used by the model layer for template validation with unresolved values.
 

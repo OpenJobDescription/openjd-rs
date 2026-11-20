@@ -466,7 +466,10 @@ fn coercible_scalar_target_narrows_unresolved_result() {
 
 #[test]
 fn incompatible_scalar_target_rejects_unresolved_result() {
-    let st = symtab(&[("X", ExprValue::unresolved(ExprType::list(ExprType::INT)))]);
+    let st = symtab(&[(
+        "X",
+        ExprValue::unresolved(ExprType::list(ExprType::INT).unwrap()),
+    )]);
     let err = eval_with_target_type("X", &ExprType::INT, &st)
         .unwrap_err()
         .to_string();
@@ -514,7 +517,7 @@ fn listcomp_element_derives_target_from_list_target() {
         eval_target("[[x, '2'] for x in [1]]", "list[list[int]]"),
         ExprValue::make_list(
             vec![ExprValue::ListInt(vec![1, 2])],
-            ExprType::list(ExprType::INT)
+            ExprType::list(ExprType::INT).unwrap()
         )
         .unwrap()
     );

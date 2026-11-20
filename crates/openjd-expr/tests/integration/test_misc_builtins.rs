@@ -246,7 +246,7 @@ fn path_from_list_with_non_string() {
     // Per spec, incompatible types in a list literal are an error
     let result = ExprValue::make_list(
         vec![ExprValue::from("/a"), ExprValue::Int(42)],
-        ExprType::union(vec![ExprType::STRING, ExprType::INT]),
+        ExprType::union(vec![ExprType::STRING, ExprType::INT]).unwrap(),
     );
     assert!(result.is_err());
 }

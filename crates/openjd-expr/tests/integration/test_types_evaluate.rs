@@ -108,7 +108,7 @@ fn nested_list_type() {
                 )
                 .unwrap(),
             ],
-            openjd_expr::ExprType::list(openjd_expr::ExprType::INT),
+            openjd_expr::ExprType::list(openjd_expr::ExprType::INT).unwrap(),
         )
         .unwrap(),
     )

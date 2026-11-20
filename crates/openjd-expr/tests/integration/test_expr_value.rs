@@ -256,7 +256,7 @@ fn coerce_list_elements() {
     )
     .unwrap();
     let v = list
-        .coerce(&ExprType::list(ExprType::INT), PathFormat::Posix)
+        .coerce(&ExprType::list(ExprType::INT).unwrap(), PathFormat::Posix)
         .unwrap();
     assert_eq!(v.expr_type().to_string(), "list[int]");
 }
@@ -276,10 +276,10 @@ fn coerce_unresolved_applies_type_level_rules() {
         (ExprType::INT, ExprType::FLOAT),
         (ExprType::PATH, ExprType::STRING),
         (
-            ExprType::list(ExprType::INT),
-            ExprType::list(ExprType::FLOAT),
+            ExprType::list(ExprType::INT).unwrap(),
+            ExprType::list(ExprType::FLOAT).unwrap(),
         ),
-        (ExprType::RANGE_EXPR, ExprType::list(ExprType::INT)),
+        (ExprType::RANGE_EXPR, ExprType::list(ExprType::INT).unwrap()),
     ];
     for (source, target) in cases {
         let value = ExprValue::unresolved(source)
@@ -299,18 +299,18 @@ fn coerce_unresolved_defers_payload_checks() {
 
 #[test]
 fn coerce_unresolved_narrows_union_constraint() {
-    let value = ExprValue::unresolved(ExprType::union(vec![ExprType::INT, ExprType::STRING]))
-        .coerce(&ExprType::INT, PathFormat::Posix)
-        .unwrap();
+    let value =
+        ExprValue::unresolved(ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap())
+            .coerce(&ExprType::INT, PathFormat::Posix)
+            .unwrap();
     assert_eq!(value, ExprValue::unresolved(ExprType::INT));
 }
 
 #[test]
 fn coerce_unresolved_keeps_successful_union_members() {
-    let value = ExprValue::unresolved(ExprType::union(vec![
-        ExprType::INT,
-        ExprType::list(ExprType::INT),
-    ]))
+    let value = ExprValue::unresolved(
+        ExprType::union(vec![ExprType::INT, ExprType::list(ExprType::INT).unwrap()]).unwrap(),
+    )
     .coerce(&ExprType::INT, PathFormat::Posix)
     .unwrap();
     assert_eq!(value, ExprValue::unresolved(ExprType::INT));
@@ -342,12 +342,15 @@ fn coerce_unresolved_nullable_and_nested_union_sources() {
 
 #[test]
 fn coerce_unresolved_empty_list_to_typed_list() {
-    let value = ExprValue::unresolved(ExprType::list(ExprType::NULLTYPE))
-        .coerce(&ExprType::list(ExprType::STRING), PathFormat::Posix)
+    let value = ExprValue::unresolved(ExprType::list(ExprType::NULLTYPE).unwrap())
+        .coerce(
+            &ExprType::list(ExprType::STRING).unwrap(),
+            PathFormat::Posix,
+        )
         .unwrap();
     assert_eq!(
         value,
-        ExprValue::unresolved(ExprType::list(ExprType::STRING))
+        ExprValue::unresolved(ExprType::list(ExprType::STRING).unwrap())
     );
 }
 
@@ -385,15 +388,16 @@ fn coerce_unresolved_list_pair_accepted_unconditionally() {
 
 #[test]
 fn coerce_unresolved_unions_successful_result_types() {
-    let value = ExprValue::unresolved(ExprType::union(vec![ExprType::BOOL, ExprType::INT]))
-        .coerce(
-            &ExprType::union(vec![ExprType::FLOAT, ExprType::STRING]),
-            PathFormat::Posix,
-        )
-        .unwrap();
+    let value =
+        ExprValue::unresolved(ExprType::union(vec![ExprType::BOOL, ExprType::INT]).unwrap())
+            .coerce(
+                &ExprType::union(vec![ExprType::FLOAT, ExprType::STRING]).unwrap(),
+                PathFormat::Posix,
+            )
+            .unwrap();
     assert_eq!(
         value,
-        ExprValue::unresolved(ExprType::union(vec![ExprType::FLOAT, ExprType::STRING]))
+        ExprValue::unresolved(ExprType::union(vec![ExprType::FLOAT, ExprType::STRING]).unwrap())
     );
 }
 
@@ -401,7 +405,7 @@ fn coerce_unresolved_unions_successful_result_types() {
 fn coerce_unresolved_does_not_broaden_for_union_target() {
     let value = ExprValue::unresolved(ExprType::INT)
         .coerce(
-            &ExprType::union(vec![ExprType::INT, ExprType::STRING]),
+            &ExprType::union(vec![ExprType::INT, ExprType::STRING]).unwrap(),
             PathFormat::Posix,
         )
         .unwrap();
@@ -410,7 +414,7 @@ fn coerce_unresolved_does_not_broaden_for_union_target() {
 
 #[test]
 fn coerce_incompatible_unresolved_errors() {
-    let error = ExprValue::unresolved(ExprType::list(ExprType::INT))
+    let error = ExprValue::unresolved(ExprType::list(ExprType::INT).unwrap())
         .coerce(&ExprType::INT, PathFormat::Posix)
         .unwrap_err();
     assert_eq!(error, "Cannot coerce list[int] to int");
@@ -418,7 +422,8 @@ fn coerce_incompatible_unresolved_errors() {
 
 #[test]
 fn coerce_unresolved_errors_when_no_union_member_succeeds() {
-    let source = ExprType::union(vec![ExprType::PATH, ExprType::list(ExprType::INT)]);
+    let source =
+        ExprType::union(vec![ExprType::PATH, ExprType::list(ExprType::INT).unwrap()]).unwrap();
     let error = ExprValue::unresolved(source.clone())
         .coerce(&ExprType::INT, PathFormat::Posix)
         .unwrap_err();
@@ -587,7 +592,8 @@ fn repr_list_nested() {
     let inner1 =
         ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
     let inner2 = ExprValue::make_list(vec![ExprValue::Int(3)], ExprType::INT).unwrap();
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
+    let v =
+        ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT).unwrap()).unwrap();
     assert_eq!(
         v.repr_python(),
         "ExprValue([[1, 2], [3]], type='list[list[int]]')"
@@ -773,7 +779,8 @@ fn transport_nested_list_roundtrip() {
     let inner1 =
         ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
     let inner2 = ExprValue::make_list(vec![ExprValue::Int(3)], ExprType::INT).unwrap();
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
+    let v =
+        ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT).unwrap()).unwrap();
     let json = v.to_json_transport();
     assert_eq!(json["type"], "list[list[int]]");
     assert!(json["value"][0].is_array());
@@ -1037,7 +1044,8 @@ fn to_string_list_nested() {
         ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
     let inner2 =
         ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4)], ExprType::INT).unwrap();
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
+    let v =
+        ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT).unwrap()).unwrap();
     assert_eq!(v.to_display_string(), "[[1, 2], [3, 4]]");
 }
 #[test]
@@ -1171,7 +1179,8 @@ fn list_list_int() {
         ExprType::INT,
     )
     .unwrap();
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
+    let v =
+        ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT).unwrap()).unwrap();
     assert_eq!(v.list_len(), Some(2));
     let elems = v.list_elements().unwrap();
     assert_eq!(elems[0].list_len(), Some(2));
@@ -1209,7 +1218,8 @@ fn list_nested() {
         ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
     let inner2 =
         ExprValue::make_list(vec![ExprValue::Int(3), ExprValue::Int(4)], ExprType::INT).unwrap();
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
+    let v =
+        ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT).unwrap()).unwrap();
     assert_eq!(v.expr_type().to_string(), "list[list[int]]");
 }
 
@@ -1225,7 +1235,11 @@ fn list_nested_int_float_mix() {
         ExprType::FLOAT,
     )
     .unwrap();
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::FLOAT)).unwrap();
+    let v = ExprValue::make_list(
+        vec![inner1, inner2],
+        ExprType::list(ExprType::FLOAT).unwrap(),
+    )
+    .unwrap();
     // Inner int list should be promoted to float
     let elems = v.list_elements().unwrap();
     assert_eq!(elems[0].expr_type().to_string(), "list[float]");
@@ -1275,7 +1289,7 @@ fn repr_empty_list_path() {
 
 #[test]
 fn repr_empty_list_list_path() {
-    let v = ExprValue::make_list(vec![], ExprType::list(ExprType::PATH)).unwrap();
+    let v = ExprValue::make_list(vec![], ExprType::list(ExprType::PATH).unwrap()).unwrap();
     let r = v.repr_python();
     assert!(r.contains("[]"), "got: {r}");
 }
@@ -1292,7 +1306,10 @@ fn coerce_list_string_type() {
     )
     .unwrap();
     let coerced = v
-        .coerce(&ExprType::list(ExprType::STRING), PathFormat::Posix)
+        .coerce(
+            &ExprType::list(ExprType::STRING).unwrap(),
+            PathFormat::Posix,
+        )
         .unwrap();
     assert_eq!(coerced.expr_type().to_string(), "list[string]");
 }
@@ -1304,10 +1321,10 @@ fn coerce_nested_list_type() {
         ExprType::STRING,
     )
     .unwrap();
-    let v = ExprValue::make_list(vec![inner], ExprType::list(ExprType::STRING)).unwrap();
+    let v = ExprValue::make_list(vec![inner], ExprType::list(ExprType::STRING).unwrap()).unwrap();
     let coerced = v
         .coerce(
-            &ExprType::list(ExprType::list(ExprType::INT)),
+            &ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap(),
             PathFormat::Posix,
         )
         .unwrap();
@@ -1326,7 +1343,11 @@ fn repr_list_list_path_with_format() {
         ExprType::PATH,
     )
     .unwrap();
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::PATH)).unwrap();
+    let v = ExprValue::make_list(
+        vec![inner1, inner2],
+        ExprType::list(ExprType::PATH).unwrap(),
+    )
+    .unwrap();
     let r = v.repr_python();
     assert!(r.contains("type='list[list[path]]'"), "got: {r}");
     assert!(r.contains("path_format=PathFormat.POSIX"), "got: {r}");
@@ -1469,7 +1490,7 @@ fn coerce_list_int_with_type() {
     )
     .unwrap();
     let coerced = list
-        .coerce(&ExprType::list(ExprType::INT), PathFormat::Posix)
+        .coerce(&ExprType::list(ExprType::INT).unwrap(), PathFormat::Posix)
         .unwrap();
     assert_eq!(coerced.list_len(), Some(3));
     assert_eq!(coerced.expr_type().to_string(), "list[int]");
@@ -1480,10 +1501,11 @@ fn coerce_nested_list_int_with_type() {
     let inner1 =
         ExprValue::make_list(vec![ExprValue::Int(1), ExprValue::Int(2)], ExprType::INT).unwrap();
     let inner2 = ExprValue::make_list(vec![ExprValue::Int(3)], ExprType::INT).unwrap();
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT)).unwrap();
+    let v =
+        ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::INT).unwrap()).unwrap();
     let coerced = v
         .coerce(
-            &ExprType::list(ExprType::list(ExprType::INT)),
+            &ExprType::list(ExprType::list(ExprType::INT).unwrap()).unwrap(),
             PathFormat::Posix,
         )
         .unwrap();
@@ -1532,7 +1554,11 @@ fn repr_list_list_path_with_windows_format() {
         ExprType::PATH,
     )
     .unwrap();
-    let v = ExprValue::make_list(vec![inner1, inner2], ExprType::list(ExprType::PATH)).unwrap();
+    let v = ExprValue::make_list(
+        vec![inner1, inner2],
+        ExprType::list(ExprType::PATH).unwrap(),
+    )
+    .unwrap();
     let r = v.repr_python();
     assert!(r.contains("type='list[list[path]]'"), "got: {r}");
     assert!(r.contains("path_format=PathFormat.WINDOWS"), "got: {r}");
@@ -1550,7 +1576,7 @@ fn repr_empty_list_path_exact() {
 
 #[test]
 fn repr_empty_list_list_path_exact() {
-    let v = ExprValue::make_list(vec![], ExprType::list(ExprType::PATH)).unwrap();
+    let v = ExprValue::make_list(vec![], ExprType::list(ExprType::PATH).unwrap()).unwrap();
     let r = v.repr_python();
     assert!(r.starts_with("ExprValue([]"), "got: {r}");
 }
@@ -1637,7 +1663,7 @@ fn from_transport_value_deeply_nested_rejected() {
     // Build a type list[list[...[int]...]] with 11 levels and matching nested JSON arrays
     let mut typ = ExprType::parse("int").unwrap();
     for _ in 0..11 {
-        typ = ExprType::list(typ);
+        typ = ExprType::list(typ).unwrap();
     }
     let mut json_val: serde_json::Value = serde_json::json!("42");
     for _ in 0..11 {
@@ -1658,35 +1684,35 @@ fn from_transport_value_deeply_nested_rejected() {
 fn empty_list_bool_preserves_elem_type() {
     let v = ExprValue::ListBool(vec![]);
     assert_eq!(v.list_elem_type(), Some(ExprType::BOOL));
-    assert_eq!(v.expr_type(), ExprType::list(ExprType::BOOL));
+    assert_eq!(v.expr_type(), ExprType::list(ExprType::BOOL).unwrap());
 }
 
 #[test]
 fn empty_list_int_preserves_elem_type() {
     let v = ExprValue::ListInt(vec![]);
     assert_eq!(v.list_elem_type(), Some(ExprType::INT));
-    assert_eq!(v.expr_type(), ExprType::list(ExprType::INT));
+    assert_eq!(v.expr_type(), ExprType::list(ExprType::INT).unwrap());
 }
 
 #[test]
 fn empty_list_float_preserves_elem_type() {
     let v = ExprValue::ListFloat(vec![]);
     assert_eq!(v.list_elem_type(), Some(ExprType::FLOAT));
-    assert_eq!(v.expr_type(), ExprType::list(ExprType::FLOAT));
+    assert_eq!(v.expr_type(), ExprType::list(ExprType::FLOAT).unwrap());
 }
 
 #[test]
 fn empty_list_string_preserves_elem_type() {
     let v = ExprValue::ListString(vec![], 0);
     assert_eq!(v.list_elem_type(), Some(ExprType::STRING));
-    assert_eq!(v.expr_type(), ExprType::list(ExprType::STRING));
+    assert_eq!(v.expr_type(), ExprType::list(ExprType::STRING).unwrap());
 }
 
 #[test]
 fn empty_list_path_preserves_elem_type() {
     let v = ExprValue::ListPath(vec![], PathFormat::Posix, 0);
     assert_eq!(v.list_elem_type(), Some(ExprType::PATH));
-    assert_eq!(v.expr_type(), ExprType::list(ExprType::PATH));
+    assert_eq!(v.expr_type(), ExprType::list(ExprType::PATH).unwrap());
 }
 
 #[test]
@@ -1696,14 +1722,17 @@ fn empty_list_roundtrip_via_make_list_preserves_type() {
     let original = ExprValue::ListString(vec![], 0);
     let hint = original.list_elem_type().unwrap();
     let rebuilt = ExprValue::make_list(vec![], hint).unwrap();
-    assert_eq!(rebuilt.expr_type(), ExprType::list(ExprType::STRING));
+    assert_eq!(
+        rebuilt.expr_type(),
+        ExprType::list(ExprType::STRING).unwrap()
+    );
 }
 
 #[test]
 fn empty_list_list_with_int_hint_preserves_type() {
     let v = ExprValue::ListList(vec![], ExprType::INT, 0);
     assert_eq!(v.list_elem_type(), Some(ExprType::INT));
-    assert_eq!(v.expr_type(), ExprType::list(ExprType::INT));
+    assert_eq!(v.expr_type(), ExprType::list(ExprType::INT).unwrap());
 }
 
 #[test]
@@ -1791,7 +1820,7 @@ fn repr_python_escapes_inside_list_elements() {
             ExprValue::String("it's".to_string()),
             ExprValue::String("a\nb".to_string()),
         ],
-        ExprType::list(ExprType::STRING),
+        ExprType::list(ExprType::STRING).unwrap(),
     )
     .unwrap();
     // CPython selects a delimiter per element, so the two differ:
@@ -1834,7 +1863,7 @@ fn repr_python_escapes_inside_list_of_path_elements() {
             "/a\nb".to_string(),
             PathFormat::Windows,
         )],
-        ExprType::list(ExprType::PATH),
+        ExprType::list(ExprType::PATH).unwrap(),
     )
     .unwrap();
     assert_eq!(
@@ -1847,12 +1876,12 @@ fn repr_python_escapes_inside_list_of_path_elements() {
 fn repr_python_escapes_inside_a_nested_list() {
     let inner = ExprValue::make_list(
         vec![ExprValue::String("a\nb".to_string())],
-        ExprType::list(ExprType::STRING),
+        ExprType::list(ExprType::STRING).unwrap(),
     )
     .unwrap();
     let v = ExprValue::make_list(
         vec![inner],
-        ExprType::list(ExprType::list(ExprType::STRING)),
+        ExprType::list(ExprType::list(ExprType::STRING).unwrap()).unwrap(),
     )
     .unwrap();
     assert_eq!(

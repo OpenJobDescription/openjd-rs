@@ -25,10 +25,11 @@ pub fn concrete_type(u: &mut Unstructured<'_>) -> ExprType {
     let elem = pick(u, &SCALAR_TYPES[..5]).clone();
     match upto(u, 9) {
         0..=5 => pick(u, SCALAR_TYPES).clone(),
-        6..=8 => ExprType::list(elem),
-        _ => ExprType::list(ExprType::list(
-            pick(u, &[ExprType::INT, ExprType::STRING]).clone(),
-        )),
+        6..=8 => ExprType::list(elem).unwrap(),
+        _ => ExprType::list(
+            ExprType::list(pick(u, &[ExprType::INT, ExprType::STRING]).clone()).unwrap(),
+        )
+        .unwrap(),
     }
 }
 
@@ -40,13 +41,13 @@ pub fn any_type(u: &mut Unstructured<'_>, depth: u32) -> ExprType {
     }
     match upto(u, 11) {
         0..=4 => concrete_type(u),
-        5 => ExprType::list(any_type(u, depth - 1)),
+        5 => ExprType::list(any_type(u, depth - 1)).unwrap(),
         6 => {
             let n = upto(u, 3) + 1;
-            ExprType::union((0..n).map(|_| any_type(u, depth - 1)).collect())
+            ExprType::union((0..n).map(|_| any_type(u, depth - 1)).collect()).unwrap()
         }
-        7 => ExprType::union(vec![any_type(u, depth - 1), ExprType::NULLTYPE]),
-        8 => ExprType::unresolved(any_type(u, depth - 1)),
+        7 => ExprType::union(vec![any_type(u, depth - 1), ExprType::NULLTYPE]).unwrap(),
+        8 => ExprType::unresolved(any_type(u, depth - 1)).unwrap(),
         9 => pick(
             u,
             &[
@@ -63,9 +64,9 @@ pub fn any_type(u: &mut Unstructured<'_>, depth: u32) -> ExprType {
         10 => {
             let n = upto(u, 2);
             let params = (0..n).map(|_| any_type(u, depth - 1)).collect();
-            ExprType::signature(params, any_type(u, depth - 1))
+            ExprType::signature(params, any_type(u, depth - 1)).unwrap()
         }
-        _ => ExprType::list(ExprType::T1),
+        _ => ExprType::list(ExprType::T1).unwrap(),
     }
 }
 

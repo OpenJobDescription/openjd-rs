@@ -459,11 +459,25 @@ impl ExprValue {
     /// non-empty list, the join of the element types computed by
     /// [`make_list`](Self::make_list) (`[[], [1]]` holds `list[int]`
     /// elements whichever comes first).
-    fn make_list_list(v: Vec<ExprValue>, elem_type: ExprType) -> Self {
+    ///
+    /// Returns `TypeTooDeep` when `list[elem_type]` would be deeper than
+    /// [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH): such a list would have no
+    /// type.
+    fn make_list_list(
+        v: Vec<ExprValue>,
+        elem_type: ExprType,
+    ) -> Result<Self, crate::error::ExpressionError> {
+        if elem_type.depth() >= crate::MAX_TYPE_DEPTH {
+            return Err(crate::error::ExpressionError::from_kind(
+                crate::error::ExpressionErrorKind::TypeTooDeep {
+                    limit: crate::MAX_TYPE_DEPTH,
+                },
+            ));
+        }
         // Vec buffer holds ExprValues inline; only count their additional heap allocations
         let heap = v.len() * std::mem::size_of::<ExprValue>()
             + v.iter().map(|e| e.heap_size()).sum::<usize>();
-        Self::ListList(v, elem_type, heap)
+        Ok(Self::ListList(v, elem_type, heap))
     }
 
     /// Estimate the heap allocation required to build a list from `elements`.
@@ -541,6 +555,12 @@ impl ExprValue {
     /// handled by the evaluator, which hoists them to a top-level
     /// `ExprValue::unresolved(list[T])` before any list is built.
     ///
+    /// A list of lists whose element type (the elements' join, or
+    /// `hint_type` for an empty list) is already
+    /// [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH) deep is rejected with
+    /// [`TypeTooDeep`](crate::ExpressionErrorKind::TypeTooDeep): the list
+    /// would have no type. A hint the result does not use is not checked.
+    ///
     /// When called from an evaluator or function implementation that has
     /// an [`EvalContext`](crate::function_library::EvalContext), prefer
     /// [`make_list_checked`](Self::make_list_checked) so that an oversized
@@ -590,11 +610,12 @@ impl ExprValue {
         let joined =
             match crate::types::join_list_element_types(elements.iter().map(Self::expr_type)) {
                 Ok(joined) => joined,
-                Err((expected, got)) => {
+                Err(crate::types::ListJoinError::Conflict(expected, got)) => {
                     return Err(crate::error::ExpressionError::type_error(format!(
                         "make_list expected {expected} element, got {got}"
                     )))
                 }
+                Err(crate::types::ListJoinError::TooDeep(e)) => return Err(e),
             };
         // Convert empty ListList([], NULLTYPE) elements to the joined list
         // element type: in [[], [1]] the empty [] becomes ListInt([]), and
@@ -639,7 +660,7 @@ impl ExprValue {
                 crate::types::TypeCode::Path => {
                     Self::make_list_path(Vec::new(), PathFormat::host())
                 }
-                crate::types::TypeCode::List => Self::make_list_list(Vec::new(), hint_type),
+                crate::types::TypeCode::List => Self::make_list_list(Vec::new(), hint_type)?,
                 crate::types::TypeCode::RangeExpr => {
                     Self::ListList(Vec::new(), ExprType::RANGE_EXPR, 0)
                 }
@@ -686,7 +707,7 @@ impl ExprValue {
                     );
                 }
             }
-            return Ok(Self::make_list_list(elements, joined));
+            return Self::make_list_list(elements, joined);
         }
         // Nested list path/string promotion: list[path] + list[string] → list[string]
         let has_list_path = elements
@@ -701,7 +722,7 @@ impl ExprValue {
                     *e = Self::make_list_string(std::mem::take(paths));
                 }
             }
-            return Ok(Self::make_list_list(elements, joined));
+            return Self::make_list_list(elements, joined);
         }
         // Path/string promotion: mix of path and string → string
         let has_path = elements.iter().any(|e| matches!(e, Self::Path { .. }));
@@ -783,8 +804,8 @@ impl ExprValue {
                     fmt,
                 )
             }
-            _ if elements[0].is_list() => Self::make_list_list(elements, joined),
-            Self::RangeExpr(_) => Self::make_list_list(elements, ExprType::RANGE_EXPR),
+            _ if elements[0].is_list() => Self::make_list_list(elements, joined)?,
+            Self::RangeExpr(_) => Self::make_list_list(elements, ExprType::RANGE_EXPR)?,
             _ => {
                 return Err(crate::error::ExpressionError::type_error(format!(
                     "Cannot create list from {} elements",
@@ -930,14 +951,16 @@ impl ExprValue {
     /// mechanically by `tests/integration/test_coercion_drift.rs`, which
     /// sweeps sample values against target types and checks the two paths
     /// agree.
+    ///
+    /// For an unresolved value whose result type would be deeper than
+    /// [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH) (only a target that deep
+    /// can make it), the error is the
+    /// [`TypeTooDeep`](crate::ExpressionErrorKind::TypeTooDeep) message.
     pub fn coerce(self, target: &ExprType, path_format: PathFormat) -> Result<Self, String> {
         // Unresolved values carry a type constraint and nothing else, so the
         // decision has to be made entirely at the type level.
         if let ExprValue::Unresolved(constraint) = &self {
-            return match Self::coerce_type(constraint, target) {
-                Some(result_type) => Ok(ExprValue::unresolved(result_type)),
-                None => Err(format!("Cannot coerce {constraint} to {target}")),
-            };
+            return Self::coerce_unresolved(constraint, target).map_err(|e| e.message());
         }
         // Step 1: already acceptable, so pass through untouched.
         let source_type = self.expr_type();
@@ -1167,7 +1190,7 @@ impl ExprValue {
         r: &crate::range_expr::RangeExpr,
         dest: &ExprType,
     ) -> Result<Self, String> {
-        if !ExprType::list(ExprType::INT).satisfies(dest) {
+        if !ExprType::fixed(ExprType::list(ExprType::INT)).satisfies(dest) {
             return Err(format!(
                 "Cannot coerce range_expr to {dest}: a range expression only \
                  implicitly coerces to list[int] (use list() for an explicit \
@@ -1209,6 +1232,37 @@ impl ExprValue {
         ExprValue::make_list(coerced?, elem_type.clone()).map_err(|e| e.to_string())
     }
 
+    /// [`Self::coerce`] with its error as an [`ExpressionError`]: a
+    /// `TypeTooDeep` from coercing an unresolved value keeps its kind (so
+    /// static typing never absorbs it, as it does any other value error),
+    /// and every other error is the message as an `Other` error.
+    ///
+    /// [`ExpressionError`]: crate::error::ExpressionError
+    pub(crate) fn coerce_keeping_kind(
+        self,
+        target: &ExprType,
+        path_format: PathFormat,
+    ) -> Result<Self, crate::error::ExpressionError> {
+        if let ExprValue::Unresolved(constraint) = &self {
+            return Self::coerce_unresolved(constraint, target);
+        }
+        self.coerce(target, path_format)
+            .map_err(crate::error::ExpressionError::new)
+    }
+
+    /// [`Self::coerce`] of an `Unresolved(constraint)` value.
+    fn coerce_unresolved(
+        constraint: &ExprType,
+        target: &ExprType,
+    ) -> Result<Self, crate::error::ExpressionError> {
+        match Self::coerce_type(constraint, target)? {
+            Some(result_type) => Ok(ExprValue::unresolved(result_type)),
+            None => Err(crate::error::ExpressionError::new(format!(
+                "Cannot coerce {constraint} to {target}"
+            ))),
+        }
+    }
+
     /// The type-level counterpart of [`Self::coerce`], for unresolved values.
     ///
     /// Returns the type the coerced value would have, or `None` if no rule
@@ -1220,17 +1274,24 @@ impl ExprValue {
     /// The mirror is maintained by hand;
     /// `tests/integration/test_coercion_drift.rs` checks it stays consistent
     /// with the concrete path.
-    fn coerce_type(source: &ExprType, target: &ExprType) -> Option<ExprType> {
+    ///
+    /// Returns [`ExpressionErrorKind::TypeTooDeep`](crate::ExpressionErrorKind::TypeTooDeep)
+    /// if the union of result types would be deeper than
+    /// [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH).
+    fn coerce_type(
+        source: &ExprType,
+        target: &ExprType,
+    ) -> Result<Option<ExprType>, crate::error::ExpressionError> {
         // An unresolved constraint may itself be unresolved; the innermost
         // constraint is what the resolved value's type will be.
         if source.code() == TypeCode::Unresolved {
-            return source
-                .params()
-                .first()
-                .and_then(|inner| Self::coerce_type(inner, target));
+            return match source.params().first() {
+                Some(inner) => Self::coerce_type(inner, target),
+                None => Ok(None),
+            };
         }
         if !target.denotes_runtime_values() {
-            return None;
+            return Ok(None);
         }
         // A concrete value can never have a type variable in its type, so an
         // unbound variable in a source constraint reads as a wildcard: the
@@ -1244,7 +1305,7 @@ impl ExprValue {
         // of no common element type.
         let erased;
         let source = if source.is_symbolic() {
-            erased = source.erase_type_vars();
+            erased = source.erase_type_vars()?;
             &erased
         } else {
             source
@@ -1263,29 +1324,30 @@ impl ExprValue {
                     .filter(|m| m.denotes_runtime_values())
                     .cloned()
                     .collect();
-                return Some(ExprType::union(usable));
+                return ExprType::union(usable).map(Some);
             }
-            return Some(target.clone());
+            return Ok(Some(target.clone()));
         }
         // A union source resolves to exactly one of its members. Keep the
         // members that have a rule and union their results; dropping the
         // rest is what lets `unresolved[int | list[int]]` coerce to `int`.
         if source.code() == TypeCode::Union {
-            let result_types: Vec<_> = source
-                .params()
-                .iter()
-                .filter_map(|member| Self::coerce_type(member, target))
-                .collect();
+            let mut result_types = Vec::new();
+            for member in source.params() {
+                if let Some(t) = Self::coerce_type(member, target)? {
+                    result_types.push(t);
+                }
+            }
             return if result_types.is_empty() {
-                None
+                Ok(None)
             } else {
-                Some(ExprType::union(result_types))
+                ExprType::union(result_types).map(Some)
             };
         }
         // Step 1: satisfaction — the value passes through unchanged, so the
         // result keeps the source type rather than widening to the target.
         if source.satisfies(target) {
-            return Some(source.clone());
+            return Ok(Some(source.clone()));
         }
         // Step 2: conversion. The concrete path picks the first destination
         // its payload converts to; without the payload no single destination
@@ -1298,9 +1360,9 @@ impl ExprValue {
             .filter_map(|dest| Self::convert_type(source, dest))
             .collect();
         if result_types.is_empty() {
-            None
+            Ok(None)
         } else {
-            Some(ExprType::union(result_types))
+            ExprType::union(result_types).map(Some)
         }
     }
 
@@ -1315,7 +1377,7 @@ impl ExprValue {
         // path, and producing the same `list[int]` it produces — not the
         // destination, which may be wider.
         if source.code() == TypeCode::RangeExpr && dest.code() == TypeCode::List {
-            let list_int = ExprType::list(ExprType::INT);
+            let list_int = ExprType::fixed(ExprType::list(ExprType::INT));
             return list_int.satisfies(dest).then_some(list_int);
         }
         // Every well-formed list/list pair is accepted: an
@@ -1619,6 +1681,17 @@ impl ExprValue {
     }
 
     /// The [`ExprType`] of this value.
+    ///
+    /// An `Unresolved(T)` is `unresolved[T]`, which is as deep as `T`. A
+    /// `ListList` is `list[E]` for its element type hint `E`, one level
+    /// deeper than `E`, so when the hint is already
+    /// [`MAX_TYPE_DEPTH`](crate::MAX_TYPE_DEPTH) deep there is no such type
+    /// and the `ListList` is `list[any]`: still a list, with the elements'
+    /// type read as unknown. No list the language builds has such a hint
+    /// (list values nest at most two lists), so only a `ListList` built
+    /// through the Rust API with one gets the fallback. Static typing then
+    /// reads such a value as `list[any]`, so it can accept an expression on
+    /// it that a run rejects with `TypeTooDeep`.
     pub fn expr_type(&self) -> ExprType {
         match self {
             Self::Null => ExprType::NULLTYPE,
@@ -1627,14 +1700,18 @@ impl ExprValue {
             Self::Float(_) => ExprType::FLOAT,
             Self::String(_) => ExprType::STRING,
             Self::Path { .. } => ExprType::PATH,
-            Self::ListBool(_) => ExprType::list(ExprType::BOOL),
-            Self::ListInt(_) => ExprType::list(ExprType::INT),
-            Self::ListFloat(_) => ExprType::list(ExprType::FLOAT),
-            Self::ListString(_, _) => ExprType::list(ExprType::STRING),
-            Self::ListPath(_, _, _) => ExprType::list(ExprType::PATH),
-            Self::ListList(_, elem_type, _) => ExprType::list(elem_type.clone()),
+            Self::ListBool(_) => ExprType::fixed(ExprType::list(ExprType::BOOL)),
+            Self::ListInt(_) => ExprType::fixed(ExprType::list(ExprType::INT)),
+            Self::ListFloat(_) => ExprType::fixed(ExprType::list(ExprType::FLOAT)),
+            Self::ListString(_, _) => ExprType::fixed(ExprType::list(ExprType::STRING)),
+            Self::ListPath(_, _, _) => ExprType::fixed(ExprType::list(ExprType::PATH)),
+            Self::ListList(_, elem_type, _) => ExprType::list(elem_type.clone())
+                .unwrap_or_else(|_| ExprType::fixed(ExprType::list(ExprType::ANY))),
             Self::RangeExpr(_) => ExprType::RANGE_EXPR,
-            Self::Unresolved(t) => ExprType::unresolved(t.clone()),
+            // `unresolved[T]` is as deep as `T`, so this cannot fail; the
+            // fallback keeps the method total all the same.
+            Self::Unresolved(t) => ExprType::unresolved(t.clone())
+                .unwrap_or_else(|_| ExprType::fixed(ExprType::unresolved(ExprType::ANY))),
         }
     }
 

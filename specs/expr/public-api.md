@@ -53,7 +53,7 @@ openjd_expr                 — crate root; most commonly used items re-exported
 ├── range_expr              — RangeExpr, IntRange, RangeExprError
 ├── symbol_table            — SymbolTable, SymbolTableEntry, SymbolTableError,
 │                             SerializedSymbolTable, MAX_SYMBOL_TABLE_ENTRIES
-├── types                   — ExprType, TypeCode
+├── types                   — ExprType, TypeCode, MAX_TYPE_DEPTH
 ├── uri_path                — URI-aware path helpers (module-path-only)
 └── value                   — ExprValue, Float64, ListIter, format_float
 ```
@@ -243,6 +243,7 @@ Additional per-module caps (see each module section below):
 - `range_expr::MAX_RANGE_EXPR_CHUNKS` (50,000 — elements parsed, and runs in the canonical form of every value)
 - `range_expr::MAX_RANGE_EXPR_LEN` (`i64::MAX` — bound on the number of values, not a heap cap)
 - `symbol_table::MAX_SYMBOL_TABLE_ENTRIES` (100,000 — transport-only)
+- `types::MAX_TYPE_DEPTH` (64 — the deepest an `ExprType` can be; a parsed type is at most 11 deep, 31 comprehensions over an unresolved value, each the body of the next, type as 63; deeper contrived types fail validation)
 
 All caps are orders of magnitude above any legitimate usage and exist to
 reject pathological inputs early, before they allocate.
@@ -472,16 +473,17 @@ impl FunctionLibrary {
     /// signature's type (`list[T3]`, or `list[T2]` for the range overloads).
     /// Any other call with an argument of unknown type (`any`, a bare type
     /// variable) that matches a signature is `any`; one that matches none
-    /// is `None`.
+    /// is `Ok(None)`. `TypeTooDeep` when the return type would be deeper
+    /// than `MAX_TYPE_DEPTH`.
     pub fn derive_return_type(
         &self, name: &str, arg_types: &[ExprType],
-    ) -> Option<ExprType>;
+    ) -> Result<Option<ExprType>, ExpressionError>;
 
     /// Static type-checking for property access: `x.name`.
     /// Looks up `__property_name__(base_type)` in the library.
     pub fn get_property_type(
         &self, base_type: &ExprType, property_name: &str,
-    ) -> Option<ExprType>;
+    ) -> Result<Option<ExprType>, ExpressionError>;
 }
 ```
 
@@ -546,15 +548,32 @@ impl ExprType {
 Constructors + queries:
 
 ```rust
+/// The deepest an `ExprType` can be. Lists, unions and signatures count a
+/// level each; `unresolved[T]` is as deep as `T`. Equal to
+/// `MAX_EXPRESSION_DEPTH`; 31 comprehensions over an unresolved value, each
+/// the body of the next (63 levels), are the most that validate, and a
+/// contrived template
+/// that types deeper fails validation (type-system.md § Depth limit).
+/// Re-exported at the crate root.
+pub const MAX_TYPE_DEPTH: usize = 64;
+
 impl ExprType {
+    // Every constructor, and every operation below that builds a type,
+    // returns `ExpressionErrorKind::TypeTooDeep` for a result deeper than
+    // `MAX_TYPE_DEPTH`. No `ExprType` is ever deeper, so the recursive
+    // walks (`==`, `Hash`, `Display`, `Drop`, `satisfies`, coercion) are
+    // bounded and cannot overflow the stack.
+
     /// Construct with normalization. Prefer the named constructors below
     /// unless you're building a generic type dynamically.
-    pub fn new(code: TypeCode, params: Vec<ExprType>) -> Self;
+    pub fn new(code: TypeCode, params: Vec<ExprType>) -> Result<Self, ExpressionError>;
 
-    pub fn list(elem: ExprType) -> Self;
-    pub fn union(types: Vec<ExprType>) -> Self;
-    pub fn unresolved(constraint: ExprType) -> Self;
-    pub fn signature(param_types: Vec<ExprType>, return_type: ExprType) -> Self;
+    pub fn list(elem: ExprType) -> Result<Self, ExpressionError>;
+    pub fn union(types: Vec<ExprType>) -> Result<Self, ExpressionError>;
+    pub fn unresolved(constraint: ExprType) -> Result<Self, ExpressionError>;
+    pub fn signature(
+        param_types: Vec<ExprType>, return_type: ExprType,
+    ) -> Result<Self, ExpressionError>;
 
     pub fn code(&self) -> TypeCode;
     pub fn params(&self) -> &[ExprType];
@@ -597,16 +616,23 @@ impl ExprType {
         &self, other: &ExprType,
     ) -> Option<HashMap<TypeCode, ExprType>>;
 
-    /// Substitute type variables with concrete types.
-    pub fn substitute(&self, bindings: &HashMap<TypeCode, ExprType>) -> ExprType;
+    /// Substitute type variables with concrete types. `TypeTooDeep` when a
+    /// deep binding takes the result past `MAX_TYPE_DEPTH`.
+    pub fn substitute(
+        &self, bindings: &HashMap<TypeCode, ExprType>,
+    ) -> Result<ExprType, ExpressionError>;
 
     /// Convenience: match + substitute on the return type in one call.
-    pub fn resolve_call(&self, arg_types: &[ExprType]) -> Option<ExprType>;
+    /// `Ok(None)` when the arguments do not match.
+    pub fn resolve_call(
+        &self, arg_types: &[ExprType],
+    ) -> Result<Option<ExprType>, ExpressionError>;
 
     // ── Parsing ──
 
     /// Parse a spec-form type string: `"int"`, `"list[string]"`,
-    /// `"int?"`, `"int | string"`, `"(int, int) -> int"`, etc.
+    /// `"int?"`, `"int | string"`, `"(int, int) -> int"`, etc. Stops at 10
+    /// levels of nesting, so a parsed type is at most 11 deep.
     pub fn parse(s: &str) -> Result<ExprType, String>;
 }
 ```
@@ -626,8 +652,8 @@ Display produces the canonical spec form (e.g., `"list[int]"`, `"int?"`,
 - Single-member unions unwrap to that member.
 
 These mirror the EXPR spec's Union Type Normalization and Unknown Type
-Normalization rules, so `ExprType::union(vec![a, b])` always produces
-the spec's canonical form.
+Normalization rules, so the `Ok` value of `ExprType::union(vec![a, b])`
+is always the spec's canonical form.
 
 ## Values (`value::*`)
 
@@ -740,7 +766,9 @@ impl ExprValue {
     /// carries the joined element type. A `Null` or an `Unresolved`
     /// element is rejected: a list cannot hold `null`, and `make_list`
     /// constructs concrete lists (the
-    /// evaluator hoists unknown-element list expressions instead).
+    /// evaluator hoists unknown-element list expressions instead). A list
+    /// of lists whose element type is already `MAX_TYPE_DEPTH` deep is
+    /// `TypeTooDeep`.
     pub fn make_list(
         elements: Vec<ExprValue>, hint_type: ExprType,
     ) -> Result<Self, ExpressionError>;
@@ -778,6 +806,8 @@ impl ExprValue {
     /// variables, `noreturn`, `unresolved[T]`, signatures) are rejected.
     /// In an unresolved source constraint, unbound type variables read as
     /// wildcards: `unresolved[list[T1]]` coerces as `unresolved[list[any]]`.
+    /// An unresolved result type past `MAX_TYPE_DEPTH` (only a target that
+    /// deep can make one) is the `TypeTooDeep` message.
     /// See `specs/expr/values.md` § Coercion.
     pub fn coerce(
         self, target: &ExprType, path_format: PathFormat,
@@ -785,6 +815,10 @@ impl ExprValue {
 
     // ── Queries ──
 
+    /// The value's type. A `ListList` whose element type hint is already
+    /// `MAX_TYPE_DEPTH` deep (only a value built through the enum variant
+    /// can hold one; `make_list` rejects such a list) is `list[any]`, since
+    /// `list[hint]` would be too deep.
     pub fn expr_type(&self) -> ExprType;
     pub fn type_name(&self) -> &'static str;
     pub fn is_list(&self) -> bool;
@@ -1580,6 +1614,8 @@ pub enum ExpressionErrorKind {
     OperationLimitExceeded { count: usize, limit: usize },
     /// Exceeded `MAX_EXPRESSION_DEPTH`.
     ExpressionTooDeep { depth: usize, limit: usize },
+    /// Building an `ExprType` would pass `MAX_TYPE_DEPTH` (the limit).
+    TypeTooDeep { limit: usize },
     /// A Python syntax feature that's not in the OpenJD subset
     /// (lambdas, walrus, dict/set literals, chained `is`, etc.).
     UnsupportedSyntax { feature: String },
@@ -1723,7 +1759,7 @@ pub use range_expr::{RangeExpr, RangeExprError, MAX_RANGE_EXPR_CHUNKS, MAX_RANGE
 pub use symbol_table::{
     SerializedSymbolTable, SymbolTable, SymbolTableError, MAX_SYMBOL_TABLE_ENTRIES,
 };
-pub use types::{ExprType, TypeCode};
+pub use types::{ExprType, TypeCode, MAX_TYPE_DEPTH};
 pub use value::ExprValue;
 ```
 
@@ -1824,6 +1860,7 @@ minor-version change; lowering them is a breaking change):
 - `MAX_EXPRESSION_DEPTH`, `MAX_PARSE_INPUT_LEN`,
   `MAX_FORMAT_STRING_LEN`, `MAX_FORMAT_STRING_SEGMENTS`,
   `MAX_STATIC_RESOLVED_VALUE_LEN`,
-  `MAX_RANGE_EXPR_CHUNKS`, `MAX_SYMBOL_TABLE_ENTRIES`: defensive caps.
+  `MAX_RANGE_EXPR_CHUNKS`, `MAX_SYMBOL_TABLE_ENTRIES`, `MAX_TYPE_DEPTH`:
+  defensive caps.
   Values may rise to accommodate new legitimate use cases; values will
   not drop without a breaking-change bump.
