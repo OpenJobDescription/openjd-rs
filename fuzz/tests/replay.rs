@@ -574,7 +574,7 @@ fn expression_oracles_fire() {
     assert!(budget("len(Param.X * 100000) > 0 or False").is_none());
     // A list value outside its list type is excused only for a generated
     // expression through an unbound-return signature.
-    let ls = ExprType::list(ExprType::STRING);
+    let ls = ExprType::list(ExprType::STRING).unwrap();
     let li = ExprValue::ListInt(vec![1]);
     let v = simulated_violation(
         "Param.L",
@@ -603,8 +603,8 @@ fn expression_oracles_fire() {
     );
     assert!(v.is_none(), "{v:?}");
     // Each known-issue gate leaves a nearby shape to the oracle.
-    let lf = ExprType::list(ExprType::FLOAT);
-    let llf = ExprType::list(lf.clone());
+    let lf = ExprType::list(ExprType::FLOAT).unwrap();
+    let llf = ExprType::list(lf.clone()).unwrap();
     // A flatten that reads no empty list.
     let v = simulated_violation(
         "flatten(Param.LL).sum()",
@@ -613,7 +613,7 @@ fn expression_oracles_fire() {
             "Param.LL",
             ExprValue::ListList(
                 vec![ExprValue::ListInt(vec![1, 2])],
-                ExprType::list(ExprType::INT),
+                ExprType::list(ExprType::INT).unwrap(),
                 1,
             ),
         )],
@@ -625,7 +625,7 @@ fn expression_oracles_fire() {
         "{v:?}"
     );
     // A negative-step slice with no range anywhere.
-    let li = ExprType::list(ExprType::INT);
+    let li = ExprType::list(ExprType::INT).unwrap();
     let v = simulated_violation(
         "Param.L[::Param.N][0] + Param.Y",
         &[
@@ -665,7 +665,7 @@ fn expression_oracles_fire() {
     let v = simulated_violation(
         "Param.L[::-1]",
         &[
-            ("Param.L", un(ExprType::list(s.clone()))),
+            ("Param.L", un(ExprType::list(s.clone()).unwrap())),
             ("Param.R", un(ExprType::RANGE_EXPR)),
         ],
         &[
