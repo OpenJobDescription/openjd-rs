@@ -10,9 +10,9 @@ it:
 | [`implement-change`](../../skills/implement-change/SKILL.md) | One change and its blast radius, in the audit step of its audit/fix loop |
 
 Change a criterion here, not in either skill. The skills define *scope* and
-*procedure*. This file defines *criteria*, *evidence*, *labels*, and
-*severity*. A skill MAY narrow which criteria it applies. It MUST NOT redefine
-any of them.
+*procedure*. This file defines *criteria*, *evidence*, *labels*,
+*severity*, and the *recurring findings* (§7) worth checking for. A skill
+MAY narrow which criteria it applies. It MUST NOT redefine any of them.
 
 MUST, SHOULD, and MAY are used in the RFC 2119 sense.
 
@@ -324,3 +324,98 @@ working tree:
 - Never use `git clean`, `git stash`, or `git checkout -- <path>` in the
   shared working tree. Uncommitted deliverables (a report being written, probe
   tests, an uncommitted change) live there, and these commands remove them.
+
+## 7. Recurring findings
+
+Reviews of this repository keep finding the same kinds of defect. Each item
+below names a place to look and the criterion that a finding there falls
+under. The items add no criteria: a finding cites its Q ID, as §2 requires,
+and MAY also name the item. Each skill says how it uses the list. An item
+that does not apply to the work is skipped, not reported.
+
+**RF1. Sibling shapes of a type (Q3, Q4, Q5).** A change to how a value of one
+type is parsed, checked, coerced, typed, rendered, or path-mapped MUST be run
+and tested on the type's sibling shapes too:
+
+- Template parameters: `T` and `LIST[T]`, plus `LIST[LIST[INT]]` for `INT`.
+- Expression types: `T`, `list[T]`, `list[list[T]]`, the empty
+  `list[nulltype]`, `T?`, a union that contains `T` or `list[T]`, and
+  `unresolved[T]`. For `int`, also `range_expr`.
+- Both ends of each implicit coercion in the Expression Language (§1.2.3),
+  such as `path` and `string` or `int` and `float`, together with the list
+  form of each coercion, which applies element by element.
+- Each representation of a value: a JSON or YAML number and a numeric string
+  (`5.0` and `"5.0"`), and a `FLOAT` whose original text is kept (`2.50`) as
+  well as one that is computed and rendered again.
+
+Run each shape with the edge values of its type:
+
+| Type | Edge values |
+|------|-------------|
+| `FLOAT` | `2.50` (text kept), `-0.0`, `1e999`, `inf`, `nan`, and an integral `5.0` given where an `INT` is expected |
+| `INT` | `i64::MIN`, `i64::MAX`, a value above `i64::MAX`, `+5`, `1_000`, `٣` (U+0663) |
+| `PATH` | relative, absolute, a URI (`s3://bucket/key`), a trailing separator, a Windows drive path, a UNC path |
+| `STRING` | empty, surrounded by white space, non-ASCII |
+| Any list | empty, one element, elements of mixed types |
+
+A change that fixes the scalar form and leaves the list form behind, or the
+reverse, is a finding. Examples: #421 applies the `PATH` default rules to
+each `LIST[PATH]` element, and #576 adds a `path(list[nulltype])` overload so
+that `path([])` has a signature to match.
+
+**RF2. Every source of a value, at every stage (Q3, Q4, Q5).** A rule about a
+value MUST hold, and be tested, for every place the value can come from:
+
+- a literal, a format string embedded in a longer string, a whole-field
+  `{{ ... }}` expression, a list element, and a fully static expression;
+- a job template default, an environment template default, and a submitted
+  value, given as CLI `-p` text, as JSON text, or as a native list through a
+  binding;
+- a step written in a SimpleAction form such as `bash:`, as well as one
+  written with `script:`;
+- every field the specification links to the rule, including rarely used
+  ones such as `notifyPeriodInSeconds`, environment `onEnter` and `onExit`
+  timeouts, SimpleAction `timeout`, and host requirement amounts.
+
+The rule MUST hold at each stage that checks it: template decode and
+`openjd check`, `create_job`, and run time. A violation reports the same
+message at the same field path whichever stage catches it. An earlier stage
+MAY accept a template that a later stage rejects because of a value it cannot
+know yet. It MUST NOT reject a template that every later stage accepts, and
+it MUST reject a failure that no value can avoid, such as an undefined name.
+
+**RF3. Twins of the code being fixed (Q3, Q8).** Before fixing a defect,
+search for the same pattern elsewhere, and fix it there too or state in the
+commit message why not. These places hold separate copies of logic:
+
+- the helper sub-crate at `crates/openjd-sessions/src/helper/`;
+- public `validate_*` functions next to the internal checks they mirror;
+- fuzz-target oracles in `fuzz/`, which repeat the library's exemptions;
+- the Python reference implementations, where a twin pull request may be
+  needed.
+
+A fix written against code that a merged refactor has since moved MUST land
+in the code's new home, so that every caller of it gets the fix.
+
+**RF4. Commit messages and the PR description list every observable change
+(Q8).** Compare the base and the tip for each of these, and name every
+difference in the commit messages and the PR description:
+
+- rendered values, such as `2.0` becoming `2` or `0` becoming `0.0`;
+- inputs that are newly accepted or newly rejected;
+- error kinds and variants, error messages, field paths, and column offsets;
+- the sequence of status callbacks;
+- metrics such as `peak_memory`, and limits.
+
+Each difference SHOULD also be pinned by a test (Q4). Check again after each
+fix round, because a fix can change behavior the description already
+describes. PRs are squash-merged, so the description becomes the commit on
+`main` and the release note.
+
+**RF5. What downstream needs at its next bump (Q2, Q8).** A change to a public
+type, signature, error variant, or rendered value states, in its PR
+description, what each consumer outside this repository needs when it next
+updates: the openjd-model-for-python bindings (an integer width such as
+`usize` in `__len__`, a field type change, or the mapping from error variant
+to Python exception), the JavaScript surface of openjd-for-js, and any
+Python reference pull request that must be released at the same time.
