@@ -276,7 +276,7 @@ before step 3 if you are not already on one.
 
 | Stage | When | Subject | Body |
 |-------|------|---------|------|
-| **Implement** | After the first step 4 passes | A conventional-commit summary of the change itself, e.g. `fix(expr): ...` | The scope statement; report items resolved; the gate commands and their results |
+| **Implement** | After the first step 4 passes | A conventional-commit summary of the change itself, e.g. `fix(expr): ...` | The scope statement; every change a caller can observe and what downstream needs (quality-criteria §7 RF4, RF5); report items resolved; the gate commands and their results |
 | **Fix** | After step 6 and the rerun of step 4, for any round that changed files | `<type>(<scope>): address audit round <N> findings` | The audit round's inputs (commit range, audit tier, angles) and verdict; then one line per finding, giving its label, severity, criterion, and a summary, followed by what was done: fixed (how), deferred (why), withdrawn (the evidence), or listed for the user as out of scope; then the gate results |
 
 Audits change no files, so they get no commit of their own. A round's

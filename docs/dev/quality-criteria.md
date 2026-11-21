@@ -345,7 +345,8 @@ path-mapped, run it on the type's sibling shapes too:
 - Expression types: `T`, `list[T]`, `list[list[T]]`, the empty
   `list[nulltype]`, `T?`, a union that contains `T` or `list[T]`, and
   `unresolved[T]`. For `int`, also `range_expr`.
-- Both ends of each implicit coercion in the Expression Language (§1.2.3),
+- Both ends of each implicit coercion in the 2026-02 Expression Language
+  (§1.2.3),
   such as `path` and `string` or `int` and `float`, together with the list
   form of each coercion, which applies element by element.
 - Each representation of a value: a JSON or YAML number and a numeric string
@@ -390,7 +391,8 @@ field path each stage reports for the same violation, since Q3 requires a
 located message. Check the two rules about stages in `specs/expr/values.md`
 and `specs/expr/evaluator.md`: an earlier stage never rejects a template
 that every later stage accepts, and a name that resolves nowhere is reported
-at template validation, because no value avoids it.
+at template validation, because whether a name exists does not depend on
+any value.
 
 **RF3. Twins of the code being fixed (Q3, Q8).** Before fixing a defect,
 search for the same pattern elsewhere, and fix it there too. A twin the
@@ -423,7 +425,7 @@ describes. PRs are squash-merged: the PR title becomes the subject of the
 commit on `main`, which release-plz turns into the changelog entry, and the
 branch's commit messages become that commit's body.
 
-**RF5. What downstream needs at its next bump (Q2, Q8).** For a change to a
+**RF5. What downstream needs at its next bump (Q8).** For a change to a
 public type, signature, error variant, or rendered value, check that the
 commit messages and the PR description say what each consumer outside this
 repository needs when it next updates: the openjd-model-for-python bindings
