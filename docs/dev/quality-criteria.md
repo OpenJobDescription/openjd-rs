@@ -105,7 +105,8 @@ everywhere the concept appears: other crates' specs and code, `specs/*.md`
 cross-cutting documents, `README.md`, `AGENTS.md`, `DEVELOPMENT.md`,
 `docs/dev/`, and CLI help text. It also reaches the change's own commit
 messages and PR description, which MUST name every change a caller can
-observe (see RF4 and RF5 in §7). Per-crate scans miss this kind of drift, so
+observe and what each consumer outside this repository needs when it next
+updates (see RF4 and RF5 in §7). Per-crate scans miss this kind of drift, so
 it gets its own criterion.
 
 **Q9. Repository conventions.** Work MUST pass every check that CI runs on it.
@@ -334,7 +335,7 @@ below says where to look and names the criteria a finding there falls under.
 The items add no requirements and use no RFC 2119 keywords: a finding cites
 its Q ID, as §2 requires, and takes that criterion's strength. It MAY also
 name the item. Each skill says how it uses the list. An item that does not
-apply to the work is skipped, not reported.
+apply to the work raises no finding.
 
 **RF1. Sibling shapes of a type (Q3, Q4, Q5).** When a change alters how a
 value of one type is parsed, checked, coerced, typed, rendered, or
@@ -377,8 +378,8 @@ can come from:
 - a job template default, an environment template default, and a submitted
   value, given as CLI `-p` text, as JSON text, or as a native list through a
   binding;
-- a step written in a SimpleAction form such as `bash:`, as well as one
-  written with `script:`;
+- a step written with a SimpleAction such as `bash:`, as well as one
+  written with a `<StepScript>` (`script:` with `actions`);
 - every field the specification links to the rule, including rarely used
   ones such as `notifyPeriodInSeconds`, environment `onEnter` and `onExit`
   timeouts, SimpleAction `timeout`, and host requirement amounts.
@@ -392,8 +393,10 @@ that every later stage accepts, and a name that resolves nowhere is reported
 at template validation, because no value avoids it.
 
 **RF3. Twins of the code being fixed (Q3, Q8).** Before fixing a defect,
-search for the same pattern elsewhere. Either fix it there too, or state in
-the commit message why not. These places hold separate copies of logic:
+search for the same pattern elsewhere, and fix it there too. A twin the
+change cannot reach, such as one in another repository, is listed for the
+user as out of scope (implement-change step 6). These places hold separate
+copies of logic:
 
 - the helper sub-crate at `crates/openjd-sessions/src/helper/`;
 - public `validate_*` functions next to the internal checks they mirror;
@@ -416,8 +419,9 @@ commit messages and the PR description name every difference:
 
 A difference that no test pins is also a Q4 finding. Check again after each
 fix round, because a fix can change behavior the description already
-describes. PRs are squash-merged, so the description becomes the commit on
-`main` and the release note.
+describes. PRs are squash-merged: the PR title becomes the subject of the
+commit on `main`, which release-plz turns into the changelog entry, and the
+branch's commit messages become that commit's body.
 
 **RF5. What downstream needs at its next bump (Q2, Q8).** For a change to a
 public type, signature, error variant, or rendered value, check that the
