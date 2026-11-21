@@ -64,8 +64,8 @@ The `openjd-specifications` repo (mainline) contains the canonical specification
 
 ### Quality Criteria
 
-The criteria, evidence rules, finding labels, severity scale, and verification
-rules this evaluation applies are defined in `docs/dev/quality-criteria.md`
+The criteria, evidence rules, finding labels, severity scale, verification
+rules, and recurring findings this evaluation applies are defined in `docs/dev/quality-criteria.md`
 ([link](../../docs/dev/quality-criteria.md)). Read that file before starting. It is
 shared with the `implement-change` skill, so criteria are changed there and
 never restated here.

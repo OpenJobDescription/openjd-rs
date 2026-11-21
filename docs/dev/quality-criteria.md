@@ -103,8 +103,10 @@ counterpart.
 **Q8. Consistency beyond the crate.** A change to a concept MUST carry through
 everywhere the concept appears: other crates' specs and code, `specs/*.md`
 cross-cutting documents, `README.md`, `AGENTS.md`, `DEVELOPMENT.md`,
-`docs/dev/`, and CLI help text. Per-crate scans miss this kind of drift, so it
-gets its own criterion.
+`docs/dev/`, and CLI help text. It also reaches the change's own commit
+messages and PR description, which MUST name every change a caller can
+observe (see RF4 and RF5 in §7). Per-crate scans miss this kind of drift, so
+it gets its own criterion.
 
 **Q9. Repository conventions.** Work MUST pass every check that CI runs on it.
 `.github/workflows/ci.yml` is authoritative for the exact commands, and the
@@ -328,14 +330,15 @@ working tree:
 ## 7. Recurring findings
 
 Reviews of this repository keep finding the same kinds of defect. Each item
-below names a place to look and the criterion that a finding there falls
-under. The items add no criteria: a finding cites its Q ID, as §2 requires,
-and MAY also name the item. Each skill says how it uses the list. An item
-that does not apply to the work is skipped, not reported.
+below says where to look and names the criteria a finding there falls under.
+The items add no requirements and use no RFC 2119 keywords: a finding cites
+its Q ID, as §2 requires, and takes that criterion's strength. It MAY also
+name the item. Each skill says how it uses the list. An item that does not
+apply to the work is skipped, not reported.
 
-**RF1. Sibling shapes of a type (Q3, Q4, Q5).** A change to how a value of one
-type is parsed, checked, coerced, typed, rendered, or path-mapped MUST be run
-and tested on the type's sibling shapes too:
+**RF1. Sibling shapes of a type (Q3, Q4, Q5).** When a change alters how a
+value of one type is parsed, checked, coerced, typed, rendered, or
+path-mapped, run it on the type's sibling shapes too:
 
 - Template parameters: `T` and `LIST[T]`, plus `LIST[LIST[INT]]` for `INT`.
 - Expression types: `T`, `list[T]`, `list[list[T]]`, the empty
@@ -348,7 +351,7 @@ and tested on the type's sibling shapes too:
   (`5.0` and `"5.0"`), and a `FLOAT` whose original text is kept (`2.50`) as
   well as one that is computed and rendered again.
 
-Run each shape with the edge values of its type:
+Use the edge values of each type:
 
 | Type | Edge values |
 |------|-------------|
@@ -358,13 +361,16 @@ Run each shape with the edge values of its type:
 | `STRING` | empty, surrounded by white space, non-ASCII |
 | Any list | empty, one element, elements of mixed types |
 
-A change that fixes the scalar form and leaves the list form behind, or the
-reverse, is a finding. Examples: #421 applies the `PATH` default rules to
-each `LIST[PATH]` element, and #576 adds a `path(list[nulltype])` overload so
-that `path([])` has a signature to match.
+A shape that behaves differently from what the specs say is a Q3 or Q5
+finding, and a shape the change leaves untested is a Q4 finding. A change
+that fixes the scalar form and leaves the list form behind, or the reverse,
+is the common case. Examples: #421 applies the `PATH` default rules to each
+`LIST[PATH]` element, and #576 adds a `path(list[nulltype])` overload so that
+`path([])` has a signature to match.
 
-**RF2. Every source of a value, at every stage (Q3, Q4, Q5).** A rule about a
-value MUST hold, and be tested, for every place the value can come from:
+**RF2. Every source of a value, at every stage (Q1, Q3, Q4, Q5).** When a
+change alters a rule about a value, check the rule for every place the value
+can come from:
 
 - a literal, a format string embedded in a longer string, a whole-field
   `{{ ... }}` expression, a list element, and a fully static expression;
@@ -377,16 +383,17 @@ value MUST hold, and be tested, for every place the value can come from:
   ones such as `notifyPeriodInSeconds`, environment `onEnter` and `onExit`
   timeouts, SimpleAction `timeout`, and host requirement amounts.
 
-The rule MUST hold at each stage that checks it: template decode and
-`openjd check`, `create_job`, and run time. A violation reports the same
-message at the same field path whichever stage catches it. An earlier stage
-MAY accept a template that a later stage rejects because of a value it cannot
-know yet. It MUST NOT reject a template that every later stage accepts, and
-it MUST reject a failure that no value can avoid, such as an undefined name.
+Then check each stage that applies the rule: template decode and
+`openjd check`, `create_job`, and run time. Compare the message and the
+field path each stage reports for the same violation, since Q3 requires a
+located message. Check the two rules about stages in `specs/expr/values.md`
+and `specs/expr/evaluator.md`: an earlier stage never rejects a template
+that every later stage accepts, and a name that resolves nowhere is reported
+at template validation, because no value avoids it.
 
 **RF3. Twins of the code being fixed (Q3, Q8).** Before fixing a defect,
-search for the same pattern elsewhere, and fix it there too or state in the
-commit message why not. These places hold separate copies of logic:
+search for the same pattern elsewhere. Either fix it there too, or state in
+the commit message why not. These places hold separate copies of logic:
 
 - the helper sub-crate at `crates/openjd-sessions/src/helper/`;
 - public `validate_*` functions next to the internal checks they mirror;
@@ -394,12 +401,12 @@ commit message why not. These places hold separate copies of logic:
 - the Python reference implementations, where a twin pull request may be
   needed.
 
-A fix written against code that a merged refactor has since moved MUST land
-in the code's new home, so that every caller of it gets the fix.
+When a merged refactor has moved the code a fix was written against, the fix
+belongs in the code's new home, so that every caller of it gets the fix.
 
 **RF4. Commit messages and the PR description list every observable change
-(Q8).** Compare the base and the tip for each of these, and name every
-difference in the commit messages and the PR description:
+(Q8).** Compare the base and the tip for each of these, and check that the
+commit messages and the PR description name every difference:
 
 - rendered values, such as `2.0` becoming `2` or `0` becoming `0.0`;
 - inputs that are newly accepted or newly rejected;
@@ -407,15 +414,16 @@ difference in the commit messages and the PR description:
 - the sequence of status callbacks;
 - metrics such as `peak_memory`, and limits.
 
-Each difference SHOULD also be pinned by a test (Q4). Check again after each
+A difference that no test pins is also a Q4 finding. Check again after each
 fix round, because a fix can change behavior the description already
 describes. PRs are squash-merged, so the description becomes the commit on
 `main` and the release note.
 
-**RF5. What downstream needs at its next bump (Q2, Q8).** A change to a public
-type, signature, error variant, or rendered value states, in its PR
-description, what each consumer outside this repository needs when it next
-updates: the openjd-model-for-python bindings (an integer width such as
-`usize` in `__len__`, a field type change, or the mapping from error variant
-to Python exception), the JavaScript surface of openjd-for-js, and any
-Python reference pull request that must be released at the same time.
+**RF5. What downstream needs at its next bump (Q2, Q8).** For a change to a
+public type, signature, error variant, or rendered value, check that the
+commit messages and the PR description say what each consumer outside this
+repository needs when it next updates: the openjd-model-for-python bindings
+(an integer width such as `usize` in `__len__`, a field type change, or the
+mapping from error variant to Python exception), the JavaScript surface of
+openjd-for-js, and any Python reference pull request that must be released
+at the same time.
