@@ -210,10 +210,11 @@ no PATH `Param.*`, a PATH definition adds no `Param.<name>`.
    evaluated and reported). The Step's `hostRequirements`, `parameterSpace` and action timing
    fields, and its Step Environments' timing fields.
 4. **Session scope** — every `Param.*`, `Session.*`, with EXPR `Job.Name`, the environment's
-   `Env.File.*`, and in a Step Environment `Step.Name` and, with EXPR, the values of the Step's
-   `let` names as the Step's task scope holds them after its script's `let` bindings; then
-   the environment script's `let` bindings. An environment's script body, for environments inside a Job
-   Template and for Environment Templates (which never get `Step.Name`).
+   `Env.File.*`, and in a Step Environment, with EXPR, `Step.Name` and the values of the Step's
+   `let` names as the Step's task scope holds them after its script's `let` bindings (a
+   SimpleAction's `let` bindings are not in it); then the environment script's `let`
+   bindings. An environment's script body, for environments inside a Job Template and for
+   Environment Templates (which never get `Step.Name`).
 5. **Task scope** — every `Param.*`, `Session.*`, with EXPR `Job.Name` and `Step.Name`,
    `Task.Param.*`, `Task.RawParam.*`, `Task.File.*` and, with EXPR, the Step's `let` values;
    then the script's `let` bindings. A step script. `Env.File.*` is not in it.
@@ -224,8 +225,8 @@ name the naming rule rejects can replace a symbol (a dotted name) or be dropped 
 Scope selection follows the spec's `@fmtstring` stage annotations, not the
 container: `timeout` and `notifyPeriodInSeconds` are plain `@fmtstring`
 (resolved at job creation, before any session exists), so they validate in
-template scope — with `Job.Name`/`Step.Name`/step `let` bindings where
-applicable, but no `Session.*`, no `Env.File.*`, no `Task.*`, and the
+the job scope or the Step template scope — with `Job.Name`/`Step.Name`/step
+`let` bindings where applicable, but no `Session.*`, no `Env.File.*`, no `Task.*`, and the
 template function library (no `apply_path_mapping`) — even though they sit
 on actions whose `command`/`args` are `@fmtstring[host]` and validate in
 session/task scope. One helper (`validate_action_timing_fs`, wrapped per
@@ -243,7 +244,7 @@ One helper (`validate_step_script`) validates a `StepScript`
 in full — script-level `let` bindings (into the task symtab), the
 EXPR-gated complex-expression rejection, the `onRun` action's
 `command`/`args` in task scope with the opt-in `max_resolved_arg_len`
-bound, `timeout`/`cancelation` in template scope, each embedded file's
+bound, `timeout`/`cancelation` in the Step template scope, each embedded file's
 `data` in task scope with the opt-in `max_resolved_data_len` bound, and
 the comprehension-variable rules (against the step's and the script's
 `let` names) on `command`, `args`, and embedded `data`.

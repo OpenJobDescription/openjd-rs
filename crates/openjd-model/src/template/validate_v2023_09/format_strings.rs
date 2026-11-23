@@ -105,13 +105,17 @@ fn add_files(symtab: &mut SymbolTable, prefix: &str, files: Option<&[EmbeddedFil
     }
 }
 
-/// The names `bindings` bind: the text before each `=`, trimmed.
-fn let_names(bindings: Option<&[String]>) -> HashSet<String> {
+/// The names `bindings` bind, in order: the text before each `=`, trimmed.
+fn let_name_strs(bindings: Option<&[String]>) -> impl Iterator<Item = &str> {
     bindings
         .into_iter()
         .flatten()
-        .filter_map(|b| b.find('=').map(|eq| b[..eq].trim().to_string()))
-        .collect()
+        .filter_map(|b| b.find('=').map(|eq| b[..eq].trim()))
+}
+
+/// The names `bindings` bind, as a set.
+fn let_names(bindings: Option<&[String]>) -> HashSet<String> {
+    let_name_strs(bindings).map(str::to_string).collect()
 }
 
 /// Copy the values of `step`'s `let` bindings from `step_scope`, a scope
@@ -121,13 +125,12 @@ fn let_names(bindings: Option<&[String]>) -> HashSet<String> {
 /// `symtab` is a host scope, so a value whose type contains `path` is then
 /// made unresolved ([`unresolve_template_paths`]).
 fn copy_step_lets(symtab: &mut SymbolTable, step: &StepTemplate, step_scope: &SymbolTable) {
-    let names = let_names(step.let_bindings.as_deref());
-    if names.is_empty() {
+    if step.let_bindings.is_none() {
         return;
     }
-    for name in names {
-        if let Some(value) = step_scope.get_value(&name) {
-            let _ = symtab.set(&name, value.clone());
+    for name in let_name_strs(step.let_bindings.as_deref()) {
+        if let Some(value) = step_scope.get_value(name) {
+            let _ = symtab.set(name, value.clone());
         }
     }
     // Host scope: their paths are in the worker's format there.
@@ -389,8 +392,9 @@ impl<'a> FsCtx<'a> {
     }
 
     /// `env`'s session scope: the host scope, the Environment's `Env.File.*`,
-    /// and for a Step Environment, `Step.Name` and the values of the Step's
-    /// `let` bindings from `step`, the Step and a scope that holds them.
+    /// and for a Step Environment, with `EXPR`, `Step.Name` and the values
+    /// of the Step's `let` bindings from `step`, the Step and a scope that
+    /// holds them.
     fn session_scope(
         &self,
         env: &Environment,
@@ -411,9 +415,9 @@ impl<'a> FsCtx<'a> {
     }
 
     /// `step`'s task scope, the scope of its script: the host scope with
-    /// `Step.Name`, `Task.Param.*`, `Task.RawParam.*` (`string` for PATH),
-    /// `Task.File.*`, and the Step's `let` values from `step_scope`, its
-    /// template scope. `Env.File.*` is only in an Environment's own scripts
+    /// `Task.Param.*`, `Task.RawParam.*` (`string` for PATH), `Task.File.*`,
+    /// and, with `EXPR`, `Step.Name` and the Step's `let` values from
+    /// `step_scope`, its template scope. `Env.File.*` is only in an Environment's own scripts
     /// (§7.3).
     fn task_scope(&self, step: &StepTemplate, step_scope: &SymbolTable) -> SymbolTable {
         let mut symtab = self.host_scope(true);
@@ -1880,8 +1884,9 @@ fn validate_host_requirements_fs(
     }
 }
 
-/// Pass 8 for a Job Template: its `name`; each Step's `let` bindings and
-/// `hostRequirements`; each Job Environment ([`validate_environment`]); each
+/// Pass 8 for a Job Template: its `name`; the `let` bindings and
+/// `hostRequirements` of each Step that has `hostRequirements`; each Job
+/// Environment ([`validate_environment`]); each
 /// Step's other fields ([`validate_step`]); and, with `EXPR`, the
 /// comprehension-variable rules of every Environment's script.
 pub fn validate_format_strings(
@@ -1907,10 +1912,11 @@ pub fn validate_format_strings(
         }),
         errors,
     );
-    // Each Step's `let` bindings and `hostRequirements`. A clean scope's
-    // bindings are kept for the Step's ranges and body while all kept
-    // bindings stay within `RETAINED_SCOPE_BUDGET`; past it, those sites
-    // evaluate the bindings again.
+    // The `let` bindings and `hostRequirements` of each Step that has
+    // `hostRequirements`. A clean scope's bindings are kept for the Step's
+    // ranges and body while all kept bindings stay within
+    // `RETAINED_SCOPE_BUDGET`; past it, those sites evaluate the bindings
+    // again.
     let mut retained = std::collections::VecDeque::new();
     let mut retained_bytes = RetainedBindings::DEQUE_MIN_BYTES;
     for (i, step) in jt.steps.iter().enumerate() {

@@ -334,7 +334,7 @@ fn let_without_expr() {
 
 #[test]
 fn job_and_step_names_need_expr() {
-    // An Environment action's `timeout` (FEATURE_BUNDLE_1) is in template
+    // An Environment action's `timeout` (FEATURE_BUNDLE_1) is in the job
     // scope, which has `Job.Name` only with EXPR.
     assert_message(
         &[],
@@ -824,5 +824,100 @@ steps:
          steps[0] -> hostRequirements -> amounts[2]:\n\tduplicate amount name 'amount.custom.a'.\n\
          steps[0] -> hostRequirements -> amounts[1]:\n\tduplicate amount name 'amount.custom.a'.\n\
          steps[0] -> hostRequirements -> amounts[2]:\n\tduplicate amount name 'amount.custom.a'.",
+    );
+}
+
+/// Without EXPR, a Step Environment's `variables`, action `args` and
+/// embedded-file `data` may use only bare references.
+#[test]
+fn without_expr_a_step_environment_rejects_complex_expressions() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+name: T
+parameterDefinitions: [{name: S, type: STRING, default: a}]
+steps:
+- name: S
+  script: {actions: {onRun: {command: x}}}
+  stepEnvironments:
+  - name: E
+    variables: {V: "{{ Param.S + 'x' }}"}
+    script:
+      actions: {onEnter: {command: x, args: ["{{ Param.S + 'x' }}"]}}
+      embeddedFiles: [{name: f, type: TEXT, data: "{{ Param.S + 'x' }}"}]
+"#,
+        "Model validation error: 3 validation errors for JobTemplate\n\
+         steps[0] -> stepEnvironments[0] -> variables -> V:\n\t\
+         complex expressions require the EXPR extension.\n\
+         steps[0] -> stepEnvironments[0] -> script -> actions -> onEnter -> args[0]:\n\t\
+         complex expressions require the EXPR extension.\n\
+         steps[0] -> stepEnvironments[0] -> script -> embeddedFiles[0] -> data:\n\t\
+         complex expressions require the EXPR extension.",
+    );
+}
+
+/// A duplicated Job Parameter name is set by each definition in turn, and
+/// the template scope has no PATH `Param.*`, so there an INT definition
+/// followed by a PATH one types `Param.X` as an int.
+#[test]
+fn a_duplicated_parameter_name_keeps_its_non_path_type_in_the_template_scope() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: "{{ Param.X + 1 }}"
+parameterDefinitions:
+- {name: X, type: INT}
+- {name: X, type: PATH}
+steps:
+- {name: S, script: {actions: {onRun: {command: x}}}}
+"#,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         parameterDefinitions[1]:\n\tduplicate parameter name: 'X'",
+    );
+}
+
+/// The comprehension-variable rules apply only with EXPR, which a
+/// comprehension needs.
+#[test]
+fn without_expr_no_comprehension_variable_rule_is_reported() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+name: T
+steps:
+- name: S
+  let: ["x = 1"]
+  script: {actions: {onRun: {command: "{{ [x for x in [1]] }}"}}}
+"#,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> let:\n\t'let' requires the EXPR extension.\n\
+         steps[0] -> script -> actions -> onRun -> command:\n\t\
+         complex expressions require the EXPR extension.",
+    );
+}
+
+/// Each SimpleAction field gets its own copy of the task scope, so its
+/// `let` bindings do not reach the Step Environments.
+#[test]
+fn a_simple_action_let_does_not_reach_the_step_environments() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR, FEATURE_BUNDLE_1]
+name: T
+steps:
+- name: S
+  let: ["x = 1"]
+  bash: {script: "echo {{ x }}", let: ["x = 'a'"]}
+  stepEnvironments:
+  - {name: E, variables: {V: "{{ x + 1 }}"}}
+"#,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         steps[0] -> bash -> let[0]:\n\t'x' shadows enclosing scope.",
     );
 }
