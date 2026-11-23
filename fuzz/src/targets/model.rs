@@ -23,6 +23,8 @@
 //!   iteration, `get(i)` equals the i-th iterated set, and every iterated set
 //!   passes `contains` / `validate_containment`.
 //! - **Topological order** respects every declared dependency.
+//! - **Serde round trips**: every job task parameter and cancelation mode
+//!   survives a serde round trip unchanged.
 
 use crate::gen::template::{environment_template, job_template, ParamInfo};
 use crate::gen::{self, one_in, pick, upto};
