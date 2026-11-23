@@ -696,7 +696,7 @@ pub fn fits(v: &ExprValue, ty: &ExprType) -> bool {
 /// token the scanners look for is ASCII, so they hide none, and keeping them
 /// leaves both the byte and the character offsets of `src` unchanged
 /// (`ExpressionError::col_offset` is a byte offset).
-fn blank_string_literals(src: &str) -> String {
+pub fn blank_string_literals(src: &str) -> String {
     let mut out = String::with_capacity(src.len());
     let mut quote: Option<char> = None;
     let mut escaped = false;

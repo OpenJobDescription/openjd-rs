@@ -453,3 +453,20 @@ fn text_facts_ignore_string_literals() {
     let f = Facts::from_format_text("it's or {{ a and b }} flatten(x)");
     assert!(f.boolop && !f.union, "{f:?}");
 }
+
+/// Blanking a string literal keeps its non-ASCII characters, so byte offsets
+/// into the blanked text (an error's `col_offset`) still index the source.
+#[test]
+fn blanked_literals_keep_offsets() {
+    use openjd_fuzz::targets::expr::{blank_string_literals as blank, conditional_branch_at};
+    let src = "g('϶ if é', 1 if c else ['ü\\'', x])";
+    let code = blank(src);
+    assert_eq!(code, "g('϶    é', 1 if c else ['ü  ', x])");
+    assert_eq!(
+        (code.len(), code.chars().count()),
+        (src.len(), src.chars().count())
+    );
+    let at = src.find("['ü").unwrap();
+    let branch = conditional_branch_at(&code, at).and_then(|r| src.get(r));
+    assert_eq!(branch.map(str::trim), Some("['ü\\'', x]"));
+}
