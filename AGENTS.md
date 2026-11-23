@@ -269,6 +269,10 @@ fn empty_command() {
 - `cargo clippy` clean with `-D warnings` — no warnings allowed.
 - All public items must have `///` documentation comments. The `missing_docs` lint (enabled in `[workspace.lints]`) enforces this. Older items carry an item-level `missing-docs burn-down` allow. Don't add new ones, and document anything you add inside an allowed item (a field or variant), because the lint can't see it.
 - Prefer `Result` types over panicking.
+- One home per rule: route through an existing implementation of a rule
+  rather than re-implementing it. A necessary second copy is cross-referenced
+  at both sites and pinned by an equivalence test
+  ([quality-criteria Q11](docs/dev/quality-criteria.md)).
 - See [DEVELOPMENT.md](DEVELOPMENT.md) for more.
 
 ## CI Pipeline
