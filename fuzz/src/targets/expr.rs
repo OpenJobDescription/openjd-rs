@@ -426,10 +426,10 @@ pub(crate) fn in_dropped_branch(
     let (Some(src), Some(at)) = (e.expr(), e.col_offset()) else {
         return false;
     };
-    let code = blank_string_literals(src);
-    if code.len() != src.len() || is_name_error(e) {
+    if is_name_error(e) {
         return false;
     }
+    let code = blank_string_literals(src);
     let Some(r) = conditional_branch_at(&code, at) else {
         return false;
     };
@@ -691,9 +691,11 @@ pub fn fits(v: &ExprValue, ty: &ExprType) -> bool {
     false
 }
 
-/// Does `src` use `and` / `or` as an operator (word-bounded)?
-/// `src` with the contents of every quoted string literal replaced by
-/// spaces (quotes kept, so offsets and the code around them are unchanged).
+/// `src` with the ASCII contents of every quoted string literal replaced by
+/// spaces, quotes kept. Non-ASCII characters are kept as they are: every
+/// token the scanners look for is ASCII, so they hide none, and keeping them
+/// leaves both the byte and the character offsets of `src` unchanged
+/// (`ExpressionError::col_offset` is a byte offset).
 fn blank_string_literals(src: &str) -> String {
     let mut out = String::with_capacity(src.len());
     let mut quote: Option<char> = None;
@@ -709,16 +711,14 @@ fn blank_string_literals(src: &str) -> String {
             Some(q) => {
                 if escaped {
                     escaped = false;
-                    out.push(' ');
                 } else if c == '\\' {
                     escaped = true;
-                    out.push(' ');
                 } else if c == q {
                     quote = None;
                     out.push(c);
-                } else {
-                    out.push(' ');
+                    continue;
                 }
+                out.push(if c.is_ascii() { ' ' } else { c });
             }
         }
     }
@@ -736,6 +736,7 @@ fn calls_fn(src: &str, name: &str) -> bool {
     })
 }
 
+/// Does `src` use `and` / `or` as an operator (word-bounded)?
 pub(crate) fn uses_boolop(src: &str) -> bool {
     first_boolop(src).is_some()
 }
@@ -785,9 +786,6 @@ pub(crate) fn has_empty_only_comprehension(
 ) -> bool {
     let code: Vec<char> = blank_string_literals(src).chars().collect();
     let text: Vec<char> = src.chars().collect();
-    if code.len() != text.len() {
-        return false;
-    }
     let mut open = Vec::new();
     for (i, c) in code.iter().enumerate() {
         match c {
