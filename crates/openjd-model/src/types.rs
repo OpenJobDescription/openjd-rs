@@ -284,6 +284,18 @@ impl JobParameterType {
         }
     }
 
+    /// The `ExprType` of `RawParam.<name>` for this type:
+    /// [`expr_type`](Self::expr_type), except `string` for PATH and
+    /// `list[string]` for LIST[PATH], since a raw path is unmapped and may
+    /// be in another operating system's format.
+    pub(crate) fn raw_expr_type(&self) -> ExprType {
+        match self {
+            Self::Path => ExprType::STRING,
+            Self::ListPath => fixed_type(ExprType::list(ExprType::STRING)),
+            _ => self.expr_type(),
+        }
+    }
+
     /// Returns the `ExprType` this parameter produces in the symbol table.
     pub fn expr_type(&self) -> ExprType {
         match self {

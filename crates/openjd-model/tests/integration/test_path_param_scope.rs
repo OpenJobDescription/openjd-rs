@@ -390,3 +390,73 @@ fn env_file_not_available_in_step_script_with_expr() {
         &["Env.File.cfg"],
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// Task parameters: Task.RawParam.* of a PATH is a string (§7.3.1)
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn task_raw_param_is_the_task_param_type_except_for_a_path() {
+    // INT, FLOAT, STRING and CHUNK[INT] (range_expr) `Task.RawParam.*` have
+    // their `Task.Param.*` type: each of the first four expressions
+    // type-checks only with it (`'a' * x` repeats a string only for an
+    // int), the fifth shows a STRING's is not a path, and the sixth that a
+    // FLOAT's is not an int.
+    check_err_ext(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "TASK_CHUNKING"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "I", "type": "INT", "range": "1-3"},
+                {"name": "F", "type": "FLOAT", "range": [1.5]},
+                {"name": "T", "type": "STRING", "range": ["a"]},
+                {"name": "C", "type": "CHUNK[INT]", "range": "1-9",
+                 "chunks": {"defaultTaskCount": 2, "rangeConstraint": "CONTIGUOUS"}}
+            ]},
+            "script": {"actions": {"onRun": {"command": "x", "args": [
+                "{{ 'a' * Task.RawParam.I }}", "{{ Task.RawParam.F + 0.5 }}",
+                "{{ Task.RawParam.T + 'b' }}", "{{ Task.RawParam.C[0] + 1 }}",
+                "{{ Task.RawParam.T.name }}", "{{ 'a' * Task.RawParam.F }}"
+            ]}}}
+        }]
+    }"#,
+        &["EXPR", "TASK_CHUNKING"],
+        &[
+            "Model validation error: 2 validation errors for JobTemplate\n\
+           steps[0] -> script -> actions -> onRun -> args[4]:\n\t\
+           Failed to parse interpolation expression at [0, 26]. 'name' property is not available \
+           for string. Available for: path",
+            "steps[0] -> script -> actions -> onRun -> args[5]:\n\t\
+           Failed to parse interpolation expression at [0, 27]. Cannot use '*' operator with \
+           string and float",
+        ],
+    );
+}
+
+#[test]
+fn task_raw_param_of_a_path_is_a_string() {
+    // `Task.Param.P` is a path, which has `name`; `Task.RawParam.P` is the
+    // unmapped string, which does not.
+    check_err_ext(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "Test",
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [{"name": "P", "type": "PATH", "range": ["/a/b"]}]},
+            "script": {"actions": {"onRun": {"command": "{{ Task.Param.P.name }}", "args": ["{{ Task.RawParam.P.name }}"]}}}
+        }]
+    }"#,
+        &["EXPR"],
+        &[
+            "Model validation error: 1 validation error for JobTemplate\n\
+           steps[0] -> script -> actions -> onRun -> args[0]:\n\t\
+           Failed to parse interpolation expression at [0, 26]. 'name' property is not available \
+           for string. Available for: path",
+        ],
+    );
+}

@@ -1914,3 +1914,39 @@ fn longest_let_chain_past_the_type_depth_limit_fails_at_that_binding() {
         start.elapsed()
     );
 }
+
+/// A `let` named like a scope root is reported, and does not displace the
+/// root from the scopes built on the Step's.
+#[test]
+fn a_let_named_like_a_scope_root_is_only_a_naming_error() {
+    for (name, step) in [
+        ("Session", "script: {actions: {onRun: {command: \"{{ Session.WorkingDirectory }}\"}}}"),
+        (
+            "Task",
+            "parameterSpace: {taskParameterDefinitions: [{name: F, type: INT, range: \"1-2\"}]}\n  \
+             script: {actions: {onRun: {command: \"{{ Task.Param.F }}\"}}}",
+        ),
+        (
+            "Env",
+            "stepEnvironments: [{name: E, script: {embeddedFiles: [{name: f, type: TEXT, data: x}], \
+             actions: {onEnter: {command: \"{{ Env.File.f }}\"}}}}]\n  \
+             script: {actions: {onRun: {command: foo}}}",
+        ),
+    ] {
+        let v = yaml_val(&format!(
+            "specificationVersion: jobtemplate-2023-09\nextensions: [EXPR]\nname: Test\nsteps:\n\
+             - name: S\n  let: [\"{name} = 1\"]\n  {step}\n"
+        ));
+        let msg = decode_job_template(v, Some(&["EXPR"]), &CallerLimits::default())
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            msg,
+            format!(
+                "Model validation error: 1 validation error for JobTemplate\nsteps[0] -> let[0]:\n\t\
+                 name '{name}' must start with lowercase letter or underscore."
+            ),
+            "{name}"
+        );
+    }
+}

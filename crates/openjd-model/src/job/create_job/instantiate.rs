@@ -141,7 +141,6 @@ pub(super) fn instantiate_step(
                 &env_symtab,
                 &step_symtab,
                 ctx,
-                limits.max_env_var_value_len,
                 &env_path,
                 check_errors,
             );

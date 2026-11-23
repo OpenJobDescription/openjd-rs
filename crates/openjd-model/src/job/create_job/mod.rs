@@ -262,7 +262,6 @@ pub fn create_job(
                 &env_symtab,
                 &symtab,
                 ctx,
-                limits.max_env_var_value_len,
                 &env_path,
                 &mut check_errors,
             );

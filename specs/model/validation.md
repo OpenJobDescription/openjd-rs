@@ -193,20 +193,30 @@ variables by building scope-appropriate symbol tables.
 
 ### Symbol Table Construction
 
-Four scope levels, each building on the previous:
+Pass 8 checks, in order, the Job Template's `name`, the `let` bindings and `hostRequirements`
+of each Step that has `hostRequirements`, each Job Environment, and then each Step's other
+fields. It builds these symbol tables, all from the document's own `parameterDefinitions`. `Param.<name>` has the
+parameter type's expression type, and `RawParam.<name>` the same except `string` for PATH and
+`list[string]` for LIST[PATH]. A Job Parameter name defined twice is typed by its last
+definition.
 
-1. **Param symtab** — `Param.*` and `RawParam.*` from job parameter definitions.
-   PATH types excluded from `Param.*` at template scope (host-only).
-   `RawParam.*` for PATH types is STRING.
+1. **Template scope** — `RawParam.*` and the non-PATH `Param.*`. The Job Template's `name`.
+2. **Job scope** — the template scope and, with EXPR, `Job.Name`.
+   The action timing fields of a Job Environment or an Environment Template.
+3. **Step template scope** — the job scope and, with EXPR, `Step.Name` and the Step's `let`
+   bindings (see [Let Binding Validation](#let-binding-validation) for how often they are
+   evaluated and reported). The Step's `hostRequirements`, `parameterSpace` and action timing
+   fields, and its Step Environments' timing fields.
+4. **Session scope** — every `Param.*`, `Session.*`, with EXPR `Job.Name`, the environment's
+   `Env.File.*`, and in a Step Environment `Step.Name` and the Step's `let` values; then the
+   script's `let` bindings. An environment's script body, for environments inside a Job
+   Template and for Environment Templates (which never get `Step.Name`).
+5. **Task scope** — every `Param.*`, `Session.*`, with EXPR `Job.Name` and `Step.Name`,
+   `Task.Param.*`, `Task.RawParam.*`, `Task.File.*` and the Step's `let` values; then the
+   script's `let` bindings. A step script. `Env.File.*` is not in it.
 
-2. **Template scope** — For job name, host requirements, parameter space ranges.
-   Uses param symtab without PATH parameters.
-
-3. **Session scope** — For environment scripts/variables. Adds `Session.WorkingDirectory`,
-   `Session.HasPathMappingRules`, `Session.PathMappingRulesFile`, `Env.File.*`.
-   With EXPR: adds `Job.Name` in all environments and `Step.Name` in step
-   environments only. Used both for environments inside a job template and for
-   standalone environment templates (which never get `Step.Name`).
+The Step's `let` values are copied into the session and task scopes last, so a binding with a
+name the naming rule rejects can replace a symbol (a dotted name) or be dropped (`Session`).
 
 Scope selection follows the spec's `@fmtstring` stage annotations, not the
 container: `timeout` and `notifyPeriodInSeconds` are plain `@fmtstring`
@@ -224,13 +234,9 @@ bound, so a parameter-dependent violation (`timeout: "{{ Param.T }}"`
 with `T = 0`) fails at submission at the same path with the same
 message (see `specs/model/job-creation.md`).
 
-4. **Task scope** — For step scripts. Adds `Task.Param.*`, `Task.RawParam.*`,
-   `Task.File.*`. With EXPR: adds `Job.Name`, `Step.Name`, `Env.File.*` from
-   step and job environments.
-
 ### Step Scripts and SimpleActions
 
-One helper (`validate_step_script_format_strings`) validates a `StepScript`
+One helper validates a `StepScript`
 in full — script-level `let` bindings (into the task symtab), the
 EXPR-gated complex-expression rejection, the `onRun` action's
 `command`/`args` in task scope with the opt-in `max_resolved_arg_len`
@@ -299,7 +305,7 @@ Let bindings are validated with these rules:
 - Name: non-empty, starts with lowercase/underscore, alphanumeric+underscore
 - No duplicate names
 - No shadowing of enclosing scope names
-- No self-references (checked via regex on non-string-literal portions)
+- No self-references (the names the parsed expression reads)
 - Expression parsed and type-checked; result type added to symtab for subsequent bindings
 - On error, the binding is added as `unresolved(ANY)` to the symbol table to prevent
   cascading type errors in subsequent bindings that reference it. (The `unresolved(ANY)`
@@ -327,16 +333,15 @@ again. Output is the same either way.
 
 ### Function Libraries
 
-Two libraries control available functions in expressions:
-- **`template_lib`** — Template-scope expressions. Built from a profile with
-  `HostContext::None` (no host functions registered at all).
-- **`host_lib`** — Task/session-scope expressions. Built from a profile with
-  `HostContext::Unresolved` so `apply_path_mapping` type-checks against its
-  signature (a stub returning `Unresolved(path)`) without real rules being
-  available at validation time. In this library `path()` and
-  `with_number(string, int)` also return `unresolved[T]` for literal
-  arguments, because the worker's path format isn't known either (see Path
-  Format below).
+Two evaluators, each a profile, its function library and the caller's evaluation budgets,
+control the functions available in expressions:
+- **Template scope** — built from a profile with `HostContext::None` (no host functions
+  registered at all).
+- **Task and session scopes** — built from a profile with `HostContext::Unresolved` so
+  `apply_path_mapping` type-checks against its signature (a stub returning
+  `Unresolved(path)`) without real rules being available at validation time. In this
+  library `path()` and `with_number(string, int)` also return `unresolved[T]` for literal
+  arguments, because the worker's path format isn't known either (see Path Format below).
 
 Both libraries are obtained from
 `openjd_expr::FunctionLibrary::for_profile(&profile)`. The model's
@@ -367,7 +372,7 @@ The same holds for a path that a TEMPLATE-scope step-level `let` binding
 computed: the session converts it to the worker's format before host-scope
 fields use it (`SerializedSymbolTable::to_symtab(PathFormat::host())`, see
 specs/sessions/session.md), so when the step-level bindings are copied into
-the task-scope symbol table (and from there into step environments),
+the task scope and a step environment's session scope (`copy_step_lets`),
 `unresolve_template_paths` replaces every value whose type contains `path`
 with `unresolved[T]`. Job creation does the same for its host-scope check
 tables (`build_task_check_symtab`, `build_env_check_symtab`).
