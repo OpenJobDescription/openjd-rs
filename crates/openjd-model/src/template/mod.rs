@@ -24,6 +24,7 @@ pub use job_template::JobTemplate;
 // environment_template
 pub use environment_template::EnvironmentTemplate;
 // parameters
+pub(crate) use parameters::check_value_char_len;
 pub use parameters::{
     FileFilter, FloatUserInterface, IntUserInterface, JobFloatParameterDefinition,
     JobIntParameterDefinition, JobParameterDefinition, JobPathParameterDefinition,

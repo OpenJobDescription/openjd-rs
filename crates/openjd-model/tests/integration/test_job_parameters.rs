@@ -1742,3 +1742,85 @@ fn numeric_param_template_strings_keep_their_text_without_white_space() {
         other => panic!("unexpected definitions {other:?}"),
     }
 }
+
+// ══════════════════════════════════════════════════════════════
+// STRING/PATH minLength/maxLength count characters at preprocess
+// ══════════════════════════════════════════════════════════════
+
+fn preprocess(
+    param_json: &str,
+    inputs: &[(&str, &str)],
+) -> Result<openjd_model::JobParameterValues, openjd_model::ModelError> {
+    let jt = decode_job_template(
+        yaml_val(&job_with_param(param_json)),
+        None,
+        &CallerLimits::default(),
+    )
+    .expect("template should decode");
+    let input_values: openjd_model::JobParameterInputValues = inputs
+        .iter()
+        .map(|(k, v)| (k.to_string(), openjd_expr::ExprValue::String(v.to_string())))
+        .collect();
+    let dir = if cfg!(windows) { "C:\\tmp" } else { "/tmp" };
+    openjd_model::preprocess_job_parameters(
+        &jt,
+        &input_values,
+        &[],
+        &openjd_model::PathParameterOptions::new(dir, dir),
+    )
+}
+
+#[test]
+fn preprocess_string_default_max_length_counts_chars() {
+    // "ééé" is 3 characters but 6 UTF-8 bytes.
+    preprocess(
+        r#"{"name": "Foo", "type": "STRING", "maxLength": 3, "default": "ééé"}"#,
+        &[],
+    )
+    .expect("3-char default must satisfy maxLength 3");
+}
+
+#[test]
+fn preprocess_string_value_min_length_counts_chars() {
+    // "éé" is 2 characters but 4 UTF-8 bytes.
+    let err = preprocess(
+        r#"{"name": "Foo", "type": "STRING", "minLength": 3}"#,
+        &[("Foo", "éé")],
+    )
+    .expect_err("2-char value must fail minLength 3");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Parameter 'Foo': value length 2 is less than minimum 3"),
+        "Got:\n{msg}"
+    );
+}
+
+#[test]
+fn preprocess_string_value_max_length_counts_chars() {
+    let err = preprocess(
+        r#"{"name": "Foo", "type": "STRING", "maxLength": 3}"#,
+        &[("Foo", "éééé")],
+    )
+    .expect_err("4-char value must fail maxLength 3");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("Parameter 'Foo': value length 4 exceeds maximum 3"),
+        "Got:\n{msg}"
+    );
+}
+
+#[test]
+fn preprocess_path_value_max_length_counts_chars() {
+    let value = if cfg!(windows) {
+        "C:\\tmp\\ééé"
+    } else {
+        "/tmp/ééé"
+    };
+    let max = value.chars().count();
+    assert!(value.len() > max, "test value must be multi-byte");
+    preprocess(
+        &format!(r#"{{"name": "Foo", "type": "PATH", "maxLength": {max}}}"#),
+        &[("Foo", value)],
+    )
+    .expect("path within maxLength characters must pass");
+}
