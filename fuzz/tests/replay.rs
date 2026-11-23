@@ -385,27 +385,14 @@ fn expression_dictionary_covers_the_library() {
 
 /// Text in string literals is not code: it must not switch on a known-issue
 /// gate and mask a real static/run-time disagreement.
-/// Text Facts: only `a if c else b` is a conditional, not a comprehension
-/// filter.
 #[test]
-fn conditional_expressions() {
-    use openjd_fuzz::targets::expr::has_conditional_expr as cond;
-    for yes in [
-        "a if c else b",
-        "[x if x > 1 else 0 for x in L]",
-        "f(a if c else b)",
-        "[x for x in L if (1 if c else 2)]",
-    ] {
-        assert!(cond(yes), "{yes}");
-    }
-    for no in [
-        "[x for x in L if c]",
-        "[upper(x) for x in [1] if True]",
-        "[x for x in L if c] + [y]",
-        "a else b",
-    ] {
-        assert!(!cond(no), "{no}");
-    }
+fn unbound_return_text_ignores_string_literals() {
+    use openjd_fuzz::targets::expr::unbound_return_in_text as unbound;
+    assert!(unbound("max(y) + 1"));
+    assert!(unbound("1 + sum (L)"));
+    assert!(unbound("L + range_expr('1-3')"));
+    assert!(!unbound("upper(Param.S + ' sum(1) ')"));
+    assert!(!unbound("my_max(x) + 1"));
 }
 
 /// The `expr-range-slice-static-type` gate: any step but a non-negative
@@ -435,21 +422,391 @@ fn negative_step_slices() {
     }
 }
 
+/// Run `check_expression` on `src` with the static pass reading `statics`
+/// and the run reading `values`, and return the oracle violation it
+/// reports, if any. Statics that differ from the values (an `Unresolved` of
+/// another type, or another value) simulate a library bug. `generated` is
+/// as for `check_expression`.
+fn simulated_violation(
+    src: &str,
+    statics: &[(&str, openjd_expr::ExprValue)],
+    values: &[(&str, openjd_expr::ExprValue)],
+    generated: Option<bool>,
+) -> Option<String> {
+    use openjd_expr::{ParsedExpression, SymbolTable};
+    use openjd_fuzz::gen::expr::Symbol;
+    use openjd_fuzz::targets::expr::{check_expression, Env};
+    install_hook();
+    let mut unresolved = SymbolTable::new();
+    let mut symbols = Vec::new();
+    for (name, v) in statics {
+        unresolved.set(name, v.clone()).unwrap();
+        let ty = match v {
+            openjd_expr::ExprValue::Unresolved(t) => t.clone(),
+            other => other.expr_type(),
+        };
+        symbols.push(Symbol {
+            name: name.to_string(),
+            ty,
+        });
+    }
+    let mut concrete = SymbolTable::new();
+    for (name, v) in values {
+        concrete.set(name, v.clone()).unwrap();
+    }
+    let env = Env {
+        symbols,
+        concrete,
+        unresolved,
+        rules: Vec::new(),
+    };
+    let parsed = ParsedExpression::new(src).unwrap();
+    IN_REPLAY.with(|r| r.set(true));
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        check_expression(
+            &parsed,
+            &env,
+            &mut arbitrary::Unstructured::new(&[0; 16]),
+            generated,
+        )
+    }));
+    IN_REPLAY.with(|r| r.set(false));
+    outcome
+        .is_err()
+        .then(|| LAST_PANIC.with(|p| p.borrow().clone()))
+}
+
+/// `Unresolved(ty)`, the static pass's placeholder for a value of type `ty`.
+fn un(ty: openjd_expr::ExprType) -> openjd_expr::ExprValue {
+    openjd_expr::ExprValue::unresolved(ty)
+}
+
+/// Each hard oracle of `check_expression` fires on the disagreement it
+/// guards against, and the allowed direction passes.
 #[test]
-fn text_facts_ignore_string_literals() {
-    use openjd_fuzz::targets::expr::Facts;
-    let f = Facts::from_text("upper(Param.S + ' or flatten(x) if [] ')");
-    assert!(!f.boolop && !f.union && !f.conditional, "{f:?}");
-    let f = Facts::from_text(r#"upper("a\" and b") + 'sum(1)'"#);
-    assert!(!f.boolop && !f.unbound_return, "{f:?}");
-    let f = Facts::from_text("a or flatten(x) + max (y) if c else []");
-    assert!(
-        f.boolop && f.union && f.unbound_return && f.conditional,
-        "{f:?}"
+fn expression_oracles_fire() {
+    use openjd_expr::{ExprType, ExprValue};
+    let s = ExprType::STRING;
+    let int = |i| ExprValue::Int(i);
+    // A run-time value outside its static type.
+    let v = simulated_violation(
+        "Param.X",
+        &[("Param.X", un(s.clone()))],
+        &[("Param.X", int(1))],
+        None,
     );
-    assert!(!Facts::from_text("my_flatten(x)").union);
-    // A format string's literal text is not code either, and an apostrophe
-    // there does not hide the interpolation after it.
-    let f = Facts::from_format_text("it's or {{ a and b }} flatten(x)");
-    assert!(f.boolop && !f.union, "{f:?}");
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static type string")),
+        "{v:?}"
+    );
+    // Rejected statically, but the (well-typed) expression runs.
+    let v = simulated_violation(
+        "Param.X + 1",
+        &[("Param.X", un(s.clone()))],
+        &[("Param.X", int(1))],
+        Some(false),
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static checking rejects it")),
+        "{v:?}"
+    );
+    // The same in a conditional, where the static error is compound.
+    let v = simulated_violation(
+        "(Param.X + 1) if Param.B else (Param.X + 2)",
+        &[("Param.X", un(s.clone())), ("Param.B", un(ExprType::BOOL))],
+        &[("Param.X", int(1)), ("Param.B", ExprValue::Bool(true))],
+        Some(false),
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static checking rejects it")),
+        "{v:?}"
+    );
+    // Accepted statically, then a failure no value can cause.
+    let v = simulated_violation("Param.Y", &[("Param.Y", un(s.clone()))], &[], None);
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("accepted statically")),
+        "{v:?}"
+    );
+    // Rejected statically for a reason some value causes, though the text
+    // runs: a violation for text too.
+    let v = simulated_violation(
+        "Param.X + 1",
+        &[("Param.X", un(s.clone()))],
+        &[("Param.X", int(1))],
+        None,
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static checking rejects it")),
+        "{v:?}"
+    );
+    // A name error in a branch no run takes is rejected on purpose.
+    let v = simulated_violation(
+        "1 if Param.B else nosuch(1)",
+        &[("Param.B", un(ExprType::BOOL))],
+        &[("Param.B", ExprValue::Bool(true))],
+        None,
+    );
+    assert!(v.is_none(), "{v:?}");
+    // A budget error the static pass alone hits (a longer static value
+    // simulates an over-charge): a violation without a speculative
+    // construct, the known issue with one.
+    let long = ExprValue::String("x".repeat(100));
+    let short = ExprValue::String("x".into());
+    let budget = |src: &str| {
+        simulated_violation(
+            src,
+            &[("Param.X", long.clone())],
+            &[("Param.X", short.clone())],
+            Some(false),
+        )
+    };
+    let v = budget("len(Param.X * 100000) > 0");
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static checking rejects it")),
+        "{v:?}"
+    );
+    assert!(budget("len(Param.X * 100000) > 0 or False").is_none());
+    // A list value outside its list type is excused only for a generated
+    // expression through an unbound-return signature.
+    let ls = ExprType::list(ExprType::STRING).unwrap();
+    let li = ExprValue::ListInt(vec![1]);
+    let v = simulated_violation(
+        "Param.L",
+        &[("Param.L", un(ls.clone()))],
+        &[("Param.L", li.clone())],
+        None,
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static type list[string]")),
+        "{v:?}"
+    );
+    let v = simulated_violation(
+        "Param.L",
+        &[("Param.L", un(ls))],
+        &[("Param.L", li)],
+        Some(true),
+    );
+    assert!(v.is_none(), "{v:?}");
+    // A value folded around a host-context function is not strict.
+    let v = simulated_violation(
+        "(path('/a').relative_to(apply_path_mapping('/b')) == path('x')) and False",
+        &[],
+        &[],
+        None,
+    );
+    assert!(v.is_none(), "{v:?}");
+    // Each known-issue gate leaves a nearby shape to the oracle.
+    let lf = ExprType::list(ExprType::FLOAT).unwrap();
+    let llf = ExprType::list(lf.clone()).unwrap();
+    // A flatten that reads no empty list.
+    let v = simulated_violation(
+        "flatten(Param.LL).sum()",
+        &[("Param.LL", un(llf))],
+        &[(
+            "Param.LL",
+            ExprValue::ListList(
+                vec![ExprValue::ListInt(vec![1, 2])],
+                ExprType::list(ExprType::INT).unwrap(),
+                1,
+            ),
+        )],
+        Some(false),
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static type float")),
+        "{v:?}"
+    );
+    // A negative-step slice with no range anywhere.
+    let li = ExprType::list(ExprType::INT).unwrap();
+    let v = simulated_violation(
+        "Param.L[::Param.N][0] + Param.Y",
+        &[
+            ("Param.L", un(li)),
+            ("Param.N", un(ExprType::INT)),
+            ("Param.Y", un(s.clone())),
+        ],
+        &[
+            ("Param.L", ExprValue::ListInt(vec![1, 2])),
+            ("Param.N", int(-1)),
+            ("Param.Y", int(1)),
+        ],
+        Some(false),
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static checking rejects it")),
+        "{v:?}"
+    );
+    // Text that merely calls `sum` next to a `+` is not an unbound-return
+    // signature.
+    let v = simulated_violation(
+        "Param.X + sum([1])",
+        &[("Param.X", un(s.clone()))],
+        &[("Param.X", int(1))],
+        None,
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static checking rejects it")),
+        "{v:?}"
+    );
+    // A chained comparison is speculative.
+    assert!(budget("1 < 2 < len(Param.X * 100000)").is_none());
+    // A gate reads only the values the expression reads: an unread range
+    // or empty list excuses nothing.
+    let v = simulated_violation(
+        "Param.L[::-1]",
+        &[
+            ("Param.L", un(ExprType::list(s.clone()).unwrap())),
+            ("Param.R", un(ExprType::RANGE_EXPR)),
+        ],
+        &[
+            ("Param.L", ExprValue::ListInt(vec![1, 2])),
+            (
+                "Param.R",
+                ExprValue::RangeExpr(
+                    <openjd_expr::RangeExpr as std::str::FromStr>::from_str("1-3").unwrap(),
+                ),
+            ),
+        ],
+        Some(false),
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static type list[string]")),
+        "{v:?}"
+    );
+    // The range-slice gate needs a `list[int]` in the value.
+    let v = simulated_violation(
+        "Param.X if len(Param.R[::-1]) > 0 else Param.X",
+        &[
+            ("Param.X", un(ExprType::INT)),
+            ("Param.R", un(ExprType::RANGE_EXPR)),
+        ],
+        &[
+            ("Param.X", ExprValue::String("a".into())),
+            (
+                "Param.R",
+                ExprValue::RangeExpr(
+                    <openjd_expr::RangeExpr as std::str::FromStr>::from_str("1-3").unwrap(),
+                ),
+            ),
+        ],
+        Some(false),
+    );
+    assert!(
+        v.as_deref().is_some_and(|m| m.contains("static type int")),
+        "{v:?}"
+    );
+    // The flatten gate's `0` is an empty sum only where a float is expected.
+    let v = simulated_violation(
+        "Param.X if len(flatten([[1]])) > 0 else Param.X",
+        &[("Param.X", un(s.clone()))],
+        &[("Param.X", int(0))],
+        Some(false),
+    );
+    assert!(
+        v.as_deref()
+            .is_some_and(|m| m.contains("static type string")),
+        "{v:?}"
+    );
+    // Accepted statically, then a value-dependent failure: allowed.
+    let v = simulated_violation(
+        "upper(Param.X)",
+        &[("Param.X", un(s.clone()))],
+        &[("Param.X", int(1))],
+        None,
+    );
+    assert!(v.is_none(), "{v:?}");
+}
+
+/// After static acceptance, a run-time failure is a violation exactly when
+/// the static pass folded a value, or no value could cause it.
+#[test]
+fn accepted_then_fails_rule() {
+    use openjd_expr::{ExprProfile, ExprValue, FunctionLibrary, ParsedExpression, SymbolTable};
+    use openjd_fuzz::targets::expr::check_accepted_then_fails;
+    install_hook();
+    let lib = FunctionLibrary::for_profile(&ExprProfile::latest());
+    let err = |src: &str| {
+        ParsedExpression::new(src)
+            .unwrap()
+            .with_library(&lib)
+            .evaluate(&[&SymbolTable::new()])
+            .expect_err(src)
+    };
+    let fires = |e: &openjd_expr::ExpressionError, folded: Option<&ExprValue>| {
+        IN_REPLAY.with(|r| r.set(true));
+        let r = catch_unwind(AssertUnwindSafe(|| {
+            check_accepted_then_fails(e, folded, || "msg".to_string())
+        }));
+        IN_REPLAY.with(|r| r.set(false));
+        r.is_err()
+    };
+    for value_independent in ["nosuch(1)", "Nope.X", "(1).nosuch"] {
+        assert!(fires(&err(value_independent), None), "{value_independent}");
+    }
+    for allowed in ["upper(1)", "'a' - 1", "int('x')", "1 // 0"] {
+        assert!(!fires(&err(allowed), None), "{allowed}");
+        assert!(
+            fires(&err(allowed), Some(&ExprValue::Int(1))),
+            "{allowed} folded"
+        );
+    }
+}
+
+/// A fold counts against the run only from literals alone, in the host's
+/// path format.
+#[test]
+fn strict_folds() {
+    use openjd_fuzz::targets::expr::strict_fold;
+    assert!(strict_fold("len('abc') > 2", false, true));
+    assert!(!strict_fold("len('abc') > 2", true, true));
+    assert!(!strict_fold("len('abc') > 2", false, false));
+    assert!(!strict_fold(
+        "apply_path_mapping('/a') == path('/b') and False",
+        false,
+        true
+    ));
+    assert!(!strict_fold(
+        "path('/a').apply_path_mapping() and False",
+        false,
+        true
+    ));
+}
+
+/// The model pipeline checks the expression error behind a create_job
+/// format-string failure, and lets a value-dependent one through.
+#[test]
+fn model_static_errors() {
+    use openjd_expr::{ExprProfile, FunctionLibrary, ParsedExpression, SymbolTable};
+    use openjd_fuzz::targets::model::model_static_error;
+    use openjd_model::ModelError;
+    let lib = FunctionLibrary::for_profile(&ExprProfile::latest());
+    let err = |src: &str| {
+        ParsedExpression::new(src)
+            .unwrap()
+            .with_library(&lib)
+            .evaluate(&[&SymbolTable::new()])
+            .expect_err(src)
+    };
+    let fs = |src: &str| ModelError::FormatStringError {
+        message: "m".into(),
+        input: None,
+        start: None,
+        end: None,
+        source: Some(err(src)),
+    };
+    assert!(model_static_error(&fs("Nope.X")).is_some());
+    assert!(model_static_error(&ModelError::Expression(err("Nope.X"))).is_some());
+    assert!(model_static_error(&fs("upper(1)")).is_none());
+    assert!(model_static_error(&ModelError::Expression(err("upper(1)"))).is_none());
 }

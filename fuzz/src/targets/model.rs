@@ -10,9 +10,12 @@
 //! Oracles beyond "never panics":
 //! - **Validation implies runnable**: a
 //!   template that decodes and instantiates must not fail at run time with
-//!   an undefined-symbol / unknown-function / syntax error when its actions,
-//!   `let` bindings, and embedded files are resolved the way the session
-//!   resolves them.
+//!   an error no value can cause (an undefined symbol, unknown function,
+//!   unknown member, or unsupported syntax), or refuse to order operands the
+//!   library orders, when its actions, `let` bindings, and embedded files are
+//!   resolved the way the session resolves them. A type error that depends
+//!   on the parameter values is allowed, and a value the static pass folded
+//!   is not compared with the run.
 //! - **Preprocess idempotence**: feeding
 //!   `preprocess_job_parameters` its own output yields the same values.
 //! - **Determinism and Eq/Hash agreement** on created jobs.
@@ -64,39 +67,23 @@ fn hash_of<T: Hash>(v: &T) -> u64 {
     h.finish()
 }
 
-/// An error template validation should have caught. Known gaps that the
-/// model only inherits from openjd-expr are recorded and not reported.
+/// An error template validation should have caught: one no parameter
+/// value can cause. Static typing may accept an expression that fails with
+/// particular values, so a type error or dispatch miss is not one of them
+/// (see `check_accepted_then_fails`).
 fn is_static_error(e: &ExpressionError) -> bool {
-    if crate::targets::expr::is_ordering_type_error(e) {
-        crate::known::hit("expr-ordering-runtime-type-check", || e.to_string());
-        return false;
-    }
-    if crate::targets::expr::is_non_iterable_error(e) {
-        crate::known::hit("expr-listcomp-non-iterable-runtime-check", || e.to_string());
-        return false;
-    }
-    // Value-dependent: a null element / iterating an optional result.
-    if crate::targets::expr::is_null_element_error(e) {
-        return false;
-    }
-    // `__add__: (list[T1], list[T2]) -> list[T3]` accepts lists of different
-    // element types statically; the concatenation fails at run time.
-    if crate::targets::expr::is_list_element_mix_error(e)
-        && e.expr()
-            .is_some_and(|x| crate::targets::expr::Facts::from_text(x).list_add)
-    {
-        crate::known::hit("expr-unbound-return-typevar", || e.to_string());
-        return false;
-    }
-    crate::targets::expr::static_class(e.kind()) || crate::targets::expr::is_dispatch_type_error(e)
+    crate::targets::expr::is_static_miss(e)
 }
 
-/// The static `ExpressionError` behind a model error, if any. A
-/// `create_job` format-string failure (job name, host-requirement names,
-/// range values) keeps only the message today, so it isn't checked yet.
-fn model_static_error(e: &ModelError) -> Option<&ExpressionError> {
+/// The static `ExpressionError` behind a model error, if any: an
+/// expression error, or the source of a `create_job` format-string failure
+/// (job name, host-requirement names, range values).
+pub fn model_static_error(e: &ModelError) -> Option<&ExpressionError> {
     match e {
         ModelError::Expression(x) if is_static_error(x) => Some(x),
+        ModelError::FormatStringError {
+            source: Some(x), ..
+        } if is_static_error(x) => Some(x),
         _ => None,
     }
 }
@@ -128,32 +115,6 @@ fn inputs(u: &mut Unstructured<'_>, params: &[ParamInfo]) -> JobParameterInputVa
     out
 }
 
-/// Does an expression use a construct the static pass evaluates
-/// speculatively (`if`/`else`, `and`, `or`)? See known issue
-/// `expr-boolop-static-type`.
-fn speculative_expr(expr: &str) -> bool {
-    // String literal contents are not code (`'a or b'` is no `or`).
-    let f = crate::targets::expr::Facts::from_text(expr);
-    f.boolop || f.conditional
-}
-
-/// Does a `{{ ... }}` interpolation in the template use a speculative
-/// construct? Text outside interpolations (descriptions, commands) does not
-/// count.
-fn speculative(doc_text: &str) -> bool {
-    let mut rest = doc_text;
-    while let Some(a) = rest.find("{{") {
-        let after = &rest[a + 2..];
-        let end = after.find("}}").unwrap_or(after.len());
-        let expr = &after[..end];
-        if speculative_expr(expr) {
-            return true;
-        }
-        rest = &after[end..];
-    }
-    false
-}
-
 /// Run the whole instantiation pipeline and its oracles.
 pub fn pipeline(
     template: &JobTemplate,
@@ -162,7 +123,6 @@ pub fn pipeline(
     u: &mut Unstructured<'_>,
     source: &str,
 ) {
-    let spec = speculative(source);
     param_def_surface(template);
     let _ = template.profile();
     let _ = template.description();
@@ -285,24 +245,10 @@ pub fn pipeline(
         Ok(j) => j,
         Err(e) => {
             if let Some(x) = model_static_error(&e) {
-                // Speculation is per expression: only the failing one counts.
-                let spec = x.expr().map_or(spec, speculative_expr);
-                // As in check_static_miss: a type error after an `and`/`or`.
-                if spec
-                    && !crate::targets::expr::is_name_error(x)
-                    && crate::targets::expr::after_boolop(x)
-                {
-                    known_issue!(
-                        "expr-boolop-static-type",
-                        false,
-                        "template validated but create_job fails with a static error: {x}"
-                    );
-                } else {
-                    oracle!(
-                        false,
-                        "template validated but create_job fails with a static error: {x}"
-                    );
-                }
+                oracle!(
+                    false,
+                    "template validated but create_job fails with an error no value can cause: {x}"
+                );
             }
             return;
         }
@@ -730,38 +676,17 @@ fn run_time_resolution(
         .with_path_format(PathFormat::host())
         .with_memory_limit(8 << 20)
         .with_operation_limit(200_000);
-    // Gated like the expr targets' static/run-time agreement check, with
-    // the same known issues.
+    // The expr targets' rule for an accepted expression that fails at run
+    // time: allowed unless no value could cause the failure.
     let check = |what: &str, fs: &FormatString, st: &SymbolTable| {
         if let Err(e) = fs.resolve_with(st, &opts) {
-            use crate::targets::expr as x;
-            // A comprehension typed `list[nulltype]` or a dropped
-            // conditional branch (documented; see check_expression).
-            let documented = !x::is_name_error(&e)
-                && (x::static_class(e.kind()) || x::is_dispatch_type_error(&e))
-                && {
-                    let (un, lib) = (
-                        x::unresolved_like(st),
-                        crate::gen::expr::validation_library(),
-                    );
-                    e.expr()
-                        .is_some_and(|src| x::has_empty_only_comprehension(src, &un, &lib))
-                        || x::in_dropped_branch(&e, &un, &lib)
-                };
-            if documented {
-                return;
-            }
-            crate::targets::expr::check_static_miss(
-                &e,
-                crate::targets::expr::Facts::from_format_text(fs.raw()),
-                || {
-                    format!(
-                        "step {:?}: {what} {:?} validated but fails at run time: {e}",
-                        step.name,
-                        fs.raw()
-                    )
-                },
-            );
+            crate::targets::expr::check_accepted_then_fails(&e, None, || {
+                format!(
+                    "step {:?}: {what} {:?} validated but fails at run time: {e}",
+                    step.name,
+                    fs.raw()
+                )
+            });
         }
     };
     for task in tasks {

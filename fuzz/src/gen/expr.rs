@@ -57,6 +57,23 @@ pub fn validation_library() -> Arc<FunctionLibrary> {
     FunctionLibrary::for_profile(&ExprProfile::latest().with_host_context(HostContext::Unresolved))
 }
 
+/// The host-context functions (`apply_path_mapping`): `Unresolved` stubs
+/// in the validation-time library, real only with a host context.
+pub fn host_context_functions() -> &'static [String] {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let without = FunctionLibrary::for_profile(&ExprProfile::latest());
+        let lib = validation_library();
+        let mut names: Vec<String> = lib
+            .function_names()
+            .filter(|n| without.get_signatures(n).is_empty())
+            .map(str::to_string)
+            .collect();
+        names.sort_unstable();
+        names
+    })
+}
+
 /// Every bare function, method, and property name the library knows, for
 /// dictionaries and seed text.
 pub fn library_tokens() -> Vec<String> {
@@ -91,18 +108,9 @@ pub struct ExprGen<'a, 'b> {
     next_local: usize,
     /// Set when the output used a signature whose return type variable no
     /// parameter binds (known issue `expr-unbound-return-typevar`): such a
-    /// signature does not say what it returns, so the output is not
-    /// well-typed by construction.
+    /// signature does not say what it returns, so the output's static type
+    /// can be wrong.
     pub used_unbound_return: bool,
-    /// Set when the output uses `and` / `or` (known issue
-    /// `expr-boolop-static-type`).
-    pub used_boolop: bool,
-    /// Set when the output calls a signature with a union-typed parameter
-    /// or return, or omits an optional argument (known issue
-    /// `expr-union-arg-overload`).
-    pub used_union: bool,
-    /// Set when the output has a conditional (`a if c else b`).
-    pub used_conditional: bool,
 }
 
 impl<'a, 'b> ExprGen<'a, 'b> {
@@ -114,9 +122,6 @@ impl<'a, 'b> ExprGen<'a, 'b> {
             budget: 48,
             next_local: 0,
             used_unbound_return: false,
-            used_boolop: false,
-            used_union: false,
-            used_conditional: false,
         }
     }
 
@@ -141,7 +146,6 @@ impl<'a, 'b> ExprGen<'a, 'b> {
             0..=1 => self.leaf(&ty),
             2..=6 => self.call(&ty, depth).unwrap_or_else(|| self.leaf(&ty)),
             7 => {
-                self.used_conditional = true;
                 let c = self.of_type(&ExprType::BOOL, depth - 1);
                 let a = self.of_type(&ty, depth - 1);
                 let b = self.of_type(&ty, depth - 1);
@@ -184,14 +188,8 @@ impl<'a, 'b> ExprGen<'a, 'b> {
                 let a = self.of_type(&ExprType::BOOL, depth - 1);
                 let b = self.of_type(&ExprType::BOOL, depth - 1);
                 match upto(self.u, 2) {
-                    0 => {
-                        self.used_boolop = true;
-                        format!("({a} and {b})")
-                    }
-                    1 => {
-                        self.used_boolop = true;
-                        format!("({a} or {b})")
-                    }
+                    0 => format!("({a} and {b})"),
+                    1 => format!("({a} or {b})"),
                     _ => format!("(not {a})"),
                 }
             }
@@ -245,14 +243,6 @@ impl<'a, 'b> ExprGen<'a, 'b> {
         if has_unbound_return(&sig) {
             self.used_unbound_return = true;
         }
-        if sig
-            .sig_params()
-            .iter()
-            .chain([sig.sig_return()])
-            .any(has_union)
-        {
-            self.used_union = true;
-        }
         let mut bindings: HashMap<TypeCode, ExprType> =
             sig.sig_return().match_type(ty).unwrap_or_default();
         // Unbound type variables: share one choice so `(list[T], T)` stays
@@ -282,7 +272,6 @@ impl<'a, 'b> ExprGen<'a, 'b> {
             && ty.params().contains(&ExprType::NULLTYPE)
             && one_in(self.u, 3)
         {
-            self.used_union = true;
             return String::new();
         }
         self.of_type(ty, depth - 1)
@@ -395,11 +384,6 @@ impl<'a, 'b> ExprGen<'a, 'b> {
             }
         }
     }
-}
-
-/// Does `t` contain a union type?
-fn has_union(t: &ExprType) -> bool {
-    t.code() == TypeCode::Union || t.params().iter().any(has_union)
 }
 
 /// Does `sig`'s return type use a type variable that no parameter binds?

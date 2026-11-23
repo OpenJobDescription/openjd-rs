@@ -61,9 +61,9 @@ Windows-specific steps; call `cargo fuzz` directly only with the same flag and
 | Target | Entry points | Oracles beyond "no panic / hang / abort" |
 |--------|--------------|------------------------------------------|
 | `expr_parse` | `ParsedExpression::new`, `with_profile` | Profile monotonicity (`current()` ⊆ `latest()`), determinism |
-| `expr_eval_text` | parse + evaluate on mutated text; symbols bound from `accessed_symbols` | All of `check_expression` (below) |
-| `expr_eval_gen` | Well-typed expressions generated from the library's own signatures | `check_expression`, plus: a well-typed expression is not rejected statically and does not fail at run time with a type error |
-| `expr_format_string` | `FormatString::new`, `resolve_with`, `resolve_string_with`, `validate_expressions`, `copy_used_symtab_values`, `escape_format_string` | Static resolution is sound (`min_resolved_string_len` ≤ actual, `resolved_value` exact, `resolved_type` satisfied); literals preserved in order; escaping round-trips; filtered table resolves identically; peak heap bounded |
+| `expr_eval_text` | parse + evaluate on mutated text; symbols bound from `accessed_symbols` | All of `check_expression` (below); text is not well-typed by construction, so a static rejection counts against a run only when some value causes it |
+| `expr_eval_gen` | Well-typed expressions generated from the library's own signatures | `check_expression`, plus: a well-typed expression that runs is not rejected statically |
+| `expr_format_string` | `FormatString::new`, `resolve_with`, `resolve_string_with`, `validate_expressions`, `copy_used_symtab_values`, `escape_format_string` | Static resolution is sound (`min_resolved_string_len` ≤ actual, `resolved_value` exact, `resolved_type` satisfied, with the same known-issue gates as `check_expression`); a resolution failure after validation follows `check_expression`'s rule for accepted expressions; literals preserved in order; escaping round-trips; filtered table resolves identically; peak heap bounded |
 | `expr_range` | `RangeExpr::from_str` and every query | Reference model against a `Vec<i64>`: `len`/`iter`/`get` (incl. negative)/`contains`/`slice`/`from_values`/`from_ranges`; display ↔ parse; Eq/Hash agreement |
 | `expr_int_range` | `IntRange::new` over all of `i64` | Constructor invariants; `len`/`get`/`iter`/`contains` agree |
 | `expr_type` | `ExprType::parse`, constructors | display ↔ parse, normalization idempotence, reflexive satisfaction, union idempotence |
@@ -83,15 +83,40 @@ Windows-specific steps; call `cargo fuzz` directly only with the same flag and
 | `snapshots_ops_gen` | `diff_snapshots`, `compose_*`, `subtree_snapshot`, `join_snapshot`, `partition_manifest`, `filter_manifest`, `entries_differ`, `common_root` | `diff(a, a)` empty; `compose(a, [diff(a, b)]) == b`; compose of diffs ≡ sequential compose; subtree/join stays inside; partitions cover every file; filters keep only matches |
 | `cli_args` | CLI `--job-param`, `--task-param`, `--tasks`, `--path-mapping-rules`, `--extensions` parsers (source-included from the bin crate) | `Name=Value` parses to that pair; one task param per argument; only supported extensions accepted |
 
-**`check_expression`** (every expression target) evaluates the same parsed
+**`check_expression`** (`expr_eval_text` and `expr_eval_gen`) evaluates the same parsed
 expression statically — every symbol `Unresolved(T)`, validation-time library —
 and concretely with values of type `T`, under both POSIX and Windows path
 formats, and requires:
 
-- the concrete value belongs to the static type, and a statically folded value
-  equals the run-time value (type soundness);
-- a statically accepted expression never fails at run time with an
-  undefined-symbol, unknown-function, unsupported-syntax, or type error;
+- the concrete value belongs to the static type, and a value the static pass
+  folded equals the run-time value in the host's path format (type soundness);
+- static typing may accept an expression that a run with particular values
+  rejects, because the static pass can't see those values. So after static
+  acceptance a run-time type error or dispatch miss is allowed. A run-time
+  failure is still a violation when the static pass folded the expression from
+  literals alone (no symbols and no host-context function such as
+  `apply_path_mapping`), in the host's path format, to a value, since the run
+  must agree with it; when it is an undefined symbol, an unknown function, a
+  method or property no type has, or unsupported syntax, which no value can
+  cause; or when it refuses to order operands the library orders. A value
+  folded around an unresolved value doesn't count: `Param.X < 0 < 0` folds to
+  `False`, though a run evaluates `Param.X < 0` first and can fail there;
+- static typing must not reject an expression that a run accepts. For
+  generated input (`expr_eval_gen`), which is well-typed by construction, any
+  static error counts. For text (`expr_eval_text`), any static error but one no
+  value can cause counts, because a name error in a branch no run takes is
+  rejected on purpose (specs/expr/evaluator.md). `expr_format_string` doesn't
+  check this direction. Known issues explain some rejections: a budget error in
+  a sub-expression the static pass evaluated speculatively (a conditional
+  branch, an `and` / `or` operand, a comprehension, a chained comparison),
+  `expr-speculative-budget-rejection`; a negative-step range slice used as a
+  list, `expr-range-slice-static-type`; a `flatten` that reads an empty list,
+  or a rejection about a list's element type after one,
+  `expr-flatten-empty-element-type`; a type error in a generated expression
+  through an unbound-return signature, `expr-unbound-return-typevar`; and, for
+  an expression that involves paths,
+  a rejection in the host's path format where the static pass in the run's
+  format accepts, `expr-static-fold-host-path-format`;
 - determinism; evaluation metrics within their limits; a target-typed result
   satisfies its target; the result survives the template → session transport
   boundary unchanged;
@@ -105,9 +130,13 @@ space iteration → dependency graph → run-time resolution, and requires:
 preprocessing is idempotent; `create_job` is deterministic and
 Eq/Hash agree; `len()` matches iteration, `get(i)` equals the i-th iterated
 set, and every iterated set passes `contains`/`validate_containment`; topological order respects every dependency; and **a template that
-validates and instantiates never fails at run time with a static error** when
-its actions, `let` bindings, and embedded files are resolved the way the
-session resolves them.
+validates and instantiates never fails at run time with an error no value can
+cause** (an undefined symbol, an unknown function, a method or property no type
+has, or unsupported syntax), or with a refusal to order operands the library
+orders, when its actions, `let` bindings, and embedded files are resolved the
+way the session resolves them. As for expressions, a type error that depends on
+the parameter values is allowed. Unlike `check_expression`, the pipeline does
+not check folded values against the run.
 
 ## Enforcement
 
@@ -152,7 +181,7 @@ Each check below is executable, and each was verified to fail when broken:
 ## Known issues
 
 Bugs the fuzzer found that need a design decision are gated with
-`known_issue!` (listed in `src/lib.rs::known::KNOWN_ISSUES`, with reproducers
+`known_issue!` or `known::hit` (listed in `src/lib.rs::known::KNOWN_ISSUES`, with reproducers
 in `regressions/*/known-*`). A gated violation is ignored so CI stays green;
 `OPENJD_FUZZ_KNOWN=1` turns every gate back into a hard failure, and
 `OPENJD_FUZZ_KNOWN=<id>[,<id>...]` only the named ones (an input can hit more
@@ -163,7 +192,7 @@ OPENJD_FUZZ_KNOWN=1 cargo test --manifest-path fuzz/Cargo.toml --no-default-feat
 OPENJD_FUZZ_KNOWN=model-preprocess-path-idempotence cargo test --manifest-path fuzz/Cargo.toml --no-default-features --test replay replay_regressions
 ```
 
-When a known issue is fixed, change its `known_issue!` to `oracle!` and delete
+When a known issue is fixed, change its gate to `oracle!` and delete
 the entry, so the fuzzer guards the fix. Rename its reproducers after the
 behavior they check (no `known-` prefix, and no `fixed-` or issue-number
 marker): `regressions/` describes what is checked, not which change fixed it.

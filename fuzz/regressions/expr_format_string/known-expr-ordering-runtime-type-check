@@ -1,1 +1,0 @@
-{{Param.X if Param.X > 3 else 0}}
