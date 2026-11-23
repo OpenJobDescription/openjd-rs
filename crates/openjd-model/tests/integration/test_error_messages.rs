@@ -722,3 +722,107 @@ fn membership_unresolved_parameter_of_wrong_type_is_refused_at_validation() {
         ],
     );
 }
+
+/// `RawParam.*` of a PATH is the unmapped string, and of a LIST[PATH] a
+/// list of strings, so a path property is not available on either.
+#[test]
+fn raw_param_of_a_path_or_list_of_paths_is_a_string() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: "{{ RawParam.P.name }}"
+parameterDefinitions:
+- {name: P, type: PATH, default: a/b}
+- {name: L, type: "LIST[PATH]", default: [a/b]}
+steps:
+- name: S
+  script: {actions: {onRun: {command: "{{ RawParam.L[0].name }}", args: ["{{ RawParam.P.upper() }}", "{{ RawParam.L[0].upper() }}"]}}}
+"#,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         name:\n\tFailed to parse interpolation expression at [0, 21]. 'name' property is not \
+         available for string. Available for: path\n  RawParam.P.name\n  ~~~~~~~~~~~^~~~\n\
+         steps[0] -> script -> actions -> onRun -> command:\n\tFailed to parse interpolation \
+         expression at [0, 24]. 'name' property is not available for string. Available for: \
+         path\n  RawParam.L[0].name\n  ~~~~~~~~~~~~~~^~~~",
+    );
+}
+
+/// A Step Environment reads the values of the Step's `let` names from the
+/// Step's task scope, after the script's own `let` bindings, so a script
+/// `let` that shadows a Step `let` gives the Step Environment its type.
+#[test]
+fn a_step_environment_reads_step_let_names_after_the_script_let_bindings() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: T
+steps:
+- name: S
+  let: ["x = 1"]
+  script: {let: ["x = 'a'"], actions: {onRun: {command: "{{ x }}"}}}
+  stepEnvironments:
+  - {name: E, variables: {V: "{{ x + 1 }}"}}
+"#,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> script -> let[0]:\n\t'x' shadows enclosing scope.\n\
+         steps[0] -> stepEnvironments[0] -> variables -> V:\n\tFailed to parse interpolation \
+         expression at [0, 11]. Cannot use '+' operator with string and int\n  x + 1\n  ~~^~~",
+    );
+}
+
+/// Without EXPR, a Step's `let` bindings bind nothing, so a Step `let`
+/// named like a task-scope symbol does not bring that symbol into a Step
+/// Environment.
+#[test]
+fn without_expr_a_step_let_adds_nothing_to_a_step_environment() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+name: T
+steps:
+- name: S
+  let: ["Task.Param.T = 1"]
+  parameterSpace: {taskParameterDefinitions: [{name: T, type: INT, range: "1-2"}]}
+  script: {actions: {onRun: {command: "{{ Task.Param.T }}"}}}
+  stepEnvironments:
+  - {name: E, variables: {V: "{{ Task.Param.T }}"}}
+"#,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> let:\n\t'let' requires the EXPR extension.\n\
+         steps[0] -> stepEnvironments[0] -> variables -> V:\n\tFailed to parse interpolation \
+         expression at [0, 18]. Undefined variable: 'Task.Param.T'.\n  Task.Param.T\n  \
+         ~~~~~~~~~~~^",
+    );
+}
+
+/// Structure reports a literal amount name that repeats an earlier literal
+/// one, and pass 8 reports a name that repeats a static one, so a literal
+/// name that repeats both is reported by each.
+#[test]
+fn a_duplicate_amount_name_is_reported_by_structure_and_by_pass_8() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: T
+steps:
+- name: S
+  hostRequirements:
+    amounts:
+    - {name: "{{ 'amount.custom.a' }}", min: 1}
+    - {name: amount.custom.a, min: 1}
+    - {name: amount.custom.a, min: 1}
+  script: {actions: {onRun: {command: x}}}
+"#,
+        "Model validation error: 3 validation errors for JobTemplate\n\
+         steps[0] -> hostRequirements -> amounts[2]:\n\tduplicate amount name 'amount.custom.a'.\n\
+         steps[0] -> hostRequirements -> amounts[1]:\n\tduplicate amount name 'amount.custom.a'.\n\
+         steps[0] -> hostRequirements -> amounts[2]:\n\tduplicate amount name 'amount.custom.a'.",
+    );
+}

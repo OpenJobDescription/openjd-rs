@@ -37,7 +37,7 @@ const MAX_LET_IDENTIFIER_LEN: usize = 512;
 /// `Param` has the expression type of the parameter type, and `RawParam`
 /// the same except `string` for PATH and `list[string]` for LIST[PATH].
 /// Without `host`, the `Param` of a PATH or LIST[PATH] parameter is left
-/// out, since mapping a path needs a host (the template scope, §7.3.2). A
+/// out, since mapping a path needs a host (the template scope). A
 /// name that `defs` yields twice (an error another pass reports) is set by
 /// each in turn.
 fn add_params<'d>(
@@ -81,9 +81,9 @@ fn add_session_symbols(symtab: &mut SymbolTable) {
     }
 }
 
-/// Add `Job.Name`, a symbol of the template and session scopes, for a
-/// caller that has checked the `EXPR` extension. It is not in the scope of
-/// the Job Template's `name`.
+/// Add `Job.Name`, a symbol of the job, Step, session and task scopes,
+/// for a caller that has checked the `EXPR` extension. It is not in the
+/// template scope, the scope of the Job Template's `name`.
 fn add_job_symbols(symtab: &mut SymbolTable) {
     symtab
         .set("Job.Name", ExprValue::unresolved(ExprType::STRING))
@@ -114,8 +114,8 @@ fn let_names(bindings: Option<&[String]>) -> HashSet<String> {
         .collect()
 }
 
-/// Copy the values of `step`'s `let` bindings from `step_scope`, its
-/// template scope, into `symtab`. They are copied last: a binding named like
+/// Copy the values of `step`'s `let` bindings from `step_scope`, a scope
+/// that holds them, into `symtab`. They are copied last: a binding named like
 /// a scope root (`Session`, an error pass 8 reports) collides with it and is
 /// dropped, and a dotted name (an error too) sets the symbol it names.
 /// `symtab` is a host scope, so a value whose type contains `path` is then
@@ -223,7 +223,8 @@ fn exact_heap_size(value: &ExprValue) -> Option<usize> {
 /// What pass 8 uses throughout one document: the validation context, the
 /// document's own Job Parameters, the extensions that change a scope, the
 /// evaluators, the limits and the standard capabilities. Its methods build
-/// the scopes of Template Schemas §7.3.2.
+/// the scopes of Template Schemas §7.3.1 (each value's Scope) and §7.4
+/// (the stage that resolves each field).
 struct FsCtx<'a> {
     ctx: &'a ValidationContext,
     params: Option<&'a [JobParameterDefinition]>,
@@ -273,7 +274,7 @@ impl<'a> FsCtx<'a> {
         }
     }
 
-    /// The template scope (§7.3.2): `RawParam.*` and the non-PATH
+    /// The template scope: `RawParam.*` and the non-PATH
     /// `Param.*`. The scope of the Job Template's `name`.
     fn template_scope(&self) -> SymbolTable {
         let mut symtab = SymbolTable::new();
@@ -403,7 +404,7 @@ impl<'a> FsCtx<'a> {
                 .as_ref()
                 .and_then(|s| s.embedded_files.as_deref()),
         );
-        if let Some((step, step_scope)) = step {
+        if let (true, Some((step, step_scope))) = (self.expr, step) {
             copy_step_lets(&mut symtab, step, step_scope);
         }
         symtab
@@ -447,7 +448,9 @@ impl<'a> FsCtx<'a> {
             "Task.",
             script.as_ref().and_then(|s| s.embedded_files.as_deref()),
         );
-        copy_step_lets(&mut symtab, step, step_scope);
+        if self.expr {
+            copy_step_lets(&mut symtab, step, step_scope);
+        }
         symtab
     }
 
@@ -713,7 +716,8 @@ impl ResolvedConstraint<'_> {
 
 impl ResolvedConstraint<'_> {
     /// Apply this constraint to what static evaluation determined, `sr`, of
-    /// the format string `fs` at `path`. One method per variant.
+    /// the format string `fs` at `path`, with one helper function per
+    /// variant.
     fn check(
         &self,
         sr: &openjd_expr::StaticResolution,
@@ -1241,13 +1245,10 @@ fn known_capability_name(
 /// Check the §3.3 constraint that no two amounts, and no two attributes,
 /// have the same resolved name, for the names template validation knows.
 ///
-/// Structure reports a literal name that repeats an earlier literal name
-/// it compared (entries marked `literal`), so an entry is reported here
-/// when it repeats an earlier known name and structure did not already
-/// report it: each entry is reported at most once. A name that is not
-/// known yet, or a requirement that may be discarded (`None` here), is
-/// compared at job creation. Comparison is case-insensitive, and the
-/// message matches the one for literal names.
+/// Structure reports duplicates between literal names, so a pair is only
+/// reported here when at least one of its names is fully static. A name
+/// that is not known yet is compared at job creation. Comparison is
+/// case-insensitive, and the message matches the one for literal names.
 fn check_known_names_unique(
     known: &[Option<KnownCapabilityName>],
     kind: helpers::CapabilityKind,
@@ -1258,15 +1259,10 @@ fn check_known_names_unique(
     for (index, k) in known.iter().enumerate() {
         let Some(k) = k else { continue };
         let lower = k.name.to_lowercase();
-        let matches = |literal: Option<bool>| {
-            seen.iter()
-                .any(|(name, l)| *name == lower && literal.is_none_or(|want| *l == want))
-        };
-        // Structure has already reported a literal name that repeats an
-        // earlier literal one, so it is reported here only when it repeats
-        // a name structure did not compare.
-        let reported_by_structure = k.literal && matches(Some(true));
-        if !reported_by_structure && matches(None) {
+        if seen
+            .iter()
+            .any(|(name, literal)| *name == lower && !(*literal && k.literal))
+        {
             errors.add(
                 &path_index(list_path, index),
                 format!("duplicate {} name '{}'.", kind.noun(), k.name),
@@ -2561,10 +2557,10 @@ fn evaluate_let_binding(
                 Ok(result) => {
                     // Set the binding in the symtab with its inferred value/type
                     // so subsequent bindings and format strings see the correct type.
-                    // `set` only fails when the key path collides with an existing
-                    // scalar; binding names are validated to start lowercase or `_`
-                    // (above, at template validation), so they can never collide with
-                    // the uppercase-rooted scopes, and ignoring the result is safe.
+                    // `set` fails only when the key path collides with an existing
+                    // scalar or table, as a binding named like a scope root
+                    // (`Session`) does. Template validation reports the name, so
+                    // the binding is dropped and the scope keeps its symbol.
                     let _ = symtab.set(name, result);
                 }
                 Err(e) => {
@@ -2646,6 +2642,31 @@ pub(crate) fn check_carried_forward_let_bindings(
             symtab,
             &ev,
             errors,
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The charge for one kept binding covers its deque slots, its entry in
+    /// the bindings vector, its name, and its value.
+    #[test]
+    fn retained_bindings_charge_every_allocation() {
+        let mut symtab = SymbolTable::new();
+        symtab.set("ab", ExprValue::String("xyz".into())).unwrap();
+        let scope = StepLetScope {
+            symtab,
+            names: HashSet::from(["ab".to_string()]),
+        };
+        let kept = RetainedBindings::from_scope(0, scope).unwrap();
+        assert_eq!(
+            kept.bytes(),
+            2 * std::mem::size_of::<RetainedBindings>()
+                + std::mem::size_of::<(String, ExprValue)>()
+                + 2
+                + 3
         );
     }
 }

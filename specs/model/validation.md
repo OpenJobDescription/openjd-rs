@@ -194,11 +194,13 @@ variables by building scope-appropriate symbol tables.
 ### Symbol Table Construction
 
 Pass 8 checks, in order, the Job Template's `name`, the `let` bindings and `hostRequirements`
-of each Step that has `hostRequirements`, each Job Environment, and then each Step's other
-fields. It builds these symbol tables, all from the document's own `parameterDefinitions`. `Param.<name>` has the
+of each Step that has `hostRequirements`, each Job Environment, each Step's other fields, and,
+with EXPR, the comprehension-variable rules of every Environment's script. It builds these
+symbol tables, all from the document's own `parameterDefinitions`. `Param.<name>` has the
 parameter type's expression type, and `RawParam.<name>` the same except `string` for PATH and
-`list[string]` for LIST[PATH]. A Job Parameter name defined twice is typed by its last
-definition.
+`list[string]` for LIST[PATH]. A Job Parameter name defined twice is set by each definition in
+turn, so the last one that the scope includes gives its type: in the template scope, which has
+no PATH `Param.*`, a PATH definition adds no `Param.<name>`.
 
 1. **Template scope** — `RawParam.*` and the non-PATH `Param.*`. The Job Template's `name`.
 2. **Job scope** — the template scope and, with EXPR, `Job.Name`.
@@ -208,12 +210,13 @@ definition.
    evaluated and reported). The Step's `hostRequirements`, `parameterSpace` and action timing
    fields, and its Step Environments' timing fields.
 4. **Session scope** — every `Param.*`, `Session.*`, with EXPR `Job.Name`, the environment's
-   `Env.File.*`, and in a Step Environment `Step.Name` and the Step's `let` values; then the
-   script's `let` bindings. An environment's script body, for environments inside a Job
+   `Env.File.*`, and in a Step Environment `Step.Name` and, with EXPR, the values of the Step's
+   `let` names as the Step's task scope holds them after its script's `let` bindings; then
+   the environment script's `let` bindings. An environment's script body, for environments inside a Job
    Template and for Environment Templates (which never get `Step.Name`).
 5. **Task scope** — every `Param.*`, `Session.*`, with EXPR `Job.Name` and `Step.Name`,
-   `Task.Param.*`, `Task.RawParam.*`, `Task.File.*` and the Step's `let` values; then the
-   script's `let` bindings. A step script. `Env.File.*` is not in it.
+   `Task.Param.*`, `Task.RawParam.*`, `Task.File.*` and, with EXPR, the Step's `let` values;
+   then the script's `let` bindings. A step script. `Env.File.*` is not in it.
 
 The Step's `let` values are copied into the session and task scopes last, so a binding with a
 name the naming rule rejects can replace a symbol (a dotted name) or be dropped (`Session`).
@@ -236,7 +239,7 @@ message (see `specs/model/job-creation.md`).
 
 ### Step Scripts and SimpleActions
 
-One helper validates a `StepScript`
+One helper (`validate_step_script`) validates a `StepScript`
 in full — script-level `let` bindings (into the task symtab), the
 EXPR-gated complex-expression rejection, the `onRun` action's
 `command`/`args` in task scope with the opt-in `max_resolved_arg_len`
