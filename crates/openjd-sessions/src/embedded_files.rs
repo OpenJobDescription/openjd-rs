@@ -101,16 +101,20 @@ pub fn write_embedded_file_with_options(
     Ok(())
 }
 
-/// Change ownership and permissions of a file for cross-user access.
+/// Set `path`'s group to the session user's group, then widen its mode to
+/// `mode`.
 ///
-/// Sets the group to the user's group and adds group read/write (and execute if runnable).
-/// Errors are propagated to match Python's behavior — if chown fails, permissions are
-/// NOT widened (security: don't grant group access to the wrong group).
+/// The single implementation of the cross-user permission rule: every path
+/// that grants the session group access to a session file or directory
+/// routes through here. It fails closed — when the group lookup, the chown,
+/// or the chmod fails, the error propagates and the mode is never widened,
+/// so group access is never granted to a group other than the session
+/// user's.
 #[cfg(unix)]
-pub fn chown_for_user(
+pub(crate) fn chown_group_then_widen(
     path: &Path,
     user: &dyn SessionUser,
-    runnable: bool,
+    mode: u32,
 ) -> Result<(), SessionError> {
     let grp = nix::unistd::Group::from_name(user.group())
         .map_err(|e| SessionError::PathPermissions {
@@ -132,14 +136,27 @@ pub fn chown_for_user(
     // Only widen permissions after chown succeeds — security: don't grant group
     // access if the group wasn't actually set.
     use std::os::unix::fs::PermissionsExt;
-    let mode = if runnable { 0o770 } else { 0o660 };
     fs::set_permissions(path, fs::Permissions::from_mode(mode)).map_err(|e| {
         SessionError::PathPermissions {
             path: path.display().to_string(),
             reason: e.to_string(),
         }
-    })?;
-    Ok(())
+    })
+}
+
+/// Change ownership and permissions of a file for cross-user access.
+///
+/// Sets the group to the user's group and adds group read/write (and execute if runnable).
+/// Errors are propagated to match Python's behavior — if chown fails, permissions are
+/// NOT widened (security: don't grant group access to the wrong group).
+#[cfg(unix)]
+pub fn chown_for_user(
+    path: &Path,
+    user: &dyn SessionUser,
+    runnable: bool,
+) -> Result<(), SessionError> {
+    let mode = if runnable { 0o770 } else { 0o660 };
+    chown_group_then_widen(path, user, mode)
 }
 
 /// Set ACL permissions on a file for cross-user access (Windows).
@@ -709,27 +726,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_chown_for_user_nonexistent_group_returns_error() {
-        use crate::session_user::SessionUser;
-
-        #[derive(Debug)]
-        struct FakeUser;
-        impl SessionUser for FakeUser {
-            fn user(&self) -> &str {
-                "nobody"
-            }
-            fn group(&self) -> &str {
-                "nonexistent_group_xyz_12345"
-            }
-            fn is_process_user(&self) -> bool {
-                false
-            }
-            fn as_any(&self) -> &dyn std::any::Any {
-                self
-            }
-        }
-
+        let user = crate::session_user::FakeSessionUser::with_group("nonexistent_group_xyz_12345");
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        let result = chown_for_user(tmp.path(), &FakeUser, false);
+        let result = chown_for_user(tmp.path(), &user, false);
         assert!(result.is_err(), "chown with nonexistent group should fail");
         let msg = result.unwrap_err().to_string();
         assert!(

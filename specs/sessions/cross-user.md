@@ -102,19 +102,29 @@ worker-agent → sudo → openjd_helper → script
 
 ## File Ownership
 
+Every POSIX path that grants the session group access — the working
+directory, embedded files, the helpers directory, and the helper binary —
+goes through one implementation, `chown_group_then_widen()` in
+`embedded_files.rs`:
+- Sets group ownership to the session user's group
+  (`nix::unistd::chown(path, None, Some(group_gid))`)
+- Then widens permissions to the caller's mode
+- Fails closed: a failed group lookup, chown, or chmod is a
+  `SessionError::PathPermissions`, and permissions are never widened
+  without the group set, so group access is never granted to a group other
+  than the session user's
+
 ### Working directory
 
 `TempDir::new_session_working_dir()` and `TempDir::new()` (used for the
 embedded-files directory) accept an optional session user. When it is
-provided and is not the process user:
-- `nix::unistd::chown(path, None, Some(group_gid))` sets group ownership
-- Permissions are set to 0o770 (owner + group rwx) instead of 0o700
+provided and is not the process user, permissions become 0o770
+(owner + group rwx) instead of 0o700.
 
 ### Embedded files
 
-`chown_for_user()` in `embedded_files.rs`:
-- Sets group ownership to the session user's group
-- Sets group read/write permissions (and execute if `runnable`)
+`chown_for_user()` in `embedded_files.rs` widens to 0o660, or 0o770 if
+`runnable`.
 
 ### Cleanup
 

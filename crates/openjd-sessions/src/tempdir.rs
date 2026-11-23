@@ -149,7 +149,11 @@ impl TempDir {
     ///
     /// - `dir`: parent directory (defaults to `openjd_temp_dir(None)`)
     /// - `prefix`: optional name prefix
-    /// - `user`: optional session user for cross-user ownership
+    /// - `user`: optional session user for cross-user ownership. When it is
+    ///   not the process user, the directory's group is set to the user's
+    ///   group and the mode to 0o770; if the group cannot be resolved or
+    ///   set, the call fails with [`SessionError::PathPermissions`] and the
+    ///   mode is never widened
     pub fn new(
         dir: Option<&Path>,
         prefix: Option<&str>,
@@ -201,31 +205,18 @@ impl TempDir {
     fn secure(path: PathBuf, user: Option<&dyn SessionUser>) -> Result<Self, SessionError> {
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = if let Some(u) = user.filter(|u| !u.is_process_user()) {
-                // Cross-user: chown group then set 0o770
-                // chown before chmod — security: don't grant group access if chown fails
-                if let Ok(Some(grp)) = nix::unistd::Group::from_name(u.group()) {
-                    nix::unistd::chown(&path, None, Some(grp.gid)).map_err(|e| {
-                        SessionError::PathPermissions {
-                            path: path.display().to_string(),
-                            reason: format!(
-                                "Could not change ownership (error: {e}). Please ensure that uid {} is a member of group {}.",
-                                nix::unistd::geteuid(), u.group()
-                            ),
-                        }
-                    })?;
-                }
-                0o770
+            if let Some(u) = user.filter(|u| !u.is_process_user()) {
+                // Cross-user: group ownership, then owner + group rwx.
+                crate::embedded_files::chown_group_then_widen(&path, u, 0o770)?;
             } else {
-                0o700
-            };
-            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).map_err(
-                |e| SessionError::TempDir {
-                    path: path.clone(),
-                    source: e,
-                },
-            )?;
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).map_err(
+                    |e| SessionError::TempDir {
+                        path: path.clone(),
+                        source: e,
+                    },
+                )?;
+            }
         }
 
         // Windows: set DACL — full control for process user, modify for session user.
@@ -689,6 +680,29 @@ mod tests {
         let td = TempDir::new(None, None, None).unwrap();
         let p: &std::path::Path = td.as_ref();
         assert_eq!(p, td.path());
+    }
+
+    /// A cross-user directory must never be group-accessible unless its group
+    /// was set to the session user's group: a failed group lookup is an error,
+    /// not a silent skip followed by a 0o770 widen.
+    #[cfg(unix)]
+    #[test]
+    fn tempdir_new_cross_user_fails_closed_when_group_lookup_fails() {
+        let user = crate::session_user::FakeSessionUser::with_group("openjd_nonexistent_group_586");
+        let parent = tempfile::tempdir().unwrap();
+        let result = TempDir::new(Some(parent.path()), Some("t-"), Some(&user));
+        let msg = match result {
+            Ok(td) => panic!(
+                "cross-user TempDir with an unresolvable group must fail, created {}",
+                td.path().display()
+            ),
+            Err(e) => e.to_string(),
+        };
+        assert!(
+            msg.starts_with("Failed to set permissions on '")
+                && msg.ends_with("': Group 'openjd_nonexistent_group_586' not found"),
+            "unexpected error message: {msg}"
+        );
     }
 
     fn sharing_violation() -> std::io::Error {
