@@ -1,0 +1,15 @@
+specificationVersion: jobtemplate-2023-09
+name: Render
+parameterDefinitions:
+  - {name: Frames, type: STRING, default: "1-100"}
+  - {name: Scene, type: PATH}
+steps:
+  - name: Render
+    parameterSpace:
+      taskParameterDefinitions:
+        - {name: Frame, type: INT, range: "{{Param.Frames}}"}
+    script:
+      actions:
+        onRun:
+          command: render
+          args: ["{{Param.Scene}}", "{{Task.Param.Frame}}"]

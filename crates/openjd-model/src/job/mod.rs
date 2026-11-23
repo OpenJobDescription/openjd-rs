@@ -22,9 +22,14 @@
 //! `-0.0 == 0.0`. Types with `f64` fields implement `PartialEq` but not
 //! `Eq`.
 
+pub mod apply;
 pub mod create_job;
+pub mod diff;
+mod document;
 pub mod step_dependency_graph;
 pub mod step_param_space;
+pub mod task_delta;
+pub mod template_diff;
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};

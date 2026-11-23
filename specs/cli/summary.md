@@ -19,7 +19,7 @@ openjd summary <PATH> [--step <STEP>] [-p <KEY=VALUE>]... [--extensions <EXT>] [
 |----------|------|----------|-------------|
 | `path` | `PathBuf` | Yes | Path to the job template file |
 | `--step` | `Option<String>` | No | Print summary for this step only |
-| `-p`, `--parameter` | `Vec<String>` | No | Job parameters (`Key=Value`, `file://path`, or inline JSON) |
+| `-p`, `--job-param` | `Vec<String>` | No | Job parameters (`Key=Value`, `file://path`, or inline JSON). Hidden alias `--parameter` |
 | `--extensions` | `Option<String>` | No | Comma-separated extension names |
 | `--output` | `String` | No | Output format: `human-readable` (default), `json`, `yaml` |
 
@@ -31,7 +31,7 @@ pub struct SummaryArgs {
     pub path: PathBuf,
     #[arg(long)]
     pub step: Option<String>,
-    #[arg(short = 'p', long = "parameter")]
+    #[arg(short = 'p', long = "job-param", alias = "parameter")]
     pub parameters: Vec<String>,
     #[arg(long = "extensions")]
     pub extensions: Option<String>,

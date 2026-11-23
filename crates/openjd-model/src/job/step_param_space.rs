@@ -51,7 +51,7 @@ fn checked_product_len(children: &[Box<dyn Node>]) -> Result<u64, ModelError> {
 }
 
 /// Tokenize a combination expression into identifiers and operators.
-fn tokenize(expr: &str) -> Vec<String> {
+pub(crate) fn tokenize(expr: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     for ch in expr.chars() {

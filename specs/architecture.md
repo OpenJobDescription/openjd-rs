@@ -31,7 +31,8 @@ openjd-rs/
 │   │       ├── template/       # The 2023-09 template model types and parsing (parse.rs)
 │   │       │   ├── validation/         # Revision-neutral validation entry points, limits and rules types
 │   │       │   └── validate_v2023_09/  # The 2023-09 validation passes
-│   │       └── job/            # Instantiated job types, parameter space iteration, step dependency graph
+│   │       └── job/            # Instantiated job types, parameter space iteration, step dependency graph;
+│   │           │               #   job diff, task delta, template diff and apply plan (unstable)
 │   │           └── create_job/ # create_job: parameter resolution and template instantiation
 │   ├── openjd-sessions/        # Session runtime
 │   │   ├── build.rs            # Builds the cross-user helper and embeds it in the crate
@@ -43,7 +44,8 @@ openjd-rs/
 │   │           ├── src/        # Helper protocol and output framing, Unix and Windows runners, process trees
 │   │           └── tests/      # Helper protocol tests
 │   ├── openjd-cli/             # The `openjd` binary
-│   │   └── src/                # main.rs (subcommand dispatch), check, summary, help, shared helpers
+│   │   └── src/                # main.rs (subcommand dispatch), check, summary, diff (unstable), help,
+│   │       │                   #   shared helpers
 │   │       └── run/            # `openjd run`: parameters, execution, result reporting
 │   ├── openjd-snapshots/       # Job attachments snapshots (experimental)
 │   │   └── src/                # lib.rs plus manifest types, the codec (v2023 and v2025 encode and decode),
@@ -136,7 +138,8 @@ Runtime library. Depends on openjd-model and openjd-expr. Provides:
 
 ### openjd-cli
 Binary crate (`openjd`). Depends on openjd-sessions, openjd-model, and openjd-expr.
-Commands: `check` (validate templates), `summary` (job/step summary), `run` (execute jobs locally).
+Commands: `check` (validate templates), `summary` (job/step summary), `run` (execute jobs locally),
+`diff` (diff two templates or two parameter sets; unstable).
 
 ### openjd-snapshots
 Job attachments library (experimental, see [Crate Status](#crate-status)). No dependency

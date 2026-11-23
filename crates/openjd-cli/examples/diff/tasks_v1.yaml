@@ -1,0 +1,17 @@
+# The old side: Render has one task per frame; Composite has one task.
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: Shot010
+steps:
+  - name: Render
+    parameterSpace:
+      taskParameterDefinitions:
+        - {name: Frame, type: INT, range: "1-3"}
+    script:
+      actions:
+        onRun: {command: render, args: ["--frame", "{{Task.Param.Frame}}"]}
+  - name: Composite
+    let: ["fps = 24"]
+    script:
+      actions:
+        onRun: {command: composite}
