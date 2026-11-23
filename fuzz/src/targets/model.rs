@@ -423,19 +423,45 @@ fn surface(template: &JobTemplate, job: &Job, ctx: &openjd_model::ValidationCont
             }
         }
         if let Some(c) = cancel {
-            match serde_json::to_value(c)
-                .map(serde_json::from_value::<openjd_model::job::CancelationMode>)
-            {
-                Ok(Ok(back)) => oracle!(
-                    serde_json::to_value(&back).ok() == serde_json::to_value(c).ok(),
-                    "CancelationMode serde round trip changed {c:?} to {back:?}"
-                ),
-                Ok(Err(e)) => oracle!(
-                    false,
-                    "CancelationMode does not deserialize its own form: {e}"
-                ),
-                Err(e) => oracle!(false, "CancelationMode does not serialize: {e}"),
-            }
+            let _ = serde_round_trip(c, "CancelationMode");
+        }
+    }
+    let params = job
+        .steps
+        .iter()
+        .filter_map(|s| s.parameter_space.as_ref())
+        .flat_map(|space| space.task_parameter_definitions.values());
+    for p in params {
+        if let Some(back) = serde_round_trip(p, "TaskParameter") {
+            oracle!(
+                back == *p,
+                "TaskParameter {p:?} reads back from its serde form as {back:?}"
+            );
+        }
+    }
+}
+
+/// `x` serializes, deserializes from what it serialized, and serializes the
+/// same way again. Returns the deserialized value.
+fn serde_round_trip<T>(x: &T, what: &str) -> Option<T>
+where
+    T: std::fmt::Debug + serde::Serialize + serde::de::DeserializeOwned,
+{
+    match serde_json::to_value(x).map(serde_json::from_value::<T>) {
+        Ok(Ok(back)) => {
+            oracle!(
+                serde_json::to_value(&back).ok() == serde_json::to_value(x).ok(),
+                "{what} serde round trip changed {x:?} to {back:?}"
+            );
+            Some(back)
+        }
+        Ok(Err(e)) => {
+            oracle!(false, "{what} does not deserialize its own form: {e}");
+            None
+        }
+        Err(e) => {
+            oracle!(false, "{what} does not serialize: {e}");
+            None
         }
     }
 }
