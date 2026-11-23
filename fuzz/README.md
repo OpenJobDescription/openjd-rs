@@ -89,13 +89,13 @@ and concretely with values of type `T`, under both POSIX and Windows path
 formats, and requires:
 
 - the concrete value belongs to the static type, and a value the static pass
-  folded equals the run-time value in the host's path format (type soundness);
+  folded equals the run-time value in either path format (type soundness);
 - static typing may accept an expression that a run with particular values
   rejects, because the static pass can't see those values. So after static
   acceptance a run-time type error or dispatch miss is allowed. A run-time
   failure is still a violation when the static pass folded the expression from
   literals alone (no symbols and no host-context function such as
-  `apply_path_mapping`), in the host's path format, to a value, since the run
+  `apply_path_mapping`) to a value, since the run
   must agree with it; when it is an undefined symbol, an unknown function, a
   method or property no type has, or unsupported syntax, which no value can
   cause; or when it refuses to order operands the library orders. A value

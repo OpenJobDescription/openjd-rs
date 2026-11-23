@@ -272,10 +272,11 @@ fn calls_host_context(code: &str) -> bool {
 
 /// Does a run-time failure of an expression the static pass folded to a
 /// value count against the fold? Only for a fold from literals alone: no
-/// symbol (`has_symbols`), no host-context function in `code` (string
-/// literals blanked), and the host's path format (`host_format`).
-pub fn strict_fold(code: &str, has_symbols: bool, host_format: bool) -> bool {
-    host_format && !has_symbols && !calls_host_context(code)
+/// symbol (`has_symbols`) and no host-context function in `code` (string
+/// literals blanked). The validation library leaves a literal path
+/// unresolved, so such a fold holds in either path format.
+pub fn strict_fold(code: &str, has_symbols: bool) -> bool {
+    !has_symbols && !calls_host_context(code)
 }
 
 /// The known issue that can explain a static rejection `e` of an
@@ -693,14 +694,8 @@ pub fn check_expression(
                 }
             }
             (Ok(sv), Err(e)) => {
-                // The "statically folded" oracle above compares in the
-                // host's format only; so does this one.
                 let folded = (!sv.is_unresolved()
-                    && strict_fold(
-                        &ctx.code,
-                        !parsed.accessed_symbols().is_empty(),
-                        fmt == PathFormat::host(),
-                    ))
+                    && strict_fold(&ctx.code, !parsed.accessed_symbols().is_empty()))
                 .then_some(sv);
                 check_accepted_then_fails(e, folded, || {
                     format!("{src:?}: accepted statically ({sv:?}) but run-time evaluation fails with {e}")
@@ -1183,13 +1178,13 @@ pub fn format_string(data: &[u8]) {
                     );
                 }
             }
+            // The static pass runs in the run's path format, so a value it
+            // folds must match resolution in every format.
             if let (Some(sv), Ok(rv)) = (&sr.resolved_value, &resolved) {
-                if fmt == PathFormat::host() {
-                    oracle!(
-                        sv.equals(rv),
-                        "{text:?}: static resolved_value {sv:?} but resolution gives {rv:?}"
-                    );
-                }
+                oracle!(
+                    sv.equals(rv),
+                    "{text:?}: static resolved_value {sv:?} but resolution gives {rv:?}"
+                );
             }
             match &resolved {
                 Ok(rv) => {
@@ -1206,9 +1201,9 @@ pub fn format_string(data: &[u8]) {
                 }
                 Err(e) => check_accepted_then_fails(
                     e,
-                    sr.resolved_value.as_ref().filter(|_| {
-                        strict_fold(&ctx.code, !names.is_empty(), fmt == PathFormat::host())
-                    }),
+                    sr.resolved_value
+                        .as_ref()
+                        .filter(|_| strict_fold(&ctx.code, !names.is_empty())),
                     || format!("{text:?}: validates but resolution fails with {e}"),
                 ),
             }

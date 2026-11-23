@@ -724,23 +724,19 @@ fn accepted_then_fails_rule() {
     }
 }
 
-/// A fold counts against the run only from literals alone, in the host's
-/// path format.
+/// A fold counts against the run only from literals alone.
 #[test]
 fn strict_folds() {
     use openjd_fuzz::targets::expr::strict_fold;
-    assert!(strict_fold("len('abc') > 2", false, true));
-    assert!(!strict_fold("len('abc') > 2", true, true));
-    assert!(!strict_fold("len('abc') > 2", false, false));
+    assert!(strict_fold("len('abc') > 2", false));
+    assert!(!strict_fold("len('abc') > 2", true));
     assert!(!strict_fold(
         "apply_path_mapping('/a') == path('/b') and False",
-        false,
-        true
+        false
     ));
     assert!(!strict_fold(
         "path('/a').apply_path_mapping() and False",
-        false,
-        true
+        false
     ));
 }
 
