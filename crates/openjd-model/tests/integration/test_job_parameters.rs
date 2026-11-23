@@ -1664,6 +1664,36 @@ fn path_param_maxlength_uses_chars_not_bytes() {
     );
 }
 
+#[test]
+fn path_param_check_constraints_rejects_by_char_count() {
+    let v = yaml_val(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "Test",
+        "parameterDefinitions": [{
+            "name": "Dir",
+            "type": "PATH",
+            "minLength": 9,
+            "maxLength": 10
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#,
+    );
+    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
+    let param = &jt.parameter_definitions.as_ref().unwrap()[0];
+    let path = |s: &str| openjd_expr::ExprValue::new_path(s.to_string(), PathFormat::Posix);
+
+    // "/tmp/ééé" is 8 chars but 11 bytes.
+    let err = param.check_constraints(&path("/tmp/ééé")).unwrap_err();
+    assert_eq!(
+        err,
+        "Parameter 'Dir': value length 8 is less than minimum 9"
+    );
+    // "/tmp/hééééé" is 11 chars but 16 bytes.
+    let err = param.check_constraints(&path("/tmp/hééééé")).unwrap_err();
+    assert_eq!(err, "Parameter 'Dir': value length 11 exceeds maximum 10");
+}
+
 // ══════════════════════════════════════════════════════════════
 // INT/FLOAT check_constraints on a numeric string (Template Schemas §7.5)
 // ══════════════════════════════════════════════════════════════
