@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 use super::rate::SlidingWindowRate;
-use crate::hash::{hash_file, hash_file_chunked};
+use crate::hash::{hash_file, hash_file_chunked, uses_chunks};
 use crate::hash_cache::{HashCache, WHOLE_FILE_RANGE_END};
 use crate::manifest::{AbsManifest, AbsSnapshot, AbsSnapshotDiff, Manifest};
 use rayon::prelude::*;
@@ -184,7 +184,7 @@ fn hash_manifest<P: Clone, K: Clone>(
         let file_size = file.size.unwrap_or(0);
         let mtime = file.mtime.unwrap_or(0);
         let path = file.path.clone();
-        let use_chunks = chunk_size > 0 && file_size as i64 > chunk_size;
+        let use_chunks = uses_chunks(file_size, chunk_size);
 
         stats.total_files += 1;
         stats.total_bytes = stats.total_bytes.saturating_add(file_size);
@@ -193,27 +193,13 @@ fn hash_manifest<P: Clone, K: Clone>(
         if let Some(ref cache) = options.hash_cache {
             if !options.force_rehash {
                 if use_chunks {
-                    let cs = chunk_size as u64;
-                    let mut all_cached = true;
-                    let mut cached_hashes = Vec::new();
-                    let mut offset: u64 = 0;
-                    while offset < file_size {
-                        let end = std::cmp::min(offset + cs, file_size);
-                        if let Some(h) = cache.get_if_fresh(
-                            Path::new(&path),
-                            alg_str,
-                            offset as i64,
-                            end as i64,
-                            mtime,
-                        ) {
-                            cached_hashes.push(h);
-                        } else {
-                            all_cached = false;
-                            break;
-                        }
-                        offset = end;
-                    }
-                    if all_cached && !cached_hashes.is_empty() {
+                    if let Some(cached_hashes) = cache.get_chunks_if_fresh(
+                        Path::new(&path),
+                        alg_str,
+                        file_size,
+                        chunk_size as u64,
+                        mtime,
+                    ) {
                         file.chunk_hashes = Some(cached_hashes);
                         stats.skipped_files += 1;
                         stats.skipped_bytes = stats.skipped_bytes.saturating_add(file_size);
@@ -338,13 +324,7 @@ fn hash_manifest<P: Clone, K: Clone>(
             }
             CacheResult::Chunked(hashes) => {
                 if let Some(ref cache) = options.hash_cache {
-                    let cs = chunk_size as u64;
-                    let mut offset: u64 = 0;
-                    for h in &hashes {
-                        let end = std::cmp::min(offset + cs, file_size);
-                        let _ = cache.put(path, alg_str, offset as i64, end as i64, h, mtime);
-                        offset = end;
-                    }
+                    cache.put_chunks(path, alg_str, file_size, chunk_size as u64, &hashes, mtime);
                 }
                 file.chunk_hashes = Some(hashes);
             }

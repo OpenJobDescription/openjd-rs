@@ -26,7 +26,7 @@ The DOWNLOAD operation uses a `tokio` runtime with bounded concurrency:
 │  │  1. Pre-allocate temp file (truncate to exact size)              │   │
 │  │  2. tokio::spawn all chunk downloads in parallel                 │   │
 │  │     - Each chunk writes to non-overlapping byte range            │   │
-│  │  3. Last chunk → atomic replace + restore mtime                  │   │
+│  │  3. All chunks done + verified → atomic replace + restore mtime  │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 │                                                                         │
 │  Memory bounded by MemoryPool (tokio::sync::Semaphore)                  │
@@ -58,9 +58,31 @@ All downloads are atomic to ensure target files are never partial or corrupt:
 
 This applies to all three download paths: small whole-file, multipart, and chunked.
 
+## Hash Verification
+
+Every byte written is checked against the manifest hash it was downloaded
+for before the temp file is renamed into place:
+
+| Download path | Check |
+|---------------|-------|
+| Small whole file, small chunk (single `get_object`) | The data is hashed in memory before it is written |
+| Whole file in byte-range parts | The assembled temp file is hashed once all parts are written |
+| Chunk in byte-range parts | Each such chunk's byte range of the temp file is hashed once all chunks are written |
+
+A mismatch deletes the temp file and fails the download with an `Io` error
+of kind `InvalidData`: `hash mismatch for <path>: expected <hash>, got <hash>`
+for a whole file, or `hash mismatch for chunk at offset <offset>: expected
+<hash>, got <hash>` for a chunk.
+
+Before any filesystem change, each chunked file's `chunk_hashes` must match
+the manifest's chunk size: the file must be larger than one chunk and have
+one hash per chunk, the rule `Manifest::validate` applies. Otherwise the
+download fails with a validation error such as `file '<path>' with size 12
+should have 4 chunks (chunk_size=3), got 2`.
+
 ## S3 Multi-Part Download
 
-Files and chunks larger than `2 × multipart_part_size` (default 64MB) use parallel byte-range requests via `get_object_range()` or `stream_range_to_file_at_offset()`:
+Files and chunks of at least `2 × multipart_part_size` (default 64MB; `multipart_threshold()` in `data_cache.rs`) use parallel byte-range requests via `get_object_range()` or `stream_range_to_file_at_offset()`:
 
 ```
 For a 100MB file with 32MB parts:
@@ -85,9 +107,9 @@ Files exceeding the chunk size are stored as multiple chunks in the data cache. 
 
 1. Pre-allocate temp file to exact size via `truncate(size)` (sparse file on supporting filesystems)
 2. Submit all chunk downloads to the tokio runtime
-3. Each chunk writes to `offset = chunk_index × file_chunk_size_bytes`
-4. Last chunk to complete triggers atomic move + mtime restore
-5. On any chunk failure, temp file deleted, error propagated
+3. Each chunk writes to `offset = chunk_index × file_chunk_size_bytes`; the chunk ranges are `split_ranges(size, file_chunk_size_bytes)`, the same ranges the hash cache keys chunks by
+4. Once every chunk has completed, chunks fetched in byte-range parts are verified (see [Hash Verification](#hash-verification)), then the temp file is moved into place and its mtime restored
+5. On any chunk failure or hash mismatch, temp file deleted, first error propagated
 
 ## Deletion Ordering
 

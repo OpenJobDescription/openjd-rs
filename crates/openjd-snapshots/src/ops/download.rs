@@ -4,10 +4,11 @@
 
 use super::memory_pool::{default_max_memory_bytes, MemoryPool};
 use super::rate::SlidingWindowRate;
-use crate::data_cache::AsyncDataCache;
-use crate::hash::hash_data;
+use crate::data_cache::{multipart_threshold, AsyncDataCache};
+use crate::hash::{hash_data, hash_file, hash_file_range, split_ranges};
 use crate::hash_cache::{HashCache, WHOLE_FILE_RANGE_END};
-use crate::manifest::{AbsManifest, FileEntry, Manifest, SymlinkPolicy};
+use crate::manifest::{check_chunk_hashes, AbsManifest, FileEntry, Manifest, SymlinkPolicy};
+use crate::path_util::parent_dir;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -221,35 +222,18 @@ fn collect_work_item(
                     }
                 }
                 if let Some(ref chunk_hashes) = file.chunk_hashes {
-                    let cs = file_chunk_size_bytes as u64;
-                    if cs > 0 && !chunk_hashes.is_empty() {
-                        let mut all_cached = true;
-                        let mut offset: u64 = 0;
-                        for expected in chunk_hashes {
-                            let end = std::cmp::min(offset + cs, file_size);
-                            if let Some(cached) = cache.get_if_fresh(
-                                path,
-                                alg_str,
-                                offset as i64,
-                                end as i64,
-                                actual_mtime,
-                            ) {
-                                if cached != *expected {
-                                    all_cached = false;
-                                    break;
-                                }
-                            } else {
-                                all_cached = false;
-                                break;
-                            }
-                            offset = end;
-                        }
-                        if all_cached {
-                            stats.skipped_files += 1;
-                            stats.skipped_bytes = stats.skipped_bytes.saturating_add(file_size);
-                            work_items.push((index, true, actual_mtime));
-                            return;
-                        }
+                    let cached = cache.get_chunks_if_fresh(
+                        path,
+                        alg_str,
+                        file_size,
+                        file_chunk_size_bytes as u64,
+                        actual_mtime,
+                    );
+                    if cached.as_ref() == Some(chunk_hashes) {
+                        stats.skipped_files += 1;
+                        stats.skipped_bytes = stats.skipped_bytes.saturating_add(file_size);
+                        work_items.push((index, true, actual_mtime));
+                        return;
                     }
                 }
             }
@@ -287,6 +271,13 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
     let max_workers = options.max_workers;
     let max_memory_bytes = options.max_memory_bytes;
 
+    // Chunk lists drive the hash-cache keys and the byte ranges written, so
+    // check them before touching the filesystem: the manifest may not have
+    // been validated.
+    for file in &manifest.files {
+        check_chunk_hashes(file, manifest.file_chunk_size_bytes)?;
+    }
+
     // Collect manifest directories (sorted so parents come before children)
     let mut dir_paths: Vec<&str> = manifest
         .dirs
@@ -306,11 +297,10 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
         if file.deleted || file.symlink_target.is_some() {
             continue;
         }
-        let parent = Path::new(&file.path)
-            .parent()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        files_by_parent.entry(parent).or_default().push(i);
+        files_by_parent
+            .entry(parent_dir(&file.path).to_string())
+            .or_default()
+            .push(i);
     }
 
     // Handle deleted entries
@@ -557,7 +547,6 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
                 };
 
                 let part_size = dc.multipart_part_size();
-                let multipart_threshold = 2 * part_size as u64;
                 let supports_range = dc.as_range_read().is_some();
 
                 // For multipart files, write directly to file at offsets
@@ -572,23 +561,21 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
                         .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
                         .map_err(crate::SnapshotError::Io)?;
 
-                    let mut file_offset: u64 = 0;
                     let mut chunk_handles: Vec<tokio::task::JoinHandle<std::io::Result<u64>>> =
                         Vec::new();
-                    for h in chunk_hashes {
-                        let cs = manifest_chunk_size as u64;
-                        let remaining = file_size - file_offset;
-                        let this_chunk_size = remaining.min(cs);
+                    // Chunks fetched in byte-range parts arrive in pieces, so
+                    // they are verified once all parts are on disk.
+                    let mut ranged_chunks: Vec<(u64, u64, String)> = Vec::new();
+                    // `check_chunk_hashes` guarantees one hash per range.
+                    let ranges = split_ranges(file_size, manifest_chunk_size as u64);
+                    for ((file_offset, chunk_end), h) in ranges.zip(chunk_hashes) {
+                        let this_chunk_size = chunk_end - file_offset;
 
-                        if this_chunk_size >= multipart_threshold && supports_range {
+                        if this_chunk_size >= multipart_threshold(part_size) && supports_range {
                             // Split large chunk into parallel byte-range parts
-                            let num_parts = (this_chunk_size as usize).div_ceil(part_size);
-                            for part_idx in 0..num_parts {
-                                let part_start = part_idx as u64 * part_size as u64;
-                                let part_end = std::cmp::min(
-                                    part_start + part_size as u64 - 1,
-                                    this_chunk_size - 1,
-                                );
+                            for (part_start, part_end) in
+                                split_ranges(this_chunk_size, part_size as u64)
+                            {
                                 let write_offset = file_offset + part_start;
                                 let dc = dc.clone();
                                 let alg = alg.clone();
@@ -601,13 +588,14 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
                                             &h,
                                             &alg,
                                             part_start,
-                                            part_end,
+                                            part_end - 1,
                                             &tp,
                                             write_offset,
                                         )
                                         .await
                                 }));
                             }
+                            ranged_chunks.push((file_offset, this_chunk_size, h));
                         } else {
                             // Small chunk - single GetObject with inline hash verification
                             let dc = dc.clone();
@@ -619,18 +607,18 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
                                 let data = dc.get_object(&expected_hash, &alg).await?;
                                 let actual_hash = hash_data(&data);
                                 if actual_hash != expected_hash {
-                                    return Err(std::io::Error::new(
-                                        std::io::ErrorKind::InvalidData,
-                                        format!(
-                                            "hash mismatch for chunk at offset {off}: expected {expected_hash}, got {actual_hash}"
-                                        ),
+                                    return Err(chunk_hash_mismatch(
+                                        off,
+                                        &expected_hash,
+                                        &actual_hash,
                                     ));
                                 }
                                 let len = data.len() as u64;
                                 let tp2 = tp.clone();
                                 tokio::task::spawn_blocking(move || {
                                     use std::io::{Seek, SeekFrom, Write};
-                                    let mut f = std::fs::OpenOptions::new().write(true).open(&tp2)?;
+                                    let mut f =
+                                        std::fs::OpenOptions::new().write(true).open(&tp2)?;
                                     f.seek(SeekFrom::Start(off))?;
                                     f.write_all(&data)?;
                                     Ok::<_, std::io::Error>(len)
@@ -639,13 +627,31 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
                                 .map_err(std::io::Error::other)?
                             }));
                         }
-                        file_offset += this_chunk_size;
                     }
+                    // Wait for every writer before acting on a failure, so
+                    // none is still writing when the temp file is removed.
+                    let mut written: crate::Result<()> = Ok(());
                     for handle in chunk_handles {
-                        handle
+                        let r = handle
                             .await
-                            .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
-                            .map_err(crate::SnapshotError::Io)?;
+                            .map_err(|e| crate::SnapshotError::Task(e.to_string()))
+                            .and_then(|r| r.map_err(crate::SnapshotError::Io));
+                        if written.is_ok() {
+                            written = r.map(|_| ());
+                        }
+                    }
+                    if written.is_ok() {
+                        let tp = tmp_path.clone();
+                        written = tokio::task::spawn_blocking(move || {
+                            verify_ranged_chunks(&tp, ranged_chunks)
+                        })
+                        .await
+                        .map_err(|e| crate::SnapshotError::Task(e.to_string()))
+                        .and_then(|r| r.map_err(crate::SnapshotError::Io));
+                    }
+                    if let Err(e) = written {
+                        let _ = std::fs::remove_file(&tmp_path);
+                        return Err(e);
                     }
                     // Atomic rename from temp to target
                     let tmp = tmp_path.clone();
@@ -657,13 +663,14 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
                     already_written = true;
                     Vec::new()
                 } else if let Some(ref hash) = file_hash {
-                    if file_size >= multipart_threshold && supports_range {
+                    if file_size >= multipart_threshold(part_size) && supports_range {
                         download_multipart_to_file(
                             &dc,
                             hash,
                             &alg,
                             file_size,
                             part_size,
+                            &file_path,
                             target_path.clone(),
                         )
                         .await?;
@@ -677,12 +684,10 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
                             .map_err(crate::SnapshotError::Io)?;
                         let actual_hash = hash_data(&data);
                         if actual_hash != *hash {
-                            return Err(crate::SnapshotError::Io(std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!(
-                                    "hash mismatch for {}: expected {hash}, got {actual_hash}",
-                                    file_path
-                                ),
+                            return Err(crate::SnapshotError::Io(file_hash_mismatch(
+                                &file_path,
+                                hash,
+                                &actual_hash,
                             )));
                         }
                         already_written = false;
@@ -720,7 +725,8 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
                     s.total_time = elapsed;
                     {
                         let mut rc = rate_calc.lock().unwrap();
-                        s.rate = rc.update(elapsed, s.downloaded_bytes.saturating_add(s.skipped_bytes));
+                        s.rate =
+                            rc.update(elapsed, s.downloaded_bytes.saturating_add(s.skipped_bytes));
                     }
                     if s.total_bytes > 0 {
                         s.progress = ((s.downloaded_bytes.saturating_add(s.skipped_bytes)) as f64
@@ -785,23 +791,14 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
                 );
             }
             if let Some(ref chunk_hashes) = file.chunk_hashes {
-                let cs = result.file_chunk_size_bytes as u64;
-                if cs > 0 {
-                    let file_size = file.size.unwrap_or(0);
-                    let mut offset: u64 = 0;
-                    for h in chunk_hashes {
-                        let end = std::cmp::min(offset + cs, file_size);
-                        let _ = cache.put(
-                            &target_path,
-                            alg_str,
-                            offset as i64,
-                            end as i64,
-                            h,
-                            actual_mtime,
-                        );
-                        offset = end;
-                    }
-                }
+                cache.put_chunks(
+                    &target_path,
+                    alg_str,
+                    file.size.unwrap_or(0),
+                    result.file_chunk_size_bytes as u64,
+                    chunk_hashes,
+                    actual_mtime,
+                );
             }
         }
     }
@@ -850,12 +847,44 @@ async fn download_manifest<P: Clone + Send + Sync + 'static, K: Clone + Send + S
     Ok((result, stats))
 }
 
+/// The error for a downloaded chunk whose content does not match its hash.
+fn chunk_hash_mismatch(offset: u64, expected: &str, actual: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("hash mismatch for chunk at offset {offset}: expected {expected}, got {actual}"),
+    )
+}
+
+/// The error for a downloaded whole file whose content does not match its hash.
+fn file_hash_mismatch(path: &str, expected: &str, actual: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("hash mismatch for {path}: expected {expected}, got {actual}"),
+    )
+}
+
+/// Checks each `(offset, len, hash)` chunk written to `path` in byte-range
+/// parts against its hash, reading it back from disk.
+fn verify_ranged_chunks(path: &Path, chunks: Vec<(u64, u64, String)>) -> std::io::Result<()> {
+    for (offset, len, expected) in chunks {
+        let actual = hash_file_range(path, offset, len)?;
+        if actual != expected {
+            return Err(chunk_hash_mismatch(offset, &expected, &actual));
+        }
+    }
+    Ok(())
+}
+
+/// Downloads a whole-file object in byte-range parts into a temp file, checks
+/// the assembled file against `hash`, then renames it over `target_path`.
+/// On any failure the temp file is removed and `target_path` is untouched.
 async fn download_multipart_to_file(
     data_cache: &Arc<dyn AsyncDataCache>,
     hash: &str,
     alg_str: &str,
     file_size: u64,
     part_size: usize,
+    manifest_path: &str,
     target_path: std::path::PathBuf,
 ) -> crate::Result<()> {
     // Pre-allocate sparse temp file
@@ -868,12 +897,8 @@ async fn download_multipart_to_file(
         .map_err(crate::SnapshotError::Io)?;
 
     // Download parts in parallel, write each at its offset in the temp file
-    let num_parts = (file_size as usize).div_ceil(part_size);
-    let mut handles = Vec::with_capacity(num_parts);
-
-    for part_idx in 0..num_parts {
-        let start = part_idx as u64 * part_size as u64;
-        let end = std::cmp::min(start + part_size as u64 - 1, file_size - 1);
+    let mut handles = Vec::new();
+    for (start, end) in split_ranges(file_size, part_size as u64) {
         let dc = data_cache.clone();
         let h = hash.to_string();
         let a = alg_str.to_string();
@@ -882,17 +907,45 @@ async fn download_multipart_to_file(
         handles.push(tokio::spawn(async move {
             dc.as_range_read()
                 .expect("download_multipart_to_file requires RangeReadDataCache support")
-                .stream_range_to_file_at_offset(&h, &a, start, end, &tp, start)
+                .stream_range_to_file_at_offset(&h, &a, start, end - 1, &tp, start)
                 .await
                 .map_err(crate::SnapshotError::Io)?;
             Ok::<_, crate::SnapshotError>(())
         }));
     }
 
+    // Wait for every writer before acting on a failure, so none is still
+    // writing when the temp file is removed.
+    let mut written: crate::Result<()> = Ok(());
     for handle in handles {
-        handle
+        let r = handle
             .await
-            .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
+            .map_err(|e| crate::SnapshotError::Task(e.to_string()))
+            .and_then(|r| r);
+        if written.is_ok() {
+            written = r;
+        }
+    }
+    // The parts arrive in pieces, so the content is checked once all of
+    // them are on disk.
+    if written.is_ok() {
+        let tp = tmp_path.clone();
+        let expected = hash.to_string();
+        let path = manifest_path.to_string();
+        written = tokio::task::spawn_blocking(move || {
+            let actual = hash_file(&tp)?;
+            if actual != expected {
+                return Err(file_hash_mismatch(&path, &expected, &actual));
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| crate::SnapshotError::Task(e.to_string()))
+        .and_then(|r| r.map_err(crate::SnapshotError::Io));
+    }
+    if let Err(e) = written {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
     }
 
     // Atomic rename from temp to target
@@ -1243,5 +1296,250 @@ mod tests {
         .unwrap();
 
         assert!(dir_path.is_dir());
+    }
+
+    /// An in-memory cache that serves byte ranges, so downloads at or above
+    /// the multipart threshold take the ranged path. Objects are stored
+    /// under whatever hash the test chooses, so a test can serve content
+    /// that does not match its hash.
+    struct RangeCache {
+        objects: Mutex<HashMap<String, Vec<u8>>>,
+        part_size: usize,
+    }
+
+    impl RangeCache {
+        fn new(part_size: usize) -> Self {
+            Self {
+                objects: Mutex::new(HashMap::new()),
+                part_size,
+            }
+        }
+        fn insert(&self, hash: &str, data: &[u8]) {
+            self.objects
+                .lock()
+                .unwrap()
+                .insert(hash.to_string(), data.to_vec());
+        }
+        fn object(&self, hash: &str) -> std::io::Result<Vec<u8>> {
+            self.objects
+                .lock()
+                .unwrap()
+                .get(hash)
+                .cloned()
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, hash.to_string()))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AsyncDataCache for RangeCache {
+        fn object_key(&self, hash: &str, algorithm: &str) -> String {
+            format!("{hash}.{algorithm}")
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        async fn object_exists(&self, hash: &str, _algorithm: &str) -> std::io::Result<bool> {
+            Ok(self.objects.lock().unwrap().contains_key(hash))
+        }
+        async fn put_object(
+            &self,
+            hash: &str,
+            _algorithm: &str,
+            data: Vec<u8>,
+        ) -> std::io::Result<String> {
+            self.insert(hash, &data);
+            Ok(hash.to_string())
+        }
+        async fn get_object(&self, hash: &str, _algorithm: &str) -> std::io::Result<Vec<u8>> {
+            self.object(hash)
+        }
+        fn multipart_part_size(&self) -> usize {
+            self.part_size
+        }
+        fn as_range_read(&self) -> Option<&dyn crate::data_cache::RangeReadDataCache> {
+            Some(self)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::data_cache::RangeReadDataCache for RangeCache {
+        async fn get_object_range(
+            &self,
+            hash: &str,
+            _algorithm: &str,
+            start: u64,
+            end: u64,
+        ) -> std::io::Result<Vec<u8>> {
+            Ok(self.object(hash)?[start as usize..=end as usize].to_vec())
+        }
+    }
+
+    /// The names in `dir`, so a test can check that no temp file is left.
+    fn dir_names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[tokio::test]
+    async fn ranged_whole_file_download_verifies_hash() {
+        let tmp = TempDir::new().unwrap();
+        // part_size 4 puts the multipart threshold at 8 bytes.
+        let cache = RangeCache::new(4);
+        let hash = hash_data(b"hello world!");
+        cache.insert(&hash, b"HELLO WORLD!");
+
+        let dest = tmp.path().join("big.bin");
+        let dest_str = dest.to_string_lossy().to_string();
+        let mut entry = FileEntry::file(&dest_str, 12, 1000);
+        entry.hash = Some(hash.clone());
+        let manifest: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![entry]);
+
+        let err = download_abs_manifest(
+            &AbsManifest::Snapshot(manifest),
+            Arc::new(cache),
+            DownloadOptions::default(),
+        )
+        .await
+        .map(|_| ())
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "IO error: hash mismatch for {dest_str}: expected {hash}, got {}",
+                hash_data(b"HELLO WORLD!")
+            )
+        );
+        assert!(
+            dir_names(tmp.path()).is_empty(),
+            "{:?}",
+            dir_names(tmp.path())
+        );
+    }
+
+    #[tokio::test]
+    async fn ranged_chunk_download_verifies_hash() {
+        let tmp = TempDir::new().unwrap();
+        let cache = RangeCache::new(4);
+        // Chunk size 8 over 12 bytes: chunk 0 (8 bytes) reaches the
+        // multipart threshold and is fetched in ranged parts; chunk 1
+        // (4 bytes) is fetched whole.
+        let h0 = hash_data(b"aaaabbbb");
+        let h1 = hash_data(b"cccc");
+        cache.insert(&h0, b"aaaaBBBB");
+        cache.insert(&h1, b"cccc");
+
+        let dest = tmp.path().join("chunked.bin");
+        let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 12, 1000);
+        entry.chunk_hashes = Some(vec![h0.clone(), h1]);
+        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, 8).with_files(vec![entry]);
+
+        let err = download_abs_manifest(
+            &AbsManifest::Snapshot(manifest),
+            Arc::new(cache),
+            DownloadOptions::default(),
+        )
+        .await
+        .map(|_| ())
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "IO error: hash mismatch for chunk at offset 0: expected {h0}, got {}",
+                hash_data(b"aaaaBBBB")
+            )
+        );
+        assert!(
+            dir_names(tmp.path()).is_empty(),
+            "{:?}",
+            dir_names(tmp.path())
+        );
+    }
+
+    #[tokio::test]
+    async fn ranged_downloads_write_matching_content() {
+        let tmp = TempDir::new().unwrap();
+        let cache = RangeCache::new(4);
+        let whole = hash_data(b"hello world!");
+        cache.insert(&whole, b"hello world!");
+        let h0 = hash_data(b"aaaabbbb");
+        let h1 = hash_data(b"cccc");
+        cache.insert(&h0, b"aaaabbbb");
+        cache.insert(&h1, b"cccc");
+
+        let whole_dest = tmp.path().join("whole.bin");
+        let mut whole_entry = FileEntry::file(whole_dest.to_string_lossy().to_string(), 12, 1000);
+        whole_entry.hash = Some(whole);
+        let chunked_dest = tmp.path().join("chunked.bin");
+        let mut chunked_entry =
+            FileEntry::file(chunked_dest.to_string_lossy().to_string(), 12, 1000);
+        chunked_entry.chunk_hashes = Some(vec![h0, h1]);
+        let manifest: AbsSnapshot =
+            Manifest::new(HashAlgorithm::Xxh128, 8).with_files(vec![whole_entry, chunked_entry]);
+
+        let result = download_abs_manifest(
+            &AbsManifest::Snapshot(manifest),
+            Arc::new(cache),
+            DownloadOptions::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.statistics.downloaded_files, 2);
+        assert_eq!(std::fs::read(&whole_dest).unwrap(), b"hello world!");
+        assert_eq!(std::fs::read(&chunked_dest).unwrap(), b"aaaabbbbcccc");
+        assert_eq!(dir_names(tmp.path()), ["chunked.bin", "whole.bin"]);
+    }
+
+    /// A `chunk_hashes` list shorter than the file's chunk count is rejected,
+    /// not taken as a hash-cache hit, even when every listed chunk is cached.
+    #[tokio::test]
+    async fn short_chunk_hash_list_is_rejected() {
+        let tmp = TempDir::new().unwrap();
+        let cache_dir = TempDir::new().unwrap();
+        let hc_dir = TempDir::new().unwrap();
+        let data_cache = FileSystemDataCache::new(cache_dir.path().join("data")).unwrap();
+        let hash_cache = Arc::new(HashCache::new(hc_dir.path()).unwrap());
+
+        let dest = tmp.path().join("chunked.bin");
+        std::fs::write(&dest, b"aaabbbcccddd").unwrap();
+        let mtime = get_mtime(&dest).unwrap();
+        let dest_str = dest.to_string_lossy().to_string();
+        let mut hashes = Vec::new();
+        for (i, c) in [b"aaa", b"bbb", b"ccc", b"ddd"].iter().enumerate() {
+            let h = hash_data(*c);
+            let start = i as i64 * 3;
+            hash_cache
+                .put(&dest, "xxh128", start, start + 3, &h, mtime)
+                .unwrap();
+            hashes.push(h);
+        }
+        hashes.truncate(2);
+
+        let mut entry = FileEntry::file(&dest_str, 12, mtime);
+        entry.chunk_hashes = Some(hashes);
+        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, 3).with_files(vec![entry]);
+
+        let err = download_abs_manifest(
+            &AbsManifest::Snapshot(manifest),
+            Arc::new(data_cache),
+            DownloadOptions {
+                hash_cache: Some(hash_cache),
+                ..Default::default()
+            },
+        )
+        .await
+        .map(|_| ())
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "Manifest validation error: file '{dest_str}' with size 12 should have 4 chunks (chunk_size=3), got 2"
+            )
+        );
+        assert_eq!(std::fs::read(&dest).unwrap(), b"aaabbbcccddd");
     }
 }

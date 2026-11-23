@@ -4,7 +4,10 @@
 
 use super::memory_pool::{default_max_memory_bytes, MemoryPool};
 use super::rate::SlidingWindowRate;
-use crate::data_cache::{AsyncDataCache, CopyResult, MultipartDataCache, RangeReadDataCache};
+use crate::data_cache::{
+    multipart_threshold, upload_multipart, AsyncDataCache, CopyResult, MultipartDataCache,
+    RangeReadDataCache,
+};
 use crate::manifest::ManifestRef;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -60,9 +63,8 @@ async fn transfer_object(
     memory_pool: &MemoryPool,
 ) -> crate::Result<u64> {
     let part_size = dst.multipart_part_size();
-    let multipart_threshold = 2 * part_size as u64;
 
-    if size_est >= multipart_threshold {
+    if size_est >= multipart_threshold(part_size) {
         if let (Some(dst_mp), Some(src_rr)) = (dst.as_multipart(), src.as_range_read()) {
             return transfer_object_multipart(
                 src_rr,
@@ -97,57 +99,23 @@ async fn transfer_object_multipart(
     part_size: usize,
     memory_pool: &MemoryPool,
 ) -> crate::Result<u64> {
-    use futures_util::stream::{FuturesUnordered, StreamExt};
-
-    let upload_id = dst
-        .create_multipart_upload(hash, alg)
-        .await
-        .map_err(crate::SnapshotError::Io)?;
-
-    let num_parts = (size_est as usize).div_ceil(part_size) as i32;
-    let mut futures = FuturesUnordered::new();
-    let mut parts = Vec::with_capacity(num_parts as usize);
-    let uid: &str = &upload_id;
-
-    for part_num in 1..=num_parts {
-        let start = (part_num as u64 - 1) * part_size as u64;
-        let end = std::cmp::min(start + part_size as u64 - 1, size_est.saturating_sub(1));
-
-        futures.push(async move {
-            let _permit = memory_pool.acquire(part_size).await;
+    upload_multipart(
+        dst,
+        hash,
+        alg,
+        size_est,
+        part_size,
+        |start, end| async move {
+            let permit = memory_pool.acquire(part_size).await;
             let data = src
-                .get_object_range(hash, alg, start, end)
+                .get_object_range(hash, alg, start, end - 1)
                 .await
                 .map_err(crate::SnapshotError::Io)?;
-            let etag = dst
-                .upload_part(hash, alg, uid, part_num, data)
-                .await
-                .map_err(crate::SnapshotError::Io)?;
-            Ok::<_, crate::SnapshotError>((part_num, etag))
-        });
-    }
-
-    let result: crate::Result<Vec<(i32, String)>> = async {
-        while let Some(res) = futures.next().await {
-            parts.push(res?);
-        }
-        parts.sort_by_key(|(num, _)| *num);
-        Ok(parts)
-    }
-    .await;
-
-    match result {
-        Ok(parts) => {
-            dst.complete_multipart_upload(hash, alg, &upload_id, parts)
-                .await
-                .map_err(crate::SnapshotError::Io)?;
-            Ok(size_est)
-        }
-        Err(e) => {
-            let _ = dst.abort_multipart_upload(hash, alg, &upload_id).await;
-            Err(e)
-        }
-    }
+            Ok((data, permit))
+        },
+    )
+    .await?;
+    Ok(size_est)
 }
 
 /// Copies data between two AsyncDataCache instances for all hashes referenced by manifest files.

@@ -2024,7 +2024,14 @@ async fn statistics_saturate_on_huge_declared_sizes() {
             FileEntry::file(&path, huge, mtime)
         })
         .collect();
-    let m = AbsManifest::Snapshot(make_snapshot(files));
+    // Whole-file hashing: a chunked file must match its declared size.
+    let m = AbsManifest::Snapshot(
+        Manifest::new(
+            HashAlgorithm::Xxh128,
+            openjd_snapshots::WHOLE_FILE_CHUNK_SIZE,
+        )
+        .with_files(files),
+    );
     let run = |hash_cache: Option<Arc<HashCache>>| {
         let (m, dc) = (&m, dc.clone());
         async move {

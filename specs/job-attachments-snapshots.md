@@ -491,7 +491,7 @@ pub struct PartitionOptions {
 }
 ```
 
-Auto-root determination: longest common prefix on POSIX, per-drive on Windows.
+Auto-root determination: one root per volume (`/`, each drive root, or `.`), the longest common directory of that volume's paths, as `Manifest::common_root` computes it. See [snapshot_operation_partition.md](snapshots/snapshot_operation_partition.md#auto-root-determination).
 
 ### 10. JOIN
 

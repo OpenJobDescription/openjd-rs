@@ -109,11 +109,12 @@ Duplicate hashes (same content referenced by multiple files) are deduplicated be
 
 ### Large Object Handling
 
-For objects larger than `2 × destination.multipart_part_size()`:
+For objects of at least `2 × destination.multipart_part_size()` (`multipart_threshold()`):
 
 1. Read from source using `get_object_range()` in parts
-2. Upload to destination using multipart upload (`create_multipart_upload` / `upload_part` / `complete_multipart_upload`)
-3. Each part is bounded by the memory pool — only a few parts in flight at once
+2. Upload to destination using multipart upload (`create_multipart_upload` / `upload_part` / `complete_multipart_upload`), through the `upload_multipart()` helper HASH_UPLOAD also uses
+3. Each part is bounded by the memory pool — a part holds its memory permit until its upload finishes, so only a few parts are in flight at once
+4. On any failure, including a failed completion, the multipart upload is aborted
 
 This avoids buffering an entire large object in memory.
 

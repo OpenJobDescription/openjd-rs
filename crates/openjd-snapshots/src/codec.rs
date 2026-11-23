@@ -23,10 +23,11 @@
 
 use crate::hash::HashAlgorithm;
 use crate::manifest::{
-    AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, Manifest, Rel, Snapshot, SnapshotDiff,
-    SymlinkPolicy, ValidateKind,
+    check_symlink_target, AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, Manifest, Rel,
+    Snapshot, SnapshotDiff, SymlinkPolicy, ValidateKind,
 };
 use crate::ops::subtree_rel_snapshot;
+use crate::path_util::implied_dirs;
 use crate::{Result, SnapshotError, DEFAULT_FILE_CHUNK_SIZE, WHOLE_FILE_CHUNK_SIZE};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -78,16 +79,13 @@ const SPEC_REL_DIFF: &str = "relative-manifest-diff-beta-2025-12";
 
 // --- Encode ---
 
-/// Validates that all symlink targets in a relative manifest are relative paths.
-fn validate_symlink_targets_relative(files: &[FileEntry]) -> Result<()> {
+/// Checks every symlink target in a relative manifest with the rule
+/// `Manifest::validate` applies, so an encoder rejects a bad target with
+/// the same message validation gives.
+fn check_relative_symlink_targets(files: &[FileEntry]) -> Result<()> {
     for f in files {
         if let Some(ref target) = f.symlink_target {
-            if crate::path_util::is_absolute_path(target) {
-                return Err(SnapshotError::Validation(format!(
-                    "symlink '{}' target must be a relative path, got absolute: '{}'",
-                    f.path, target
-                )));
-            }
+            check_symlink_target::<Rel>(&f.path, target)?;
         }
     }
     Ok(())
@@ -113,10 +111,33 @@ fn v2023_total_size(paths: &[Value]) -> Result<u64> {
 }
 
 /// Encode a Snapshot to v2023 JSON. Fails with `SnapshotError::Validation`
-/// if a file is missing a hash, a symlink target is absolute, the chunk size
-/// is not whole-file, or the file sizes sum past `u64::MAX`.
+/// if a file is missing a hash, a symlink target is not a valid relative
+/// path, the chunk size is not whole-file, or the file sizes sum past
+/// `u64::MAX`.
 pub fn encode_snapshot_v2023(manifest: &Snapshot) -> Result<String> {
-    validate_symlink_targets_relative(&manifest.files)?;
+    encode_v2023(manifest)
+}
+
+/// Encode a SnapshotDiff to v2023 JSON (drops deletions). Fails with
+/// `SnapshotError::Validation` under the same conditions as
+/// [`encode_snapshot_v2023`], including file sizes that sum past `u64::MAX`.
+pub fn encode_snapshot_diff_v2023(manifest: &SnapshotDiff) -> Result<String> {
+    // Symlink collapsing works on a Snapshot, so carry the diff's entries,
+    // deletions included, into one; `encode_v2023` drops the deletions.
+    let mut snap: Snapshot = Manifest::new(manifest.hash_alg, manifest.file_chunk_size_bytes);
+    snap.files = manifest.files.clone();
+    snap.dirs = manifest.dirs.clone();
+    snap.total_size = manifest.total_size;
+    encode_v2023(&snap)
+}
+
+/// The v2023 encoding both [`encode_snapshot_v2023`] and
+/// [`encode_snapshot_diff_v2023`] produce. v2023 has no symlinks,
+/// directories, or deletions: symlinks are collapsed into the files they
+/// point at, and empty directories and deleted entries are dropped with a
+/// warning.
+fn encode_v2023(manifest: &Snapshot) -> Result<String> {
+    check_relative_symlink_targets(&manifest.files)?;
     if manifest.file_chunk_size_bytes != WHOLE_FILE_CHUNK_SIZE {
         return Err(SnapshotError::Validation(format!(
             "v2023 format requires fileChunkSizeBytes={WHOLE_FILE_CHUNK_SIZE}, got {}",
@@ -127,25 +148,39 @@ pub fn encode_snapshot_v2023(manifest: &Snapshot) -> Result<String> {
     // Collapse symlinks via identity subtree
     let collapsed = subtree_rel_snapshot(manifest, ".", SymlinkPolicy::CollapseAll)?;
 
-    // Warn about empty directories being dropped (v2023 has no directory support)
-    if !collapsed.dirs.is_empty() {
-        let implied: std::collections::HashSet<String> = collapsed
+    let deleted_count = collapsed.files.iter().filter(|f| f.deleted).count()
+        + collapsed.dirs.iter().filter(|d| d.deleted).count();
+    if deleted_count > 0 {
+        warn!(
+            count = deleted_count,
+            "dropping deletions not supported in v2023 format"
+        );
+    }
+
+    let implied = implied_dirs(
+        collapsed
             .files
             .iter()
             .filter(|f| !f.deleted)
-            .filter_map(|f| f.path.rfind('/').map(|i| f.path[..i].to_string()))
-            .collect();
-        let empty_count = collapsed
-            .dirs
-            .iter()
-            .filter(|d| !implied.contains(&d.path))
-            .count();
-        if empty_count > 0 {
-            warn!(
-                count = empty_count,
-                "dropping empty directories not supported in v2023 format"
-            );
-        }
+            .map(|f| f.path.as_str())
+            .chain(
+                collapsed
+                    .dirs
+                    .iter()
+                    .filter(|d| !d.deleted)
+                    .map(|d| d.path.as_str()),
+            ),
+    );
+    let empty_count = collapsed
+        .dirs
+        .iter()
+        .filter(|d| !d.deleted && !implied.contains(d.path.as_str()))
+        .count();
+    if empty_count > 0 {
+        warn!(
+            count = empty_count,
+            "dropping empty directories not supported in v2023 format"
+        );
     }
 
     let mut paths: Vec<Value> = Vec::new();
@@ -171,100 +206,15 @@ pub fn encode_snapshot_v2023(manifest: &Snapshot) -> Result<String> {
         utf16_be_bytes(pa).cmp(&utf16_be_bytes(pb))
     });
 
+    // totalSize counts the written (non-deleted, non-symlink) files only.
     let obj = serde_json::json!({
-        "hashAlg": hash_alg_str(collapsed.hash_alg),
+        "hashAlg": collapsed.hash_alg.extension(),
         "manifestVersion": V2023_MANIFEST_VERSION,
         "paths": paths,
         "totalSize": v2023_total_size(&paths)?,
     });
 
     // sort_keys + no whitespace = canonical JSON
-    Ok(canonical_json(&obj))
-}
-
-/// Encode a SnapshotDiff to v2023 JSON (drops deletions). Fails with
-/// `SnapshotError::Validation` under the same conditions as
-/// [`encode_snapshot_v2023`], including file sizes that sum past `u64::MAX`.
-pub fn encode_snapshot_diff_v2023(manifest: &SnapshotDiff) -> Result<String> {
-    validate_symlink_targets_relative(&manifest.files)?;
-    if manifest.file_chunk_size_bytes != WHOLE_FILE_CHUNK_SIZE {
-        return Err(SnapshotError::Validation(format!(
-            "v2023 format requires fileChunkSizeBytes={WHOLE_FILE_CHUNK_SIZE}, got {}",
-            manifest.file_chunk_size_bytes
-        )));
-    }
-
-    // Build a Snapshot from non-deleted files for symlink collapsing
-    let mut snap: Snapshot = Manifest::new(manifest.hash_alg, manifest.file_chunk_size_bytes);
-    snap.files = manifest.files.clone();
-    snap.dirs = manifest.dirs.clone();
-    snap.total_size = manifest.total_size;
-
-    let collapsed = subtree_rel_snapshot(&snap, ".", SymlinkPolicy::CollapseAll)?;
-
-    // Warn about deletions being dropped (v2023 has no deletion support)
-    let deleted_count = collapsed.files.iter().filter(|f| f.deleted).count()
-        + collapsed.dirs.iter().filter(|d| d.deleted).count();
-    if deleted_count > 0 {
-        warn!(
-            count = deleted_count,
-            "dropping deletions not supported in v2023 format"
-        );
-    }
-
-    // Warn about empty directories being dropped
-    if !collapsed.dirs.is_empty() {
-        let implied: std::collections::HashSet<String> = collapsed
-            .files
-            .iter()
-            .filter(|f| !f.deleted)
-            .filter_map(|f| f.path.rfind('/').map(|i| f.path[..i].to_string()))
-            .collect();
-        let empty_count = collapsed
-            .dirs
-            .iter()
-            .filter(|d| !d.deleted && !implied.contains(&d.path))
-            .count();
-        if empty_count > 0 {
-            warn!(
-                count = empty_count,
-                "dropping empty directories not supported in v2023 format"
-            );
-        }
-    }
-
-    let mut paths: Vec<Value> = Vec::new();
-    for f in &collapsed.files {
-        if f.deleted || f.symlink_target.is_some() {
-            continue;
-        }
-        let hash = f.hash.as_ref().ok_or_else(|| {
-            SnapshotError::Validation(format!("File '{}' is missing a hash", f.path))
-        })?;
-        paths.push(serde_json::json!({
-            "hash": hash,
-            "mtime": f.mtime,
-            "path": f.path,
-            "size": f.size,
-        }));
-    }
-
-    paths.sort_by(|a, b| {
-        let pa = a["path"].as_str().unwrap();
-        let pb = b["path"].as_str().unwrap();
-        utf16_be_bytes(pa).cmp(&utf16_be_bytes(pb))
-    });
-
-    // Recompute total_size from non-deleted files only
-    let total_size = v2023_total_size(&paths)?;
-
-    let obj = serde_json::json!({
-        "hashAlg": hash_alg_str(collapsed.hash_alg),
-        "manifestVersion": V2023_MANIFEST_VERSION,
-        "paths": paths,
-        "totalSize": total_size,
-    });
-
     Ok(canonical_json(&obj))
 }
 
@@ -347,7 +297,7 @@ pub fn encode_v2025<P: Clone + std::fmt::Debug, K: Clone + std::fmt::Debug>(
     let mut obj = serde_json::json!({
         "dirs": dirs_json,
         "files": files_json,
-        "hashAlg": hash_alg_str(manifest.hash_alg),
+        "hashAlg": manifest.hash_alg.extension(),
         "specificationVersion": spec_version,
         "totalSize": manifest.total_size,
     });
@@ -379,7 +329,7 @@ pub fn encode_abs_snapshot_diff_v2025(m: &AbsSnapshotDiff) -> Result<String> {
 ///
 /// **Experimental draft format.** See the [module-level docs](self).
 pub fn encode_snapshot_v2025(m: &Snapshot) -> Result<String> {
-    validate_symlink_targets_relative(&m.files)?;
+    check_relative_symlink_targets(&m.files)?;
     encode_v2025(m, SPEC_REL_SNAPSHOT)
 }
 
@@ -387,7 +337,7 @@ pub fn encode_snapshot_v2025(m: &Snapshot) -> Result<String> {
 ///
 /// **Experimental draft format.** See the [module-level docs](self).
 pub fn encode_snapshot_diff_v2025(m: &SnapshotDiff) -> Result<String> {
-    validate_symlink_targets_relative(&m.files)?;
+    check_relative_symlink_targets(&m.files)?;
     encode_v2025(m, SPEC_REL_DIFF)
 }
 
@@ -701,20 +651,12 @@ fn decode_v2025_raw(raw: raw::RawManifest) -> Result<DecodedManifest> {
 
 // --- Internal helpers ---
 
-fn hash_alg_str(alg: HashAlgorithm) -> &'static str {
-    match alg {
-        HashAlgorithm::Xxh128 => "xxh128",
-    }
-}
-
+/// Parses a manifest's `hashAlg` field, spelled as
+/// [`HashAlgorithm::extension`].
 fn parse_hash_alg(s: Option<&str>) -> Result<HashAlgorithm> {
-    match s {
-        Some("xxh128") => Ok(HashAlgorithm::Xxh128),
-        Some(other) => Err(SnapshotError::Validation(format!(
-            "Unsupported hash algorithm: {other}"
-        ))),
-        None => Err(SnapshotError::Validation("missing hashAlg".into())),
-    }
+    let name = s.ok_or_else(|| SnapshotError::Validation("missing hashAlg".into()))?;
+    HashAlgorithm::from_extension(name)
+        .ok_or_else(|| SnapshotError::Validation(format!("Unsupported hash algorithm: {name}")))
 }
 
 fn utf16_be_bytes(s: &str) -> Vec<u8> {
@@ -812,34 +754,17 @@ fn collect_all_directories(dirs: &[DirEntry], files: &[FileEntry]) -> Vec<DirEnt
         all_paths.push(&d.path);
     }
 
-    let mut inferred: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for path in &all_paths {
-        extract_parent_dirs(path, &mut inferred);
-    }
-
+    // Every ancestor directory, except the POSIX root `/` and the relative
+    // root `.`, which the format leaves implicit. A drive root (`C:/`) is
+    // listed; the decoder does not accept a drive-root name, so v2025 does
+    // not round-trip drive-letter paths (see `snapshot_codec.md`).
     let mut result: Vec<DirEntry> = dirs.to_vec();
-    for dir_path in inferred {
-        if !explicit.contains_key(dir_path.as_str()) {
-            result.push(DirEntry::new(&dir_path));
+    for dir_path in implied_dirs(all_paths) {
+        if dir_path != "/" && dir_path != "." && !explicit.contains_key(dir_path) {
+            result.push(DirEntry::new(dir_path));
         }
     }
     result
-}
-
-fn extract_parent_dirs(path: &str, result: &mut std::collections::HashSet<String>) {
-    let mut last_slash = path.rfind('/');
-    let mut current = path;
-    while let Some(pos) = last_slash {
-        if pos == 0 {
-            break;
-        }
-        let parent = &current[..pos];
-        if !result.insert(parent.to_string()) {
-            break;
-        }
-        current = parent;
-        last_slash = current.rfind('/');
-    }
 }
 
 fn build_dir_index(raw_dirs: &[raw::RawV2025Dir]) -> Result<HashMap<usize, String>> {

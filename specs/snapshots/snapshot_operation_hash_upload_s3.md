@@ -4,7 +4,7 @@
 
 ## Multipart Upload
 
-Multipart upload is used when uploading to `S3DataCache` and the file/chunk size exceeds `2 × multipart_part_size` (default threshold: 64MB with 32MB parts).
+Multipart upload is used when uploading to `S3DataCache` and the file/chunk size is at least `2 × multipart_part_size` (default threshold: 64MB with 32MB parts). The threshold is `multipart_threshold()` in `data_cache.rs`, shared with DOWNLOAD and CACHE_SYNC.
 
 ### Multipart Coordination
 
@@ -20,40 +20,38 @@ async fn abort_multipart_upload(&self, hash: &str, algorithm: &str,
                                  upload_id: &str) -> io::Result<()>;
 ```
 
-**Coordination flow:**
+**Coordination flow** (`upload_multipart()` in `data_cache.rs`, shared by HASH_UPLOAD and CACHE_SYNC):
 1. `create_multipart_upload` → get `upload_id`
-2. `tokio::spawn` each part upload independently
-3. Each part returns `(part_number, etag)` on success
-4. Last part to complete calls `complete_multipart_upload`
-5. On any failure, `abort_multipart_upload`
+2. Parts are the `split_ranges(size, part_size)` byte ranges. Each is read and uploaded concurrently; each returns `(part_number, etag)` on success
+3. Once every part has uploaded, the parts are sorted by number and `complete_multipart_upload` is called
+4. On any failure, including a failed read or a failed completion, `abort_multipart_upload` is called and the first error is returned
 
-## Streaming Files (Larger Than Memory)
+## Large Unchunked Files: Two Passes
 
-When file chunking is disabled (`WHOLE_FILE_CHUNK_SIZE`) and a file exceeds `max_memory_bytes`, a two-pass approach is used:
+When file chunking is disabled (`WHOLE_FILE_CHUNK_SIZE`), the data cache supports multipart upload, and a file is at least the multipart threshold, the file is read twice:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Pass 1: Compute Hash (discard data)                            │
+│  Pass 1: Compute Hashes (discard data)                          │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │  Read part 1 → hash (full + part) → discard             │    │
-│  │  Read part 2 → hash (full + part) → discard             │    │
+│  │  Check the file size on disk matches the manifest       │    │
+│  │  Read part 1 → hash (whole file + part) → discard       │    │
+│  │  Read part 2 → hash (whole file + part) → discard       │    │
 │  │  ...                                                    │    │
-│  │  Result: final_hash + per-part hashes                   │    │
+│  │  Result: whole-file hash + per-part hashes              │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                                                                 │
-│  HeadObject check with final_hash                               │
+│  HeadObject check with the whole-file hash                      │
 │  └─► If exists, skip upload (done)                              │
 │                                                                 │
-│  Pass 2: Read, Verify, and Upload Parts (memory throttled)      │
+│  Pass 2: Read, Verify, and Upload Parts                         │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │  Create S3 multipart upload session                     │    │
-│  │  For each part:                                         │    │
-│  │    1. memory_pool.acquire(part_size).await               │    │
-│  │    2. spawn_blocking: read part + compute part hash      │    │
-│  │    3. Verify part hash matches pass 1                    │    │
-│  │       └─► If mismatch: abort, return error               │    │
-│  │    4. Upload part (async)                                │    │
-│  │    5. Drop permit (releases memory)                      │    │
+│  │  For each part (concurrently):                          │    │
+│  │    1. spawn_blocking: read part + compute part hash     │    │
+│  │    2. Verify part hash matches pass 1                   │    │
+│  │       └─► If mismatch: abort, return error              │    │
+│  │    3. Upload part                                       │    │
 │  └─────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -63,7 +61,7 @@ When file chunking is disabled (`WHOLE_FILE_CHUNK_SIZE`) and a file exceeds `max
 2. Discarding data in pass 1 avoids buffering the entire file
 3. If object already exists (HeadObject hit), skip pass 2 entirely
 
-**Hash verification:** Per-part hashes computed in pass 1 are verified in pass 2. If any part's hash differs (file modified between passes), the multipart upload is aborted and an error is returned.
+**Hash verification:** Pass 1 is `hash_file_and_parts()`, which reads the file through the same chunk reader as the HASH operation, so a file whose size on disk differs from the manifest fails before anything is uploaded. Each part read in pass 2 is checked against its pass 1 hash. If a part differs (the file changed between passes), the upload is aborted and an `Io` error of kind `InvalidData` is returned: `<path> changed while uploading: part at offset <offset> hashed <before> before the upload and <after> during it`. The object stored under a hash is therefore always the content that produced that hash.
 
 ## Probabilistic S3 Cache Validation
 
@@ -111,4 +109,4 @@ For each item where S3 check cache says "exists":
 For `FileSystemDataCache`, behavior is simpler:
 - No multipart uploads (single-file writes)
 - Existence check via filesystem `exists()`
-- Streaming files use two-pass: hash first, then copy while re-verifying hash
+- Unchunked files are read once into memory, hashed, and written; there is no two-pass path

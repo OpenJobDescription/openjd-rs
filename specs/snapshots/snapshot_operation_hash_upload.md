@@ -75,7 +75,7 @@ Detected via `/proc/meminfo` on Linux. Falls back to 256MB if detection fails.
 |------------|--------|
 | Regular file | Read+Hash → Upload (single pass) |
 | Large file (chunking enabled) | Read+Hash → Upload (per chunk) |
-| Large file (no chunking, > memory) | Two-pass: hash first, then verify+upload |
+| Large file (no chunking, ≥ multipart threshold, multipart cache) | Two-pass: hash first, then verify+upload |
 | Symlink | Pass through unchanged |
 | Deleted marker | Pass through unchanged |
 | Directory | Pass through unchanged |

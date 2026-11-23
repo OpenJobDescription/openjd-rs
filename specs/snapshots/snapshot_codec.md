@@ -27,6 +27,26 @@ the entries, and `decode_v2023` rejects a `totalSize` above `u64::MAX` as
 `missing or invalid totalSize`. No real file set reaches this size; the limit
 matters only for crafted manifests.
 
+`encode_snapshot_v2023` and `encode_snapshot_diff_v2023` share one encoder;
+the diff form passes its entries, deletions included, to it as a snapshot.
+Both write `hashAlg` as `HashAlgorithm::extension()`, which the decoders
+parse back with `HashAlgorithm::from_extension`.
+
+The v2023 encoders and the relative v2025 encoders check symlink targets
+with the rule `Manifest::validate` applies to a relative manifest, so a bad
+target fails with the same `symlink_target path style mismatch for <path>:
+<target>` message validation gives.
+
+### v2025 Directories and Drive Roots
+
+The v2025 encoder lists every ancestor directory of the manifest's entries,
+except the POSIX root `/` and the relative root `.`, which the format leaves
+implicit. A Windows drive root (`C:/`) is listed. The v2025 decoder rejects
+a directory name containing `/` that is not a `$N/` reference (`Invalid path
+format 'C:/': paths with '/' must use $N/ reference`), so a v2025 manifest
+with drive-letter paths does not decode. v2025 is an experimental draft
+format.
+
 ## Decoding
 
 ### Format Detection

@@ -154,6 +154,59 @@ impl HashCache {
             None
         }
     }
+
+    /// The cached chunk hashes of a chunked file, one per range of
+    /// [`split_ranges`](crate::hash::split_ranges)`(file_size, chunk_size)`,
+    /// if every range is cached and fresh for `current_mtime`. `None` if any
+    /// range misses or `chunk_size` is 0.
+    ///
+    /// The `hash`, `hash_upload`, and `download` operations all key chunk
+    /// entries through this and [`put_chunks`](Self::put_chunks).
+    pub(crate) fn get_chunks_if_fresh(
+        &self,
+        file_path: &Path,
+        algorithm: &str,
+        file_size: u64,
+        chunk_size: u64,
+        current_mtime: u64,
+    ) -> Option<Vec<String>> {
+        let hashes: Option<Vec<String>> = crate::hash::split_ranges(file_size, chunk_size)
+            .map(|(start, end)| {
+                self.get_if_fresh(
+                    file_path,
+                    algorithm,
+                    start as i64,
+                    end as i64,
+                    current_mtime,
+                )
+            })
+            .collect();
+        hashes.filter(|h| !h.is_empty())
+    }
+
+    /// Caches a chunked file's chunk hashes under the ranges
+    /// [`get_chunks_if_fresh`](Self::get_chunks_if_fresh) reads. Writes
+    /// nothing if `hashes` does not hold exactly one hash per range, so a
+    /// hash list that does not fit the file cannot be cached under the
+    /// wrong ranges. Individual write failures are ignored, as a cache miss
+    /// later only costs a rehash.
+    pub(crate) fn put_chunks(
+        &self,
+        file_path: &Path,
+        algorithm: &str,
+        file_size: u64,
+        chunk_size: u64,
+        hashes: &[String],
+        mtime: u64,
+    ) {
+        let ranges = crate::hash::split_ranges(file_size, chunk_size);
+        if ranges.clone().count() != hashes.len() {
+            return;
+        }
+        for ((start, end), hash) in ranges.zip(hashes) {
+            let _ = self.put(file_path, algorithm, start as i64, end as i64, hash, mtime);
+        }
+    }
 }
 
 #[cfg(test)]

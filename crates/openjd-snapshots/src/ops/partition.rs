@@ -4,7 +4,11 @@
 
 use crate::manifest::{AbsSnapshot, Manifest, Snapshot, SymlinkPolicy};
 use crate::ops::subtree::{subtree_rel_snapshot, subtree_snapshot};
-use crate::path_util::{is_absolute_path, normalize_path};
+use crate::path_util::{
+    ancestor_dirs, is_absolute_path, is_volume_root, longest_common_dir_prefix, normalize_path,
+    strip_root, volume_root,
+};
+use std::collections::BTreeMap;
 use tracing::debug;
 
 #[allow(
@@ -27,74 +31,16 @@ impl Default for PartitionOptions {
     }
 }
 
-/// Returns the longest common directory prefix of the given paths.
-fn longest_common_prefix(dirs: &[&str]) -> String {
-    if dirs.is_empty() {
-        return String::new();
-    }
-    if dirs.len() == 1 {
-        return dirs[0].to_string();
-    }
-
-    let parts: Vec<Vec<&str>> = dirs.iter().map(|p| p.split('/').collect()).collect();
-    let min_len = parts.iter().map(|p| p.len()).min().unwrap_or(0);
-    let mut common = Vec::new();
-
-    for i in 0..min_len {
-        let component = parts[0][i];
-        if parts.iter().all(|p| p[i] == component) {
-            common.push(component);
-        } else {
-            break;
-        }
-    }
-
-    // For absolute paths, splitting "/a/b" gives ["", "a", "b"].
-    // If only the empty-string prefix matched, the common root is "/".
-    if common.len() == 1 && common[0].is_empty() {
-        return "/".to_string();
-    }
-    common.join("/")
-}
-
-fn parent_dir(path: &str) -> String {
-    match path.rfind('/') {
-        Some(0) => "/".to_string(),
-        Some(pos) => path[..pos].to_string(),
-        None => String::new(),
-    }
-}
-
-/// Collect all directory paths relevant for root determination.
-fn all_dir_paths_generic<P: Clone, K: Clone>(manifest: &Manifest<P, K>) -> Vec<String> {
-    let mut dirs = std::collections::HashSet::new();
-    for f in &manifest.files {
-        dirs.insert(parent_dir(&f.path));
-    }
-    for d in &manifest.dirs {
-        dirs.insert(d.path.clone());
-    }
-    dirs.into_iter().collect()
-}
-
-fn find_root_for_path<'a>(path: &str, roots: &'a [String]) -> Option<&'a str> {
-    roots.iter().find_map(|r| {
-        let r_str = r.as_str();
-        if r_str == "." {
-            // "." root matches everything in a relative manifest
-            Some(r_str)
-        } else if path == r_str || path.starts_with(&format!("{r}/")) {
-            Some(r_str)
-        } else {
-            None
-        }
-    })
+/// Returns true if `path` is `root` or lies beneath it, by the rule
+/// `subtree_snapshot` uses to select a root's entries.
+fn is_under(path: &str, root: &str) -> bool {
+    strip_root(path, root).is_some()
 }
 
 fn validate_no_nested_roots(roots: &[String]) -> crate::Result<()> {
-    for (i, a) in roots.iter().enumerate() {
-        for (j, b) in roots.iter().enumerate() {
-            if i != j && (a.starts_with(&format!("{b}/")) || b.starts_with(&format!("{a}/"))) {
+    for a in roots {
+        for b in roots {
+            if a != b && is_under(a, b) {
                 return Err(crate::SnapshotError::Validation(format!(
                     "root '{a}' is a subpath of root '{b}'"
                 )));
@@ -102,6 +48,59 @@ fn validate_no_nested_roots(roots: &[String]) -> crate::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Groups `paths` by their [`volume_root`], in volume order. Paths on
+/// different volumes (`/`, each drive root, the relative root `.`) share no
+/// directory, so each volume gets its own roots.
+fn by_volume<'a>(paths: &[&'a str]) -> BTreeMap<&'a str, Vec<&'a str>> {
+    let mut groups: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for &p in paths {
+        groups.entry(volume_root(p)).or_default().push(p);
+    }
+    groups
+}
+
+/// The roots for `paths` when no roots are given: one per volume, the
+/// longest common directory of that volume's paths. For a single-volume
+/// manifest this is [`Manifest::common_root`].
+fn auto_roots(paths: &[&str]) -> Vec<String> {
+    by_volume(paths)
+        .values()
+        .map(|group| longest_common_dir_prefix(group))
+        .collect()
+}
+
+/// The top-level directory under its volume root that `path` lies in, or
+/// `path` itself when it is a volume root or directly beneath one.
+fn top_level_dir(path: &str) -> &str {
+    std::iter::once(path)
+        .chain(ancestor_dirs(path))
+        .take_while(|a| !is_volume_root(a))
+        .last()
+        .unwrap_or(path)
+}
+
+/// The additional roots for `paths` that no given root contains: per volume,
+/// the longest common directory if it is below the volume root, otherwise
+/// one root per top-level directory, so the remainder is not collapsed onto
+/// the volume root. A path that is itself the volume root (such as a file
+/// directly under it) can only be held by the volume root.
+fn remainder_roots(paths: &[&str]) -> Vec<String> {
+    let mut roots = Vec::new();
+    for (volume, group) in by_volume(paths) {
+        let common = longest_common_dir_prefix(&group);
+        if !is_volume_root(&common) || group.contains(&volume) {
+            roots.push(common);
+            continue;
+        }
+        let mut by_top: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+        for p in group {
+            by_top.entry(top_level_dir(p)).or_default().push(p);
+        }
+        roots.extend(by_top.values().map(|g| longest_common_dir_prefix(g)));
+    }
+    roots
 }
 
 /// Detect whether the manifest uses absolute paths by checking the first file or dir entry.
@@ -153,57 +152,20 @@ fn validate_path_style<P: Clone, K: Clone>(
     Ok(())
 }
 
-/// Group remaining directory paths into roots.
-fn group_into_roots(paths: &[&str]) -> Vec<String> {
-    if paths.is_empty() {
-        return vec![];
-    }
-    if paths.len() == 1 {
-        return vec![paths[0].to_string()];
-    }
-
-    let prefix = longest_common_prefix(paths);
-    if !prefix.is_empty() && prefix != "/" {
-        return vec![prefix];
-    }
-
-    let mut groups: std::collections::HashMap<String, Vec<&str>> = std::collections::HashMap::new();
-    for &p in paths {
-        let key = if let Some(stripped) = p.strip_prefix('/') {
-            match stripped.find('/') {
-                Some(pos) => p[..pos + 1].to_string(),
-                None => p.to_string(),
-            }
-        } else {
-            match p.find('/') {
-                Some(pos) => p[..pos].to_string(),
-                None => p.to_string(),
-            }
-        };
-        groups.entry(key).or_default().push(p);
-    }
-
-    let mut roots: Vec<String> = groups
-        .values()
-        .map(|group| longest_common_prefix(group))
-        .collect();
-    roots.sort();
-    roots.dedup();
-    roots
-}
-
 fn compute_roots<P: Clone, K: Clone>(
     manifest: &Manifest<P, K>,
     options: &PartitionOptions,
 ) -> crate::Result<Vec<String>> {
-    let is_abs = manifest_is_absolute(manifest).unwrap_or(true);
-
-    let mut all_paths = all_dir_paths_generic(manifest);
-    if let Some(ref rp) = options.referenced_paths {
-        for p in rp {
-            all_paths.push(normalize_path(p));
-        }
-    }
+    let referenced: Vec<String> = options
+        .referenced_paths
+        .iter()
+        .flatten()
+        .map(|p| normalize_path(p))
+        .collect();
+    let mut all_paths = manifest.root_contributors();
+    all_paths.extend(referenced.iter().map(String::as_str));
+    all_paths.sort_unstable();
+    all_paths.dedup();
 
     let explicit_roots: Vec<String> = options
         .roots
@@ -216,51 +178,13 @@ fn compute_roots<P: Clone, K: Clone>(
     }
 
     let auto_roots = if explicit_roots.is_empty() {
-        if all_paths.is_empty() {
-            vec![]
-        } else {
-            // For relative manifests, root-level files have parent_dir == "".
-            // Filter those out for prefix computation, then use "." if all are root-level.
-            let refs: Vec<&str> = all_paths.iter().map(|s| s.as_str()).collect();
-            let non_empty: Vec<&str> = refs.iter().copied().filter(|s| !s.is_empty()).collect();
-            if non_empty.is_empty() && !is_abs {
-                // All files at root level of relative manifest
-                vec![".".to_string()]
-            } else if non_empty.len() < refs.len() && !is_abs {
-                // Mix of root-level and nested — include root-level in prefix calc as "."
-                let mut with_dot = non_empty.clone();
-                with_dot.push(".");
-                let prefix = longest_common_prefix(&with_dot);
-                if prefix.is_empty() {
-                    vec![".".to_string()]
-                } else {
-                    vec![prefix]
-                }
-            } else {
-                let prefix = longest_common_prefix(&refs);
-                vec![prefix]
-            }
-        }
+        auto_roots(&all_paths)
     } else {
         let remaining: Vec<&str> = all_paths
-            .iter()
-            .filter(|p| {
-                let p_str = p.as_str();
-                // For relative manifests, empty string means root-level
-                if p_str.is_empty() && !is_abs {
-                    // Check if any explicit root is "." which covers root-level
-                    !explicit_roots.iter().any(|r| r == ".")
-                } else {
-                    find_root_for_path(p_str, &explicit_roots).is_none()
-                }
-            })
-            .map(|s| s.as_str())
+            .into_iter()
+            .filter(|p| !explicit_roots.iter().any(|r| is_under(p, r)))
             .collect();
-        if remaining.is_empty() {
-            vec![]
-        } else {
-            group_into_roots(&remaining)
-        }
+        remainder_roots(&remaining)
     };
 
     let mut all_roots = explicit_roots;
@@ -432,6 +356,189 @@ mod tests {
             ..Default::default()
         };
         assert!(partition_manifest(&m, &opts).is_err());
+    }
+
+    fn roots(m: &AbsSnapshot, opts: &PartitionOptions) -> Vec<String> {
+        partition_manifest(m, opts)
+            .unwrap()
+            .into_iter()
+            .map(|(r, _)| r)
+            .collect()
+    }
+
+    #[test]
+    fn drive_root_keeps_its_slash() {
+        let m = make_abs(
+            vec![
+                FileEntry::file("C:/foo/a.txt", 1, 1),
+                FileEntry::file("C:/bar/b.txt", 1, 1),
+            ],
+            vec![],
+        );
+        assert_eq!(roots(&m, &PartitionOptions::default()), ["C:/"]);
+        let m = make_abs(vec![FileEntry::file("C:/a.txt", 1, 1)], vec![]);
+        assert_eq!(roots(&m, &PartitionOptions::default()), ["C:/"]);
+    }
+
+    #[test]
+    fn one_auto_root_per_drive() {
+        let m = make_abs(
+            vec![
+                FileEntry::file("D:/proj/out/b.exr", 1, 1),
+                FileEntry::file("C:/proj/scene/a.ma", 1, 1),
+                FileEntry::file("C:/proj/tex/t.png", 1, 1),
+            ],
+            vec![],
+        );
+        let parts = partition_manifest(&m, &PartitionOptions::default()).unwrap();
+        let got: Vec<(&str, usize)> = parts
+            .iter()
+            .map(|(r, s)| (r.as_str(), s.files.len()))
+            .collect();
+        assert_eq!(got, [("C:/proj", 2), ("D:/proj/out", 1)]);
+    }
+
+    #[test]
+    fn non_empty_dir_does_not_widen_root() {
+        // `/a/b` is implied by the file beneath it, as in `common_root`.
+        let m = make_abs(
+            vec![FileEntry::file("/a/b/c/f.txt", 1, 1)],
+            vec![DirEntry::new("/a/b")],
+        );
+        assert_eq!(roots(&m, &PartitionOptions::default()), ["/a/b/c"]);
+        // An empty dir does widen it.
+        let m = make_abs(
+            vec![FileEntry::file("/a/b/c/f.txt", 1, 1)],
+            vec![DirEntry::new("/a/e")],
+        );
+        assert_eq!(roots(&m, &PartitionOptions::default()), ["/a"]);
+    }
+
+    #[test]
+    fn explicit_volume_root_covers_everything() {
+        let m = make_abs(
+            vec![
+                FileEntry::file("/a/f.txt", 1, 1),
+                FileEntry::file("/b/c/g.txt", 1, 1),
+            ],
+            vec![],
+        );
+        let opts = PartitionOptions {
+            roots: Some(vec!["/".into()]),
+            ..Default::default()
+        };
+        assert_eq!(roots(&m, &opts), ["/"]);
+
+        let m = make_abs(vec![FileEntry::file("C:/a/f.txt", 1, 1)], vec![]);
+        let opts = PartitionOptions {
+            roots: Some(vec!["C:/".into()]),
+            ..Default::default()
+        };
+        assert_eq!(roots(&m, &opts), ["C:/"]);
+    }
+
+    #[test]
+    fn explicit_root_nested_under_volume_root_rejected() {
+        let m = make_abs(vec![], vec![]);
+        let opts = PartitionOptions {
+            roots: Some(vec!["/".into(), "/a".into()]),
+            ..Default::default()
+        };
+        assert_eq!(
+            partition_manifest(&m, &opts)
+                .map(|_| ())
+                .unwrap_err()
+                .to_string(),
+            "Manifest validation error: root '/a' is a subpath of root '/'"
+        );
+    }
+
+    #[test]
+    fn remainder_roots_split_by_top_level_dir() {
+        let m = make_abs(
+            vec![
+                FileEntry::file("/x/a.txt", 1, 1),
+                FileEntry::file("/p/q/b.txt", 1, 1),
+                FileEntry::file("/r/c.txt", 1, 1),
+                FileEntry::file("C:/s/t/d.txt", 1, 1),
+            ],
+            vec![],
+        );
+        let opts = PartitionOptions {
+            roots: Some(vec!["/x".into()]),
+            ..Default::default()
+        };
+        assert_eq!(roots(&m, &opts), ["/x", "/p/q", "/r", "C:/s/t"]);
+    }
+
+    /// Pins auto-partitioning of a single-volume manifest to
+    /// [`Manifest::common_root`]: both route through the same contributor
+    /// and common-prefix rules, so they must pick the same root.
+    #[test]
+    fn auto_root_matches_common_root() {
+        let cases: Vec<(Vec<FileEntry>, Vec<DirEntry>)> = vec![
+            (vec![FileEntry::file("/foo/bar/baz.txt", 1, 1)], vec![]),
+            (vec![], vec![DirEntry::new("/foo/bar")]),
+            (
+                vec![
+                    FileEntry::file("/a/b.txt", 1, 1),
+                    FileEntry::file("/a/c.txt", 1, 1),
+                ],
+                vec![],
+            ),
+            (
+                vec![FileEntry::file("/a/b.txt", 1, 1)],
+                vec![DirEntry::new("/c")],
+            ),
+            (
+                vec![FileEntry::file("/a/b/c/f.txt", 1, 1)],
+                vec![DirEntry::new("/a/b"), DirEntry::new("/")],
+            ),
+            (
+                vec![
+                    FileEntry::file("/app/bar/x", 1, 1),
+                    FileEntry::file("/app/baz/y", 1, 1),
+                ],
+                vec![],
+            ),
+            (vec![FileEntry::file("/f.txt", 1, 1)], vec![]),
+            (
+                vec![
+                    FileEntry::file("C:/foo/a.txt", 1, 1),
+                    FileEntry::file("C:/bar/b.txt", 1, 1),
+                ],
+                vec![],
+            ),
+            (vec![FileEntry::file("C:/foo/a.txt", 1, 1)], vec![]),
+        ];
+        for (files, dirs) in cases {
+            let m = make_abs(files, dirs);
+            let expected = m.common_root().unwrap();
+            assert_eq!(roots(&m, &PartitionOptions::default()), [expected], "{m:?}");
+        }
+
+        let rel_cases: Vec<Vec<FileEntry>> = vec![
+            vec![FileEntry::file("foo/bar/baz.txt", 1, 1)],
+            vec![FileEntry::file("baz.txt", 1, 1)],
+            vec![
+                FileEntry::file("foo/a.txt", 1, 1),
+                FileEntry::file("bar/b.txt", 1, 1),
+            ],
+            vec![
+                FileEntry::file("a.txt", 1, 1),
+                FileEntry::file("d/b.txt", 1, 1),
+            ],
+        ];
+        for files in rel_cases {
+            let m: Snapshot =
+                Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(files);
+            let got: Vec<String> = partition_rel_manifest(&m, &PartitionOptions::default())
+                .unwrap()
+                .into_iter()
+                .map(|(r, _)| r)
+                .collect();
+            assert_eq!(got, [m.common_root().unwrap()], "{m:?}");
+        }
     }
 
     #[test]

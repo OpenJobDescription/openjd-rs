@@ -37,8 +37,13 @@ pub struct PartitionOptions {
 
 | Condition | Behavior |
 |-----------|----------|
-| A root is a subpath of another root | Error |
+| A root is a subpath of another root (`/a` under `/`, `a` under `.`) | Error: `root '<nested>' is a subpath of root '<outer>'` |
 | `Preserve` or `TransitiveIncludeTargets` policy | Error |
+
+A path lies under a root by the rule `subtree_snapshot()` uses to select a
+root's entries: it equals the root or continues it after a `/`, a root that
+ends in `/` (`/`, `C:/`) is a prefix as-is, and `.` contains every relative
+path.
 
 ## Output Ordering
 
@@ -49,27 +54,31 @@ If no entries exist under an explicitly provided root, its `Snapshot` is empty b
 
 ## Auto-Root Determination
 
-| Scenario | Platform | Behavior |
-|----------|----------|----------|
-| `roots` is `None` | POSIX | Single root: longest common directory prefix of all entries and referenced_paths |
-| `roots` is `None` | Windows | One root per drive letter or UNC root |
-| `roots` provided | Any | Provided roots first, then smallest set of additional roots for remaining entries |
+Roots are derived from the paths a root must contain: the manifest's
+[common-root contributors](snapshot_manifest_types.md#common-root) (each
+non-deleted file's parent directory and each non-deleted empty directory)
+plus the normalized `referenced_paths`. Paths are grouped by volume: the
+POSIX root `/`, each drive root (`C:/`), and the relative root `.`. Paths on
+different volumes share no directory. UNC paths normalize to `/server/...`,
+so they fall on the `/` volume.
 
-### Longest Common Prefix
+| Scenario | Behavior |
+|----------|----------|
+| `roots` is `None` | One root per volume: the longest common directory of that volume's paths. For a single-volume manifest without `referenced_paths` this is `Manifest::common_root()`. |
+| `roots` provided | Provided roots first, then roots for the paths no provided root contains. Per volume, that is their longest common directory when it lies below the volume root; otherwise one root per top-level directory (`/p/q` and `/r` give `/p/q` and `/r`, not `/`). A remaining path that is the volume root itself, such as the parent of a file directly under `/`, is covered by the volume root. |
 
-Implemented via `longest_common_prefix()`:
-- Splits paths by `/`, finds common prefix components
-- For absolute paths, splitting `/a/b` gives `["", "a", "b"]`; if only empty-string prefix matches, root is `"/"`
-
-### Empty Directory Handling
-
-Empty directories (in `manifest.dirs`) are included in root determination alongside file parent directories via `all_dir_paths()`.
+The common-directory rule is `longest_common_dir_prefix()` in `path_util.rs`,
+the implementation `common_root()` uses. It keeps a root's trailing slash
+(`/`, `C:/`) and gives `.` for relative paths that share no directory.
+Non-empty directories do not contribute, because their descendants already
+imply them: a manifest with dir `/a/b` and file `/a/b/c/f.txt` partitions at
+`/a/b/c`.
 
 ## Implementation Details
 
-- `parent_dir()` extracts the parent directory of a path
-- `all_dir_paths()` collects all relevant directory paths for root determination
-- `find_root_for_path()` matches a path to its containing root
+- `Manifest::root_contributors()` lists the paths a root must contain, for both `common_root()` and partitioning
+- `path_util.rs` holds the path rules: `parent_dir()`, `volume_root()`, `longest_common_dir_prefix()`, and `strip_root()` (the under-a-root test, shared with `subtree_snapshot()`)
+- The unit test `auto_root_matches_common_root` pins single-volume auto-partitioning to `common_root()`
 - Each partition is produced by calling `subtree_snapshot()` with the root path
 
 ## Example

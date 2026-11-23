@@ -249,6 +249,74 @@ pub trait MultipartDataCache: AsyncDataCache {
     ) -> std::io::Result<()>;
 }
 
+/// The object size at and above which an operation transfers an object in
+/// parts of `part_size` bytes (see [`AsyncDataCache::multipart_part_size`])
+/// rather than in one request, when the caches involved support it. The
+/// `hash_upload`, `download`, and `cache_sync` operations all use this.
+pub(crate) fn multipart_threshold(part_size: usize) -> u64 {
+    2 * part_size as u64
+}
+
+/// Uploads a `size`-byte object to `dst` as a multipart upload with parts of
+/// `part_size` bytes, the last one shorter. `read_part(start, end)` supplies
+/// the bytes of the half-open range `start..end` for each part, with a guard
+/// (such as a memory-pool permit) that is held until that part's upload
+/// finishes. Parts are read and uploaded concurrently, then completed in
+/// part-number order. On any failure, including completion, the upload is
+/// aborted and the first error is returned.
+pub(crate) async fn upload_multipart<F, Fut, G>(
+    dst: &dyn MultipartDataCache,
+    hash: &str,
+    algorithm: &str,
+    size: u64,
+    part_size: usize,
+    read_part: F,
+) -> crate::Result<()>
+where
+    F: Fn(u64, u64) -> Fut,
+    Fut: std::future::Future<Output = crate::Result<(Vec<u8>, G)>>,
+{
+    use futures_util::stream::{FuturesUnordered, StreamExt};
+
+    let upload_id = dst
+        .create_multipart_upload(hash, algorithm)
+        .await
+        .map_err(crate::SnapshotError::Io)?;
+    let uid: &str = &upload_id;
+
+    let result = async {
+        let mut pending: FuturesUnordered<_> = crate::hash::split_ranges(size, part_size as u64)
+            .zip(1i32..)
+            .map(|((start, end), part_number)| {
+                let read = read_part(start, end);
+                async move {
+                    let (data, guard) = read.await?;
+                    let etag = dst
+                        .upload_part(hash, algorithm, uid, part_number, data)
+                        .await
+                        .map_err(crate::SnapshotError::Io)?;
+                    drop(guard);
+                    Ok::<_, crate::SnapshotError>((part_number, etag))
+                }
+            })
+            .collect();
+        let mut parts = Vec::with_capacity(pending.len());
+        while let Some(part) = pending.next().await {
+            parts.push(part?);
+        }
+        parts.sort_by_key(|(number, _)| *number);
+        dst.complete_multipart_upload(hash, algorithm, uid, parts)
+            .await
+            .map_err(crate::SnapshotError::Io)
+    }
+    .await;
+
+    if result.is_err() {
+        let _ = dst.abort_multipart_upload(hash, algorithm, uid).await;
+    }
+    result
+}
+
 /// Extension trait for caches that support byte-range reads.
 #[async_trait]
 #[allow(

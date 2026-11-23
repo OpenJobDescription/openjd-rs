@@ -6,24 +6,9 @@ use crate::manifest::{
     AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, Manifest, Snapshot, SnapshotDiff,
     SymlinkPolicy,
 };
-use crate::path_util::normalize_path;
+use crate::path_util::{normalize_path, strip_root};
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
-
-fn strip_prefix(path: &str, prefix: &str) -> Option<String> {
-    if prefix.is_empty() || prefix == "." {
-        return Some(path.to_string());
-    }
-    if path == prefix {
-        return Some(String::new());
-    }
-    let with_slash = if prefix.ends_with('/') {
-        prefix.to_string()
-    } else {
-        format!("{prefix}/")
-    };
-    path.strip_prefix(&with_slash).map(|s| s.to_string())
-}
 
 /// Resolve a symlink target to a non-symlink file entry, following chains and detecting cycles.
 fn resolve_symlink<'a>(
@@ -108,7 +93,7 @@ fn process_files(
 ) -> crate::Result<Vec<FileEntry>> {
     let mut result = Vec::new();
     for f in files {
-        let rel_path = match strip_prefix(&f.path, prefix) {
+        let rel_path = match strip_root(&f.path, prefix).map(str::to_string) {
             Some(p) if !p.is_empty() => p,
             Some(_) => continue,
             None => continue,
@@ -144,7 +129,7 @@ fn process_files(
                     )));
                 }
                 SymlinkPolicy::CollapseEscaping | SymlinkPolicy::ExcludeEscaping => {
-                    match strip_prefix(target, prefix) {
+                    match strip_root(target, prefix).map(str::to_string) {
                         Some(rel_target) => {
                             // Non-escaping symlink
                             let mut entry = f.clone();
@@ -190,14 +175,14 @@ fn process_files(
 fn process_dirs(dirs: &[DirEntry], prefix: &str) -> Vec<DirEntry> {
     dirs.iter()
         .filter_map(|d| {
-            strip_prefix(&d.path, prefix).and_then(|rel| {
+            strip_root(&d.path, prefix).and_then(|rel| {
                 if rel.is_empty() {
                     None
                 } else {
                     Some(if d.deleted {
-                        DirEntry::deleted(&rel)
+                        DirEntry::deleted(rel)
                     } else {
-                        DirEntry::new(&rel)
+                        DirEntry::new(rel)
                     })
                 }
             })

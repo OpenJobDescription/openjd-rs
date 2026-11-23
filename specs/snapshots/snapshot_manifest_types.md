@@ -119,8 +119,18 @@ equal to) every meaningful non-deleted path in the manifest. Files contribute
 their parent directory; empty dirs contribute themselves; non-empty dirs
 (those with a strict descendant declared elsewhere in the manifest) are
 ignored so that a dir entry like `/` does not collapse the result toward
-root when it merely contains other declared entries. Returns `None` if the
-manifest is empty (or all entries are deleted). Composes with
+root when it merely contains other declared entries. A dir is non-empty if
+any non-deleted file or dir lies beneath it, including a drive root such as
+`C:/` with files under it. Returns `None` if the
+manifest is empty (or all entries are deleted).
+
+The result keeps a root's trailing slash (`/`, `C:/`) and is `.` for
+relative paths that share no directory. Paths on different volumes (`/`,
+two drive letters, or absolute and relative) share no directory, so the
+result for such a manifest is `.`;
+[PARTITION](snapshot_operation_partition.md#auto-root-determination) uses
+the same contributing paths and prefix rule but gives one root per volume.
+Composes with
 `subtree_snapshot` to extract a relative-path subtree from an absolute
 manifest without the caller needing to know a root path.
 

@@ -850,3 +850,80 @@ fn v2023_diff_without_parent_manifest_hash() {
     let decoded = decode_v2023(&json).unwrap();
     assert!(decoded.parent_manifest_hash.is_none());
 }
+
+// ===== Symlink targets in relative manifests =====
+
+/// The v2023 encoders reject a relative manifest's symlink target with the
+/// same rule and message as `Manifest::validate`.
+#[test]
+fn v2023_symlink_target_rule_matches_validate() {
+    for target in ["/abs/target.txt", "C:/abs/target.txt", ""] {
+        let files = vec![
+            file("target.txt", "h1", 1, 1),
+            FileEntry {
+                symlink_target: Some(target.to_string()),
+                ..FileEntry::new("link.txt")
+            },
+        ];
+        let expected = format!(
+            "Manifest validation error: symlink_target path style mismatch for link.txt: {target}"
+        );
+        let snap = make_snapshot(files.clone());
+        assert_eq!(snap.validate().unwrap_err().to_string(), expected);
+        assert_eq!(
+            encode_snapshot_v2023(&snap).unwrap_err().to_string(),
+            expected
+        );
+        let diff = make_snapshot_diff(files);
+        assert_eq!(diff.validate().unwrap_err().to_string(), expected);
+        assert_eq!(
+            encode_snapshot_diff_v2023(&diff).unwrap_err().to_string(),
+            expected
+        );
+    }
+}
+
+// ===== v2025 directory list =====
+
+/// The full paths of a v2025 document's `dirs`. A dir whose parent is
+/// listed is written as `$<index>/<name>`; parents sort before children, so
+/// the references resolve in order.
+fn v2025_dir_paths(json: &str) -> Vec<String> {
+    let v: serde_json::Value = serde_json::from_str(json).unwrap();
+    let mut dirs: Vec<String> = Vec::new();
+    for d in v["dirs"].as_array().unwrap() {
+        let name = d["name"].as_str().unwrap();
+        let full = match name.strip_prefix('$').and_then(|s| s.split_once('/')) {
+            Some((idx, rest)) => format!("{}/{rest}", dirs[idx.parse::<usize>().unwrap()]),
+            None => name.to_string(),
+        };
+        dirs.push(full);
+    }
+    dirs
+}
+
+/// The v2025 directory list holds each entry's ancestor directories below
+/// the POSIX root `/` and the relative root `.`, and decodes back to the
+/// same files.
+#[test]
+fn v2025_dirs_list_ancestors_below_the_root() {
+    for (path, expected) in [("/a/b/c.txt", vec!["/a", "/a/b"]), ("/c.txt", vec![])] {
+        let m: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE)
+            .with_files(vec![file(path, "h1", 1, 1)]);
+        let json = encode_abs_snapshot_v2025(&m).unwrap();
+        assert_eq!(v2025_dir_paths(&json), expected, "{path}: {json}");
+        match decode_v2025(&json).unwrap() {
+            DecodedManifest::AbsSnapshot(s) => assert_eq!(s.files[0].path, path, "{json}"),
+            other => panic!("{:?}", std::mem::discriminant(&other)),
+        }
+    }
+    for (path, expected) in [("a/b/c.txt", vec!["a", "a/b"]), ("c.txt", vec![])] {
+        let m = make_snapshot(vec![file(path, "h1", 1, 1)]);
+        let json = encode_snapshot_v2025(&m).unwrap();
+        assert_eq!(v2025_dir_paths(&json), expected, "{path}: {json}");
+        match decode_v2025(&json).unwrap() {
+            DecodedManifest::Snapshot(s) => assert_eq!(s.files[0].path, path, "{json}"),
+            other => panic!("{:?}", std::mem::discriminant(&other)),
+        }
+    }
+}
