@@ -2259,7 +2259,8 @@ fn validate_parameter_space(
 /// ([`validate_environment`]), with the template's own
 /// `parameterDefinitions` as the Job Parameters: the body is validated in
 /// session scope, and action `timeout` and `notifyPeriodInSeconds` (plain
-/// `@fmtstring`, resolved at job creation) in template scope with `Job.*`.
+/// `@fmtstring`, resolved at job creation) in the job scope (the template
+/// scope and, with `EXPR`, `Job.Name`).
 /// `Step.Name` is in neither: an environment template is not attached to a
 /// step.
 pub fn validate_format_strings_environment_template(

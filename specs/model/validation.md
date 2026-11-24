@@ -219,8 +219,9 @@ no PATH `Param.*`, a PATH definition adds no `Param.<name>`.
    `Task.Param.*`, `Task.RawParam.*`, `Task.File.*` and, with EXPR, the Step's `let` values;
    then the script's `let` bindings. A step script. `Env.File.*` is not in it.
 
-The Step's `let` values are copied into the session and task scopes last, so a binding with a
-name the naming rule rejects can replace a symbol (a dotted name) or be dropped (`Session`).
+The Step's `let` values are copied into the session and task scopes after the scope's other
+symbols, so a binding with a name the naming rule rejects can replace a symbol (a dotted name)
+or be dropped (`Session`).
 
 Scope selection follows the spec's `@fmtstring` stage annotations, not the
 container: `timeout` and `notifyPeriodInSeconds` are plain `@fmtstring`
