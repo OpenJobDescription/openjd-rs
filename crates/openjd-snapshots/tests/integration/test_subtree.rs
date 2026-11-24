@@ -879,6 +879,33 @@ fn symlink_chain_is_followed_up_to_64_hops() {
     }
 }
 
+/// A nested directory symlink skipped as a cycle on one path is not marked
+/// expanded, so a later path that reaches it without a cycle expands it.
+#[test]
+fn link_skipped_as_cycle_still_expands_on_another_path() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/t", "/a"),
+            FileEntry::symlink("/a/l1", "/b"),
+            FileEntry::symlink("/a/l2", "/c"),
+            hf("/b/f.txt", "hf", 1, 10),
+            FileEntry::symlink("/b/k", "/c"),
+            hf("/c/g.txt", "hg", 2, 20),
+            FileEntry::symlink("/c/m", "/b"),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            ["t/l1/f.txt", "t/l1/k/g.txt", "t/l2/g.txt", "t/l2/m/f.txt"],
+            "{policy}"
+        );
+    }
+}
+
 // ===== TestSubtreeFileChunkSizePreservation =====
 
 #[test]
