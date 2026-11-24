@@ -394,11 +394,13 @@ that every later stage accepts, and a name that resolves nowhere is reported
 at template validation, because whether a name exists does not depend on
 any value.
 
-**RF3. Twins of the code being fixed (Q3, Q8).** Before fixing a defect,
-search for the same pattern elsewhere, and fix it there too. A twin the
-change cannot reach, such as one in another repository, is listed for the
-user as out of scope (implement-change step 6). These places hold separate
-copies of logic:
+**RF3. Twins of the code being fixed (Q3, Q8, Q11).** Before fixing a
+defect, search for the same pattern elsewhere, and fix it there too. When a
+twin in this repository implements the same rule, also check it against Q11:
+it has the cross-references and the equivalence pin that Q11 requires, or the
+fix routes both callers through one implementation. A twin the change cannot
+reach, such as one in another repository, is listed for the user as out of
+scope (implement-change step 6). These places hold separate copies of logic:
 
 - the helper sub-crate at `crates/openjd-sessions/src/helper/`;
 - public `validate_*` functions next to the internal checks they mirror;

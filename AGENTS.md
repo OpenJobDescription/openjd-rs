@@ -39,6 +39,11 @@ not in a skill, in this file, or in a workflow prompt. Other documents, such as
 and `quality-criteria.md` disagree, `quality-criteria.md` wins and the summary
 should be fixed.
 
+[`quality-criteria.md` §7](docs/dev/quality-criteria.md#7-recurring-findings)
+lists the defects that reviews of this repository keep finding, such as a fix
+that handles `FLOAT` and misses `LIST[FLOAT]`. The `implement-change` skill
+checks the ones a change can reach, while implementing and again in the audit.
+
 ## Quick Reference
 
 ```bash
