@@ -18,8 +18,8 @@ MUST, SHOULD, and MAY are used in the RFC 2119 sense.
 
 ## 1. The three artifacts
 
-Every crate has three artifacts that MUST stay aligned, and most criteria
-below are about the relationship between them:
+Every crate has three artifacts that MUST stay aligned, and every criterion
+below is about the relationship between them:
 
 1. **Specs** in `specs/<crate>/`. These describe goals, design decisions and
    rationale, and how the implementation achieves them. Each crate MUST have a
@@ -27,9 +27,6 @@ below are about the relationship between them:
    design.
 2. **Implementation** in `crates/openjd-<crate>/src/`.
 3. **Tests**, both in-crate and under `crates/openjd-<crate>/tests/`.
-
-Q9 and Q14 are about a change rather than the artifacts: the checks it
-passes, and how its commit messages and PR description describe it.
 
 ## 2. Criteria
 
@@ -238,27 +235,6 @@ skip. Whether a name exists does not depend on any value, so every run that
 evaluates that sub-expression fails. `specs/expr/values.md` and
 `specs/expr/evaluator.md` state both rules for the constructs they cover.
 
-**Q14. The change describes what it changes.** A change's commit messages and
-PR description MUST name every difference between the base and the change
-that a caller can observe:
-
-- rendered values, such as `2.0` becoming `2` or `0` becoming `0.0`;
-- inputs that are newly accepted or newly rejected;
-- error kinds and variants, error messages, field paths, and column offsets;
-- the sequence of status callbacks;
-- metrics such as `peak_memory`, and limits.
-
-A change to a public type, signature, error variant, or rendered value MUST
-also say what each consumer outside this repository needs when it next
-updates: the openjd-model-for-python bindings (an integer width such as
-`usize` in `__len__`, a field type change, or the mapping from error variant
-to Python exception), the JavaScript surface of openjd-for-js, and any Python
-reference pull request that must be released at the same time. PRs are
-squash-merged: the PR title becomes the subject of the commit on `main`,
-which release-plz turns into the changelog entry, and the branch's commit
-messages become that commit's body. A difference that no test pins is also a
-Q4 finding.
-
 ## 3. Evidence
 
 No claim is accepted on the strength of having been generated. Each kind of
@@ -351,9 +327,9 @@ leaving the file behind.
 
 ### Verifier rules
 1. When several verifiers run, they MUST get disjoint slices and different
-   angles, chosen from: spec fidelity (Q1, Q2, Q8, Q10, Q14),
-   implementation correctness (Q3, Q5, Q6, Q11, Q12, Q13), test adequacy by
-   mutation (Q4), and Python divergence (Q7).
+   angles, chosen from: spec fidelity (Q1, Q2, Q8, Q10), implementation
+   correctness (Q3, Q5, Q6, Q11, Q12, Q13), test adequacy by mutation (Q4),
+   and Python divergence (Q7).
 2. Each verifier MUST be told that it is one of several and will not see the
    others' results, so that it checks rather than defers.
 3. Each finding comes back labelled as in §4.

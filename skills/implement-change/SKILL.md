@@ -180,7 +180,6 @@ Instruct the auditor to:
   (Q8), and tests that should have changed but did not;
 - check every spec line, doc comment, and code comment the diff adds or
   edits against Q10: it describes the code as it is, not the change;
-- check the commit messages in the range against Q14;
 - check that the diff does what the scope statement says, no more and no
   less. Unrequested scope is a finding;
 - return each finding with its criterion ID, severity (§5), label (§4), and
@@ -260,10 +259,8 @@ Tell the user:
   reasons), and findings withdrawn;
 - any out-of-scope findings that need a decision.
 
-Push and open a PR only when the user asks. Put the gate results and the
-audit summary in the PR description, so reviewers can see what was checked.
-Before pushing, and again after any later fix round, check the description
-against quality-criteria Q14.
+Push and open a PR only when the user asks. Write it as "The pull request"
+below describes, both when you open it and after every later push.
 
 ## Commits
 
@@ -274,7 +271,7 @@ before step 3 if you are not already on one.
 
 | Stage | When | Subject | Body |
 |-------|------|---------|------|
-| **Implement** | After the first step 4 passes | A conventional-commit summary of the change itself, e.g. `fix(expr): ...` | The scope statement; every change a caller can observe and what downstream needs (quality-criteria Q14); report items resolved; the gate commands and their results |
+| **Implement** | After the first step 4 passes | A conventional-commit summary of the change itself, e.g. `fix(expr): ...` | The scope statement; the observable changes and what downstream needs (see "The pull request"); report items resolved; the gate commands and their results |
 | **Fix** | After step 6 and the rerun of step 4, for any round that changed files | `<type>(<scope>): address audit round <N> findings` | The audit round's inputs (commit range, audit tier, angles) and verdict; then one line per finding, giving its label, severity, criterion, and a summary, followed by what was done: fixed (how), deferred (why), withdrawn (the evidence), or listed for the user as out of scope; then the gate results |
 
 Audits change no files, so they get no commit of their own. A round's
@@ -291,9 +288,48 @@ Rules for every stage commit:
 - Sign off each commit (`git commit -s`).
 - Add new commits rather than amending or rebasing earlier stages away. The
   stage history is the record of the loop.
-- PRs are squash-merged, so the PR title becomes the commit on `main` that
-  release-plz reads. Give it a conventional-commit summary of the whole
-  change, not of the last stage.
+
+## The pull request
+
+PRs are squash-merged. The PR title becomes the subject of the commit on
+`main`, which release-plz turns into the changelog entry, and the branch's
+commit messages become that commit's body. Reviewers and the next downstream
+bump read the description. Together, the title, the description, and the
+commit messages MUST name every difference between the base and the change
+that a caller can observe:
+
+- rendered values, such as `2.0` becoming `2` or `0` becoming `0.0`;
+- inputs that are newly accepted or newly rejected;
+- error kinds and variants, error messages, field paths, and column offsets;
+- the sequence of status callbacks;
+- metrics such as `peak_memory`, and limits.
+
+For a change to a public type, signature, error variant, or rendered value,
+they also say what each consumer outside this repository needs when it next
+updates: the openjd-model-for-python bindings (an integer width such as
+`usize` in `__len__`, a field type change, or the mapping from error variant
+to Python exception), the JavaScript surface of openjd-for-js, and any Python
+reference pull request that must be released at the same time.
+
+**On submission**, when the PR is opened:
+
+- Give it a conventional-commit title that summarizes the whole change, not
+  the last stage.
+- Fill in `.github/PULL_REQUEST_TEMPLATE.md`. List the observable changes and
+  what downstream needs under "What is the impact of this change?", and give
+  the gate results and the audit summary under their own headings, so
+  reviewers can see what was checked.
+
+**On update**, after every later push (a fix round, a rebase, or a change a
+reviewer asked for):
+
+- Compare base and tip again. A fix can change behavior that the
+  description already describes.
+- Update the title and the description so they describe the change as it
+  stands, and add the new audit rounds to the audit summary.
+- Leave the earlier stage commits as they are (see "Commits"). When their
+  messages describe an earlier design, say in the description which commits
+  describe the result, so the squash commit's body can be trimmed at merge.
 
 ## Audit depth
 

@@ -227,8 +227,9 @@ Types: `feat`, `fix`, `test`, `docs`, `refactor`, `ci`, `chore`, `perf`
 Append `!` for breaking changes (e.g., `feat!: ...`) and include a `BREAKING CHANGE` footer. **Note:** This is relaxed during pre-release — make any change that improves things. Enable strict breaking-change tracking once the project reaches stable release.
 
 Commit messages and the PR description name every change a caller can
-observe, and what consumers outside this repository need at their next update
-([quality-criteria Q14](docs/dev/quality-criteria.md)).
+observe, and what consumers outside this repository need at their next update.
+The [`implement-change` skill](skills/implement-change/SKILL.md#the-pull-request)
+says what to write when a PR is opened and after every later push.
 
 ### Test Quality Standard
 
