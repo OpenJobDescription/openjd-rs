@@ -214,7 +214,8 @@ Handle each finding from the audit:
   about design rather than fact, take it to the user.
 - **A finding outside the requested scope** (a pre-existing problem the change
   merely revealed): do not fix it silently. List it for the user, who decides
-  whether it joins this change.
+  whether it joins this change. An unfixed copy of a rule the change fixes is
+  in scope (Q11), not a pre-existing problem.
 
 After fixing, rerun step 4, then make the **fix commit** (see "Commits").
 

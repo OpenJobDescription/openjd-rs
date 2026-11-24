@@ -193,9 +193,10 @@ shapes are:
 - expression types `T`, `list[T]`, `list[list[T]]`, the empty
   `list[nulltype]`, `T?`, a union that contains `T` or `list[T]`, and
   `unresolved[T]`, plus `range_expr` for `int`;
-- both ends of each implicit coercion in the 2026-02 Expression Language
-  §1.2.3, such as `path` and `string` or `int` and `float`, together with the
-  list form of each coercion, which applies element by element;
+- both ends of each implicit coercion the value passes through (2026-02
+  Expression Language §1.2.3), such as `path` and `string` or `int` and
+  `float`, together with the list form of each coercion, which applies
+  element by element;
 - each representation of a value: a JSON or YAML number and a numeric string
   (`5.0` and `"5.0"`), and a `FLOAT` whose original text is kept (`2.50`) as
   well as one that is computed and rendered again.
@@ -231,10 +232,11 @@ It MUST also hold at each stage that applies it: template decode and
 `openjd check`, `create_job`, and run time. Each stage reports a violation
 with a located message (Q3), and SHOULD use the message and field path that
 the other stages use. An earlier stage MUST NOT reject a template that every
-later stage accepts. A name that resolves nowhere MUST be reported at
-template validation, because whether a name exists does not depend on any
-value. `specs/expr/values.md` and `specs/expr/evaluator.md` state both rules
-for the constructs they cover.
+later stage accepts, with one exception: a name that resolves nowhere MUST be
+reported at template validation, even in a sub-expression that some runs
+skip. Whether a name exists does not depend on any value, so every run that
+evaluates that sub-expression fails. `specs/expr/values.md` and
+`specs/expr/evaluator.md` state both rules for the constructs they cover.
 
 **Q14. The change describes what it changes.** A change's commit messages and
 PR description MUST name every difference between the base and the change
