@@ -906,6 +906,31 @@ fn link_skipped_as_cycle_still_expands_on_another_path() {
     }
 }
 
+/// The cycle rule applies to the directory a symlink chain resolves to, not
+/// the first hop: chains back to the subtree root or to a directory being
+/// expanded are skipped, nested and at top level.
+#[test]
+fn cycle_through_symlink_chain_is_skipped() {
+    let m = abs(
+        vec![
+            hf("/p/x.txt", "hx", 1, 10),
+            FileEntry::symlink("/p/dlink", "/x"),
+            FileEntry::symlink("/p/self", "/lp"),
+            hf("/x/a.txt", "ha", 2, 20),
+            FileEntry::symlink("/x/up", "/lp"),
+            FileEntry::symlink("/lp", "/p"),
+            FileEntry::symlink("/x/back", "/lx"),
+            FileEntry::symlink("/lx", "/x"),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["x.txt", "dlink/a.txt"], "{policy}");
+    }
+}
+
 // ===== TestSubtreeFileChunkSizePreservation =====
 
 #[test]
