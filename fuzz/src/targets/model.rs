@@ -33,6 +33,7 @@ use openjd_expr::{
     ExprValue, ExpressionError, FormatString, FormatStringOptions, FunctionLibrary, HostContext,
     PathFormat, SymbolTable,
 };
+use openjd_model::job::diff::{diff_environments, diff_jobs, diff_steps};
 use openjd_model::job::{Job, Step};
 use openjd_model::template::{EnvironmentTemplate, JobTemplate};
 use openjd_model::{
@@ -257,6 +258,7 @@ pub fn pipeline(
         Ok(j2) => {
             oracle!(j2 == job, "create_job is nondeterministic");
             oracle!(hash_of(&j2) == hash_of(&job), "equal jobs hash differently");
+            check_self_diff(&job, &j2);
         }
         Err(e) => oracle!(false, "create_job succeeded once then failed: {e}"),
     }
@@ -266,6 +268,27 @@ pub fn pipeline(
     for step in &job.steps {
         let tasks = check_param_space(step);
         run_time_resolution(template, &job, step, &values, &tasks, u);
+    }
+}
+
+/// Two equal jobs diff as unchanged at the root and at every step.
+fn check_self_diff(job: &Job, same: &Job) {
+    let d = diff_jobs(job, same);
+    oracle!(
+        !d.is_changed() && d.to_string().is_empty(),
+        "diff_jobs reports a change between equal jobs:\n{d}"
+    );
+    oracle!(
+        job.steps
+            .iter()
+            .all(|s| d.root().child(&format!("steps[{}]", s.name)).is_none()),
+        "diff_jobs expanded an unchanged root"
+    );
+    for (a, b) in job.steps.iter().zip(&same.steps) {
+        oracle!(
+            !diff_steps(a, b).is_changed(),
+            "diff_steps reports a change between equal steps"
+        );
     }
 }
 
@@ -859,6 +882,10 @@ pub fn env_gen(data: &[u8]) {
         let _ = st.set(&format!("Param.{}", p.name), v);
     }
     let env = openjd_model::convert_environment_with_symtab(t.environment(), Some(&st));
+    oracle!(
+        !diff_environments(&env, &env.clone()).is_changed(),
+        "diff_environments reports a change between equal environments"
+    );
     if let Some(rs) = &env.resolved_symtab {
         oracle!(
             rs.to_symtab(PathFormat::Posix).is_ok(),

@@ -31,7 +31,7 @@ openjd-rs/
 │   │       ├── template/       # The 2023-09 template model types and parsing (parse.rs)
 │   │       │   ├── validation/         # Revision-neutral validation entry points, limits and rules types
 │   │       │   └── validate_v2023_09/  # The 2023-09 validation passes
-│   │       └── job/            # Instantiated job types, parameter space iteration, step dependency graph
+│   │       └── job/            # Instantiated job types, parameter space iteration, step dependency graph, diff
 │   │           └── create_job/ # create_job: parameter resolution and template instantiation
 │   ├── openjd-sessions/        # Session runtime
 │   │   ├── build.rs            # Builds the cross-user helper and embeds it in the crate

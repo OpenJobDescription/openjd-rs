@@ -40,6 +40,7 @@ openjd_model              — crate root re-exports, the main public surface
 ├── format_string         — re-exported from openjd_expr
 ├── job                   — instantiated (resolved) job types
 │   ├── create_job        — pipeline functions + MergedParameterDefinition
+│   ├── diff              — unstable diff of jobs, steps, environments
 │   ├── step_param_space  — StepParameterSpaceIterator
 │   └── step_dependency_graph — StepDependencyGraph + friends
 ├── symbol_table          — re-exported from openjd_expr
@@ -1277,6 +1278,62 @@ forces sequential iteration, because chunk size depends on runtime
 feedback; for that case, callers mutate
 `set_chunks_default_task_count` while iterating to reshape chunks
 dynamically.
+
+## Job Diff (unstable)
+
+**Status: unstable.** `job::diff` may change or be removed in any release
+without notice. Design: [job-diff.md](job-diff.md).
+
+```rust
+pub fn diff_jobs(old: &Job, new: &Job) -> DiffTree;
+pub fn diff_steps(old: &Step, new: &Step) -> DiffTree;
+pub fn diff_environments(old: &Environment, new: &Environment) -> DiffTree;
+
+pub struct DiffTree { /* private */ }
+impl DiffTree {
+    pub fn root(&self) -> &DiffNode;
+    pub fn is_changed(&self) -> bool;
+}
+impl Display for DiffTree;
+
+#[non_exhaustive]
+pub struct DiffNode {
+    pub segment: String,
+    pub status: DiffStatus,
+    pub field_changes: Vec<FieldChange>,
+    pub children: Vec<DiffNode>,
+}
+impl DiffNode {
+    pub fn is_changed(&self) -> bool;
+    pub fn child(&self, segment: &str) -> Option<&DiffNode>;
+}
+
+pub enum DiffStatus { Unchanged, Added, Removed, Modified }
+
+#[non_exhaustive]
+pub struct FieldChange {
+    pub field: String,
+    pub before: serde_json::Value,
+    pub after: serde_json::Value,
+}
+```
+
+Each function compares two values of one model type and cannot fail. The
+root node compares the two arguments and has an empty `segment`.
+`DiffTree::is_changed` is the root's `is_changed`, which is true for any
+status other than `Unchanged`.
+
+A node is `Unchanged` exactly when the two sides are equal under the type's
+`PartialEq`. Only a `Modified` node has `field_changes` and `children`; its
+children include unchanged ones, so `child(segment)` finds any sub-value
+present on either side. `segment` names a collection element by its name or
+map key, as in `steps[Render]` or `parameters[Scene]`. A `FieldChange`'s
+`before` and `after` are JSON, with `null` for an absent value. Names must be
+unique within each collection, which `create_job` guarantees.
+
+`Display` writes the changed nodes as indented text, one line per changed node
+(`~`, `+` or `-` and its segment) and one per field change
+(`field: before -> after`). An unchanged tree writes nothing.
 
 ## Step Dependency Graph
 

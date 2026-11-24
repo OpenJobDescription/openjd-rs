@@ -200,6 +200,65 @@ pub fn openjd_model::job::create_job::create_job(&openjd_model::template::JobTem
 pub fn openjd_model::job::create_job::evaluate_let_bindings(&[alloc::string::String], &openjd_expr::symbol_table::SymbolTable, core::option::Option<&openjd_expr::function_library::FunctionLibrary>, openjd_expr::path_mapping::PathFormat, core::option::Option<usize>, core::option::Option<usize>) -> core::result::Result<openjd_expr::symbol_table::SymbolTable, openjd_model::error::ModelError>
 pub fn openjd_model::job::create_job::merge_job_parameter_definitions(&openjd_model::template::JobTemplate, &[openjd_model::template::EnvironmentTemplate]) -> core::result::Result<alloc::vec::Vec<openjd_model::job::create_job::parameters::MergedParameterDefinition>, openjd_model::error::ModelError>
 pub fn openjd_model::job::create_job::preprocess_job_parameters(&openjd_model::template::JobTemplate, &openjd_model::types::JobParameterInputValues, &[openjd_model::template::EnvironmentTemplate], &openjd_model::job::create_job::parameters::PathParameterOptions<'_>) -> core::result::Result<openjd_model::types::JobParameterValues, openjd_model::error::ModelError>
+pub mod openjd_model::job::diff
+pub enum openjd_model::job::diff::DiffStatus
+pub openjd_model::job::diff::DiffStatus::Added
+pub openjd_model::job::diff::DiffStatus::Modified
+pub openjd_model::job::diff::DiffStatus::Removed
+pub openjd_model::job::diff::DiffStatus::Unchanged
+impl core::clone::Clone for openjd_model::job::diff::DiffStatus
+pub fn openjd_model::job::diff::DiffStatus::clone(&self) -> openjd_model::job::diff::DiffStatus
+impl core::cmp::Eq for openjd_model::job::diff::DiffStatus
+impl core::cmp::PartialEq for openjd_model::job::diff::DiffStatus
+pub fn openjd_model::job::diff::DiffStatus::eq(&self, &openjd_model::job::diff::DiffStatus) -> bool
+impl core::fmt::Debug for openjd_model::job::diff::DiffStatus
+pub fn openjd_model::job::diff::DiffStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for openjd_model::job::diff::DiffStatus
+pub fn openjd_model::job::diff::DiffStatus::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for openjd_model::job::diff::DiffStatus
+impl core::marker::StructuralPartialEq for openjd_model::job::diff::DiffStatus
+#[non_exhaustive] pub struct openjd_model::job::diff::DiffNode
+pub openjd_model::job::diff::DiffNode::children: alloc::vec::Vec<openjd_model::job::diff::DiffNode>
+pub openjd_model::job::diff::DiffNode::field_changes: alloc::vec::Vec<openjd_model::job::diff::FieldChange>
+pub openjd_model::job::diff::DiffNode::segment: alloc::string::String
+pub openjd_model::job::diff::DiffNode::status: openjd_model::job::diff::DiffStatus
+impl openjd_model::job::diff::DiffNode
+pub fn openjd_model::job::diff::DiffNode::child(&self, &str) -> core::option::Option<&openjd_model::job::diff::DiffNode>
+pub fn openjd_model::job::diff::DiffNode::is_changed(&self) -> bool
+impl core::clone::Clone for openjd_model::job::diff::DiffNode
+pub fn openjd_model::job::diff::DiffNode::clone(&self) -> openjd_model::job::diff::DiffNode
+impl core::cmp::PartialEq for openjd_model::job::diff::DiffNode
+pub fn openjd_model::job::diff::DiffNode::eq(&self, &openjd_model::job::diff::DiffNode) -> bool
+impl core::fmt::Debug for openjd_model::job::diff::DiffNode
+pub fn openjd_model::job::diff::DiffNode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::diff::DiffNode
+pub struct openjd_model::job::diff::DiffTree
+impl openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::DiffTree::is_changed(&self) -> bool
+pub fn openjd_model::job::diff::DiffTree::root(&self) -> &openjd_model::job::diff::DiffNode
+impl core::clone::Clone for openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::DiffTree::clone(&self) -> openjd_model::job::diff::DiffTree
+impl core::cmp::PartialEq for openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::DiffTree::eq(&self, &openjd_model::job::diff::DiffTree) -> bool
+impl core::fmt::Debug for openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::DiffTree::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::DiffTree::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::diff::DiffTree
+#[non_exhaustive] pub struct openjd_model::job::diff::FieldChange
+pub openjd_model::job::diff::FieldChange::after: serde_json::value::Value
+pub openjd_model::job::diff::FieldChange::before: serde_json::value::Value
+pub openjd_model::job::diff::FieldChange::field: alloc::string::String
+impl core::clone::Clone for openjd_model::job::diff::FieldChange
+pub fn openjd_model::job::diff::FieldChange::clone(&self) -> openjd_model::job::diff::FieldChange
+impl core::cmp::PartialEq for openjd_model::job::diff::FieldChange
+pub fn openjd_model::job::diff::FieldChange::eq(&self, &openjd_model::job::diff::FieldChange) -> bool
+impl core::fmt::Debug for openjd_model::job::diff::FieldChange
+pub fn openjd_model::job::diff::FieldChange::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for openjd_model::job::diff::FieldChange
+pub fn openjd_model::job::diff::diff_environments(&openjd_model::job::Environment, &openjd_model::job::Environment) -> openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::diff_jobs(&openjd_model::job::Job, &openjd_model::job::Job) -> openjd_model::job::diff::DiffTree
+pub fn openjd_model::job::diff::diff_steps(&openjd_model::job::Step, &openjd_model::job::Step) -> openjd_model::job::diff::DiffTree
 pub mod openjd_model::job::step_dependency_graph
 pub struct openjd_model::job::step_dependency_graph::StepDependencyEdge
 pub openjd_model::job::step_dependency_graph::StepDependencyEdge::dependent: usize
