@@ -922,6 +922,20 @@ fn v2025_dirs_list_ancestors_below_the_root() {
             other => panic!("{:?}", std::mem::discriminant(&other)),
         }
     }
+    // An explicit POSIX root dir is listed as `/`.
+    let m: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE)
+        .with_files(vec![file("/a/b.txt", "h1", 1, 1)])
+        .with_dirs(vec![DirEntry::new("/")]);
+    let json = encode_abs_snapshot_v2025(&m).unwrap();
+    assert_eq!(v2025_dir_paths(&json), ["/", "/a"], "{json}");
+    match decode_v2025(&json).unwrap() {
+        DecodedManifest::AbsSnapshot(s) => {
+            assert_eq!(s.files[0].path, "/a/b.txt", "{json}");
+            let dirs: Vec<&str> = s.dirs.iter().map(|d| d.path.as_str()).collect();
+            assert_eq!(dirs, ["/", "/a"], "{json}");
+        }
+        other => panic!("{:?}", std::mem::discriminant(&other)),
+    }
     // An explicit drive-root dir is listed under the same name.
     let m: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE)
         .with_files(vec![file("C:/top.txt", "h1", 1, 1)])

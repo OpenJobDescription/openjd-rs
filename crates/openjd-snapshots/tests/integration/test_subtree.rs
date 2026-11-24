@@ -520,8 +520,11 @@ fn directory_symlink_collapsed_with_implicit_dirs() {
     assert!(p.contains("link/b.png"));
 }
 
+/// A nested symlink in an expanded directory whose target is outside the
+/// subtree is collapsed, as `collect` collapses escaping links in a collapsed
+/// directory, so the subtree holds no link to a target it lacks.
 #[test]
-fn directory_symlink_with_nested_symlink_collapse_escaping_preserves() {
+fn directory_symlink_with_nested_escaping_symlink_collapse_escaping_collapses() {
     let m = rel(
         vec![
             FileEntry::symlink("assets/textures/link", "assets/shared/v2"),
@@ -546,12 +549,34 @@ fn directory_symlink_with_nested_symlink_collapse_escaping_preserves() {
     assert_eq!(reg.hash.as_deref(), Some("h1"));
     assert!(reg.symlink_target.is_none());
 
-    // CollapseEscaping preserves nested symlinks inside expanded directories
     let nested = by_path["link/nested_link"];
-    assert_eq!(
-        nested.symlink_target.as_deref(),
-        Some("assets/data/actual.png")
+    assert!(nested.symlink_target.is_none());
+    assert_eq!(nested.hash.as_deref(), Some("h2"));
+    assert!(result.validate().is_ok(), "{:?}", result.validate());
+}
+
+/// A nested symlink in an expanded directory whose target is inside the
+/// subtree is kept, with its target relative to the subtree, as `collect`
+/// keeps internal links in a collapsed directory.
+#[test]
+fn directory_symlink_with_nested_internal_symlink_collapse_escaping_preserves() {
+    let m = rel(
+        vec![
+            FileEntry::symlink("assets/textures/link", "assets/shared/v2"),
+            FileEntry::symlink("assets/shared/v2/nested_link", "assets/textures/local.png"),
+            hf("assets/textures/local.png", "h3", 300, 3000),
+        ],
+        vec![],
     );
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let nested = result
+        .files
+        .iter()
+        .find(|f| f.path == "link/nested_link")
+        .unwrap();
+    assert_eq!(nested.symlink_target.as_deref(), Some("local.png"));
+    assert!(result.validate().is_ok(), "{:?}", result.validate());
 }
 
 #[test]

@@ -212,7 +212,7 @@ fn compute_roots<P: Clone, K: Clone>(
 /// directly under it as well as the given root `/x`. Its partition leaves out
 /// the given roots' entries, which have their own partitions, and treats
 /// links into them as escaping, so each entry is in exactly one partition and
-/// no partition holds a link to a target it lacks.
+/// a link into a given root is collapsed or left out by the symlink policy.
 fn partition_at<P: Clone, K: Clone>(
     manifest: &Manifest<P, K>,
     root: &str,
@@ -698,18 +698,23 @@ mod tests {
 
     /// A derived root's partition treats links into a given root as
     /// escaping: collapsed to copies of their targets, or left out, by the
-    /// policy. No partition holds a link to a target it lacks.
+    /// policy, including the links nested in a collapsed directory link.
+    /// Every partition is a valid relative snapshot.
     #[test]
     fn links_into_given_roots_escape_derived_partitions() {
         let mut a = FileEntry::file("/x/a.txt", 3, 1);
         a.hash = Some("ha".into());
+        let mut f = FileEntry::file("/f.txt", 2, 1);
+        f.hash = Some("hf".into());
         let m = make_abs(
             vec![
                 a,
-                FileEntry::file("/f.txt", 2, 1),
+                f,
                 FileEntry::symlink("/link", "/x/a.txt"),
                 FileEntry::symlink("/dlink", "/x"),
                 FileEntry::symlink("/inner", "/f.txt"),
+                FileEntry::symlink("/x/s", "/x/a.txt"),
+                FileEntry::symlink("/x/t", "/f.txt"),
             ],
             vec![],
         );
@@ -723,14 +728,23 @@ mod tests {
                 })
                 .collect()
         };
-        for (policy, expected_root) in [
+        for (policy, expected_x, expected_root) in [
             (
                 SymlinkPolicy::CollapseEscaping,
-                vec!["f.txt", "link #ha", "dlink/a.txt #ha", "inner -> f.txt"],
+                vec!["a.txt #ha", "s -> a.txt", "t #hf"],
+                vec![
+                    "f.txt #hf",
+                    "link #ha",
+                    "dlink/a.txt #ha",
+                    "dlink/s #ha",
+                    "dlink/t -> f.txt",
+                    "inner -> f.txt",
+                ],
             ),
             (
                 SymlinkPolicy::ExcludeEscaping,
-                vec!["f.txt", "inner -> f.txt"],
+                vec!["a.txt #ha", "s -> a.txt"],
+                vec!["f.txt #hf", "inner -> f.txt"],
             ),
         ] {
             let opts = PartitionOptions {
@@ -743,14 +757,15 @@ mod tests {
                 .iter()
                 .map(|(r, s)| (r.as_str(), describe(s)))
                 .collect();
+            let owned = |v: Vec<&str>| v.into_iter().map(str::to_string).collect::<Vec<_>>();
             assert_eq!(
                 got,
-                [
-                    ("/x", vec!["a.txt #ha".to_string()]),
-                    ("/", expected_root.iter().map(|s| s.to_string()).collect())
-                ],
+                [("/x", owned(expected_x)), ("/", owned(expected_root))],
                 "{policy}"
             );
+            for (root, s) in &parts {
+                assert!(s.validate().is_ok(), "{policy} {root}: {:?}", s.validate());
+            }
         }
     }
 

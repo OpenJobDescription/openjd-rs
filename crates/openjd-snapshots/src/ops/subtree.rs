@@ -42,14 +42,19 @@ fn is_dir_target(target: &str, file_lookup: &HashMap<&str, &FileEntry>) -> bool 
 ///
 /// Nested symlinks inside the expanded directory are handled according to `symlink_policy`:
 /// - `CollapseAll`: nested symlinks are resolved to their real targets.
-/// - `CollapseEscaping`: nested symlinks are preserved (remapped but kept as symlinks),
-///   since the escaping decision was already made on the parent directory symlink.
+/// - `CollapseEscaping`: a nested symlink whose target is in the subtree at
+///   `prefix` (and not under an `excluded` root) is kept, with its target made
+///   relative to the subtree, as `collect` keeps internal links in a collapsed
+///   directory. Any other nested symlink is resolved to its real target, so
+///   the result never holds a link to a target outside the subtree.
 fn expand_dir_symlink(
     link_rel_path: &str,
     target: &str,
     files: &[FileEntry],
     file_lookup: &HashMap<&str, &FileEntry>,
     symlink_policy: SymlinkPolicy,
+    prefix: &str,
+    excluded: &[String],
 ) -> Vec<FileEntry> {
     let target_prefix = format!("{target}/");
     let mut result = Vec::new();
@@ -69,12 +74,21 @@ fn expand_dir_symlink(
                         result.push(entry);
                     }
                 }
-                _ => {
-                    // Preserve nested symlinks with remapped path
-                    let mut entry = f.clone();
-                    entry.path = new_path;
-                    result.push(entry);
-                }
+                _ => match subtree_rel_path(sym_target, prefix, excluded) {
+                    Some(rel_target) if !rel_target.is_empty() => {
+                        let mut entry = f.clone();
+                        entry.path = new_path;
+                        entry.symlink_target = Some(rel_target.to_string());
+                        result.push(entry);
+                    }
+                    _ => {
+                        if let Some(real) = resolve_symlink(sym_target, file_lookup, 64) {
+                            let mut entry = real.clone();
+                            entry.path = new_path;
+                            result.push(entry);
+                        }
+                    }
+                },
             }
         } else {
             let mut entry = f.clone();
@@ -122,6 +136,8 @@ fn process_files(
                             files,
                             file_lookup,
                             symlink_policy,
+                            prefix,
+                            excluded,
                         ));
                         continue;
                     }
@@ -163,6 +179,8 @@ fn process_files(
                                     files,
                                     file_lookup,
                                     symlink_policy,
+                                    prefix,
+                                    excluded,
                                 ));
                                 continue;
                             }

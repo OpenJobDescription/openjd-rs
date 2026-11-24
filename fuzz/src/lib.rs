@@ -191,12 +191,6 @@ pub mod known {
              and `subtree_snapshot` with symlink collapsing emits duplicate paths.",
         ),
         (
-            "snapshots-collapse-nested-symlink",
-            "`subtree_snapshot` with a collapsing symlink policy pulls a symlinked directory's \
-             contents into the subtree but leaves a nested symlink's absolute target as-is, so \
-             the relative result fails `validate()` (`symlink_target path style mismatch`).",
-        ),
-        (
             "snapshots-subtree-root-symlink-empty-target",
             "`subtree_snapshot` gives a symlink whose target is the subtree root itself an \
              empty target (`/r/d/l -> /r/d` under `subtree(\"/r/d\", ExcludeEscaping)` \

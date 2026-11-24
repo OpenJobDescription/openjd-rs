@@ -981,10 +981,12 @@ mod tests {
     /// A multipart cache with 4-byte parts (multipart threshold 8 bytes).
     /// When `rewrite` is set it overwrites the source file with same-size
     /// content as the upload starts: after the hashing pass, before any part
-    /// is read for upload. When `fail_complete` is set, completing fails.
+    /// is read for upload. When `delete` is set it removes the source file
+    /// at the same point. When `fail_complete` is set, completing fails.
     struct RewriteOnUploadCache {
         source: String,
         rewrite: bool,
+        delete: bool,
         fail_complete: bool,
         puts: Mutex<Vec<Vec<u8>>>,
         parts: Mutex<Vec<(i32, Vec<u8>)>>,
@@ -997,6 +999,7 @@ mod tests {
             Self {
                 source: source.to_string(),
                 rewrite,
+                delete: false,
                 fail_complete: false,
                 puts: Mutex::default(),
                 parts: Mutex::default(),
@@ -1037,6 +1040,9 @@ mod tests {
         async fn create_multipart_upload(&self, _h: &str, _a: &str) -> std::io::Result<String> {
             if self.rewrite {
                 std::fs::write(&self.source, b"ABCDEFGHIJ")?;
+            }
+            if self.delete {
+                std::fs::remove_file(&self.source)?;
             }
             Ok("uid".into())
         }
@@ -1185,5 +1191,22 @@ mod tests {
                 assert_eq!(puts, [content.to_vec()], "{content:?}");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn whole_multipart_upload_names_a_file_removed_after_hashing() {
+        let tmp = TempDir::new().unwrap();
+        let (path, _) = make_test_file(tmp.path(), "big.bin", b"0123456789");
+        let mut cache = RewriteOnUploadCache::new(&path, false);
+        cache.delete = true;
+        let cache = Arc::new(cache);
+        let err = upload_whole_multipart(cache.clone())
+            .await
+            .map(|_| ())
+            .unwrap_err();
+        // The OS's own wording for the missing file, which differs by platform.
+        let os_message = std::fs::File::open(&path).unwrap_err().to_string();
+        assert_eq!(err.to_string(), format!("IO error: {path}: {os_message}"));
+        assert!(cache.aborted.load(Ordering::SeqCst));
     }
 }

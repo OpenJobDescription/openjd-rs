@@ -75,7 +75,12 @@ under any provided root, so that example gives `("/x", [a.txt])` and
 `("/", [f.txt])`. A symlink in a derived root's partition whose target is
 under a provided root escapes that partition: `symlink_policy` collapses it
 to a copy of its target (`CollapseEscaping`) or leaves it out
-(`ExcludeEscaping`), so no partition holds a link to a target it lacks.
+(`ExcludeEscaping`), as for any symlink leaving a subtree. A directory
+symlink collapsed this way is expanded with the
+[subtree rules](snapshot_symlink_handling.md) for the symlinks nested in it.
+Under `ExcludeEscaping`, a link whose target is itself an excluded link (a
+chain that leaves the partition through a later hop) is kept and dangles,
+as in SUBTREE.
 
 **Divergence from Python.** The Python job attachments uploader
 (`S3AssetManager._get_asset_groups`) also groups by volume, but gives the
