@@ -94,8 +94,9 @@ formats, and requires:
   rejects, because the static pass can't see those values. So after static
   acceptance a run-time type error or dispatch miss is allowed. A run-time
   failure is still a violation when the static pass folded the expression from
-  literals alone (no symbols and no host-context function such as
-  `apply_path_mapping`) to a value, since the run
+  literals alone (no symbols, no host-context function such as
+  `apply_path_mapping`, and no `path` or `with_number`, which the static pass
+  leaves unresolved for a literal) to a value, since the run
   must agree with it; when it is an undefined symbol, an unknown function, a
   method or property no type has, or unsupported syntax, which no value can
   cause; or when it refuses to order operands the library orders. A value

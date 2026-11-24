@@ -60,6 +60,15 @@ pub fn validation_library() -> Arc<FunctionLibrary> {
     FunctionLibrary::for_profile(&ExprProfile::latest().with_host_context(HostContext::Unresolved))
 }
 
+/// The functions that read a literal string as a path, which the
+/// validation-time library makes return `unresolved[T]` for literal
+/// arguments (`register_unresolved_host_context_functions`). `with_number`
+/// does so only on a `string`; its `path` overload takes a path that is
+/// already unresolved.
+pub fn literal_path_functions() -> &'static [&'static str] {
+    &["path", "with_number"]
+}
+
 /// The host-context functions (`apply_path_mapping`): `Unresolved` stubs
 /// in the validation-time library, real only with a host context.
 pub fn host_context_functions() -> &'static [String] {

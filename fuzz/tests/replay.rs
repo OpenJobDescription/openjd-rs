@@ -738,6 +738,43 @@ fn strict_folds() {
         "path('/a').apply_path_mapping() and False",
         false
     ));
+    // `path` and `with_number` on a literal string are unresolved
+    // statically, so a fold around them doesn't count.
+    assert!(!strict_fold(
+        "([path('a')])[(-2)] == path('b') and False",
+        false
+    ));
+    assert!(!strict_fold("'a'.with_number(1) == 'b' and False", false));
+    assert!(strict_fold("filepath('a') and False", false));
+}
+
+/// Each function `strict_fold` treats as reading a literal path returns an
+/// unresolved value in the validation library and a concrete one at run
+/// time.
+#[test]
+fn literal_path_functions_are_unresolved_statically() {
+    use openjd_expr::{ExprProfile, FunctionLibrary, ParsedExpression, SymbolTable};
+    use openjd_fuzz::gen::expr::{literal_path_functions, validation_library};
+    let runtime = FunctionLibrary::for_profile(&ExprProfile::latest());
+    let validation = validation_library();
+    for f in literal_path_functions() {
+        let src = match *f {
+            "path" => "path('a')",
+            "with_number" => "with_number('a', 1)",
+            other => panic!("no sample call for {other}"),
+        };
+        let parsed = ParsedExpression::new(src).unwrap();
+        let st = parsed
+            .with_library(&validation)
+            .evaluate(&[&SymbolTable::new()])
+            .unwrap();
+        assert!(st.is_unresolved(), "{src} is {st:?} statically");
+        let rt = parsed
+            .with_library(&runtime)
+            .evaluate(&[&SymbolTable::new()])
+            .unwrap();
+        assert!(!rt.is_unresolved(), "{src} is {rt:?} at run time");
+    }
 }
 
 /// The model pipeline checks the expression error behind a create_job

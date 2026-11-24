@@ -270,13 +270,25 @@ fn calls_host_context(code: &str) -> bool {
         .any(|f| calls_fn(code, f))
 }
 
+/// Does `code` (string literals blanked) call a function that reads a
+/// literal string as a path (`path`, `with_number`)? The validation library
+/// returns `unresolved[T]` from these even for literal arguments.
+fn calls_literal_path_function(code: &str) -> bool {
+    crate::gen::expr::literal_path_functions()
+        .iter()
+        .any(|f| calls_fn(code, f))
+}
+
 /// Does a run-time failure of an expression the static pass folded to a
 /// value count against the fold? Only for a fold from literals alone: no
-/// symbol (`has_symbols`) and no host-context function in `code` (string
-/// literals blanked). The validation library leaves a literal path
-/// unresolved, so such a fold holds in either path format.
+/// symbol (`has_symbols`), and no host-context function or function that
+/// reads a literal string as a path in `code` (string literals blanked).
+/// The validation library returns an unresolved value from all of these,
+/// and the static pass can fold around it: `[path('a')][-2] == path('b')
+/// and False` folds to `False`, though a run evaluates the index first and
+/// fails. A fold from literals alone holds in either path format.
 pub fn strict_fold(code: &str, has_symbols: bool) -> bool {
-    !has_symbols && !calls_host_context(code)
+    !has_symbols && !calls_host_context(code) && !calls_literal_path_function(code)
 }
 
 /// The known issue that can explain a static rejection `e` of an
@@ -355,7 +367,9 @@ fn interpolation_code(text: &str) -> String {
 ///   value folded around an unresolved value doesn't count: `Param.X < 0 <
 ///   0` folds to `False` statically, though a run evaluates `Param.X < 0`
 ///   first and can fail there. Neither does one folded around a
-///   host-context function, which is an `Unresolved` stub statically;
+///   host-context function, which is an `Unresolved` stub statically, or
+///   around a function that reads a literal string as a path (`path`,
+///   `with_number`), which returns `unresolved[T]` statically;
 /// - an undefined symbol, an unknown function, a member no type has, or
 ///   unsupported syntax, which don't depend on values;
 /// - an ordering of operands the library orders, which is a run-time bug
