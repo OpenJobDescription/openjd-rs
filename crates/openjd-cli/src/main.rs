@@ -26,7 +26,7 @@ fn format_log_timestamp() -> String {
         .map(|s| s.as_str())
         .unwrap_or("relative");
     match fmt {
-        "local" => jiff::Zoned::now()
+        "local" => jiff::ZonedDateTime::now()
             .strftime("%Y-%m-%dT%H:%M:%S%.3f")
             .to_string(),
         "utc" => jiff::Timestamp::now()
