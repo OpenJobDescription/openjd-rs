@@ -74,6 +74,11 @@ of kind `InvalidData`: `hash mismatch for <path>: expected <hash>, got <hash>`
 for a whole file, or `hash mismatch for chunk at offset <offset>: expected
 <hash>, got <hash>` for a chunk.
 
+This is stricter than the Python job attachments downloader, which writes
+downloaded objects without hashing them. A content-addressed object that does
+not match its key indicates a corrupt or tampered cache, so DOWNLOAD fails
+rather than write it.
+
 Before any filesystem change, each chunked file's `chunk_hashes` must match
 the manifest's chunk size: the file must be larger than one chunk and have
 one hash per chunk, the rule `Manifest::validate` applies. Otherwise the

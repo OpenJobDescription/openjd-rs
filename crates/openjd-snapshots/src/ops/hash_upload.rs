@@ -5,7 +5,7 @@
 use super::memory_pool::{default_max_memory_bytes, MemoryPool};
 use super::rate::SlidingWindowRate;
 use crate::data_cache::{multipart_threshold, upload_multipart, AsyncDataCache};
-use crate::hash::{hash_data, hash_file_and_parts, read_chunks, uses_chunks};
+use crate::hash::{hash_data, hash_file_and_parts, open_file, read_chunks, uses_chunks};
 use crate::hash_cache::{HashCache, WHOLE_FILE_RANGE_END};
 use crate::manifest::{AbsManifest, Manifest};
 use std::collections::HashMap;
@@ -613,7 +613,7 @@ async fn process_whole_multipart(
             async move {
                 let data = tokio::task::spawn_blocking(move || {
                     use std::io::{Read, Seek, SeekFrom};
-                    let mut f = std::fs::File::open(&path)?;
+                    let mut f = open_file(Path::new(&path))?;
                     f.seek(SeekFrom::Start(start))?;
                     let mut buf = vec![0u8; (end - start) as usize];
                     f.read_exact(&mut buf)?;
@@ -978,12 +978,15 @@ mod tests {
         }
     }
 
-    /// A multipart cache with 4-byte parts that, when `rewrite` is set,
-    /// overwrites the source file with same-size content as the upload
-    /// starts: after the hashing pass, before any part is read for upload.
+    /// A multipart cache with 4-byte parts (multipart threshold 8 bytes).
+    /// When `rewrite` is set it overwrites the source file with same-size
+    /// content as the upload starts: after the hashing pass, before any part
+    /// is read for upload. When `fail_complete` is set, completing fails.
     struct RewriteOnUploadCache {
         source: String,
         rewrite: bool,
+        fail_complete: bool,
+        puts: Mutex<Vec<Vec<u8>>>,
         parts: Mutex<Vec<(i32, Vec<u8>)>>,
         completed: Mutex<Option<Vec<u8>>>,
         aborted: AtomicBool,
@@ -994,6 +997,8 @@ mod tests {
             Self {
                 source: source.to_string(),
                 rewrite,
+                fail_complete: false,
+                puts: Mutex::default(),
                 parts: Mutex::default(),
                 completed: Mutex::default(),
                 aborted: AtomicBool::default(),
@@ -1018,8 +1023,9 @@ mod tests {
         async fn object_exists(&self, _h: &str, _a: &str) -> std::io::Result<bool> {
             Ok(false)
         }
-        async fn put_object(&self, _h: &str, _a: &str, _d: Vec<u8>) -> std::io::Result<String> {
-            unreachable!("the whole-file multipart path does not put")
+        async fn put_object(&self, h: &str, _a: &str, d: Vec<u8>) -> std::io::Result<String> {
+            self.puts.lock().unwrap().push(d);
+            Ok(h.to_string())
         }
         async fn get_object(&self, _h: &str, _a: &str) -> std::io::Result<Vec<u8>> {
             unreachable!("upload does not get")
@@ -1052,6 +1058,9 @@ mod tests {
             _uid: &str,
             _parts: Vec<(i32, String)>,
         ) -> std::io::Result<()> {
+            if self.fail_complete {
+                return Err(std::io::Error::other("complete failed"));
+            }
             let mut parts = self.parts.lock().unwrap().clone();
             parts.sort_by_key(|(n, _)| *n);
             *self.completed.lock().unwrap() =
@@ -1131,5 +1140,50 @@ mod tests {
         assert!(expected.contains(&err), "{err}");
         assert!(cache.aborted.load(Ordering::SeqCst));
         assert_eq!(*cache.completed.lock().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn whole_multipart_upload_aborts_when_complete_fails() {
+        let tmp = TempDir::new().unwrap();
+        let (path, _) = make_test_file(tmp.path(), "big.bin", b"0123456789");
+        let mut cache = RewriteOnUploadCache::new(&path, false);
+        cache.fail_complete = true;
+        let cache = Arc::new(cache);
+        let err = upload_whole_multipart(cache.clone())
+            .await
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.to_string(), "IO error: complete failed");
+        assert!(cache.aborted.load(Ordering::SeqCst));
+    }
+
+    /// Unchunked files at or above the multipart threshold (8 bytes here) go
+    /// through multipart upload; smaller ones are put whole.
+    #[tokio::test]
+    async fn whole_files_use_multipart_from_the_threshold() {
+        for (content, multipart) in [(&b"1234567"[..], false), (&b"12345678"[..], true)] {
+            let tmp = TempDir::new().unwrap();
+            let (path, mtime) = make_test_file(tmp.path(), "f.bin", content);
+            let cache = Arc::new(RewriteOnUploadCache::new(&path, false));
+            let manifest: AbsSnapshot =
+                Manifest::new(HashAlgorithm::Xxh128, crate::WHOLE_FILE_CHUNK_SIZE)
+                    .with_files(vec![FileEntry::file(&path, content.len() as u64, mtime)]);
+            hash_upload_abs_manifest(
+                &AbsManifest::Snapshot(manifest),
+                cache.clone(),
+                HashUploadOptions::default(),
+            )
+            .await
+            .unwrap();
+            let completed = cache.completed.lock().unwrap().clone();
+            let puts = cache.puts.lock().unwrap().clone();
+            if multipart {
+                assert_eq!(completed.as_deref(), Some(content), "{content:?}");
+                assert!(puts.is_empty(), "{content:?}");
+            } else {
+                assert_eq!(completed, None, "{content:?}");
+                assert_eq!(puts, [content.to_vec()], "{content:?}");
+            }
+        }
     }
 }

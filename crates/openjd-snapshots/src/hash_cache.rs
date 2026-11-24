@@ -221,6 +221,37 @@ mod tests {
     }
 
     #[test]
+    fn chunk_entries_round_trip_by_range() {
+        let (_tmp, cache) = make_cache();
+        let path = Path::new("/tmp/chunked.bin");
+        let hashes = vec!["h0".to_string(), "h1".to_string(), "h2".to_string()];
+        cache.put_chunks(path, "xxh128", 10, 4, &hashes, 1000);
+        assert_eq!(
+            cache.get(path, "xxh128", 8, 10).map(|(h, _)| h).as_deref(),
+            Some("h2")
+        );
+        assert_eq!(
+            cache.get_chunks_if_fresh(path, "xxh128", 10, 4, 1000),
+            Some(hashes)
+        );
+        // Stale mtime, a different chunk size, or a zero chunk size misses.
+        assert_eq!(cache.get_chunks_if_fresh(path, "xxh128", 10, 4, 1001), None);
+        assert_eq!(cache.get_chunks_if_fresh(path, "xxh128", 10, 5, 1000), None);
+        assert_eq!(cache.get_chunks_if_fresh(path, "xxh128", 10, 0, 1000), None);
+    }
+
+    #[test]
+    fn put_chunks_writes_nothing_for_a_wrong_hash_count() {
+        let (_tmp, cache) = make_cache();
+        let path = Path::new("/tmp/chunked.bin");
+        let two = vec!["h0".to_string(), "h1".to_string()];
+        cache.put_chunks(path, "xxh128", 10, 4, &two, 1000);
+        for (start, end) in [(0, 4), (4, 8), (8, 10)] {
+            assert_eq!(cache.get(path, "xxh128", start, end), None);
+        }
+    }
+
+    #[test]
     fn put_and_get() {
         let (_tmp, cache) = make_cache();
         let path = Path::new("/tmp/test.txt");

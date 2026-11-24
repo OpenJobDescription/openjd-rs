@@ -354,13 +354,16 @@ Replace the Python two-thread-pool + manual memory pool with a `tokio` bounded c
 
 #### S3 Multipart Upload
 
-Files > `2 × multipart_part_size` use `CreateMultipartUpload` / `UploadPart` /
-`CompleteMultipartUpload`. Parts are uploaded as separate async tasks. An `AtomicUsize`
-counter tracks remaining parts; the task that decrements to 0 calls complete.
+Files of at least `2 × multipart_part_size` use `CreateMultipartUpload` /
+`UploadPart` / `CompleteMultipartUpload`. Parts are read and uploaded
+concurrently; once all have uploaded they are completed in part-number order,
+and any failure aborts the upload. See
+[snapshot_operation_hash_upload_s3.md](snapshots/snapshot_operation_hash_upload_s3.md#multipart-coordination).
 
-#### Streaming Files (> max_memory)
+#### Large Unchunked Files
 
-Two-pass approach when `WHOLE_FILE_CHUNK_SIZE` and file > `max_memory_bytes`:
+Two-pass approach when `WHOLE_FILE_CHUNK_SIZE`, the file is at least the
+multipart threshold, and the cache supports multipart upload:
 1. Stream-read computing full hash + per-part hashes (no allocation).
 2. If HeadObject miss, re-read with per-part hash verification and upload.
 

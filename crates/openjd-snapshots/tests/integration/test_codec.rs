@@ -903,11 +903,16 @@ fn v2025_dir_paths(json: &str) -> Vec<String> {
 }
 
 /// The v2025 directory list holds each entry's ancestor directories below
-/// the POSIX root `/` and the relative root `.`, and decodes back to the
-/// same files.
+/// the POSIX root `/` and the relative root `.`, with a drive root named
+/// `C:`, and decodes back to the same files.
 #[test]
 fn v2025_dirs_list_ancestors_below_the_root() {
-    for (path, expected) in [("/a/b/c.txt", vec!["/a", "/a/b"]), ("/c.txt", vec![])] {
+    for (path, expected) in [
+        ("/a/b/c.txt", vec!["/a", "/a/b"]),
+        ("/c.txt", vec![]),
+        ("C:/a/b.txt", vec!["C:", "C:/a"]),
+        ("C:/top.txt", vec!["C:"]),
+    ] {
         let m: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE)
             .with_files(vec![file(path, "h1", 1, 1)]);
         let json = encode_abs_snapshot_v2025(&m).unwrap();
@@ -916,6 +921,20 @@ fn v2025_dirs_list_ancestors_below_the_root() {
             DecodedManifest::AbsSnapshot(s) => assert_eq!(s.files[0].path, path, "{json}"),
             other => panic!("{:?}", std::mem::discriminant(&other)),
         }
+    }
+    // An explicit drive-root dir is listed under the same name.
+    let m: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, WHOLE_FILE_CHUNK_SIZE)
+        .with_files(vec![file("C:/top.txt", "h1", 1, 1)])
+        .with_dirs(vec![DirEntry::new("C:/"), DirEntry::new("C:/e")]);
+    let json = encode_abs_snapshot_v2025(&m).unwrap();
+    assert_eq!(v2025_dir_paths(&json), ["C:", "C:/e"], "{json}");
+    match decode_v2025(&json).unwrap() {
+        DecodedManifest::AbsSnapshot(s) => {
+            assert_eq!(s.files[0].path, "C:/top.txt", "{json}");
+            let dirs: Vec<&str> = s.dirs.iter().map(|d| d.path.as_str()).collect();
+            assert_eq!(dirs, ["C:/", "C:/e"], "{json}");
+        }
+        other => panic!("{:?}", std::mem::discriminant(&other)),
     }
     for (path, expected) in [("a/b/c.txt", vec!["a", "a/b"]), ("c.txt", vec![])] {
         let m = make_snapshot(vec![file(path, "h1", 1, 1)]);

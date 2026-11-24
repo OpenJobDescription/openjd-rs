@@ -152,10 +152,12 @@ fn validate_path_style<P: Clone, K: Clone>(
     Ok(())
 }
 
+/// The partition roots: the given roots, normalized, in order, then the
+/// derived ones, sorted. Returns the roots and how many were given.
 fn compute_roots<P: Clone, K: Clone>(
     manifest: &Manifest<P, K>,
     options: &PartitionOptions,
-) -> crate::Result<Vec<String>> {
+) -> crate::Result<(Vec<String>, usize)> {
     let referenced: Vec<String> = options
         .referenced_paths
         .iter()
@@ -187,6 +189,7 @@ fn compute_roots<P: Clone, K: Clone>(
         remainder_roots(&remaining)
     };
 
+    let given = explicit_roots.len();
     let mut all_roots = explicit_roots;
     let mut sorted_auto = auto_roots;
     sorted_auto.sort();
@@ -196,7 +199,27 @@ fn compute_roots<P: Clone, K: Clone>(
         }
     }
 
-    Ok(all_roots)
+    Ok((all_roots, given))
+}
+
+/// Drops from `snapshot`, the subtree at derived root `root`, the entries
+/// that lie under one of the `given` roots, which have their own partitions.
+/// A derived root can contain a given root (`/` holds a file directly under
+/// it as well as the given root `/x`), and without this the given root's
+/// entries would be in both partitions.
+fn drop_given_roots(snapshot: &mut Snapshot, root: &str, given: &[String]) {
+    let nested: Vec<&str> = given
+        .iter()
+        .filter_map(|g| strip_root(g, root))
+        .filter(|n| !n.is_empty())
+        .collect();
+    if nested.is_empty() {
+        return;
+    }
+    let keep = |path: &str| !nested.iter().any(|n| is_under(path, n));
+    snapshot.files.retain(|f| keep(&f.path));
+    snapshot.dirs.retain(|d| keep(&d.path));
+    snapshot.recompute_total_size();
 }
 
 /// Partitions an absolute snapshot into multiple `(root, Snapshot)` pairs.
@@ -215,12 +238,15 @@ pub fn partition_manifest(
 
     validate_path_style(manifest, options)?;
 
-    let all_roots = compute_roots(manifest, options)?;
+    let (all_roots, given) = compute_roots(manifest, options)?;
     debug!(roots = ?all_roots, "partition roots determined");
 
     let mut result = Vec::new();
-    for root in &all_roots {
-        let snapshot = subtree_snapshot(manifest, root, options.symlink_policy)?;
+    for (i, root) in all_roots.iter().enumerate() {
+        let mut snapshot = subtree_snapshot(manifest, root, options.symlink_policy)?;
+        if i >= given {
+            drop_given_roots(&mut snapshot, root, &all_roots[..given]);
+        }
         debug!(root = %root, files = snapshot.files.len(), "partitioned root");
         result.push((root.clone(), snapshot));
     }
@@ -244,11 +270,14 @@ pub fn partition_rel_manifest(
 
     validate_path_style(manifest, options)?;
 
-    let all_roots = compute_roots(manifest, options)?;
+    let (all_roots, given) = compute_roots(manifest, options)?;
 
     let mut result = Vec::new();
-    for root in &all_roots {
-        let snapshot = subtree_rel_snapshot(manifest, root, options.symlink_policy)?;
+    for (i, root) in all_roots.iter().enumerate() {
+        let mut snapshot = subtree_rel_snapshot(manifest, root, options.symlink_policy)?;
+        if i >= given {
+            drop_given_roots(&mut snapshot, root, &all_roots[..given]);
+        }
         result.push((root.clone(), snapshot));
     }
 
@@ -459,7 +488,10 @@ mod tests {
             vec![
                 FileEntry::file("/x/a.txt", 1, 1),
                 FileEntry::file("/p/q/b.txt", 1, 1),
+                FileEntry::file("/p/q/r/e.txt", 1, 1),
                 FileEntry::file("/r/c.txt", 1, 1),
+                FileEntry::file("/s/t/f.txt", 1, 1),
+                FileEntry::file("/s/u/g.txt", 1, 1),
                 FileEntry::file("C:/s/t/d.txt", 1, 1),
             ],
             vec![],
@@ -468,7 +500,46 @@ mod tests {
             roots: Some(vec!["/x".into()]),
             ..Default::default()
         };
-        assert_eq!(roots(&m, &opts), ["/x", "/p/q", "/r", "C:/s/t"]);
+        assert_eq!(roots(&m, &opts), ["/x", "/p/q", "/r", "/s", "C:/s/t"]);
+    }
+
+    /// A remaining path that is the volume root itself gives the volume root,
+    /// which then holds every other remaining path on that volume.
+    #[test]
+    fn remainder_at_volume_root_gives_one_root() {
+        let m = make_abs(
+            vec![
+                FileEntry::file("C:/x/a.txt", 1, 1),
+                FileEntry::file("/f.txt", 1, 1),
+                FileEntry::file("/p/q/b.txt", 1, 1),
+            ],
+            vec![],
+        );
+        let opts = PartitionOptions {
+            roots: Some(vec!["C:/x".into()]),
+            ..Default::default()
+        };
+        let parts = partition_manifest(&m, &opts).unwrap();
+        let got: Vec<(&str, usize)> = parts
+            .iter()
+            .map(|(r, s)| (r.as_str(), s.files.len()))
+            .collect();
+        assert_eq!(got, [("C:/x", 1), ("/", 2)]);
+    }
+
+    #[test]
+    fn auto_root_is_common_to_all_paths() {
+        // The third path diverges earliest.
+        let m = make_abs(
+            vec![
+                FileEntry::file("/a/x/f", 1, 1),
+                FileEntry::file("/a/y/f", 1, 1),
+                FileEntry::file("/b/z/f", 1, 1),
+            ],
+            vec![],
+        );
+        assert_eq!(roots(&m, &PartitionOptions::default()), ["/"]);
+        assert_eq!(m.common_root().as_deref(), Some("/"));
     }
 
     /// Pins auto-partitioning of a single-volume manifest to
@@ -539,6 +610,86 @@ mod tests {
                 .collect();
             assert_eq!(got, [m.common_root().unwrap()], "{m:?}");
         }
+    }
+
+    /// Each entry is in exactly one partition, including when a derived root
+    /// (here the volume root, for a file directly under it) contains a given
+    /// root.
+    #[test]
+    fn given_root_entries_are_not_repeated_in_derived_partitions() {
+        let parts = |files: Vec<FileEntry>, given: &str| -> Vec<(String, Vec<String>)> {
+            let opts = PartitionOptions {
+                roots: Some(vec![given.into()]),
+                ..Default::default()
+            };
+            partition_manifest(&make_abs(files, vec![DirEntry::new("/x/e")]), &opts)
+                .unwrap()
+                .into_iter()
+                .map(|(r, s)| {
+                    let mut paths: Vec<String> = s.files.iter().map(|f| f.path.clone()).collect();
+                    paths.extend(s.dirs.iter().map(|d| format!("{}/", d.path)));
+                    (r, paths)
+                })
+                .collect()
+        };
+        assert_eq!(
+            parts(
+                vec![
+                    FileEntry::file("/x/a.txt", 1, 1),
+                    FileEntry::file("/f.txt", 2, 1),
+                    FileEntry::file("/p/q/b.txt", 4, 1),
+                ],
+                "/x"
+            ),
+            [
+                (
+                    "/x".to_string(),
+                    vec!["a.txt".to_string(), "e/".to_string()]
+                ),
+                (
+                    "/".to_string(),
+                    vec!["f.txt".to_string(), "p/q/b.txt".to_string()]
+                ),
+            ]
+        );
+
+        let m = make_abs(
+            vec![
+                FileEntry::file("/x/a.txt", 1, 1),
+                FileEntry::file("/f.txt", 2, 1),
+            ],
+            vec![],
+        );
+        let opts = PartitionOptions {
+            roots: Some(vec!["/x".into()]),
+            ..Default::default()
+        };
+        let got = partition_manifest(&m, &opts).unwrap();
+        assert_eq!(got[1].0, "/");
+        assert_eq!(got[1].1.total_size, 2);
+
+        let m: Snapshot =
+            Manifest::new(HashAlgorithm::Xxh128, DEFAULT_FILE_CHUNK_SIZE).with_files(vec![
+                FileEntry::file("f", 1, 1),
+                FileEntry::file("a/x", 1, 1),
+                FileEntry::file("b/y", 1, 1),
+            ]);
+        let opts = PartitionOptions {
+            roots: Some(vec!["a".into()]),
+            ..Default::default()
+        };
+        let got: Vec<(String, Vec<String>)> = partition_rel_manifest(&m, &opts)
+            .unwrap()
+            .into_iter()
+            .map(|(r, s)| (r, s.files.iter().map(|f| f.path.clone()).collect()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("a".to_string(), vec!["x".to_string()]),
+                (".".to_string(), vec!["f".to_string(), "b/y".to_string()]),
+            ]
+        );
     }
 
     #[test]

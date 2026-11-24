@@ -67,6 +67,20 @@ so they fall on the `/` volume.
 | `roots` is `None` | One root per volume: the longest common directory of that volume's paths. For a single-volume manifest without `referenced_paths` this is `Manifest::common_root()`. |
 | `roots` provided | Provided roots first, then roots for the paths no provided root contains. Per volume, that is their longest common directory when it lies below the volume root; otherwise one root per top-level directory (`/p/q` and `/r` give `/p/q` and `/r`, not `/`). A remaining path that is the volume root itself, such as the parent of a file directly under `/`, is covered by the volume root. |
 
+Every entry is in exactly one partition. A derived root can contain a
+provided root: with `roots: ["/x"]` and files `/x/a.txt` and `/f.txt`, the
+derived root is `/`. A derived root's partition leaves out the entries
+under any provided root, so that example gives `("/x", [a.txt])` and
+`("/", [f.txt])`.
+
+**Divergence from Python.** The Python job attachments uploader
+(`S3AssetManager._get_asset_groups`) also groups by volume, but gives the
+paths outside the provided roots one root per volume, their longest common
+directory, which is often `/`. PARTITION splits that remainder per
+top-level directory instead, so a job's roots name the directories it uses:
+files `/p/q/b.txt` and `/var/tmp/g.txt` outside `roots: ["/x"]` give the
+roots `/p/q` and `/var/tmp`, where Python gives `/`.
+
 The common-directory rule is `longest_common_dir_prefix()` in `path_util.rs`,
 the implementation `common_root()` uses. It keeps a root's trailing slash
 (`/`, `C:/`) and gives `.` for relative paths that share no directory.

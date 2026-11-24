@@ -264,7 +264,7 @@ fallible STS call out of the synchronous `new`.
 
 ### Multipart Transfers
 
-Files larger than `2 × multipart_part_size` (default 64MB) use S3 multipart upload/download with parallel parts.
+Files of at least `2 × multipart_part_size` (default 64MB; `multipart_threshold()`) use S3 multipart upload/download with parallel parts.
 
 ### S3 Check Cache
 

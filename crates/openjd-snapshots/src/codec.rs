@@ -27,7 +27,7 @@ use crate::manifest::{
     Snapshot, SnapshotDiff, SymlinkPolicy, ValidateKind,
 };
 use crate::ops::subtree_rel_snapshot;
-use crate::path_util::implied_dirs;
+use crate::path_util::{implied_dirs, is_root_path};
 use crate::{Result, SnapshotError, DEFAULT_FILE_CHUNK_SIZE, WHOLE_FILE_CHUNK_SIZE};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -755,16 +755,36 @@ fn collect_all_directories(dirs: &[DirEntry], files: &[FileEntry]) -> Vec<DirEnt
     }
 
     // Every ancestor directory, except the POSIX root `/` and the relative
-    // root `.`, which the format leaves implicit. A drive root (`C:/`) is
-    // listed; the decoder does not accept a drive-root name, so v2025 does
-    // not round-trip drive-letter paths (see `snapshot_codec.md`).
-    let mut result: Vec<DirEntry> = dirs.to_vec();
+    // root `.`, which the format leaves implicit.
+    let mut result: Vec<DirEntry> = dirs
+        .iter()
+        .map(|d| DirEntry {
+            path: v2025_dir_name(&d.path).to_string(),
+            deleted: d.deleted,
+        })
+        .collect();
     for dir_path in implied_dirs(all_paths) {
         if dir_path != "/" && dir_path != "." && !explicit.contains_key(dir_path) {
-            result.push(DirEntry::new(dir_path));
+            result.push(DirEntry {
+                path: v2025_dir_name(dir_path).to_string(),
+                deleted: false,
+            });
         }
     }
     result
+}
+
+/// The name v2025 lists directory `path` under. A drive root (`C:/`) is
+/// listed as `C:`: `$N/name` expands to `<dir>/name`, and
+/// [`encode_path_with_dir_index`] finds a path's directory as the text before
+/// its last `/`, which for `C:/a` is `C:`. Built without `DirEntry::new`,
+/// which would normalize `C:` back to `C:/`.
+fn v2025_dir_name(path: &str) -> &str {
+    if path != "/" && is_root_path(path) {
+        path.trim_end_matches('/')
+    } else {
+        path
+    }
 }
 
 fn build_dir_index(raw_dirs: &[raw::RawV2025Dir]) -> Result<HashMap<usize, String>> {

@@ -72,7 +72,7 @@ pub fn hash_data(data: &[u8]) -> String {
 }
 
 /// Opens `path` for reading, naming the path in any error.
-fn open_file(path: &Path) -> std::io::Result<File> {
+pub(crate) fn open_file(path: &Path) -> std::io::Result<File> {
     File::open(path).map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", path.display())))
 }
 

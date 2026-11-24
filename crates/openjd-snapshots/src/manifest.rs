@@ -283,8 +283,8 @@ impl ValidatePaths for Rel {
 
 /// Checks a symlink entry's target against the manifest's path style `P`:
 /// an absolute manifest needs absolute targets, a relative one relative
-/// targets, and no target may be empty. [`Manifest::validate`] and the v2023
-/// encoders both apply it.
+/// targets, and no target may be empty. [`Manifest::validate`], the v2023
+/// encoders, and the relative v2025 encoders apply it.
 pub(crate) fn check_symlink_target<P: ValidatePaths>(
     path: &str,
     target: &str,

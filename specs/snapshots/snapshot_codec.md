@@ -41,11 +41,12 @@ target fails with the same `symlink_target path style mismatch for <path>:
 
 The v2025 encoder lists every ancestor directory of the manifest's entries,
 except the POSIX root `/` and the relative root `.`, which the format leaves
-implicit. A Windows drive root (`C:/`) is listed. The v2025 decoder rejects
-a directory name containing `/` that is not a `$N/` reference (`Invalid path
-format 'C:/': paths with '/' must use $N/ reference`), so a v2025 manifest
-with drive-letter paths does not decode. v2025 is an experimental draft
-format.
+implicit. A directory name has no trailing slash, because `$N/name` expands
+to `<dir>/name`, so a Windows drive root is listed as `C:` and `C:/a/b.txt`
+is written as a reference to it. This holds for an explicit `C:/` dir entry
+too, which decodes back to `C:/`. The decoder rejects a name containing `/`
+that is not a `$N/` reference (`Invalid path format 'C:/': paths with '/'
+must use $N/ reference`).
 
 ## Decoding
 

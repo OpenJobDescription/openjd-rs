@@ -1301,10 +1301,12 @@ mod tests {
     /// An in-memory cache that serves byte ranges, so downloads at or above
     /// the multipart threshold take the ranged path. Objects are stored
     /// under whatever hash the test chooses, so a test can serve content
-    /// that does not match its hash.
+    /// that does not match its hash. Records the hash of each ranged read,
+    /// so a test can check which objects took the ranged path.
     struct RangeCache {
         objects: Mutex<HashMap<String, Vec<u8>>>,
         part_size: usize,
+        ranged: Mutex<Vec<String>>,
     }
 
     impl RangeCache {
@@ -1312,7 +1314,15 @@ mod tests {
             Self {
                 objects: Mutex::new(HashMap::new()),
                 part_size,
+                ranged: Mutex::new(Vec::new()),
             }
+        }
+        /// The distinct hashes read by range, sorted.
+        fn ranged_hashes(&self) -> Vec<String> {
+            let mut hashes = self.ranged.lock().unwrap().clone();
+            hashes.sort();
+            hashes.dedup();
+            hashes
         }
         fn insert(&self, hash: &str, data: &[u8]) {
             self.objects
@@ -1370,6 +1380,7 @@ mod tests {
             start: u64,
             end: u64,
         ) -> std::io::Result<Vec<u8>> {
+            self.ranged.lock().unwrap().push(hash.to_string());
             Ok(self.object(hash)?[start as usize..=end as usize].to_vec())
         }
     }
@@ -1388,7 +1399,7 @@ mod tests {
     async fn ranged_whole_file_download_verifies_hash() {
         let tmp = TempDir::new().unwrap();
         // part_size 4 puts the multipart threshold at 8 bytes.
-        let cache = RangeCache::new(4);
+        let cache = Arc::new(RangeCache::new(4));
         let hash = hash_data(b"hello world!");
         cache.insert(&hash, b"HELLO WORLD!");
 
@@ -1401,7 +1412,7 @@ mod tests {
 
         let err = download_abs_manifest(
             &AbsManifest::Snapshot(manifest),
-            Arc::new(cache),
+            cache.clone(),
             DownloadOptions::default(),
         )
         .await
@@ -1414,6 +1425,7 @@ mod tests {
                 hash_data(b"HELLO WORLD!")
             )
         );
+        assert_eq!(cache.ranged_hashes(), std::slice::from_ref(&hash));
         assert!(
             dir_names(tmp.path()).is_empty(),
             "{:?}",
@@ -1432,6 +1444,7 @@ mod tests {
         let h1 = hash_data(b"cccc");
         cache.insert(&h0, b"aaaaBBBB");
         cache.insert(&h1, b"cccc");
+        let cache = Arc::new(cache);
 
         let dest = tmp.path().join("chunked.bin");
         let mut entry = FileEntry::file(dest.to_string_lossy().to_string(), 12, 1000);
@@ -1440,7 +1453,7 @@ mod tests {
 
         let err = download_abs_manifest(
             &AbsManifest::Snapshot(manifest),
-            Arc::new(cache),
+            cache.clone(),
             DownloadOptions::default(),
         )
         .await
@@ -1453,6 +1466,7 @@ mod tests {
                 hash_data(b"aaaaBBBB")
             )
         );
+        assert_eq!(cache.ranged_hashes(), std::slice::from_ref(&h0));
         assert!(
             dir_names(tmp.path()).is_empty(),
             "{:?}",
@@ -1463,7 +1477,11 @@ mod tests {
     #[tokio::test]
     async fn ranged_downloads_write_matching_content() {
         let tmp = TempDir::new().unwrap();
-        let cache = RangeCache::new(4);
+        // Threshold 8: the 12-byte whole file and the 8-byte chunk are read
+        // by range; the 7-byte whole file and the 4-byte chunk are not.
+        let cache = Arc::new(RangeCache::new(4));
+        let small = hash_data(b"1234567");
+        cache.insert(&small, b"1234567");
         let whole = hash_data(b"hello world!");
         cache.insert(&whole, b"hello world!");
         let h0 = hash_data(b"aaaabbbb");
@@ -1477,21 +1495,34 @@ mod tests {
         let chunked_dest = tmp.path().join("chunked.bin");
         let mut chunked_entry =
             FileEntry::file(chunked_dest.to_string_lossy().to_string(), 12, 1000);
-        chunked_entry.chunk_hashes = Some(vec![h0, h1]);
-        let manifest: AbsSnapshot =
-            Manifest::new(HashAlgorithm::Xxh128, 8).with_files(vec![whole_entry, chunked_entry]);
+        chunked_entry.chunk_hashes = Some(vec![h0.clone(), h1]);
+        let small_dest = tmp.path().join("small.bin");
+        let mut small_entry = FileEntry::file(small_dest.to_string_lossy().to_string(), 7, 1000);
+        small_entry.hash = Some(small);
+        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, 8).with_files(vec![
+            whole_entry,
+            chunked_entry,
+            small_entry,
+        ]);
 
         let result = download_abs_manifest(
             &AbsManifest::Snapshot(manifest),
-            Arc::new(cache),
+            cache.clone(),
             DownloadOptions::default(),
         )
         .await
         .unwrap();
-        assert_eq!(result.statistics.downloaded_files, 2);
+        assert_eq!(result.statistics.downloaded_files, 3);
         assert_eq!(std::fs::read(&whole_dest).unwrap(), b"hello world!");
         assert_eq!(std::fs::read(&chunked_dest).unwrap(), b"aaaabbbbcccc");
-        assert_eq!(dir_names(tmp.path()), ["chunked.bin", "whole.bin"]);
+        assert_eq!(std::fs::read(&small_dest).unwrap(), b"1234567");
+        assert_eq!(
+            dir_names(tmp.path()),
+            ["chunked.bin", "small.bin", "whole.bin"]
+        );
+        let mut expected_ranged = vec![hash_data(b"hello world!"), h0];
+        expected_ranged.sort();
+        assert_eq!(cache.ranged_hashes(), expected_ranged);
     }
 
     /// A `chunk_hashes` list shorter than the file's chunk count is rejected,
