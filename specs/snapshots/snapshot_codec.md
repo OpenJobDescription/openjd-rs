@@ -45,8 +45,8 @@ implicit. A directory name has no trailing slash, because `$N/name` expands
 to `<dir>/name`, so a Windows drive root is listed as `C:` and `C:/a/b.txt`
 is written as a reference to it. This holds for an explicit `C:/` dir entry
 too, which decodes back to `C:/`. The decoder rejects a name containing `/`
-that is not a `$N/` reference (`Invalid path format 'C:/': paths with '/'
-must use $N/ reference`).
+that is neither absolute (`/...`) nor a `$N/` reference (`Invalid path
+format 'C:/': paths with '/' must use $N/ reference`).
 
 ## Decoding
 

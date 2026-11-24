@@ -85,15 +85,26 @@ fn expand_dir_symlink(
     result
 }
 
+/// The path of `path` relative to the subtree at `prefix`, or `None` if it is
+/// outside the subtree or under one of the `excluded` roots, which other
+/// subtrees hold.
+fn subtree_rel_path<'a>(path: &'a str, prefix: &str, excluded: &[String]) -> Option<&'a str> {
+    if excluded.iter().any(|e| strip_root(path, e).is_some()) {
+        return None;
+    }
+    strip_root(path, prefix)
+}
+
 fn process_files(
     files: &[FileEntry],
     prefix: &str,
+    excluded: &[String],
     symlink_policy: SymlinkPolicy,
     file_lookup: &HashMap<&str, &FileEntry>,
 ) -> crate::Result<Vec<FileEntry>> {
     let mut result = Vec::new();
     for f in files {
-        let rel_path = match strip_root(&f.path, prefix).map(str::to_string) {
+        let rel_path = match subtree_rel_path(&f.path, prefix, excluded).map(str::to_string) {
             Some(p) if !p.is_empty() => p,
             Some(_) => continue,
             None => continue,
@@ -129,7 +140,9 @@ fn process_files(
                     )));
                 }
                 SymlinkPolicy::CollapseEscaping | SymlinkPolicy::ExcludeEscaping => {
-                    match strip_root(target, prefix).map(str::to_string) {
+                    // A target under an excluded root is outside this
+                    // subtree, so the link escapes it.
+                    match subtree_rel_path(target, prefix, excluded).map(str::to_string) {
                         Some(rel_target) => {
                             // Non-escaping symlink
                             let mut entry = f.clone();
@@ -172,10 +185,10 @@ fn process_files(
     Ok(result)
 }
 
-fn process_dirs(dirs: &[DirEntry], prefix: &str) -> Vec<DirEntry> {
+fn process_dirs(dirs: &[DirEntry], prefix: &str, excluded: &[String]) -> Vec<DirEntry> {
     dirs.iter()
         .filter_map(|d| {
-            strip_root(&d.path, prefix).and_then(|rel| {
+            subtree_rel_path(&d.path, prefix, excluded).and_then(|rel| {
                 if rel.is_empty() {
                     None
                 } else {
@@ -193,6 +206,20 @@ fn process_dirs(dirs: &[DirEntry], prefix: &str) -> Vec<DirEntry> {
 fn subtree_impl<P: Clone, K: Clone>(
     manifest: &Manifest<P, K>,
     subtree: &str,
+    symlink_policy: SymlinkPolicy,
+) -> crate::Result<Manifest<crate::manifest::Rel, K>> {
+    subtree_excluding(manifest, subtree, &[], symlink_policy)
+}
+
+/// Extracts the subtree at `subtree`, leaving out the entries under the
+/// normalized `excluded` roots. A symlink whose target is under an excluded
+/// root escapes the subtree, and `symlink_policy` applies to it as to any
+/// escaping link. Partitioning uses this so that a derived root containing a
+/// given root holds neither that root's entries nor links into them.
+pub(crate) fn subtree_excluding<P: Clone, K: Clone>(
+    manifest: &Manifest<P, K>,
+    subtree: &str,
+    excluded: &[String],
     symlink_policy: SymlinkPolicy,
 ) -> crate::Result<Manifest<crate::manifest::Rel, K>> {
     if symlink_policy == SymlinkPolicy::Preserve
@@ -241,8 +268,14 @@ fn subtree_impl<P: Clone, K: Clone>(
         .map(|f| (f.path.as_str(), f))
         .collect();
 
-    let files = process_files(&manifest.files, &prefix, symlink_policy, &file_lookup)?;
-    let dirs = process_dirs(&manifest.dirs, &prefix);
+    let files = process_files(
+        &manifest.files,
+        &prefix,
+        excluded,
+        symlink_policy,
+        &file_lookup,
+    )?;
+    let dirs = process_dirs(&manifest.dirs, &prefix, excluded);
 
     let mut result = Manifest::new(manifest.hash_alg, manifest.file_chunk_size_bytes);
     result.files = files;

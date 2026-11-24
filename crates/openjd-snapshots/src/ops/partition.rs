@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 use crate::manifest::{AbsSnapshot, Manifest, Snapshot, SymlinkPolicy};
-use crate::ops::subtree::{subtree_rel_snapshot, subtree_snapshot};
+use crate::ops::subtree::subtree_excluding;
 use crate::path_util::{
     ancestor_dirs, is_absolute_path, is_volume_root, longest_common_dir_prefix, normalize_path,
     strip_root, volume_root,
@@ -38,7 +38,12 @@ fn is_under(path: &str, root: &str) -> bool {
 }
 
 fn validate_no_nested_roots(roots: &[String]) -> crate::Result<()> {
-    for a in roots {
+    for (i, a) in roots.iter().enumerate() {
+        if roots[..i].contains(a) {
+            return Err(crate::SnapshotError::Validation(format!(
+                "root '{a}' is given more than once"
+            )));
+        }
         for b in roots {
             if a != b && is_under(a, b) {
                 return Err(crate::SnapshotError::Validation(format!(
@@ -202,24 +207,29 @@ fn compute_roots<P: Clone, K: Clone>(
     Ok((all_roots, given))
 }
 
-/// Drops from `snapshot`, the subtree at derived root `root`, the entries
-/// that lie under one of the `given` roots, which have their own partitions.
-/// A derived root can contain a given root (`/` holds a file directly under
-/// it as well as the given root `/x`), and without this the given root's
-/// entries would be in both partitions.
-fn drop_given_roots(snapshot: &mut Snapshot, root: &str, given: &[String]) {
-    let nested: Vec<&str> = given
-        .iter()
-        .filter_map(|g| strip_root(g, root))
-        .filter(|n| !n.is_empty())
-        .collect();
-    if nested.is_empty() {
-        return;
-    }
-    let keep = |path: &str| !nested.iter().any(|n| is_under(path, n));
-    snapshot.files.retain(|f| keep(&f.path));
-    snapshot.dirs.retain(|d| keep(&d.path));
-    snapshot.recompute_total_size();
+/// The partition at `root`, the `index`th root. A derived root (one after
+/// the `given` roots) can contain a given root, such as `/` holding a file
+/// directly under it as well as the given root `/x`. Its partition leaves out
+/// the given roots' entries, which have their own partitions, and treats
+/// links into them as escaping, so each entry is in exactly one partition and
+/// no partition holds a link to a target it lacks.
+fn partition_at<P: Clone, K: Clone>(
+    manifest: &Manifest<P, K>,
+    root: &str,
+    index: usize,
+    given: &[String],
+    options: &PartitionOptions,
+) -> crate::Result<Manifest<crate::manifest::Rel, K>> {
+    let excluded: Vec<String> = if index < given.len() {
+        Vec::new()
+    } else {
+        given
+            .iter()
+            .filter(|g| strip_root(g, root).is_some())
+            .cloned()
+            .collect()
+    };
+    subtree_excluding(manifest, root, &excluded, options.symlink_policy)
 }
 
 /// Partitions an absolute snapshot into multiple `(root, Snapshot)` pairs.
@@ -243,10 +253,7 @@ pub fn partition_manifest(
 
     let mut result = Vec::new();
     for (i, root) in all_roots.iter().enumerate() {
-        let mut snapshot = subtree_snapshot(manifest, root, options.symlink_policy)?;
-        if i >= given {
-            drop_given_roots(&mut snapshot, root, &all_roots[..given]);
-        }
+        let snapshot = partition_at(manifest, root, i, &all_roots[..given], options)?;
         debug!(root = %root, files = snapshot.files.len(), "partitioned root");
         result.push((root.clone(), snapshot));
     }
@@ -274,10 +281,7 @@ pub fn partition_rel_manifest(
 
     let mut result = Vec::new();
     for (i, root) in all_roots.iter().enumerate() {
-        let mut snapshot = subtree_rel_snapshot(manifest, root, options.symlink_policy)?;
-        if i >= given {
-            drop_given_roots(&mut snapshot, root, &all_roots[..given]);
-        }
+        let snapshot = partition_at(manifest, root, i, &all_roots[..given], options)?;
         result.push((root.clone(), snapshot));
     }
 
@@ -689,6 +693,80 @@ mod tests {
                 ("a".to_string(), vec!["x".to_string()]),
                 (".".to_string(), vec!["f".to_string(), "b/y".to_string()]),
             ]
+        );
+    }
+
+    /// A derived root's partition treats links into a given root as
+    /// escaping: collapsed to copies of their targets, or left out, by the
+    /// policy. No partition holds a link to a target it lacks.
+    #[test]
+    fn links_into_given_roots_escape_derived_partitions() {
+        let mut a = FileEntry::file("/x/a.txt", 3, 1);
+        a.hash = Some("ha".into());
+        let m = make_abs(
+            vec![
+                a,
+                FileEntry::file("/f.txt", 2, 1),
+                FileEntry::symlink("/link", "/x/a.txt"),
+                FileEntry::symlink("/dlink", "/x"),
+                FileEntry::symlink("/inner", "/f.txt"),
+            ],
+            vec![],
+        );
+        let describe = |s: &Snapshot| -> Vec<String> {
+            s.files
+                .iter()
+                .map(|f| match (&f.symlink_target, &f.hash) {
+                    (Some(t), _) => format!("{} -> {t}", f.path),
+                    (None, Some(h)) => format!("{} #{h}", f.path),
+                    (None, None) => f.path.clone(),
+                })
+                .collect()
+        };
+        for (policy, expected_root) in [
+            (
+                SymlinkPolicy::CollapseEscaping,
+                vec!["f.txt", "link #ha", "dlink/a.txt #ha", "inner -> f.txt"],
+            ),
+            (
+                SymlinkPolicy::ExcludeEscaping,
+                vec!["f.txt", "inner -> f.txt"],
+            ),
+        ] {
+            let opts = PartitionOptions {
+                roots: Some(vec!["/x".into()]),
+                symlink_policy: policy,
+                ..Default::default()
+            };
+            let parts = partition_manifest(&m, &opts).unwrap();
+            let got: Vec<(&str, Vec<String>)> = parts
+                .iter()
+                .map(|(r, s)| (r.as_str(), describe(s)))
+                .collect();
+            assert_eq!(
+                got,
+                [
+                    ("/x", vec!["a.txt #ha".to_string()]),
+                    ("/", expected_root.iter().map(|s| s.to_string()).collect())
+                ],
+                "{policy}"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_given_roots_rejected() {
+        let m = make_abs(vec![FileEntry::file("/a/x.txt", 1, 1)], vec![]);
+        let opts = PartitionOptions {
+            roots: Some(vec!["/a".into(), "/a/".into()]),
+            ..Default::default()
+        };
+        assert_eq!(
+            partition_manifest(&m, &opts)
+                .map(|_| ())
+                .unwrap_err()
+                .to_string(),
+            "Manifest validation error: root '/a' is given more than once"
         );
     }
 

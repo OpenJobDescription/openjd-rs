@@ -37,6 +37,7 @@ pub struct PartitionOptions {
 
 | Condition | Behavior |
 |-----------|----------|
+| A root is given more than once after normalization (`/a` and `/a/`) | Error: `root '<root>' is given more than once` |
 | A root is a subpath of another root (`/a` under `/`, `a` under `.`) | Error: `root '<nested>' is a subpath of root '<outer>'` |
 | `Preserve` or `TransitiveIncludeTargets` policy | Error |
 
@@ -71,7 +72,10 @@ Every entry is in exactly one partition. A derived root can contain a
 provided root: with `roots: ["/x"]` and files `/x/a.txt` and `/f.txt`, the
 derived root is `/`. A derived root's partition leaves out the entries
 under any provided root, so that example gives `("/x", [a.txt])` and
-`("/", [f.txt])`.
+`("/", [f.txt])`. A symlink in a derived root's partition whose target is
+under a provided root escapes that partition: `symlink_policy` collapses it
+to a copy of its target (`CollapseEscaping`) or leaves it out
+(`ExcludeEscaping`), so no partition holds a link to a target it lacks.
 
 **Divergence from Python.** The Python job attachments uploader
 (`S3AssetManager._get_asset_groups`) also groups by volume, but gives the
@@ -93,7 +97,7 @@ imply them: a manifest with dir `/a/b` and file `/a/b/c/f.txt` partitions at
 - `Manifest::root_contributors()` lists the paths a root must contain, for both `common_root()` and partitioning
 - `path_util.rs` holds the path rules: `parent_dir()`, `volume_root()`, `longest_common_dir_prefix()`, and `strip_root()` (the under-a-root test, shared with `subtree_snapshot()`)
 - The unit test `auto_root_matches_common_root` pins single-volume auto-partitioning to `common_root()`
-- Each partition is produced by calling `subtree_snapshot()` with the root path
+- Each partition is extracted with the subtree rules of `subtree_snapshot()`; a derived root's extraction also leaves out the provided roots it contains (`subtree_excluding()` in `ops/subtree.rs`)
 
 ## Example
 
