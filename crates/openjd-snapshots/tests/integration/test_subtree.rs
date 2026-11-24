@@ -762,6 +762,47 @@ fn symlink_chain_to_directory_expands() {
     }
 }
 
+/// Sibling nested symlinks to the same directory are both expanded: the
+/// directory is no longer being expanded once the first expansion ends.
+#[test]
+fn sibling_nested_links_to_same_directory_both_expand() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/dlink", "/x"),
+            FileEntry::symlink("/x/s1", "/y"),
+            FileEntry::symlink("/x/s2", "/y"),
+            hf("/y/b.txt", "hb", 1, 10),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["dlink/s1/b.txt", "dlink/s2/b.txt"], "{policy}");
+    }
+}
+
+/// A cycle through more than one directory link is skipped: every directory
+/// being expanded is checked, not only the innermost.
+#[test]
+fn two_hop_directory_symlink_cycle_is_skipped() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/dlink", "/x"),
+            hf("/x/a.txt", "ha", 1, 10),
+            FileEntry::symlink("/x/s", "/y"),
+            hf("/y/b.txt", "hb", 2, 20),
+            FileEntry::symlink("/y/t", "/x"),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["dlink/a.txt", "dlink/s/b.txt"], "{policy}");
+    }
+}
+
 // ===== TestSubtreeFileChunkSizePreservation =====
 
 #[test]
