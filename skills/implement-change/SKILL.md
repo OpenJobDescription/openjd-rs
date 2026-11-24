@@ -89,9 +89,9 @@ current behavior follow quality-criteria §3: cite `file:line`, or run it.
   touches rather than adding a parallel copy. If a second implementation is
   genuinely necessary, add the cross-references and the equivalence pin in
   the same change (Q11).
-- Go through the recurring findings in quality-criteria §7 that the change
-  can reach: the type's sibling shapes (RF1), every source of the value at
-  every stage (RF2), and twins of the code being fixed (RF3).
+- Carry the change to every sibling shape of each type it touches (Q12), and
+  to every source and stage of each value it touches (Q13). When the change
+  fixes a rule, fix every copy of the rule (Q11).
 - Write spec text and comments about the code as it is, not about the change
   or what it replaced. That history goes in the commit message (Q10).
 - Strike through resolved report items in the same change (Q9).
@@ -180,10 +180,7 @@ Instruct the auditor to:
   (Q8), and tests that should have changed but did not;
 - check every spec line, doc comment, and code comment the diff adds or
   edits against Q10: it describes the code as it is, not the change;
-- work through every recurring finding in quality-criteria §7 that the
-  change can reach, checking the commit messages in the range for RF4 and
-  RF5, and say which items it checked and which it skipped as not
-  applicable;
+- check the commit messages in the range against Q14;
 - check that the diff does what the scope statement says, no more and no
   less. Unrequested scope is a finding;
 - return each finding with its criterion ID, severity (§5), label (§4), and
@@ -265,7 +262,7 @@ Tell the user:
 Push and open a PR only when the user asks. Put the gate results and the
 audit summary in the PR description, so reviewers can see what was checked.
 Before pushing, and again after any later fix round, check the description
-against quality-criteria §7 RF4 and RF5.
+against quality-criteria Q14.
 
 ## Commits
 
@@ -276,7 +273,7 @@ before step 3 if you are not already on one.
 
 | Stage | When | Subject | Body |
 |-------|------|---------|------|
-| **Implement** | After the first step 4 passes | A conventional-commit summary of the change itself, e.g. `fix(expr): ...` | The scope statement; every change a caller can observe and what downstream needs (quality-criteria §7 RF4, RF5); report items resolved; the gate commands and their results |
+| **Implement** | After the first step 4 passes | A conventional-commit summary of the change itself, e.g. `fix(expr): ...` | The scope statement; every change a caller can observe and what downstream needs (quality-criteria Q14); report items resolved; the gate commands and their results |
 | **Fix** | After step 6 and the rerun of step 4, for any round that changed files | `<type>(<scope>): address audit round <N> findings` | The audit round's inputs (commit range, audit tier, angles) and verdict; then one line per finding, giving its label, severity, criterion, and a summary, followed by what was done: fixed (how), deferred (why), withdrawn (the evidence), or listed for the user as out of scope; then the gate results |
 
 Audits change no files, so they get no commit of their own. A round's

@@ -148,8 +148,7 @@ probes, and writes a fresh report at `reports/<crate>-quality-evaluation-report.
 The full procedure, including the Python reference branch table and the
 required report structure, lives in
 [`skills/eval-crate/SKILL.md`](../../skills/eval-crate/SKILL.md). The criteria
-it applies, along with the evidence, labelling, and severity rules and the
-recurring findings to check for, live in
+it applies, along with the evidence, labelling, and severity rules, live in
 [`docs/dev/quality-criteria.md`](quality-criteria.md). That file is
 shared with the `implement-change` skill, so individual changes are audited
 against the same bar the reports use. Both files are short and worth reading

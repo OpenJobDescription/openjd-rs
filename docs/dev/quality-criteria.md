@@ -10,16 +10,16 @@ it:
 | [`implement-change`](../../skills/implement-change/SKILL.md) | One change and its blast radius, in the audit step of its audit/fix loop |
 
 Change a criterion here, not in either skill. The skills define *scope* and
-*procedure*. This file defines *criteria*, *evidence*, *labels*,
-*severity*, and the *recurring findings* (§7) worth checking for. A skill
-MAY narrow which criteria it applies. It MUST NOT redefine any of them.
+*procedure*. This file defines *criteria*, *evidence*, *labels*, and
+*severity*. A skill MAY narrow which criteria it applies. It MUST NOT redefine
+any of them.
 
 MUST, SHOULD, and MAY are used in the RFC 2119 sense.
 
 ## 1. The three artifacts
 
-Every crate has three artifacts that MUST stay aligned, and every criterion
-below is about the relationship between them:
+Every crate has three artifacts that MUST stay aligned, and most criteria
+below are about the relationship between them:
 
 1. **Specs** in `specs/<crate>/`. These describe goals, design decisions and
    rationale, and how the implementation achieves them. Each crate MUST have a
@@ -27,6 +27,9 @@ below is about the relationship between them:
    design.
 2. **Implementation** in `crates/openjd-<crate>/src/`.
 3. **Tests**, both in-crate and under `crates/openjd-<crate>/tests/`.
+
+Q9 and Q14 are about a change rather than the artifacts: the checks it
+passes, and how its commit messages and PR description describe it.
 
 ## 2. Criteria
 
@@ -103,11 +106,8 @@ counterpart.
 **Q8. Consistency beyond the crate.** A change to a concept MUST carry through
 everywhere the concept appears: other crates' specs and code, `specs/*.md`
 cross-cutting documents, `README.md`, `AGENTS.md`, `DEVELOPMENT.md`,
-`docs/dev/`, and CLI help text. It also reaches the change's own commit
-messages and PR description, which MUST name every change a caller can
-observe and what each consumer outside this repository needs when it next
-updates (see RF4 and RF5 in §7). Per-crate scans miss this kind of drift, so
-it gets its own criterion.
+`docs/dev/`, and CLI help text. Per-crate scans miss this kind of drift, so it
+gets its own criterion.
 
 **Q9. Repository conventions.** Work MUST pass every check that CI runs on it.
 `.github/workflows/ci.yml` is authoritative for the exact commands, and the
@@ -172,8 +172,90 @@ streaming trade-off — the copies MUST cross-reference each other at both
 sites and MUST be pinned by an equivalence test that fails when either copy
 changes alone. Existing equivalence pins: openjd-expr's
 `tests/integration/test_coercion_drift.rs` and the sessions helper framer
-test in `crates/openjd-sessions/src/subprocess.rs`. Incidentally
+test in `crates/openjd-sessions/src/subprocess.rs`. A change that fixes
+a rule MUST fix every copy of it in this repository, or route the copies
+through one implementation. Copies are easy to miss in the cross-user helper
+(`crates/openjd-sessions/src/helper/`), in public `validate_*` functions
+beside the internal checks they mirror, and in the fuzz-target oracles in
+`fuzz/`, which repeat the library's exemptions. A fix belongs where the code
+is on the target branch, including code that a merged refactor has moved. A
+copy in a Python reference implementation falls under Q7. Incidentally
 similar code that encodes no shared rule is not a Q11 finding.
+
+**Q12. Sibling shapes of a type.** A rule about how a value of one type is
+parsed, checked, coerced, typed, rendered, or path-mapped MUST also apply to
+the type's sibling shapes, unless the specs say how a shape differs. For a
+list, it applies to each element. Tests SHOULD cover each shape. The sibling
+shapes are:
+
+- template parameter types `T` and `LIST[T]`, plus `LIST[LIST[INT]]` for
+  `INT`;
+- expression types `T`, `list[T]`, `list[list[T]]`, the empty
+  `list[nulltype]`, `T?`, a union that contains `T` or `list[T]`, and
+  `unresolved[T]`, plus `range_expr` for `int`;
+- both ends of each implicit coercion in the 2026-02 Expression Language
+  §1.2.3, such as `path` and `string` or `int` and `float`, together with the
+  list form of each coercion, which applies element by element;
+- each representation of a value: a JSON or YAML number and a numeric string
+  (`5.0` and `"5.0"`), and a `FLOAT` whose original text is kept (`2.50`) as
+  well as one that is computed and rendered again.
+
+Tests SHOULD include these edge values:
+
+| Type | Edge values |
+|------|-------------|
+| `FLOAT` | `2.50` (text kept), `-0.0`, `1e999`, `inf`, `nan`, and an integral `5.0` given where an `INT` is expected |
+| `INT` | `i64::MIN`, `i64::MAX`, a value above `i64::MAX`, `+5`, `1_000`, `٣` (U+0663) |
+| `PATH` | relative, absolute, a URI (`s3://bucket/key`), a trailing separator, a Windows drive path, a UNC path |
+| `STRING` | empty, surrounded by white space, non-ASCII |
+| Any list | empty, one element, elements of mixed types |
+
+For example, the `PATH` default rules apply to each `LIST[PATH]` element
+(#421), and `path([])` matches a `path(list[nulltype])` overload (#576).
+
+**Q13. Every source of a value, at every stage.** A rule about a value MUST
+hold wherever the value can come from:
+
+- a literal, a format string embedded in a longer string, a whole-field
+  `{{ ... }}` expression, a list element, and a fully static expression;
+- a job template default, an environment template default, and a submitted
+  value, given as CLI `-p` text, as JSON text, or as a native list through a
+  binding;
+- a step written with a SimpleAction such as `bash:`, as well as one written
+  with a `<StepScript>` (`script:` with `actions`);
+- every field the specification links to the rule, including rarely used
+  ones such as `notifyPeriodInSeconds`, environment `onEnter` and `onExit`
+  timeouts, SimpleAction `timeout`, and host requirement amounts.
+
+It MUST also hold at each stage that applies it: template decode and
+`openjd check`, `create_job`, and run time. Each stage reports a violation
+with a located message (Q3), and SHOULD use the message and field path that
+the other stages use. An earlier stage MUST NOT reject a template that every
+later stage accepts. A name that resolves nowhere MUST be reported at
+template validation, because whether a name exists does not depend on any
+value. `specs/expr/values.md` and `specs/expr/evaluator.md` state both rules
+for the constructs they cover.
+
+**Q14. The change describes what it changes.** A change's commit messages and
+PR description MUST name every difference between the base and the change
+that a caller can observe:
+
+- rendered values, such as `2.0` becoming `2` or `0` becoming `0.0`;
+- inputs that are newly accepted or newly rejected;
+- error kinds and variants, error messages, field paths, and column offsets;
+- the sequence of status callbacks;
+- metrics such as `peak_memory`, and limits.
+
+A change to a public type, signature, error variant, or rendered value MUST
+also say what each consumer outside this repository needs when it next
+updates: the openjd-model-for-python bindings (an integer width such as
+`usize` in `__len__`, a field type change, or the mapping from error variant
+to Python exception), the JavaScript surface of openjd-for-js, and any Python
+reference pull request that must be released at the same time. PRs are
+squash-merged: the PR title becomes the subject of the commit on `main`,
+which release-plz turns into the changelog entry, and the branch's commit
+messages become that commit's body. A difference that no test pins is also a
+Q4 finding.
 
 ## 3. Evidence
 
@@ -267,9 +349,9 @@ leaving the file behind.
 
 ### Verifier rules
 1. When several verifiers run, they MUST get disjoint slices and different
-   angles, chosen from: spec fidelity (Q1, Q2, Q8, Q10), implementation
-   correctness (Q3, Q5, Q6, Q11), test adequacy by mutation (Q4), and Python
-   divergence (Q7).
+   angles, chosen from: spec fidelity (Q1, Q2, Q8, Q10, Q14),
+   implementation correctness (Q3, Q5, Q6, Q11, Q12, Q13), test adequacy by
+   mutation (Q4), and Python divergence (Q7).
 2. Each verifier MUST be told that it is one of several and will not see the
    others' results, so that it checks rather than defers.
 3. Each finding comes back labelled as in §4.
@@ -327,111 +409,3 @@ working tree:
 - Never use `git clean`, `git stash`, or `git checkout -- <path>` in the
   shared working tree. Uncommitted deliverables (a report being written, probe
   tests, an uncommitted change) live there, and these commands remove them.
-
-## 7. Recurring findings
-
-Reviews of this repository keep finding the same kinds of defect. Each item
-below says where to look and names the criteria a finding there falls under.
-The items add no requirements and use no RFC 2119 keywords: a finding cites
-its Q ID, as §2 requires, and takes that criterion's strength. It MAY also
-name the item. Each skill says how it uses the list. An item that does not
-apply to the work raises no finding.
-
-**RF1. Sibling shapes of a type (Q3, Q4, Q5).** When a change alters how a
-value of one type is parsed, checked, coerced, typed, rendered, or
-path-mapped, run it on the type's sibling shapes too:
-
-- Template parameters: `T` and `LIST[T]`, plus `LIST[LIST[INT]]` for `INT`.
-- Expression types: `T`, `list[T]`, `list[list[T]]`, the empty
-  `list[nulltype]`, `T?`, a union that contains `T` or `list[T]`, and
-  `unresolved[T]`. For `int`, also `range_expr`.
-- Both ends of each implicit coercion in the 2026-02 Expression Language
-  (§1.2.3),
-  such as `path` and `string` or `int` and `float`, together with the list
-  form of each coercion, which applies element by element.
-- Each representation of a value: a JSON or YAML number and a numeric string
-  (`5.0` and `"5.0"`), and a `FLOAT` whose original text is kept (`2.50`) as
-  well as one that is computed and rendered again.
-
-Use the edge values of each type:
-
-| Type | Edge values |
-|------|-------------|
-| `FLOAT` | `2.50` (text kept), `-0.0`, `1e999`, `inf`, `nan`, and an integral `5.0` given where an `INT` is expected |
-| `INT` | `i64::MIN`, `i64::MAX`, a value above `i64::MAX`, `+5`, `1_000`, `٣` (U+0663) |
-| `PATH` | relative, absolute, a URI (`s3://bucket/key`), a trailing separator, a Windows drive path, a UNC path |
-| `STRING` | empty, surrounded by white space, non-ASCII |
-| Any list | empty, one element, elements of mixed types |
-
-A shape that behaves differently from what the specs say is a Q3 or Q5
-finding, and a shape the change leaves untested is a Q4 finding. A change
-that fixes the scalar form and leaves the list form behind, or the reverse,
-is the common case. Examples: #421 applies the `PATH` default rules to each
-`LIST[PATH]` element, and #576 adds a `path(list[nulltype])` overload so that
-`path([])` has a signature to match.
-
-**RF2. Every source of a value, at every stage (Q1, Q3, Q4, Q5).** When a
-change alters a rule about a value, check the rule for every place the value
-can come from:
-
-- a literal, a format string embedded in a longer string, a whole-field
-  `{{ ... }}` expression, a list element, and a fully static expression;
-- a job template default, an environment template default, and a submitted
-  value, given as CLI `-p` text, as JSON text, or as a native list through a
-  binding;
-- a step written with a SimpleAction such as `bash:`, as well as one
-  written with a `<StepScript>` (`script:` with `actions`);
-- every field the specification links to the rule, including rarely used
-  ones such as `notifyPeriodInSeconds`, environment `onEnter` and `onExit`
-  timeouts, SimpleAction `timeout`, and host requirement amounts.
-
-Then check each stage that applies the rule: template decode and
-`openjd check`, `create_job`, and run time. Compare the message and the
-field path each stage reports for the same violation, since Q3 requires a
-located message. Check the two rules about stages in `specs/expr/values.md`
-and `specs/expr/evaluator.md`: an earlier stage never rejects a template
-that every later stage accepts, and a name that resolves nowhere is reported
-at template validation, because whether a name exists does not depend on
-any value.
-
-**RF3. Twins of the code being fixed (Q3, Q8, Q11).** Before fixing a
-defect, search for the same pattern elsewhere, and fix it there too. When a
-twin in this repository implements the same rule, also check it against Q11:
-it has the cross-references and the equivalence pin that Q11 requires, or the
-fix routes both callers through one implementation. A twin the change cannot
-reach, such as one in another repository, is listed for the user as out of
-scope (implement-change step 6). These places hold separate copies of logic:
-
-- the helper sub-crate at `crates/openjd-sessions/src/helper/`;
-- public `validate_*` functions next to the internal checks they mirror;
-- fuzz-target oracles in `fuzz/`, which repeat the library's exemptions;
-- the Python reference implementations, where a twin pull request may be
-  needed.
-
-When a merged refactor has moved the code a fix was written against, the fix
-belongs in the code's new home, so that every caller of it gets the fix.
-
-**RF4. Commit messages and the PR description list every observable change
-(Q8).** Compare the base and the tip for each of these, and check that the
-commit messages and the PR description name every difference:
-
-- rendered values, such as `2.0` becoming `2` or `0` becoming `0.0`;
-- inputs that are newly accepted or newly rejected;
-- error kinds and variants, error messages, field paths, and column offsets;
-- the sequence of status callbacks;
-- metrics such as `peak_memory`, and limits.
-
-A difference that no test pins is also a Q4 finding. Check again after each
-fix round, because a fix can change behavior the description already
-describes. PRs are squash-merged: the PR title becomes the subject of the
-commit on `main`, which release-plz turns into the changelog entry, and the
-branch's commit messages become that commit's body.
-
-**RF5. What downstream needs at its next bump (Q8).** For a change to a
-public type, signature, error variant, or rendered value, check that the
-commit messages and the PR description say what each consumer outside this
-repository needs when it next updates: the openjd-model-for-python bindings
-(an integer width such as `usize` in `__len__`, a field type change, or the
-mapping from error variant to Python exception), the JavaScript surface of
-openjd-for-js, and any Python reference pull request that must be released
-at the same time.

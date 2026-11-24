@@ -64,8 +64,8 @@ The `openjd-specifications` repo (mainline) contains the canonical specification
 
 ### Quality Criteria
 
-The criteria, evidence rules, finding labels, severity scale, verification
-rules, and recurring findings this evaluation applies are defined in `docs/dev/quality-criteria.md`
+The criteria, evidence rules, finding labels, severity scale, and verification
+rules this evaluation applies are defined in `docs/dev/quality-criteria.md`
 ([link](../../docs/dev/quality-criteria.md)). Read that file before starting. It is
 shared with the `implement-change` skill, so criteria are changed there and
 never restated here.
@@ -74,8 +74,9 @@ This skill applies the criteria with these settings:
 
 - **Scope**: the whole crate (its specs, source, and tests), plus anything the
   crate's concepts reach under Q8.
-- **Criteria**: all of Q1–Q8, Q10, and Q11. For Q9, check only what step 6 below
-  runs (build, test, and warnings).
+- **Criteria**: all of Q1–Q8 and Q10–Q13. For Q9, check only what step 6 below
+  runs (build, test, and warnings). Q14 is about a change's commit messages
+  and PR description, so it does not apply to a crate.
 - **Verification** (quality-criteria §6): subagents are REQUIRED. Use all
   four angles and give each a disjoint slice. Each mutation subagent works in
   its own worktree, as §6 "Mutation testing" describes, so they may run in
@@ -107,7 +108,7 @@ This skill applies the criteria with these settings:
 4. **Read and understand the tests** in the crate source and `crates/openjd-<crate-name>/tests/`.
 5. **Compare with the Python reference** (see Python Reference Branch table) where applicable.
 6. **Build and test**: Run `cargo build -p openjd-<crate-name>` and `cargo test -p openjd-<crate-name>`. Confirm clean compilation (no errors or warnings) and all tests pass.
-7. **Exploratory testing**: Actively try to find bugs. Look for edge cases, boundary conditions, and unusual inputs that might cause undefined behavior, crashes, or logic errors. Start from the recurring findings in `docs/dev/quality-criteria.md` §7 that apply to the crate. Write failing tests that demonstrate any issues found. Include these in the report.
+7. **Exploratory testing**: Actively try to find bugs. Look for edge cases, boundary conditions, and unusual inputs that might cause undefined behavior, crashes, or logic errors. Start from the sibling shapes (Q12) and the sources and stages (Q13) of the values the crate handles. Write failing tests that demonstrate any issues found. Include these in the report.
 8. **Verify every finding** per quality-criteria §3 (Evidence) and §6 (Independent verification). Drop the withdrawn findings and label the plausible ones before writing.
 9. **Write the report** to `reports/<crate-name>-quality-evaluation-report-<YYYY-MM-DD>.md`.
 10. **Write the run summary** to `reports/<crate-name>-eval-summary-<YYYY-MM-DD>.json`:
