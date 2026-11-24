@@ -89,13 +89,14 @@ and concretely with values of type `T`, under both POSIX and Windows path
 formats, and requires:
 
 - the concrete value belongs to the static type, and a value the static pass
-  folded equals the run-time value in the host's path format (type soundness);
+  folded equals the run-time value in either path format (type soundness);
 - static typing may accept an expression that a run with particular values
   rejects, because the static pass can't see those values. So after static
   acceptance a run-time type error or dispatch miss is allowed. A run-time
   failure is still a violation when the static pass folded the expression from
-  literals alone (no symbols and no host-context function such as
-  `apply_path_mapping`), in the host's path format, to a value, since the run
+  literals alone (no symbols, no host-context function such as
+  `apply_path_mapping`, and no `path` or `with_number`, which the static pass
+  leaves unresolved for a literal) to a value, since the run
   must agree with it; when it is an undefined symbol, an unknown function, a
   method or property no type has, or unsupported syntax, which no value can
   cause; or when it refuses to order operands the library orders. A value
@@ -112,11 +113,8 @@ formats, and requires:
   `expr-speculative-budget-rejection`; a negative-step range slice used as a
   list, `expr-range-slice-static-type`; a `flatten` that reads an empty list,
   or a rejection about a list's element type after one,
-  `expr-flatten-empty-element-type`; a type error in a generated expression
-  through an unbound-return signature, `expr-unbound-return-typevar`; and, for
-  an expression that involves paths,
-  a rejection in the host's path format where the static pass in the run's
-  format accepts, `expr-static-fold-host-path-format`;
+  `expr-flatten-empty-element-type`; and a type error in a generated expression
+  through an unbound-return signature, `expr-unbound-return-typevar`;
 - determinism; evaluation metrics within their limits; a target-typed result
   satisfies its target; the result survives the template → session transport
   boundary unchanged;

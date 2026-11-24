@@ -807,10 +807,22 @@ pub fn register_host_context_functions(
     .expect("bad builtin signature");
 }
 
-#[allow(
-    missing_docs,
-    reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
-)]
+/// Prepare `lib` for checking host-context expressions before the host is
+/// known (the [`HostContext::Unresolved`] library).
+///
+/// - Registers `apply_path_mapping` with a stub that returns
+///   `unresolved[path]`, since the path mapping rules are not known.
+/// - Makes every overload of `path`, and `with_number` on a `string`,
+///   return `unresolved[T]` even for concrete arguments. These are the
+///   functions that read a literal string as a filesystem path, and how
+///   they split it depends on the worker's path format (`C:\a\b` is one
+///   component in POSIX and three in Windows), which is not known either.
+///   Folding them in one format would reject expressions that run on a
+///   worker using the other.
+///
+/// Their signatures are unchanged, so type errors are still reported.
+/// Call this on a library that already holds the default functions; a
+/// function `lib` doesn't have is not added.
 pub fn register_unresolved_host_context_functions(lib: &mut FunctionLibrary) {
     fn unresolved_apply_path_mapping(
         _ctx: &mut dyn crate::function_library::EvalContext,
@@ -824,6 +836,10 @@ pub fn register_unresolved_host_context_functions(lib: &mut FunctionLibrary) {
         unresolved_apply_path_mapping,
     )
     .expect("bad builtin signature");
+    lib.make_unresolved("path", |_| true);
+    lib.make_unresolved("with_number", |sig| {
+        sig.sig_params().first() == Some(&crate::ExprType::STRING)
+    });
 }
 
 fn misc() -> FunctionLibrary {

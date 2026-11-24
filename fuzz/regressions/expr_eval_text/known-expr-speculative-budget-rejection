@@ -1,0 +1,1 @@
+(([[(-1.0)] for v0 in ['x']]).flatten() * floor((1e16).round())) if (Session.Y0 != Session.Y0) else [1.0]

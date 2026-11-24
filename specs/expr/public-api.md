@@ -282,7 +282,10 @@ pub enum HostContext {
     #[default]
     None,
     /// Host-context signatures registered with stub implementations that
-    /// return `Unresolved(T)`. Use at template-validation time.
+    /// return `Unresolved(T)`, and the functions that read a literal string
+    /// as a path (`path`, `with_number(string, int)`) returning
+    /// `unresolved[T]`, because the worker's path format isn't known. Use
+    /// at template-validation time.
     Unresolved,
     /// Real implementations with a path mapper registered. Use at
     /// runtime.
@@ -1724,9 +1727,12 @@ pub fn functions::path::make_apply_path_mapping_fn(
     + Send + Sync + 'static;
 
 /// Register host-context signatures with stub implementations that
-/// return `Unresolved(T)`. Used at template-validation time when real
-/// host state is not yet available but signatures must be known for
-/// type checking.
+/// return `Unresolved(T)`, and make every `path` overload and
+/// `with_number(string, int)` return `unresolved[T]` too, since the
+/// worker's path format isn't known either. Used at template-validation
+/// time when real host state is not yet available but signatures must be
+/// known for type checking. Call it on a library that already holds the
+/// default functions.
 pub fn default_library::register_unresolved_host_context_functions(
     lib: &mut FunctionLibrary,
 );

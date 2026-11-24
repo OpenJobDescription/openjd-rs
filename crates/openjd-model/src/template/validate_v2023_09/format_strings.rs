@@ -883,6 +883,13 @@ fn check_resolved_constraint(
 /// with each other and with the POSIX-format values `create_job` seeds
 /// into its check symbol tables, and makes validation outcomes
 /// independent of the OS running them.
+///
+/// A path built from a literal in a host-scope field is not folded in
+/// POSIX: the host-scope library (`HostContext::Unresolved`) returns
+/// `unresolved[path]` from `path()`, because the worker's path format
+/// isn't known yet, and a TEMPLATE-scope path reaching a host-scope
+/// symbol table is unresolved too ([`unresolve_template_paths`]; see
+/// specs/model/validation.md § Path Format).
 struct FsEval<'a> {
     lib: &'a FunctionLibrary,
     memory_limit: Option<usize>,
@@ -2391,6 +2398,8 @@ pub fn validate_format_strings(
                         let _ = task_symtab.set(name, val.clone());
                     }
                 }
+                // Host scope: their paths are in the worker's format there.
+                unresolve_template_paths(&mut task_symtab);
             }
         }
         drop(step_let_names);
@@ -3013,6 +3022,32 @@ fn evaluate_let_binding(
         Err(e) => {
             report(&e, errors);
             let _ = symtab.set(name, ExprValue::unresolved(ExprType::ANY));
+        }
+    }
+}
+
+/// Make every concrete value in `symtab` whose type contains `path`
+/// unresolved, for a host-scope check made before the worker is known.
+///
+/// Those values come from TEMPLATE scope (step-level `let` bindings), where
+/// paths are POSIX. The session converts them to the worker's path format
+/// before host-scope fields use them (`SerializedSymbolTable::to_symtab`
+/// with `PathFormat::host()`), so `C:\a\b` may have one component or
+/// three there, and a host-scope check can no more fold them in POSIX than
+/// it can a literal `path()` (specs/model/validation.md § Path Format).
+pub(crate) fn unresolve_template_paths(symtab: &mut SymbolTable) {
+    fn has_path(t: &ExprType) -> bool {
+        t.code() == openjd_expr::TypeCode::Path || t.params().iter().any(has_path)
+    }
+    for name in symtab.all_paths("") {
+        let ty = match symtab.get_value(&name) {
+            Some(v) if !v.is_unresolved() => v.expr_type(),
+            _ => continue,
+        };
+        if has_path(&ty) {
+            symtab
+                .set(&name, ExprValue::unresolved(ty))
+                .expect("replacing an existing leaf value cannot conflict");
         }
     }
 }

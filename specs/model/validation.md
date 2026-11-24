@@ -333,7 +333,10 @@ Two libraries control available functions in expressions:
 - **`host_lib`** — Task/session-scope expressions. Built from a profile with
   `HostContext::Unresolved` so `apply_path_mapping` type-checks against its
   signature (a stub returning `Unresolved(path)`) without real rules being
-  available at validation time.
+  available at validation time. In this library `path()` and
+  `with_number(string, int)` also return `unresolved[T]` for literal
+  arguments, because the worker's path format isn't known either (see Path
+  Format below).
 
 Both libraries are obtained from
 `openjd_expr::FunctionLibrary::for_profile(&profile)`. The model's
@@ -354,6 +357,30 @@ re-checks (which read POSIX-format values out of their check symbol
 tables) and makes validation outcomes independent of the OS running
 them — a template accepted by `check` on Linux is accepted on Windows
 and vice versa.
+
+The POSIX format never applies to a path built from a literal in a
+host-scope field (step and environment script actions, embedded files,
+environment variables, and script-level `let` bindings): `host_lib`
+returns `unresolved[path]` from `path()` there, so the path, and everything
+computed from it, is checked by type only, as a `PATH` job parameter is.
+The same holds for a path that a TEMPLATE-scope step-level `let` binding
+computed: the session converts it to the worker's format before host-scope
+fields use it (`SerializedSymbolTable::to_symtab(PathFormat::host())`, see
+specs/sessions/session.md), so when the step-level bindings are copied into
+the task-scope symbol table (and from there into step environments),
+`unresolve_template_paths` replaces every value whose type contains `path`
+with `unresolved[T]`. Job creation does the same for its host-scope check
+tables (`build_task_check_symtab`, `build_env_check_symtab`).
+Whether `C:\a\b` has one component or three is decided by the worker's
+format when the session runs it (Expression Language "Path Format"). This
+is what keeps validation from rejecting an expression that a worker runs:
+`int(path('C:\\a\\5').name)` folded under POSIX fails, but a Windows
+worker gives `5`. A value error that every worker hits, such as
+`path('/a').relative_to(path('/b'))`, is reported by the session instead.
+Type errors the function signatures show, such as
+`path('/a').startswith('/')`, are still reported at validation.
+TEMPLATE-scope expressions (`template_lib`) still build concrete POSIX
+paths.
 
 ### Spec-Mandated Resolved-Value Constraints
 

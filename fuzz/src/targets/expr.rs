@@ -99,17 +99,6 @@ fn comparable(a: &str, b: &str) -> bool {
     }
 }
 
-/// Whether `src` can touch a PATH value: a PATH symbol it names, or the
-/// text `path` anywhere in it, as in the `path()` that builds one from a
-/// literal (`expr-static-fold-host-path-format` needs one).
-fn involves_paths(src: &str, env: &Env) -> bool {
-    src.contains("path")
-        || env
-            .symbols
-            .iter()
-            .any(|s| s.ty.to_string().contains("path") && src.contains(s.name.as_str()))
-}
-
 /// Did the expression go through a signature whose return type variable
 /// no parameter binds (`expr-unbound-return-typevar`)? The generator reports
 /// what it emitted; for text it is inferred from the source.
@@ -281,12 +270,25 @@ fn calls_host_context(code: &str) -> bool {
         .any(|f| calls_fn(code, f))
 }
 
+/// Does `code` (string literals blanked) call a function that reads a
+/// literal string as a path (`path`, `with_number`)? The validation library
+/// returns `unresolved[T]` from these even for literal arguments.
+fn calls_literal_path_function(code: &str) -> bool {
+    crate::gen::expr::literal_path_functions()
+        .iter()
+        .any(|f| calls_fn(code, f))
+}
+
 /// Does a run-time failure of an expression the static pass folded to a
 /// value count against the fold? Only for a fold from literals alone: no
-/// symbol (`has_symbols`), no host-context function in `code` (string
-/// literals blanked), and the host's path format (`host_format`).
-pub fn strict_fold(code: &str, has_symbols: bool, host_format: bool) -> bool {
-    host_format && !has_symbols && !calls_host_context(code)
+/// symbol (`has_symbols`), and no host-context function or function that
+/// reads a literal string as a path in `code` (string literals blanked).
+/// The validation library returns an unresolved value from all of these,
+/// and the static pass can fold around it: `[path('a')][-2] == path('b')
+/// and False` folds to `False`, though a run evaluates the index first and
+/// fails. A fold from literals alone holds in either path format.
+pub fn strict_fold(code: &str, has_symbols: bool) -> bool {
+    !has_symbols && !calls_host_context(code) && !calls_literal_path_function(code)
 }
 
 /// The known issue that can explain a static rejection `e` of an
@@ -365,7 +367,9 @@ fn interpolation_code(text: &str) -> String {
 ///   value folded around an unresolved value doesn't count: `Param.X < 0 <
 ///   0` folds to `False` statically, though a run evaluates `Param.X < 0`
 ///   first and can fail there. Neither does one folded around a
-///   host-context function, which is an `Unresolved` stub statically;
+///   host-context function, which is an `Unresolved` stub statically, or
+///   around a function that reads a literal string as a path (`path`,
+///   `with_number`), which returns `unresolved[T]` statically;
 /// - an undefined symbol, an unknown function, a member no type has, or
 ///   unsupported syntax, which don't depend on values;
 /// - an ordering of operands the library orders, which is a run-time bug
@@ -618,18 +622,15 @@ pub fn check_expression(
     let runtime = runtime_library(&env.rules);
     let validation = validation_library();
 
-    // Static pass, as template validation runs it (in the host's path
-    // format; the other format only for expr-static-fold-host-path-format).
-    let static_pass = |fmt: PathFormat| {
-        let tabs = [&env.unresolved];
-        parsed
-            .with_library(&validation)
-            .with_memory_limit(MEMORY_LIMIT)
-            .with_operation_limit(OP_LIMIT)
-            .with_path_format(fmt)
-            .evaluate(&tabs)
-    };
-    let static_result = static_pass(PathFormat::host());
+    // Static pass, as template validation runs it. The validation library
+    // leaves literal paths unresolved (the worker's path format isn't
+    // known), so the result doesn't depend on the format it runs in.
+    let static_result = parsed
+        .with_library(&validation)
+        .with_memory_limit(MEMORY_LIMIT)
+        .with_operation_limit(OP_LIMIT)
+        .with_path_format(PathFormat::host())
+        .evaluate(&[&env.unresolved]);
 
     for fmt in [PathFormat::Posix, PathFormat::Windows] {
         let table = env.concrete_in(fmt);
@@ -675,25 +676,11 @@ pub fn check_expression(
                 let st = static_type(sv);
                 let ct = cv.expr_type();
                 let mismatch = !fits(cv, &st);
-                // The known issue that explains the mismatch, and the
-                // host-path fold when it does too, are recorded; a mismatch
-                // none explains is a new bug.
+                // The known issue that explains the mismatch is recorded; a
+                // mismatch none explains is a new bug.
                 let mut explained: Vec<&'static str> = Vec::new();
                 if mismatch {
                     explained.extend(type_gap_known_issue(&ctx, &st, cv));
-                    // The static pass folds path operations in the host's
-                    // format; in the other format a folded condition can go
-                    // the other way. Only when the fold is the cause: the
-                    // static pass run in this run's format gives a type the
-                    // value fits. (Not "the host-format run fits": the
-                    // branch the host fold kept can fail at run time, with
-                    // an operation limit, say, and give no value to check.)
-                    if fmt != PathFormat::host()
-                        && involves_paths(src, env)
-                        && static_pass(fmt).is_ok_and(|fv| fits(cv, &static_type(&fv)))
-                    {
-                        explained.push("expr-static-fold-host-path-format");
-                    }
                 }
                 if !explained.is_empty() {
                     for id in explained {
@@ -709,34 +696,20 @@ pub fn check_expression(
                         "{src:?}: static type {st} but run-time value {cv:?} has type {ct}"
                     );
                 }
-                if !sv.is_unresolved() && fmt == PathFormat::host() {
+                // A static fold holds for a worker in either format: the
+                // static symbols are all unresolved, and the validation
+                // library leaves a literal path unresolved, so no
+                // format-dependent value is folded.
+                if !sv.is_unresolved() {
                     oracle!(
                         sv.equals(cv),
                         "{src:?}: statically folded to {sv:?} but evaluates to {cv:?}"
                     );
                 }
             }
-            // The static pass folded a path operation in the host's format
-            // and dropped what this run's format evaluates; checked in this
-            // run's format, it rejects.
-            (Ok(sv), Err(e))
-                if fmt != PathFormat::host()
-                    && involves_paths(src, env)
-                    && static_pass(fmt).is_err() =>
-            {
-                crate::known::hit("expr-static-fold-host-path-format", || {
-                    format!("{src:?}: accepted statically in the host's format ({sv:?}) but fails in {fmt:?}: {e}")
-                })
-            }
             (Ok(sv), Err(e)) => {
-                // The "statically folded" oracle above compares in the
-                // host's format only; so does this one.
                 let folded = (!sv.is_unresolved()
-                    && strict_fold(
-                        &ctx.code,
-                        !parsed.accessed_symbols().is_empty(),
-                        fmt == PathFormat::host(),
-                    ))
+                    && strict_fold(&ctx.code, !parsed.accessed_symbols().is_empty()))
                 .then_some(sv);
                 check_accepted_then_fails(e, folded, || {
                     format!("{src:?}: accepted statically ({sv:?}) but run-time evaluation fails with {e}")
@@ -752,13 +725,7 @@ pub fn check_expression(
                         "{src:?} evaluates to {cv:?} ({fmt:?}) but static checking rejects it: {e}"
                     )
                 };
-                if fmt != PathFormat::host() && involves_paths(src, env) && static_pass(fmt).is_ok()
-                {
-                    // The static pass folded a path operation in the host's
-                    // format and refused a branch this run's format doesn't
-                    // take; checked in this run's format, it accepts.
-                    crate::known::hit("expr-static-fold-host-path-format", msg);
-                } else if let Some(id) = rejection_known_issue(&ctx, e) {
+                if let Some(id) = rejection_known_issue(&ctx, e) {
                     crate::known::hit(id, msg);
                 } else {
                     oracle!(false, "{}", msg());
@@ -1225,13 +1192,13 @@ pub fn format_string(data: &[u8]) {
                     );
                 }
             }
+            // The static pass runs in the run's path format, so a value it
+            // folds must match resolution in every format.
             if let (Some(sv), Ok(rv)) = (&sr.resolved_value, &resolved) {
-                if fmt == PathFormat::host() {
-                    oracle!(
-                        sv.equals(rv),
-                        "{text:?}: static resolved_value {sv:?} but resolution gives {rv:?}"
-                    );
-                }
+                oracle!(
+                    sv.equals(rv),
+                    "{text:?}: static resolved_value {sv:?} but resolution gives {rv:?}"
+                );
             }
             match &resolved {
                 Ok(rv) => {
@@ -1248,9 +1215,9 @@ pub fn format_string(data: &[u8]) {
                 }
                 Err(e) => check_accepted_then_fails(
                     e,
-                    sr.resolved_value.as_ref().filter(|_| {
-                        strict_fold(&ctx.code, !names.is_empty(), fmt == PathFormat::host())
-                    }),
+                    sr.resolved_value
+                        .as_ref()
+                        .filter(|_| strict_fold(&ctx.code, !names.is_empty())),
                     || format!("{text:?}: validates but resolution fails with {e}"),
                 ),
             }

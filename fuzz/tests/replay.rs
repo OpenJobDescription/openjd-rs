@@ -331,45 +331,6 @@ fn known_issue_reproducers_reproduce() {
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
-/// `expr-static-fold-host-path-format` explains only mismatches the path
-/// format causes: a mismatch from another cause, in an expression that
-/// merely mentions a path, is still reported as that other cause alone.
-/// (`known_issue_reproducers_reproduce` checks only that an id is recorded.)
-#[test]
-fn host_path_fold_does_not_claim_other_mismatches() {
-    use openjd_fuzz::known::take_recorded;
-    install_hook();
-    // The range-slice reproducer's expression, wrapped in a path condition
-    // whose branches are the same, with its control bytes.
-    let base = std::fs::read(
-        root().join("regressions/expr_eval_text/known-expr-range-slice-static-type--param-step"),
-    )
-    .unwrap();
-    let ctl = &base[base.iter().position(|&b| b == 0).unwrap()..];
-    let mut data =
-        b"Session.R[::Session.N] if path('a').is_absolute() else Session.R[::Session.N]".to_vec();
-    data.extend_from_slice(ctl);
-    let (_, target) = TARGETS
-        .iter()
-        .find(|(n, _)| *n == "expr_eval_text")
-        .unwrap();
-    take_recorded();
-    IN_REPLAY.with(|r| r.set(true));
-    let outcome = catch_unwind(AssertUnwindSafe(|| target(&data)));
-    IN_REPLAY.with(|r| r.set(false));
-    assert!(
-        outcome.is_ok(),
-        "unexpected oracle violation: {}",
-        LAST_PANIC.with(|p| p.borrow().clone())
-    );
-    let hit = take_recorded();
-    assert_eq!(
-        hit,
-        BTreeSet::from(["expr-range-slice-static-type".to_string()]),
-        "recorded known issues"
-    );
-}
-
 #[test]
 fn expression_dictionary_covers_the_library() {
     let dict = std::fs::read_to_string(root().join("dicts/expr.dict")).unwrap();
@@ -763,24 +724,57 @@ fn accepted_then_fails_rule() {
     }
 }
 
-/// A fold counts against the run only from literals alone, in the host's
-/// path format.
+/// A fold counts against the run only from literals alone.
 #[test]
 fn strict_folds() {
     use openjd_fuzz::targets::expr::strict_fold;
-    assert!(strict_fold("len('abc') > 2", false, true));
-    assert!(!strict_fold("len('abc') > 2", true, true));
-    assert!(!strict_fold("len('abc') > 2", false, false));
+    assert!(strict_fold("len('abc') > 2", false));
+    assert!(!strict_fold("len('abc') > 2", true));
     assert!(!strict_fold(
         "apply_path_mapping('/a') == path('/b') and False",
-        false,
-        true
+        false
     ));
     assert!(!strict_fold(
         "path('/a').apply_path_mapping() and False",
-        false,
-        true
+        false
     ));
+    // `path` and `with_number` on a literal string are unresolved
+    // statically, so a fold around them doesn't count.
+    assert!(!strict_fold(
+        "([path('a')])[(-2)] == path('b') and False",
+        false
+    ));
+    assert!(!strict_fold("'a'.with_number(1) == 'b' and False", false));
+    assert!(strict_fold("filepath('a') and False", false));
+}
+
+/// Each function `strict_fold` treats as reading a literal path returns an
+/// unresolved value in the validation library and a concrete one at run
+/// time.
+#[test]
+fn literal_path_functions_are_unresolved_statically() {
+    use openjd_expr::{ExprProfile, FunctionLibrary, ParsedExpression, SymbolTable};
+    use openjd_fuzz::gen::expr::{literal_path_functions, validation_library};
+    let runtime = FunctionLibrary::for_profile(&ExprProfile::latest());
+    let validation = validation_library();
+    for f in literal_path_functions() {
+        let src = match *f {
+            "path" => "path('a')",
+            "with_number" => "with_number('a', 1)",
+            other => panic!("no sample call for {other}"),
+        };
+        let parsed = ParsedExpression::new(src).unwrap();
+        let st = parsed
+            .with_library(&validation)
+            .evaluate(&[&SymbolTable::new()])
+            .unwrap();
+        assert!(st.is_unresolved(), "{src} is {st:?} statically");
+        let rt = parsed
+            .with_library(&runtime)
+            .evaluate(&[&SymbolTable::new()])
+            .unwrap();
+        assert!(!rt.is_unresolved(), "{src} is {rt:?} at run time");
+    }
 }
 
 /// The model pipeline checks the expression error behind a create_job

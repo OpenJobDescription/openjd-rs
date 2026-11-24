@@ -72,7 +72,7 @@ the forcing-function idiom used throughout the workspace.
 pub enum HostContext {
     #[default]
     None,                                    // no host functions registered
-    Unresolved,                              // stub impls returning Unresolved(T)
+    Unresolved,                              // stub impls returning Unresolved(T): host not known
     WithRules(Arc<PathMapper>),              // real impls using this mapper
 }
 ```
@@ -84,8 +84,12 @@ three call sites:
 - **`None`** — plain expression evaluation; `apply_path_mapping` is an
   unknown function.
 - **`Unresolved`** — template validation time: signatures must be known
-  for type checking, but no rules exist yet. Stub implementations return
-  `Unresolved(PATH)`.
+  for type checking, but the host isn't known yet, so neither are its
+  path mapping rules nor its path format. Stub implementations return
+  `Unresolved(T)`: `apply_path_mapping`, every `path` overload, and
+  `with_number` on a `string` (the functions that read a literal string
+  as a filesystem path, whose result depends on the worker's path
+  format). See [function-library.md § Host Context](function-library.md#host-context).
 - **`WithRules`** — runtime: real implementations capture a
   [`PathMapper`](path-mapping.md#pathmapper) via `Arc`, so cloning
   libraries is cheap. `HostContext::with_rules(vec)` builds the mapper,

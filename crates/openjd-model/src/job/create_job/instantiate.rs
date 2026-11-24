@@ -270,7 +270,9 @@ fn add_unresolved_session_symbols(symtab: &mut SymbolTable) -> Result<(), ModelE
 /// bindings) plus `Unresolved` placeholders for `Session.*`, PATH
 /// `Param.*`, `Task.Param.*` / `Task.RawParam.*`, and `Task.File.*` —
 /// the same scope the session runtime binds when it resolves these
-/// format strings at run time.
+/// format strings at run time. A step-level binding holding a path is
+/// unresolved too: the session gives it the worker's path format
+/// (`unresolve_template_paths`).
 ///
 /// Script-level `let` bindings are evaluated into the table with
 /// unresolved host context through pass 8's own evaluation helper
@@ -291,6 +293,7 @@ fn build_task_check_symtab(
     errors: &mut ValidationErrors,
 ) -> Result<SymbolTable, ModelError> {
     let mut check_symtab = step_symtab.clone();
+    crate::template::validate_v2023_09::format_strings::unresolve_template_paths(&mut check_symtab);
     add_unresolved_session_symbols(&mut check_symtab)?;
 
     if let Some(ps) = &st.parameter_space {
@@ -351,7 +354,8 @@ fn build_task_check_symtab(
 /// environments): the base symtab (concrete `Param.*` / `RawParam.*` /
 /// `Job.Name`, plus `Step.Name` and step-level `let` bindings when
 /// `base` is a step's table) with `Unresolved` placeholders for
-/// `Session.*`, PATH `Param.*`, and this environment's `Env.File.*`,
+/// `Session.*`, PATH `Param.*`, this environment's `Env.File.*`, and
+/// step-level bindings holding a path (see [`build_task_check_symtab`]),
 /// and the environment's script-level `let` bindings evaluated in —
 /// mirroring what the session runtime binds when it resolves the
 /// environment at run time.
@@ -372,6 +376,7 @@ pub(super) fn build_env_check_symtab(
     errors: &mut ValidationErrors,
 ) -> Result<SymbolTable, ModelError> {
     let mut symtab = base.clone();
+    crate::template::validate_v2023_09::format_strings::unresolve_template_paths(&mut symtab);
     add_unresolved_session_symbols(&mut symtab)?;
     if let Some(script) = &env.script {
         if let Some(files) = &script.embedded_files {

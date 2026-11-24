@@ -103,6 +103,12 @@ pub enum HostContext {
     /// implementations that return `Unresolved(T)`. Use this at
     /// template-validation time, when real host state is not yet
     /// available but signatures must be known for type checking.
+    ///
+    /// The worker's path format is host state too, so `path()` and
+    /// `with_number` on a string, which read a literal string as a
+    /// filesystem path, return `unresolved[T]` in this library even for
+    /// concrete arguments (see
+    /// [`register_unresolved_host_context_functions`](crate::default_library::register_unresolved_host_context_functions)).
     Unresolved,
     /// Host-context functions are registered with implementations that
     /// use the supplied path mapper. Use this at runtime.

@@ -764,7 +764,9 @@ impl ModelProfile {
 
     /// Derive an `ExprProfile` for the given host context. Pass
     /// `HostContext::None` for template-scope work, `HostContext::Unresolved`
-    /// for template-validation type checking, and
+    /// for type checking host-scope (SESSION/TASK) fields at template
+    /// validation (it also leaves literal paths unresolved, since the
+    /// worker's path format isn't known), and
     /// `HostContext::WithRules(..)` for runtime evaluation with real path
     /// mapping.
     pub fn to_expr_profile(
