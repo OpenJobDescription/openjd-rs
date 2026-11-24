@@ -7,6 +7,7 @@ use crate::manifest::{
     SymlinkPolicy,
 };
 use crate::path_util::{normalize_path, strip_root};
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
@@ -80,9 +81,9 @@ struct Collapse<'a, 'c> {
     /// The subtree root and the directories being expanded. A link to one of
     /// them, or to a directory containing one, is a cycle.
     expanding: Vec<&'c str>,
-    /// Nested symlinks already collapsed. Each is collapsed at most once per
-    /// top-level symlink, as `collect` does, which bounds the output when
-    /// directory links converge.
+    /// Nested directory symlinks already expanded. Each is expanded at most
+    /// once per top-level symlink, which bounds the output when directory
+    /// links converge.
     visited: HashSet<&'a str>,
 }
 
@@ -90,8 +91,15 @@ impl<'a: 'c, 'c> Collapse<'a, 'c> {
     /// Collapse a symlink to `target` into output path `out_path`: a file
     /// target becomes a copy of the file entry, a directory target is
     /// expanded under `out_path`, and a missing target or a cycle gives
-    /// nothing.
-    fn collapse(&mut self, out_path: &str, target: &'a str, result: &mut Vec<FileEntry>) {
+    /// nothing. `nested` is the manifest path of a nested symlink, whose
+    /// directory target is expanded only the first time it is reached.
+    fn collapse(
+        &mut self,
+        out_path: &str,
+        nested: Option<&'a str>,
+        target: &'a str,
+        result: &mut Vec<FileEntry>,
+    ) {
         match resolve_target(target, self.index) {
             Some(Resolved::File(real)) => {
                 let mut entry = real.clone();
@@ -101,6 +109,9 @@ impl<'a: 'c, 'c> Collapse<'a, 'c> {
             Some(Resolved::Dir(dir)) => {
                 if self.expanding.iter().any(|e| strip_root(e, dir).is_some()) {
                     warn!(target, "symlink cycle detected, skipping");
+                    return;
+                }
+                if nested.is_some_and(|link| !self.visited.insert(link)) {
                     return;
                 }
                 self.expand_dir(out_path, dir, result);
@@ -142,9 +153,7 @@ impl<'a: 'c, 'c> Collapse<'a, 'c> {
                     continue;
                 }
             }
-            if self.visited.insert(f.path.as_str()) {
-                self.collapse(&new_path, sym_target, result);
-            }
+            self.collapse(&new_path, Some(f.path.as_str()), sym_target, result);
         }
         self.expanding.pop();
     }
@@ -166,7 +175,8 @@ fn process_files(
     excluded: &[String],
     symlink_policy: SymlinkPolicy,
 ) -> crate::Result<Vec<FileEntry>> {
-    let index = FileIndex::new(files);
+    // Built on first use: a subtree without symlinks to collapse needs none.
+    let index = OnceCell::new();
     let mut result = Vec::new();
     for f in files {
         let rel_path = match subtree_rel_path(&f.path, prefix, excluded) {
@@ -204,7 +214,7 @@ fn process_files(
             SymlinkPolicy::CollapseAll => {}
         }
         let mut collapse = Collapse {
-            index: &index,
+            index: index.get_or_init(|| FileIndex::new(files)),
             symlink_policy,
             prefix,
             excluded,
@@ -215,7 +225,7 @@ fn process_files(
             },
             visited: HashSet::new(),
         };
-        collapse.collapse(rel_path, target, &mut result);
+        collapse.collapse(rel_path, None, target, &mut result);
     }
     Ok(result)
 }

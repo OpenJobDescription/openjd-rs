@@ -92,7 +92,7 @@ SUBTREE operates on manifest data without filesystem access. Collapsing uses:
 - `resolve_target()` — follows symlink chains up to 64 hops, detecting cycles via `HashSet`, to a file entry or a directory
 - `Collapse` — collapses one top-level symlink: a file target becomes a copy of the file entry, a directory target is expanded under the symlink's path (`expand_dir()`), and a missing target or a cycle gives nothing
 
-A symlink whose resolved directory is the subtree root, a directory being expanded, or a directory containing one of those is a cycle and is skipped, since expanding it would copy a directory into itself. Each nested symlink is collapsed at most once per top-level symlink, as COLLECT does; when directory links converge, a later path to an already collapsed nested symlink omits it. This bounds the output of one top-level symlink by the number of nested symlinks times the number of files.
+A symlink whose resolved directory is the subtree root, a directory being expanded, or a directory containing one of those is a cycle and is skipped, since expanding it would copy a directory into itself. Each nested directory symlink is expanded at most once per top-level symlink; when directory links converge, a later path to an already expanded nested directory symlink omits it. Nested file symlinks are copied on every path. This bounds the output of one top-level symlink by the number of nested directory symlinks plus one, times the number of files. The file index is built only when a symlink needs collapsing, so a subtree without one costs no more than the path filter.
 
 ## Example
 

@@ -803,6 +803,42 @@ fn two_hop_directory_symlink_cycle_is_skipped() {
     }
 }
 
+/// The once-per-link bound applies to nested directory symlinks only: a
+/// nested file symlink reached through converging directory links is copied
+/// on every path.
+#[test]
+fn converging_links_keep_every_nested_file_link() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/top", "/a"),
+            FileEntry::symlink("/a/l1", "/c"),
+            FileEntry::symlink("/a/l2", "/c"),
+            hf("/c/g.txt", "hg", 1, 10),
+            FileEntry::symlink("/c/f", "/real.txt"),
+            hf("/real.txt", "hr", 2, 20),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let files: Vec<_> = result
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.hash.as_deref()))
+            .collect();
+        assert_eq!(
+            files,
+            [
+                ("top/l1/f", Some("hr")),
+                ("top/l1/g.txt", Some("hg")),
+                ("top/l2/f", Some("hr")),
+                ("top/l2/g.txt", Some("hg"))
+            ],
+            "{policy}"
+        );
+    }
+}
+
 // ===== TestSubtreeFileChunkSizePreservation =====
 
 #[test]
