@@ -871,7 +871,8 @@ impl S3DataCache {
 
         // Precompute the (1-based part number, inclusive byte range) for each
         // part. The last part is short unless `size` is an exact multiple of
-        // `part_size`.
+        // `part_size`. These are the ranges of `hash::split_ranges`, with
+        // inclusive ends.
         let part_ranges: Vec<(i32, u64, u64)> = (0..num_parts)
             .map(|i| {
                 let part_number = (i + 1) as i32;

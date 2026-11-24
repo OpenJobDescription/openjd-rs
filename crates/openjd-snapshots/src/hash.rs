@@ -121,9 +121,10 @@ pub(crate) fn hash_file_range(path: &Path, offset: u64, len: u64) -> std::io::Re
 /// the last one shorter if `piece` does not divide `total`. `total == 0` or
 /// `piece == 0` gives no ranges.
 ///
-/// This is the one rule for both file chunks (`piece` = the manifest's
-/// chunk size; the ranges are the hash-cache keys of a chunked file) and
-/// multipart transfer parts (`piece` = the part size).
+/// This is the rule for file chunks (`piece` = the manifest's chunk size;
+/// the ranges are the hash-cache keys of a chunked file) and for multipart
+/// upload parts (`piece` = the part size). `S3DataCache::multipart_copy`
+/// computes the same part ranges inline, as inclusive S3 byte ranges.
 pub(crate) fn split_ranges(total: u64, piece: u64) -> impl Iterator<Item = (u64, u64)> + Clone {
     let count = if piece == 0 { 0 } else { total.div_ceil(piece) };
     (0..count).map(move |i| {
