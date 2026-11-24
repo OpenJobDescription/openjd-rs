@@ -556,8 +556,7 @@ fn directory_symlink_with_nested_escaping_symlink_collapse_escaping_collapses() 
 }
 
 /// A nested symlink in an expanded directory whose target is inside the
-/// subtree is kept, with its target relative to the subtree, as `collect`
-/// keeps internal links in a collapsed directory.
+/// subtree is kept, with its target relative to the subtree.
 #[test]
 fn directory_symlink_with_nested_internal_symlink_collapse_escaping_preserves() {
     let m = rel(
@@ -609,6 +608,64 @@ fn directory_symlink_with_nested_symlink_collapse_all_resolves() {
     assert_eq!(nested.hash.as_deref(), Some("h2"));
     assert_eq!(nested.size, Some(200));
     assert!(nested.symlink_target.is_none());
+}
+
+/// A nested symlink to a directory outside the subtree is expanded in turn,
+/// under both collapsing policies.
+#[test]
+fn directory_symlink_with_nested_directory_symlink_expands() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/dlink", "/x"),
+            hf("/x/a.txt", "ha", 1, 10),
+            FileEntry::symlink("/x/sub", "/y"),
+            hf("/y/b.txt", "hb", 2, 20),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let files: Vec<_> = result
+            .files
+            .iter()
+            .map(|f| {
+                (
+                    f.path.as_str(),
+                    f.hash.as_deref(),
+                    f.symlink_target.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            files,
+            [
+                ("dlink/a.txt", Some("ha"), None),
+                ("dlink/sub/b.txt", Some("hb"), None)
+            ],
+            "{policy}"
+        );
+        assert!(result.validate().is_ok(), "{:?}", result.validate());
+    }
+}
+
+/// A nested symlink back to a directory being expanded, or to one containing
+/// it, is a cycle and is skipped.
+#[test]
+fn directory_symlink_with_nested_cycle_is_skipped() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/dlink", "/x/d"),
+            hf("/x/d/a.txt", "ha", 1, 10),
+            FileEntry::symlink("/x/d/back", "/x/d"),
+            FileEntry::symlink("/x/d/up", "/x"),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["dlink/a.txt"], "{policy}");
+    }
 }
 
 // ===== TestSubtreeFileChunkSizePreservation =====

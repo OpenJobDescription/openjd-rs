@@ -27,7 +27,7 @@ pub struct PartitionOptions {
 |-----------|-------------|
 | `roots` | Optional list of root paths. No root may be a subpath of another. |
 | `referenced_paths` | Paths referenced by the workload, influencing auto-root determination even if no files exist under them. |
-| `symlink_policy` | How to handle escaping symlinks. Only `CollapseAll`, `CollapseEscaping`, `ExcludeAll` supported. |
+| `symlink_policy` | How to handle escaping symlinks. `CollapseAll`, `CollapseEscaping`, `ExcludeEscaping` and `ExcludeAll` are supported; `Preserve` and `TransitiveIncludeTargets` are rejected. |
 
 ## Returns
 

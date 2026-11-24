@@ -48,7 +48,7 @@ pub enum SymlinkPolicy {
 |--------|---------|---------|-----------|----------|
 | `CollapseEscaping` | ✓ (default) | ✓ (default) | ✓ (default) | — |
 | `CollapseAll` | ✓ | ✓ | ✓ | — |
-| `ExcludeEscaping` | ✓ | ✓ | — | — |
+| `ExcludeEscaping` | ✓ | ✓ | ✓ | — |
 | `ExcludeAll` | ✓ | ✓ | ✓ | ✓ |
 | `Preserve` | ✓ | — | — | ✓ (default) |
 | `TransitiveIncludeTargets` | ✓ | — | — | — |
@@ -84,7 +84,7 @@ When a symlink is collapsed, it is replaced with the actual content at its targe
 
 **Directory target:** The symlink is replaced with the entire directory tree at the target. All entries appear under the symlink's path. Nested symlinks are handled recursively.
 
-In SUBTREE, collapsing looks up targets in the manifest data (no filesystem access). The `resolve_symlink()` helper follows symlink chains up to 64 hops, detecting cycles. The `expand_dir_symlink()` helper remaps directory contents under the symlink's path. A symlink nested in the expanded directory is kept, with its target made relative to the subtree, when that target is inside the subtree (`CollapseEscaping`); otherwise it is collapsed to its real target, as COLLECT does for nested links in a collapsed directory. `CollapseAll` collapses every nested symlink.
+In SUBTREE, collapsing looks up targets in the manifest data (no filesystem access). The `resolve_symlink()` helper follows symlink chains up to 64 hops, detecting cycles. The `expand_dir_symlink()` helper remaps directory contents under the symlink's path. A symlink nested in the expanded directory is kept, with its target made relative to the subtree, when that target is inside the subtree (`CollapseEscaping`); otherwise it is collapsed to its real target. `CollapseAll` collapses every nested symlink. A collapsed nested symlink to a directory is expanded in turn; one that points at a directory being expanded, or at a directory containing one, is a cycle and is skipped. This differs from COLLECT, which keeps a nested link whose target is inside the collapsed directory, remapped under the link path; SUBTREE keeps only links whose target is inside the subtree.
 
 ## Cycle Detection
 

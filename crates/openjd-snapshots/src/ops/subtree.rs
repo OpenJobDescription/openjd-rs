@@ -44,9 +44,13 @@ fn is_dir_target(target: &str, file_lookup: &HashMap<&str, &FileEntry>) -> bool 
 /// - `CollapseAll`: nested symlinks are resolved to their real targets.
 /// - `CollapseEscaping`: a nested symlink whose target is in the subtree at
 ///   `prefix` (and not under an `excluded` root) is kept, with its target made
-///   relative to the subtree, as `collect` keeps internal links in a collapsed
-///   directory. Any other nested symlink is resolved to its real target, so
-///   the result never holds a link to a target outside the subtree.
+///   relative to the subtree. Any other nested symlink is resolved to its real
+///   target, so the result never holds a link to a target outside the subtree.
+///
+/// A nested symlink that is resolved and points at a directory is expanded in
+/// turn. `expanding` holds the directories being expanded; a nested link to
+/// one of them or to a directory containing one is a cycle and is skipped.
+#[allow(clippy::too_many_arguments)]
 fn expand_dir_symlink(
     link_rel_path: &str,
     target: &str,
@@ -55,8 +59,10 @@ fn expand_dir_symlink(
     symlink_policy: SymlinkPolicy,
     prefix: &str,
     excluded: &[String],
+    expanding: &mut Vec<String>,
 ) -> Vec<FileEntry> {
     let target_prefix = format!("{target}/");
+    expanding.push(target.to_string());
     let mut result = Vec::new();
     for f in files {
         if !f.path.starts_with(&target_prefix) {
@@ -64,38 +70,48 @@ fn expand_dir_symlink(
         }
         let suffix = &f.path[target_prefix.len()..];
         let new_path = format!("{link_rel_path}/{suffix}");
-        if let Some(ref sym_target) = f.symlink_target {
-            match symlink_policy {
-                SymlinkPolicy::CollapseAll => {
-                    // Resolve nested symlinks to their real targets
-                    if let Some(real) = resolve_symlink(sym_target, file_lookup, 64) {
-                        let mut entry = real.clone();
-                        entry.path = new_path;
-                        result.push(entry);
-                    }
-                }
-                _ => match subtree_rel_path(sym_target, prefix, excluded) {
-                    Some(rel_target) if !rel_target.is_empty() => {
-                        let mut entry = f.clone();
-                        entry.path = new_path;
-                        entry.symlink_target = Some(rel_target.to_string());
-                        result.push(entry);
-                    }
-                    _ => {
-                        if let Some(real) = resolve_symlink(sym_target, file_lookup, 64) {
-                            let mut entry = real.clone();
-                            entry.path = new_path;
-                            result.push(entry);
-                        }
-                    }
-                },
-            }
-        } else {
+        let Some(ref sym_target) = f.symlink_target else {
             let mut entry = f.clone();
+            entry.path = new_path;
+            result.push(entry);
+            continue;
+        };
+        if symlink_policy != SymlinkPolicy::CollapseAll {
+            if let Some(rel_target) =
+                subtree_rel_path(sym_target, prefix, excluded).filter(|r| !r.is_empty())
+            {
+                let mut entry = f.clone();
+                entry.path = new_path;
+                entry.symlink_target = Some(rel_target.to_string());
+                result.push(entry);
+                continue;
+            }
+        }
+        if is_dir_target(sym_target, file_lookup) {
+            if expanding
+                .iter()
+                .any(|e| strip_root(e, sym_target).is_some())
+            {
+                warn!(target = %sym_target, "symlink cycle detected, skipping");
+                continue;
+            }
+            result.extend(expand_dir_symlink(
+                &new_path,
+                sym_target,
+                files,
+                file_lookup,
+                symlink_policy,
+                prefix,
+                excluded,
+                expanding,
+            ));
+        } else if let Some(real) = resolve_symlink(sym_target, file_lookup, 64) {
+            let mut entry = real.clone();
             entry.path = new_path;
             result.push(entry);
         }
     }
+    expanding.pop();
     result
 }
 
@@ -138,6 +154,7 @@ fn process_files(
                             symlink_policy,
                             prefix,
                             excluded,
+                            &mut Vec::new(),
                         ));
                         continue;
                     }
@@ -181,6 +198,7 @@ fn process_files(
                                     symlink_policy,
                                     prefix,
                                     excluded,
+                                    &mut Vec::new(),
                                 ));
                                 continue;
                             }

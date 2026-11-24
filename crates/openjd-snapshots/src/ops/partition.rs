@@ -770,6 +770,43 @@ mod tests {
     }
 
     #[test]
+    fn nested_directory_links_into_given_roots_expand_in_derived_partitions() {
+        let mut a = FileEntry::file("/x/d/a.txt", 3, 1);
+        a.hash = Some("ha".into());
+        let mut f = FileEntry::file("/f.txt", 2, 1);
+        f.hash = Some("hf".into());
+        let m = make_abs(
+            vec![
+                f,
+                FileEntry::symlink("/dlink", "/x"),
+                a,
+                FileEntry::symlink("/x/sub", "/x/d"),
+            ],
+            vec![],
+        );
+        let opts = PartitionOptions {
+            roots: Some(vec!["/x".into()]),
+            ..Default::default()
+        };
+        let parts = partition_manifest(&m, &opts).unwrap();
+        let root = &parts.iter().find(|(r, _)| r == "/").unwrap().1;
+        let got: Vec<(&str, Option<&str>)> = root
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.hash.as_deref()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("f.txt", Some("hf")),
+                ("dlink/d/a.txt", Some("ha")),
+                ("dlink/sub/a.txt", Some("ha"))
+            ]
+        );
+        assert!(root.validate().is_ok(), "{:?}", root.validate());
+    }
+
+    #[test]
     fn duplicate_given_roots_rejected() {
         let m = make_abs(vec![FileEntry::file("/a/x.txt", 1, 1)], vec![]);
         let opts = PartitionOptions {
