@@ -38,6 +38,38 @@ impl<T> NullableVec<T> {
     }
 }
 
+/// Checks a STRING or PATH parameter value against `minLength`/`maxLength`.
+///
+/// Length is the value's Unicode scalar value count, not its UTF-8 byte
+/// length (Template Schemas §7; `specs/model/parameters.md` "Length
+/// measurement"). The template-level `check_constraints` of
+/// [`JobStringParameterDefinition`] and [`JobPathParameterDefinition`], and
+/// the merged-definition check that `preprocess_job_parameters` and
+/// `create_job` run, all route through this function.
+pub(crate) fn check_value_char_len(
+    name: &str,
+    value: &str,
+    min_length: Option<usize>,
+    max_length: Option<usize>,
+) -> Result<(), String> {
+    let char_len = value.chars().count();
+    if let Some(min) = min_length {
+        if char_len < min {
+            return Err(format!(
+                "Parameter '{name}': value length {char_len} is less than minimum {min}"
+            ));
+        }
+    }
+    if let Some(max) = max_length {
+        if char_len > max {
+            return Err(format!(
+                "Parameter '{name}': value length {char_len} exceeds maximum {max}"
+            ));
+        }
+    }
+    Ok(())
+}
+
 impl<'de, T: serde::de::DeserializeOwned> Deserialize<'de> for NullableVec<T> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         match Option::<Vec<T>>::deserialize(deserializer)? {
@@ -756,23 +788,7 @@ impl JobStringParameterDefinition {
         reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
     )]
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
-        let char_len = value.chars().count();
-        if let Some(min) = self.min_length {
-            if char_len < min {
-                return Err(format!(
-                    "Parameter '{}': value length {} is less than minimum {min}",
-                    self.name, char_len
-                ));
-            }
-        }
-        if let Some(max) = self.max_length {
-            if char_len > max {
-                return Err(format!(
-                    "Parameter '{}': value length {} exceeds maximum {max}",
-                    self.name, char_len
-                ));
-            }
-        }
+        check_value_char_len(self.name.as_str(), value, self.min_length, self.max_length)?;
         if let Some(allowed) = self.allowed_values.as_ref() {
             if !allowed.iter().any(|a| a == value) {
                 return Err(format!(
@@ -1421,23 +1437,7 @@ impl JobPathParameterDefinition {
         reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
     )]
     pub fn check_constraints(&self, value: &str) -> Result<(), String> {
-        let char_len = value.chars().count();
-        if let Some(min) = self.min_length {
-            if char_len < min {
-                return Err(format!(
-                    "Parameter '{}': value length {} is less than minimum {min}",
-                    self.name, char_len
-                ));
-            }
-        }
-        if let Some(max) = self.max_length {
-            if char_len > max {
-                return Err(format!(
-                    "Parameter '{}': value length {} exceeds maximum {max}",
-                    self.name, char_len
-                ));
-            }
-        }
+        check_value_char_len(self.name.as_str(), value, self.min_length, self.max_length)?;
         if let Some(allowed) = self.allowed_values.as_ref() {
             if !allowed.iter().any(|a| a == value) {
                 return Err(format!(

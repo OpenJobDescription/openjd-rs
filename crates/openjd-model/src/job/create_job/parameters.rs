@@ -400,24 +400,13 @@ impl MergedParameterDefinition {
                 }
             }
             openjd_expr::ExprValue::String(v) | openjd_expr::ExprValue::Path { value: v, .. } => {
-                if let Some(min) = self.min_length {
-                    if v.len() < min {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': value length {} is less than minimum {min}",
-                            self.name,
-                            v.len()
-                        )));
-                    }
-                }
-                if let Some(max) = self.max_length {
-                    if v.len() > max {
-                        return Err(ModelError::DecodeValidation(format!(
-                            "Parameter '{}': value length {} exceeds maximum {max}",
-                            self.name,
-                            v.len()
-                        )));
-                    }
-                }
+                crate::template::check_value_char_len(
+                    &self.name,
+                    v,
+                    self.min_length,
+                    self.max_length,
+                )
+                .map_err(ModelError::DecodeValidation)?;
                 if let Some(allowed) = &self.allowed_values_str {
                     if !allowed.iter().any(|a| a == v) {
                         return Err(ModelError::DecodeValidation(format!(
