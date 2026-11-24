@@ -398,10 +398,10 @@ fn env_file_not_available_in_step_script_with_expr() {
 #[test]
 fn task_raw_param_is_the_task_param_type_except_for_a_path() {
     // INT, FLOAT, STRING and CHUNK[INT] (range_expr) `Task.RawParam.*` have
-    // their `Task.Param.*` type: each of the first four expressions
-    // type-checks only with it (`'a' * x` repeats a string only for an
-    // int), the fifth shows a STRING's is not a path, and the sixth that a
-    // FLOAT's is not an int.
+    // their `Task.Param.*` type: the first four expressions type-check with
+    // it (`'a' * x` repeats a string only for an int, and a range_expr can
+    // be indexed), the fifth shows a STRING's is not a path, and the sixth
+    // that a FLOAT's is not an int.
     check_err_ext(
         r#"{
         "specificationVersion": "jobtemplate-2023-09",

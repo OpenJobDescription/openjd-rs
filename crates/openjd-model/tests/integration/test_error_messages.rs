@@ -950,3 +950,32 @@ steps:
          ~~~~~~~~^~~",
     );
 }
+
+/// Pass 8 reports a fully static amount or attribute name that repeats an
+/// earlier literal one; structure, which compares only literal names, does
+/// not see it.
+#[test]
+fn a_static_capability_name_that_repeats_a_literal_one_is_reported() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: T
+steps:
+- name: S
+  hostRequirements:
+    amounts:
+    - {name: amount.custom.a, min: 1}
+    - {name: "{{ 'amount.custom.a' }}", min: 1}
+    attributes:
+    - {name: attr.custom.a, anyOf: [x]}
+    - {name: "{{ 'attr.custom.a' }}", anyOf: [x]}
+  script: {actions: {onRun: {command: x}}}
+"#,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> hostRequirements -> amounts[1]:\n\tduplicate amount name 'amount.custom.a'.\n\
+         steps[0] -> hostRequirements -> attributes[1]:\n\tduplicate attribute name \
+         'attr.custom.a'.",
+    );
+}

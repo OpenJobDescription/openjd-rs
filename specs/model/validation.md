@@ -347,9 +347,9 @@ control the functions available in expressions:
   library `path()` and `with_number(string, int)` also return `unresolved[T]` for literal
   arguments, because the worker's path format isn't known either (see Path Format below).
 
-Both libraries are obtained from
+Both evaluators' libraries are obtained from
 `openjd_expr::FunctionLibrary::for_profile(&profile)`. The model's
-`SpecificationProfile::to_expr_profile(host_context)` helper produces the
+`ModelProfile::to_expr_profile(host_context)` helper produces the
 right `ExprProfile` from a model profile.
 
 ### Path Format

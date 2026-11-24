@@ -105,17 +105,13 @@ fn add_files(symtab: &mut SymbolTable, prefix: &str, files: Option<&[EmbeddedFil
     }
 }
 
-/// The names `bindings` bind, in order: the text before each `=`, trimmed.
-fn let_name_strs(bindings: Option<&[String]>) -> impl Iterator<Item = &str> {
+/// The names `bindings` bind: the text before each `=`, trimmed.
+fn let_names(bindings: Option<&[String]>) -> HashSet<String> {
     bindings
         .into_iter()
         .flatten()
-        .filter_map(|b| b.find('=').map(|eq| b[..eq].trim()))
-}
-
-/// The names `bindings` bind, as a set.
-fn let_names(bindings: Option<&[String]>) -> HashSet<String> {
-    let_name_strs(bindings).map(str::to_string).collect()
+        .filter_map(|b| b.find('=').map(|eq| b[..eq].trim().to_string()))
+        .collect()
 }
 
 /// Copy the values of `step`'s `let` bindings from `step_scope`, a scope
@@ -1440,9 +1436,8 @@ fn add_fs_validation_error(
 /// task scope), the EXPR-gated complex-expression rejection, the body
 /// ([`validate_step_script_body`]), and comprehension-variable rules against
 /// the Step and script `let` names. `step_lets` are the Step's `let`
-/// bindings and `step_template_symtab` its template scope. The names are
-/// taken from the bindings where they are needed and dropped, so they are
-/// not held while the body is checked.
+/// bindings and `step_template_symtab` its template scope. Their names are
+/// collected where they are needed and dropped before the body is checked.
 ///
 /// Shared by the authored `script` field and the desugared SimpleAction
 /// forms (§8); the latter run it into a scratch collection rooted at `[]`
@@ -1458,20 +1453,18 @@ fn validate_step_script(
     errors: &mut ValidationErrors,
 ) {
     // Script-level `let` bindings are in task scope. `Task.File.*` is in
-    // it: a Session allocates the files before it evaluates `let`.
-    // The enclosing names, only when there are bindings to check against them.
-    let enclosing = match &script.let_bindings {
-        Some(_) => let_names(step_lets),
-        None => HashSet::new(),
-    };
-    f.validate_lets(
-        script.let_bindings.as_deref(),
-        &path_field(script_path, "let"),
-        &enclosing,
-        task_symtab,
-        &f.host,
-        errors,
-    );
+    // it: a Session allocates the files before it evaluates `let`. The
+    // enclosing names are collected only when there are bindings to check.
+    if let Some(bindings) = &script.let_bindings {
+        f.validate_lets(
+            Some(bindings),
+            &path_field(script_path, "let"),
+            &let_names(step_lets),
+            task_symtab,
+            &f.host,
+            errors,
+        );
+    }
     let action_path = path_field(&path_field(script_path, "actions"), "onRun");
     if !f.expr {
         reject_complex_action(&script.actions.on_run, &action_path, errors);
@@ -2106,19 +2099,16 @@ fn validate_step(
         // The Step's `let` values are read from the task scope, after its
         // script's own `let` bindings.
         let mut symtab = f.session_scope(env, Some((step, &task_scope)));
-        let env_lets = env.script.as_ref().and_then(|s| s.let_bindings.as_deref());
-        let enclosing = match env_lets {
-            Some(_) => let_names(step_lets),
-            None => HashSet::new(),
-        };
-        f.validate_lets(
-            env_lets,
-            &path_field(&path_field(&env_path, "script"), "let"),
-            &enclosing,
-            &mut symtab,
-            &f.host,
-            errors,
-        );
+        if let Some(bindings) = env.script.as_ref().and_then(|s| s.let_bindings.as_deref()) {
+            f.validate_lets(
+                Some(bindings),
+                &path_field(&path_field(&env_path, "script"), "let"),
+                &let_names(step_lets),
+                &mut symtab,
+                &f.host,
+                errors,
+            );
+        }
         validate_env_body(f, env, &symtab, step_scope, !f.expr, &env_path, errors);
     }
 }

@@ -165,8 +165,8 @@ fn template_scope_string_and_path_range_items_reject_apply_path_mapping() {
 
 #[test]
 fn template_scope_environment_action_timeout_rejects_apply_path_mapping() {
-    // An Environment action's `timeout` is template scope too, though its
-    // `command` is session scope.
+    // An Environment action's `timeout` is in the job scope, which has no
+    // host functions either, though its `command` is in the session scope.
     let t = r#"{
         "specificationVersion": "jobtemplate-2023-09",
         "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
