@@ -839,6 +839,46 @@ fn converging_links_keep_every_nested_file_link() {
     }
 }
 
+/// The once-per-link bound is per top-level symlink: two top-level links to
+/// the same directory each expand its nested directory links.
+#[test]
+fn top_level_links_to_same_directory_each_expand_nested_links() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/a", "/x"),
+            FileEntry::symlink("/p/b", "/x"),
+            FileEntry::symlink("/x/s", "/y"),
+            hf("/y/f.txt", "hf", 1, 10),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["a/s/f.txt", "b/s/f.txt"], "{policy}");
+    }
+}
+
+/// A symlink chain is followed for up to 64 hops: 63 intermediate links
+/// resolve to the file at the end, 64 do not.
+#[test]
+fn symlink_chain_is_followed_up_to_64_hops() {
+    let chain = |intermediate: usize| {
+        let mut files = vec![FileEntry::symlink("/p/l", "/c1")];
+        for i in 1..=intermediate {
+            files.push(FileEntry::symlink(format!("/c{i}"), format!("/c{}", i + 1)));
+        }
+        files.push(hf(&format!("/c{}", intermediate + 1), "hc", 1, 10));
+        abs(files, vec![])
+    };
+    for (intermediate, expected) in [(3, vec!["l"]), (63, vec!["l"]), (64, vec![])] {
+        let result =
+            subtree_snapshot(&chain(intermediate), "/p", SymlinkPolicy::CollapseAll).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, expected, "{intermediate} intermediate links");
+    }
+}
+
 // ===== TestSubtreeFileChunkSizePreservation =====
 
 #[test]
