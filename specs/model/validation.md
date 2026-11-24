@@ -209,13 +209,13 @@ no PATH `Param.*`, a PATH definition adds no `Param.<name>`.
    bindings (see [Let Binding Validation](#let-binding-validation) for how often they are
    evaluated and reported). The Step's `hostRequirements`, `parameterSpace` and action timing
    fields, and its Step Environments' timing fields.
-4. **Session scope** — every `Param.*`, `Session.*`, with EXPR `Job.Name`, the environment's
+4. **Session scope** — every `Param.*` and `RawParam.*`, `Session.*`, with EXPR `Job.Name`, the environment's
    `Env.File.*`, and in a Step Environment, with EXPR, `Step.Name` and the values of the Step's
    `let` names as the Step's task scope holds them after its script's `let` bindings (a
    SimpleAction's `let` bindings are not in it); then the environment script's `let`
    bindings. An environment's script body, for environments inside a Job Template and for
    Environment Templates (which never get `Step.Name`).
-5. **Task scope** — every `Param.*`, `Session.*`, with EXPR `Job.Name` and `Step.Name`,
+5. **Task scope** — every `Param.*` and `RawParam.*`, `Session.*`, with EXPR `Job.Name` and `Step.Name`,
    `Task.Param.*`, `Task.RawParam.*`, `Task.File.*` and, with EXPR, the Step's `let` values;
    then the script's `let` bindings. A step script. `Env.File.*` is not in it.
 

@@ -121,14 +121,30 @@ fn let_names(bindings: Option<&[String]>) -> HashSet<String> {
 /// Copy the values of `step`'s `let` bindings from `step_scope`, a scope
 /// that holds them, into `symtab`. They are copied last: a binding named like
 /// a scope root (`Session`, an error pass 8 reports) collides with it and is
-/// dropped, and a dotted name (an error too) sets the symbol it names.
-/// `symtab` is a host scope, so a value whose type contains `path` is then
-/// made unresolved ([`unresolve_template_paths`]).
-fn copy_step_lets(symtab: &mut SymbolTable, step: &StepTemplate, step_scope: &SymbolTable) {
+/// dropped, and a dotted name (an error too) sets the symbol it names. With
+/// `evaluated_only`, a binding with an empty name or no expression, which
+/// pass 8 reports and does not evaluate, is not copied: the task scope
+/// copies only evaluated bindings, and a Step Environment's scope copies
+/// every binding with an `=`. `symtab` is a host scope, so a value whose
+/// type contains `path` is then made unresolved
+/// ([`unresolve_template_paths`]).
+fn copy_step_lets(
+    symtab: &mut SymbolTable,
+    step: &StepTemplate,
+    step_scope: &SymbolTable,
+    evaluated_only: bool,
+) {
     if step.let_bindings.is_none() {
         return;
     }
-    for name in let_name_strs(step.let_bindings.as_deref()) {
+    for binding in step.let_bindings.iter().flatten() {
+        let Some(eq) = binding.find('=') else {
+            continue;
+        };
+        let name = binding[..eq].trim();
+        if evaluated_only && (name.is_empty() || binding[eq + 1..].trim().is_empty()) {
+            continue;
+        }
         if let Some(value) = step_scope.get_value(name) {
             let _ = symtab.set(name, value.clone());
         }
@@ -374,8 +390,9 @@ impl<'a> FsCtx<'a> {
         symtab
     }
 
-    /// What the session and task scopes share: every `Param.*`,
-    /// `Session.*`, and, with `EXPR`, `Job.*` and, for a Step, `Step.Name`.
+    /// What the session and task scopes share: every `Param.*` and
+    /// `RawParam.*`, `Session.*`, and, with `EXPR`, `Job.Name` and, for a
+    /// Step, `Step.Name`.
     fn host_scope(&self, step: bool) -> SymbolTable {
         let mut symtab = SymbolTable::new();
         add_params(&mut symtab, job_params(self.params), true);
@@ -409,7 +426,7 @@ impl<'a> FsCtx<'a> {
                 .and_then(|s| s.embedded_files.as_deref()),
         );
         if let (true, Some((step, step_scope))) = (self.expr, step) {
-            copy_step_lets(&mut symtab, step, step_scope);
+            copy_step_lets(&mut symtab, step, step_scope, false);
         }
         symtab
     }
@@ -453,7 +470,7 @@ impl<'a> FsCtx<'a> {
             script.as_ref().and_then(|s| s.embedded_files.as_deref()),
         );
         if self.expr {
-            copy_step_lets(&mut symtab, step, step_scope);
+            copy_step_lets(&mut symtab, step, step_scope, true);
         }
         symtab
     }
@@ -1442,10 +1459,15 @@ fn validate_step_script(
 ) {
     // Script-level `let` bindings are in task scope. `Task.File.*` is in
     // it: a Session allocates the files before it evaluates `let`.
+    // The enclosing names, only when there are bindings to check against them.
+    let enclosing = match &script.let_bindings {
+        Some(_) => let_names(step_lets),
+        None => HashSet::new(),
+    };
     f.validate_lets(
         script.let_bindings.as_deref(),
         &path_field(script_path, "let"),
-        &let_names(step_lets),
+        &enclosing,
         task_symtab,
         &f.host,
         errors,
@@ -2084,10 +2106,15 @@ fn validate_step(
         // The Step's `let` values are read from the task scope, after its
         // script's own `let` bindings.
         let mut symtab = f.session_scope(env, Some((step, &task_scope)));
+        let env_lets = env.script.as_ref().and_then(|s| s.let_bindings.as_deref());
+        let enclosing = match env_lets {
+            Some(_) => let_names(step_lets),
+            None => HashSet::new(),
+        };
         f.validate_lets(
-            env.script.as_ref().and_then(|s| s.let_bindings.as_deref()),
+            env_lets,
             &path_field(&path_field(&env_path, "script"), "let"),
-            &let_names(step_lets),
+            &enclosing,
             &mut symtab,
             &f.host,
             errors,

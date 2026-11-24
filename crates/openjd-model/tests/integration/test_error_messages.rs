@@ -921,3 +921,32 @@ steps:
          steps[0] -> bash -> let[0]:\n\t'x' shadows enclosing scope.",
     );
 }
+
+/// A Step's task scope takes only the `let` bindings pass 8 evaluates, so a
+/// binding with no expression named like a Job Parameter does not replace
+/// the task scope's own value: with a duplicated name, the template scope's
+/// INT `Param.Q` does not hide the task scope's PATH one.
+#[test]
+fn a_let_binding_with_no_expression_does_not_replace_a_task_scope_symbol() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: T
+parameterDefinitions:
+- {name: Q, type: INT}
+- {name: Q, type: PATH}
+steps:
+- name: S
+  let: ["Param.Q ="]
+  script: {actions: {onRun: {command: "{{ Param.Q + 1 }}"}}}
+"#,
+        "Model validation error: 3 validation errors for JobTemplate\n\
+         parameterDefinitions[1]:\n\tduplicate parameter name: 'Q'\n\
+         steps[0] -> let[0]:\n\tbinding 'Param.Q' has no expression after '='.\n\
+         steps[0] -> script -> actions -> onRun -> command:\n\tFailed to parse interpolation \
+         expression at [0, 17]. Cannot use '+' operator with path and int\n  Param.Q + 1\n  \
+         ~~~~~~~~^~~",
+    );
+}
