@@ -43,9 +43,10 @@ static PROFILE_CACHE: LazyLock<Mutex<HashMap<ProfileKey, Arc<FunctionLibrary>>>>
 /// a compile error here, forcing an explicit decision about how the
 /// new variant affects the library.
 ///
-/// The skeleton is shared, not copied: every profile bucket of a revision
-/// with no extensions holds the same `Arc` as [`DEFAULT_LIBRARY`], so a
-/// process parses the built-in signatures once. An extension that adds
+/// The skeleton is shared, not copied: the no-host bucket of a revision with
+/// no extensions holds the same `Arc` as [`DEFAULT_LIBRARY`] and the host
+/// buckets are derived from it, so a process parses the built-in signatures
+/// once. An extension that adds
 /// functions would copy it first (`Arc::make_mut`).
 fn build_library_skeleton(profile: &ExprProfile) -> Arc<FunctionLibrary> {
     let lib = match profile.revision() {
