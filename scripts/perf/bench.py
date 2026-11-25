@@ -34,6 +34,11 @@ import sys
 import tempfile
 import time
 
+USAGE = (
+    "usage: bench.py [-n RUNS] [--warmup N] [--no-null-test] "
+    "LABEL=BINARY [LABEL=BINARY ...] -- ARGS..."
+)
+
 
 def parse_binaries(specs: list[str]) -> list[tuple[str, str]]:
     out = []
@@ -41,6 +46,8 @@ def parse_binaries(specs: list[str]) -> list[tuple[str, str]]:
         label, sep, path = spec.partition("=")
         if not sep or not label or not path:
             sys.exit(f"expected LABEL=BINARY, got {spec!r}")
+        # Absolute, so a bare name is the file named, not a PATH lookup.
+        path = os.path.abspath(path)
         if not (os.path.isfile(path) and os.access(path, os.X_OK)):
             sys.exit(f"{label}: {path} is not an executable file")
         if any(label == seen for seen, _ in out):
@@ -59,18 +66,33 @@ def run_once(path: str, args: list[str]) -> tuple[float, int]:
 
 def main() -> int:
     argv = sys.argv[1:]
-    if "--" not in argv:
-        sys.exit("usage: bench.py [-n RUNS] [--warmup N] LABEL=BINARY ... -- ARGS...")
-    split = argv.index("--")
-    ap = argparse.ArgumentParser(description="Interleaved wall-time comparison with a null test.")
-    ap.add_argument("-n", "--runs", type=int, default=30, help="timed rounds (default 30)")
-    ap.add_argument("--warmup", type=int, default=2, help="untimed rounds first (default 2)")
-    ap.add_argument("--no-null-test", action="store_true", help="skip the copy of the first binary")
+    ap = argparse.ArgumentParser(
+        usage=USAGE[len("usage: ") :],
+        description="Interleaved wall-time comparison with a null test.",
+        epilog="Everything after '--' is passed to each binary.",
+    )
+    ap.add_argument(
+        "-n", "--runs", type=int, default=30, help="timed rounds (default 30)"
+    )
+    ap.add_argument(
+        "--warmup", type=int, default=2, help="untimed rounds first (default 2)"
+    )
+    ap.add_argument(
+        "--no-null-test", action="store_true", help="skip the copy of the first binary"
+    )
     ap.add_argument("binaries", nargs="+", metavar="LABEL=BINARY")
+    if "--" not in argv:
+        if any(a in ("-h", "--help") for a in argv):
+            ap.print_help()
+            return 0
+        ap.error("give the command's arguments after '--'")
+    split = argv.index("--")
     opts = ap.parse_args(argv[:split])
     cmd_args = argv[split + 1 :]
     if opts.runs < 4:
         sys.exit("--runs must be at least 4 to report quartiles")
+    if opts.warmup < 0:
+        sys.exit("--warmup must not be negative")
     binaries = parse_binaries(opts.binaries)
 
     with tempfile.TemporaryDirectory(prefix="openjd-bench-") as tmp:
@@ -98,7 +120,9 @@ def main() -> int:
 
     base_label = binaries[0][0]
     base = statistics.median(times[base_label])
-    print(f"{opts.runs} interleaved rounds, exit code {expected_code}: {' '.join(cmd_args)}")
+    print(
+        f"{opts.runs} interleaved rounds, exit code {expected_code}: {' '.join(cmd_args)}"
+    )
     print(f"{'':>14} {'median':>10} {'p25':>9} {'p75':>9}   vs {base_label}")
     for label, _ in binaries:
         q1, _, q3 = statistics.quantiles(times[label], n=4)

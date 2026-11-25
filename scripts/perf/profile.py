@@ -27,7 +27,9 @@
 # on Linux; on other platforms run it in a Linux container. Inclusive costs
 # follow callgrind's call records, so a recursive function's inclusive cost
 # counts its recursive calls again, as `callgrind_annotate --inclusive=yes`
-# does.
+# does. Costs are merged by function name, so functions of the same name in
+# different objects (for example `clone` in libc and in the binary) share one
+# entry.
 
 from __future__ import annotations
 
@@ -76,7 +78,9 @@ class Profile:
     total: int
     self_cost: Counter = field(default_factory=Counter)
     # caller -> callee -> [call count, inclusive cost of those calls]
-    calls: dict = field(default_factory=lambda: defaultdict(lambda: defaultdict(lambda: [0, 0])))
+    calls: dict = field(
+        default_factory=lambda: defaultdict(lambda: defaultdict(lambda: [0, 0]))
+    )
 
     def inclusive(self) -> Counter:
         inc = Counter(self.self_cost)
@@ -102,31 +106,55 @@ def _first_cost(fields: list[str], npos: int) -> int:
 
 def load(path: str) -> Profile:
     """Parse a callgrind output file (format version 1)."""
-    names: dict[str, str] = {}
+    # Name compression: "(id) name" defines id, "(id)" refers to it. Files,
+    # functions and objects are numbered separately and reuse the same ids.
+    tables: dict[str, dict[str, str]] = {"file": {}, "fn": {}, "ob": {}}
+    kind_of = {
+        "fl": "file",
+        "fi": "file",
+        "fe": "file",
+        "cfi": "file",
+        "cfl": "file",
+        "fn": "fn",
+        "cfn": "fn",
+        "ob": "ob",
+        "cob": "ob",
+    }
 
-    def resolve(spec: str) -> str:
-        # Name compression: "(id) name" defines id, "(id)" refers to it.
+    def resolve(key: str, spec: str) -> str:
         m = re.match(r"^\((\d+)\)(?: (.*))?$", spec)
         if not m:
             return spec
+        names = tables[kind_of[key]]
         if m.group(2) is not None:
             names[m.group(1)] = m.group(2)
         return names.get(m.group(1), spec)
+
+    def fail(lineno: int, what: str) -> None:
+        sys.exit(f"{path}:{lineno}: {what}; not a callgrind output file?")
 
     event, total, npos = "", 0, 1
     prof = None
     fn = ""
     pending_call: tuple[str, int] | None = None  # (callee, count)
+    seen_header = False
+    if not os.path.isfile(path):
+        sys.exit(f"{path}: no such file")
     with open(path, encoding="utf-8", errors="replace") as fh:
-        for raw in fh:
+        for lineno, raw in enumerate(fh, 1):
             line = raw.rstrip("\n")
             if not line or line.startswith("#"):
                 continue
             c = line[0]
             if c.isdigit() or c in "+-*":
+                if not seen_header:
+                    fail(lineno, "cost line before any 'version:' or 'events:' header")
                 if prof is None:
                     prof = Profile(event or "Ir", total)
-                cost = _first_cost(line.split(), npos)
+                try:
+                    cost = _first_cost(line.split(), npos)
+                except ValueError:
+                    fail(lineno, f"unreadable cost line {line[:60]!r}")
                 if pending_call is not None:
                     callee, count = pending_call
                     rec = prof.calls[fn][callee]
@@ -138,22 +166,29 @@ def load(path: str) -> Profile:
                 continue
             key, _, value = line.partition("=")
             if key == "fn":
-                fn = resolve(value)
+                fn = resolve(key, value)
             elif key == "cfn":
-                callee = resolve(value)
-                pending_call = (callee, 0)
+                pending_call = (resolve(key, value), 0)
             elif key == "calls":
                 if pending_call is None:
-                    sys.exit(f"{path}: 'calls=' without a preceding 'cfn=': {line!r}")
-                pending_call = (pending_call[0], int(value.split()[0]))
-            elif key in ("fl", "fi", "fe", "ob", "cob", "cfi", "cfl"):
-                resolve(value)  # keep the compression table complete
-            elif line.startswith("events:"):
-                event = line.split()[1]
+                    fail(lineno, "'calls=' without a preceding 'cfn='")
+                try:
+                    pending_call = (pending_call[0], int(value.split()[0]))
+                except (ValueError, IndexError):
+                    fail(lineno, f"unreadable {line[:60]!r}")
+            elif key in kind_of:
+                resolve(key, value)  # keep the compression tables complete
+            elif line.startswith(("version:", "events:")):
+                seen_header = True
+                if line.startswith("events:"):
+                    event = line.split()[1]
             elif line.startswith("positions:"):
                 npos = len(line.split()) - 1
             elif line.startswith(("summary:", "totals:")):
-                total = int(line.split()[1])
+                try:
+                    total = int(line.split()[1])
+                except (ValueError, IndexError):
+                    fail(lineno, f"unreadable {line[:60]!r}")
     if prof is None:
         sys.exit(f"{path}: no cost lines; not a callgrind file?")
     if not prof.total:
@@ -168,6 +203,13 @@ def tool(name: str) -> str:
     if not found:
         sys.exit(f"{name} not found on PATH (install valgrind, or set VALGRIND)")
     return found
+
+
+def compile_regex(pattern: str) -> re.Pattern:
+    try:
+        return re.compile(pattern)
+    except re.error as e:
+        sys.exit(f"bad regex {pattern!r}: {e}")
 
 
 def area(name: str) -> str:
@@ -192,8 +234,18 @@ def is_openjd(name: str) -> bool:
 def cmd_run(args: argparse.Namespace) -> int:
     if not args.command:
         sys.exit("run: give the command after '--'")
+    # Remove an earlier profile first, so a run that fails cannot report it.
+    try:
+        os.remove(args.out)
+    except FileNotFoundError:
+        pass
     proc = subprocess.run(
-        [tool("valgrind"), "--tool=callgrind", f"--callgrind-out-file={args.out}", *args.command],
+        [
+            tool("valgrind"),
+            "--tool=callgrind",
+            f"--callgrind-out-file={args.out}",
+            *args.command,
+        ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
@@ -201,7 +253,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     if not os.path.exists(args.out):
         sys.stderr.write(proc.stderr)
-        sys.exit("valgrind wrote no profile")
+        sys.exit(f"valgrind wrote no profile (exit {proc.returncode})")
     prof = load(args.out)
     print(f"exit {proc.returncode}; {prof.total:,} {prof.event} -> {args.out}")
     return 0
@@ -222,7 +274,9 @@ def cmd_report(args: argparse.Namespace) -> int:
         print(f"  {pct(cost, total)}  {short(name)}")
     print(f"\ntop {args.top} openjd functions by inclusive cost:")
     inc = prof.inclusive()
-    for name, cost in [(n, c) for n, c in inc.most_common() if is_openjd(n)][: args.top]:
+    for name, cost in [(n, c) for n, c in inc.most_common() if is_openjd(n)][
+        : args.top
+    ]:
         print(f"  {pct(cost, total)}  {short(name)}")
     allocs = Counter()
     for caller, callees in prof.calls.items():
@@ -243,15 +297,18 @@ def cmd_diff(args: argparse.Namespace) -> int:
     change = 100 * (new.total - old.total) / old.total if old.total else 0.0
     print(f"total {old.event}: {old.total:,} -> {new.total:,} ({change:+.1f}%)")
     a, b = old.inclusive(), new.inclusive()
-    keep = re.compile(args.match) if args.match else None
+    keep = compile_regex(args.match) if args.match else None
     rows = []
     for name in set(a) | set(b):
         if keep.search(name) if keep else is_openjd(name):
             rows.append((b.get(name, 0) - a.get(name, 0), name))
     rows.sort()
     for title, subset in (
-        ("largest inclusive decreases", rows[: args.top]),
-        ("largest inclusive increases", [r for r in reversed(rows[-args.top :]) if r[0] > 0]),
+        ("largest inclusive decreases", [r for r in rows if r[0] < 0][: args.top]),
+        (
+            "largest inclusive increases",
+            [r for r in reversed(rows) if r[0] > 0][: args.top],
+        ),
     ):
         print(f"\n{title}:")
         for delta, name in subset:
@@ -265,8 +322,10 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
 def cmd_callers(args: argparse.Namespace) -> int:
     prof = load(args.out)
-    pattern = re.compile(args.regex)
-    callees = sorted({c for cs in prof.calls.values() for c in cs} | set(prof.self_cost))
+    pattern = compile_regex(args.regex)
+    callees = sorted(
+        {c for cs in prof.calls.values() for c in cs} | set(prof.self_cost)
+    )
     matched = [c for c in callees if pattern.search(c)]
     if not matched:
         print(f"no function matches {args.regex!r}")
@@ -293,7 +352,9 @@ def main() -> int:
     p.add_argument("old")
     p.add_argument("new")
     p.add_argument("--top", type=int, default=15)
-    p.add_argument("--match", help="regex of functions to compare (default: openjd functions)")
+    p.add_argument(
+        "--match", help="regex of functions to compare (default: openjd functions)"
+    )
     p = sub.add_parser("callers", help="who calls the matching functions")
     p.add_argument("out")
     p.add_argument("regex")
@@ -301,9 +362,12 @@ def main() -> int:
     args = ap.parse_args()
     if args.cmd == "run" and args.command[:1] == ["--"]:
         args.command = args.command[1:]
-    return {"run": cmd_run, "report": cmd_report, "diff": cmd_diff, "callers": cmd_callers}[
-        args.cmd
-    ](args)
+    return {
+        "run": cmd_run,
+        "report": cmd_report,
+        "diff": cmd_diff,
+        "callers": cmd_callers,
+    }[args.cmd](args)
 
 
 if __name__ == "__main__":

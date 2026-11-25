@@ -65,7 +65,9 @@ def collect(dirs: list[str], scratch: str) -> list[str]:
                         continue
                     dest = os.path.join(scratch, f"{len(out):05d}-{name}")
                     with open(dest, "w", encoding="utf-8") as fh:
-                        yaml.safe_dump(doc["template"], fh, sort_keys=False, allow_unicode=True)
+                        yaml.safe_dump(
+                            doc["template"], fh, sort_keys=False, allow_unicode=True
+                        )
                     out.append(dest)
                 elif name.endswith((".yaml", ".yml", ".json")):
                     out.append(path)
@@ -78,23 +80,36 @@ def is_job_template(path: str) -> bool:
 
 
 Result = tuple[int, str, str]
+# Exit status recorded for an invocation that timed out; no real exit is this.
+TIMED_OUT = -(10**9)
 
 
 def run(binary: str, args: list[str], timeout: float) -> Result:
     try:
-        p = subprocess.run([binary, *args], capture_output=True, timeout=timeout, check=False)
+        p = subprocess.run(
+            [binary, *args], capture_output=True, timeout=timeout, check=False
+        )
     except subprocess.TimeoutExpired:
-        return (-1, "", f"<timed out after {timeout}s>")
-    return (p.returncode, p.stdout.decode(errors="replace"), p.stderr.decode(errors="replace"))
+        return (TIMED_OUT, "", f"<timed out after {timeout}s>")
+    return (
+        p.returncode,
+        p.stdout.decode(errors="replace"),
+        p.stderr.decode(errors="replace"),
+    )
 
 
 def as_multiset(r: Result) -> tuple[int, list[str], list[str]]:
     return (r[0], sorted(r[1].splitlines()), sorted(r[2].splitlines()))
 
 
-def compare(old: str, new: str, args: list[str], timeout: float) -> tuple[str, Result, Result]:
-    """'same', 'unordered' (nondeterministic order, same lines), or 'differ'."""
+def compare(
+    old: str, new: str, args: list[str], timeout: float
+) -> tuple[str, Result, Result]:
+    """'same', 'unordered' (nondeterministic order, same lines), 'timeout', or
+    'differ'."""
     a, b = run(old, args, timeout), run(new, args, timeout)
+    if TIMED_OUT in (a[0], b[0]):
+        return "timeout", a, b
     if a == b:
         return "same", a, b
     again = run(old, args, timeout)
@@ -110,9 +125,17 @@ def show(args: list[str], a: Result, b: Result) -> str:
     for name, x, y in (("stdout", a[1], b[1]), ("stderr", a[2], b[2])):
         if x != y:
             diff = difflib.unified_diff(
-                x.splitlines(), y.splitlines(), f"old {name}", f"new {name}", lineterm="", n=2
+                x.splitlines(),
+                y.splitlines(),
+                f"old {name}",
+                f"new {name}",
+                lineterm="",
+                n=2,
             )
-            lines.extend("   " + (d if len(d) <= 200 else d[:197] + "...") for d in list(diff)[:40])
+            lines.extend(
+                "   " + (d if len(d) <= 200 else d[:197] + "...")
+                for d in list(diff)[:40]
+            )
     return "\n".join(lines)
 
 
@@ -130,29 +153,44 @@ def main() -> int:
         help="pass --extensions SET (repeatable; default: the CLI's default set)",
     )
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
-    ap.add_argument("--timeout", type=float, default=120.0, help="seconds per invocation")
+    ap.add_argument(
+        "--timeout", type=float, default=120.0, help="seconds per invocation"
+    )
     ap.add_argument("--show", type=int, default=5, help="differences to print")
     opts = ap.parse_args()
+    # Absolute, so a bare name is the file named, not a PATH lookup.
+    opts.old, opts.new = os.path.abspath(opts.old), os.path.abspath(opts.new)
     for b in (opts.old, opts.new):
         if not (os.path.isfile(b) and os.access(b, os.X_OK)):
             sys.exit(f"{b} is not an executable file")
+    if opts.jobs < 1:
+        sys.exit("--jobs must be at least 1")
+    if opts.timeout <= 0:
+        sys.exit("--timeout must be positive")
     ext_sets = [None] if opts.extensions is None else opts.extensions
 
     with tempfile.TemporaryDirectory(prefix="openjd-difftest-") as scratch:
         templates = collect(opts.dirs, scratch)
+        if not templates:
+            sys.exit(f"no templates found under {', '.join(opts.dirs)}")
         cases = []
         for path in templates:
             cmds = ["check", "summary"] if is_job_template(path) else ["check"]
             for cmd in cmds:
                 for ext in ext_sets:
-                    cases.append([cmd, path] + ([] if ext is None else ["--extensions", ext]))
+                    cases.append(
+                        [cmd, path] + ([] if ext is None else ["--extensions", ext])
+                    )
         with ThreadPoolExecutor(max_workers=opts.jobs) as pool:
             results = list(
-                pool.map(lambda c: (c, *compare(opts.old, opts.new, c, opts.timeout)), cases)
+                pool.map(
+                    lambda c: (c, *compare(opts.old, opts.new, c, opts.timeout)), cases
+                )
             )
 
     differ = [(c, a, b) for c, kind, a, b in results if kind == "differ"]
     unordered = sum(1 for _, kind, _, _ in results if kind == "unordered")
+    timeouts = [c for c, kind, _, _ in results if kind == "timeout"]
     print(
         f"{len(templates)} templates, {len(cases)} invocations, {len(differ)} differences"
         + (
@@ -163,7 +201,13 @@ def main() -> int:
     )
     for c, a, b in differ[: opts.show]:
         print(show(c, a, b))
-    return 1 if differ else 0
+    if timeouts:
+        print(
+            f"{len(timeouts)} invocations timed out after {opts.timeout}s and were not compared:"
+        )
+        for c in timeouts[: opts.show]:
+            print(f"== openjd {' '.join(c)}")
+    return 1 if differ or timeouts else 0
 
 
 if __name__ == "__main__":

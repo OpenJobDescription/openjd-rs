@@ -18,3 +18,6 @@ mutants.out/
 mutants.out.old/
 
 .claude/settings.local.json
+
+# Python bytecode from running scripts/
+__pycache__/
