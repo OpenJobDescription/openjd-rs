@@ -1319,6 +1319,12 @@ pub struct FieldChange {
 }
 ```
 
+- `DiffTree::root` returns the node that compares the two arguments.
+- `DiffTree::is_changed` says whether the two arguments differ.
+- `DiffNode::is_changed` says whether the node's status is not `Unchanged`.
+- `DiffNode::child` returns the child with the given segment, written as the
+  diff formats it, such as `steps[Render]`.
+
 ## Step Dependency Graph
 
 ```rust

@@ -15,12 +15,16 @@ pub fn diff_environments(old: &Environment, new: &Environment) -> DiffTree;
 ```
 
 `diff_steps` and `diff_environments` return the same tree that `diff_jobs`
-builds below that step or environment.
+builds below that step or environment. They are public so a caller can compare
+one step or environment on its own, such as two steps of one job, or a step
+across jobs whose names differ. A later change uses the tree to plan how to
+apply a change to a running job.
 
 Inputs are what `create_job` produces: names unique within each collection,
-no empty optional lists or maps, and symbol tables as `create_job` writes
-them. For other inputs the diff still returns a tree and never panics, but
-the tree may not attribute every change.
+no empty optional lists or maps except a host requirement list (`amounts` or
+`attributes` may be empty when the other is not), and symbol tables as
+`create_job` writes them. For other inputs the diff still returns a tree and
+never panics, but the tree may not attribute every change.
 
 ## Nodes
 
@@ -51,7 +55,7 @@ Elements of collections are matched by identity, not position.
 | collection | kind | matched by | children |
 |---|---|---|---|
 | `steps`, `jobEnvironments`, `stepEnvironments`, `embeddedFiles` | list | `name` | old-side order, then new-only |
-| `hostRequirements.amounts`, `.attributes` | list | `name` | field changes, same order |
+| `hostRequirements.amounts`, `.attributes` | list | `name` | field changes, old-side order, then new-only |
 | `parameters`, `taskParameterDefinitions` | map | key | key order |
 | `variables` | map | key | field changes, key order |
 | `resolvedSymTab` | list | `name` | field changes, name order |
@@ -69,7 +73,7 @@ maps never record an order change and reordered map entries are `Unchanged`.
 
 `Unchanged` means equal under `PartialEq`, which does not imply the same task
 order. A reordered task parameter definition list with no `combination` is
-`Unchanged` although it iterates tasks in another order (see "Out of scope").
+`Unchanged` although it iterates tasks in another order.
 
 ## Resolved symbol tables
 
@@ -130,17 +134,14 @@ unchanged tree writes nothing.
 | EmbeddedFile | `embeddedFiles[N]` | `name`, `type`, `filename`, `data`, `runnable`, `endOfLine` | none |
 | ParameterSpace | `parameterSpace` | `combination` | `taskParameterDefinitions[K]` |
 | TaskParameter | `taskParameterDefinitions[K]` | `type`, `range`, `chunks` | none |
-| HostRequirements | `hostRequirements` | `amounts.order`, `amounts[N]`, `attributes.order`, `attributes[N]` | none |
+| HostRequirements | `hostRequirements` | `amounts` (absent against empty), `amounts.order`, `amounts[N]`, `attributes` (absent against empty), `attributes.order`, `attributes[N]` | none |
 
 ## Out of scope
 
 - Templates. The diff compares created jobs only.
-- Tasks. Task parameter definitions are a map, so their order is not a
-  change, although it fixes task iteration order. Which tasks a change adds
-  or removes is not computed.
+- Tasks. Which tasks a change adds or removes is not computed.
 - Applying a diff, and any command-line interface. A caller reads an
-  element's name from its `segment` (`collection[name]`); a structured
-  identity may come with applying a diff.
+  element's name from its `segment` (`collection[name]`).
 - Options such as a depth limit. `diff_*` always expands every `Modified`
   node.
 

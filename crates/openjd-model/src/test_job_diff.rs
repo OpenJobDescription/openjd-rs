@@ -9,11 +9,10 @@
 use crate::job::diff::{diff_environments, diff_jobs, diff_steps, DiffNode, DiffStatus};
 use crate::job::{Job, ResolvedChunks, TaskParamRange, TaskParameter};
 use crate::template::RangeConstraint;
-use crate::types::{EndOfLine, JobParameterType, ModelExtension};
+use crate::types::ModelExtension;
 use crate::{create_job, decode_job_template, preprocess_job_parameters, CallerLimits};
 use crate::{JobParameterInputValues, PathParameterOptions};
 use openjd_expr::symbol_table::SerializedSymbolTable;
-use openjd_expr::value::Float64;
 use openjd_expr::RangeExpr;
 
 const BASE: &str = r#"
@@ -38,6 +37,7 @@ steps:
       embeddedFiles: [{name: F, type: TEXT, data: one}, {name: G, type: TEXT, data: two}]
   - name: Render
     dependencies: [{dependsOn: Prep}]
+    stepEnvironments: [{name: A, variables: {X: a}}, {name: B, variables: {X: b}}]
     hostRequirements:
       amounts: [{name: amount.worker.vcpu, min: 2}, {name: amount.worker.gpu, min: 1}]
       attributes: [{name: attr.worker.os.family, anyOf: [linux]}, {name: attr.worker.cpu.arch, anyOf: [x86_64]}]
@@ -51,7 +51,11 @@ steps:
 
 fn job_with(yaml: &str, params: &[(&str, &str)]) -> Job {
     let v: serde_json::Value = serde_saphyr::from_str(yaml).unwrap();
-    let jt = decode_job_template(v, None, &CallerLimits::default()).unwrap();
+    let extensions: Vec<_> = ModelExtension::ALL
+        .iter()
+        .map(ModelExtension::as_str)
+        .collect();
+    let jt = decode_job_template(v, Some(&extensions), &CallerLimits::default()).unwrap();
     let mut input = JobParameterInputValues::new();
     for (k, val) in params {
         input.insert((*k).into(), openjd_expr::ExprValue::String((*val).into()));
@@ -233,9 +237,13 @@ fn step_reorder_is_one_order_change() {
 enum Edit {
     /// Replace text in `BASE` for the new job.
     Text(&'static str, &'static str),
+    /// Replace text in `BASE` for the old job; the new job is `BASE`.
+    Old(&'static str, &'static str),
+    /// Rewrite `BASE` for the old job and for the new job.
+    Templates(fn(&str) -> String, fn(&str) -> String),
     /// Give a job parameter a value for the new job.
     Param(&'static str, &'static str),
-    /// Edit both created jobs, for what validation does not allow in a template.
+    /// Edit both created jobs, for a pair no template pair produces.
     Jobs(fn(&mut Job, &mut Job)),
 }
 
@@ -246,26 +254,65 @@ enum Expect {
 }
 
 use DiffStatus::{Added, Removed};
-use Edit::{Jobs, Param, Text};
+use Edit::{Jobs, Old, Param, Templates, Text};
 use Expect::{Child, Fields};
 
 const PREP: &str = "  - name: Prep\n";
+const PREP_STEP: &str = "  - name: Prep\n    script:\n      actions: {onRun: {command: prep, args: [\"{{Param.Scene}}\"]}}\n      embeddedFiles: [{name: F, type: TEXT, data: one}, {name: G, type: TEXT, data: two}]\n";
+const PREP_SPACE: &str = "  - name: Prep\n    parameterSpace:\n      taskParameterDefinitions: [{name: Shot, type: INT, range: [1]}]\n";
+const PREP_ATTRS: &str = "  - name: Prep\n    hostRequirements: {attributes: [{name: attr.worker.os.family, anyOf: [linux]}]}\n";
+const PREP_AMOUNTS: &str =
+    "  - name: Prep\n    hostRequirements: {amounts: [{name: amount.worker.vcpu, min: 2}]}\n";
+const LOG_ENV: &str = "  - name: Log\n    variables: {LEVEL: info}\n";
+const LAST: &str = "  - {name: Last";
+const EXTRA_THEN_LAST: &str = "  - {name: Extra, type: STRING, default: e}\n  - {name: Last";
 const FRAME: &str = "        - {name: Frame";
+const FRAME_DEF: &str = "{name: Frame, type: INT, range: \"1-{{Param.Last}}\"}";
 const RENDER_RUN: &str = "{command: render,";
 const RENDER: &str = "steps[Render]";
 const ON_RUN: &[&str] = &[RENDER, "script", "onRun"];
 const FILE_F: &[&str] = &["steps[Prep]", "script", "embeddedFiles[F]"];
 const SPACE: &[&str] = &[RENDER, "parameterSpace"];
 const FRAME_NODE: &[&str] = &[RENDER, "parameterSpace", "taskParameterDefinitions[Frame]"];
+const EYE_NODE: &[&str] = &[RENDER, "parameterSpace", "taskParameterDefinitions[Eye]"];
+const HOST: &[&str] = &[RENDER, "hostRequirements"];
+const PREP_HOST: &[&str] = &["steps[Prep]", "hostRequirements"];
 const CONDA: &str = "jobEnvironments[Conda]";
 const LOG: &str = "jobEnvironments[Log]";
 
-fn prep_files(j: &mut Job) -> &mut Vec<crate::job::EmbeddedFile> {
-    j.steps[0].script.embedded_files.as_mut().unwrap()
+fn same(t: &str) -> String {
+    t.into()
 }
 
-fn host(j: &mut Job) -> &mut crate::job::HostRequirements {
-    j.steps[1].host_requirements.as_mut().unwrap()
+fn with_extensions(t: &str, extensions: &str) -> String {
+    edited(
+        t,
+        "name: Demo\n",
+        &format!("name: Demo\nextensions: [{extensions}]\n"),
+    )
+}
+
+/// `Frame` as a CHUNK[INT] with `range` and a default task count of `count`.
+fn chunked(t: &str, range: &str, count: u32) -> String {
+    let def = format!(
+        "{{name: Frame, type: \"CHUNK[INT]\", range: {range}, \
+         chunks: {{defaultTaskCount: {count}, rangeConstraint: CONTIGUOUS}}}}"
+    );
+    edited(&with_extensions(t, "TASK_CHUNKING"), FRAME_DEF, &def)
+}
+
+/// The Conda environment with the three wrap actions, which come together.
+fn wrapped(t: &str) -> String {
+    let wraps = "{onEnter: {command: activate}, onWrapEnvEnter: {command: wrap-enter}, \
+                 onWrapTaskRun: {command: wrap-task}, onWrapEnvExit: {command: wrap-exit}}";
+    let t = with_extensions(t, "WRAP_ACTIONS, EXPR");
+    edited(&t, "{onEnter: {command: activate}}", wraps)
+}
+
+/// A `let` binding in the script whose actions line starts `actions`.
+fn with_let(t: &str, actions: &str) -> String {
+    let binding = format!("      let: [\"x = 1\"]\n{actions}");
+    edited(&with_extensions(t, "EXPR"), actions, &binding)
 }
 
 fn frame(j: &mut Job) -> &mut TaskParameter {
@@ -289,34 +336,27 @@ fn five_six(contiguous: bool) -> TaskParamRange<i64> {
     )
 }
 
-fn conda_script(j: &mut Job) -> &mut crate::job::EnvironmentScript {
-    j.job_environments.as_mut().unwrap()[0]
-        .script
-        .as_mut()
-        .unwrap()
-}
-
 #[rustfmt::skip]
 const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
     ("job name", Text("name: Demo\n", "name: Demo2\n"), &[], Fields(r#"name: "Demo" -> "Demo2""#)),
     ("job description", Text("name: Demo\n", "name: Demo\ndescription: d\n"), &[], Fields(r#"description: null -> "d""#)),
-    ("job extensions", Jobs(|_, b| b.extensions = Some(vec![ModelExtension::TaskChunking])),
+    ("job extensions", Templates(same, |t| with_extensions(t, "TASK_CHUNKING")),
         &[], Fields(r#"extensions: null -> ["TASK_CHUNKING"]"#)),
-    ("parameter added",
-        Text("  - {name: Last", "  - {name: Extra, type: STRING, default: e}\n  - {name: Last"),
-        &[], Child("parameters[Extra]", Added)),
-    ("parameter removed", Jobs(|_, b| { b.parameters.shift_remove("Quality"); }),
-        &[], Child("parameters[Quality]", Removed)),
-    ("parameter name", Jobs(|_, b| b.parameters["Scene"].name = "Other".into()),
-        &["parameters[Scene]"], Fields(r#"name: "Scene" -> "Other""#)),
-    ("parameter type", Jobs(|_, b| b.parameters["Scene"].param_type = JobParameterType::Path),
-        &["parameters[Scene]"], Fields(r#"type: "STRING" -> "PATH""#)),
+    ("parameter added", Text(LAST, EXTRA_THEN_LAST), &[], Child("parameters[Extra]", Added)),
+    ("parameter removed", Old(LAST, EXTRA_THEN_LAST), &[], Child("parameters[Extra]", Removed)),
+    ("parameter type",
+        Templates(|t| edited(t, LAST, "  - {name: Root, type: STRING, default: /r}\n  - {name: Last"),
+                  |t| edited(t, LAST, "  - {name: Root, type: PATH, default: /r}\n  - {name: Last")),
+        &["parameters[Root]"], Fields(r#"type: "STRING" -> "PATH""#)),
     ("parameter value", Param("Scene", "b.blend"), &["parameters[Scene]"], Fields(r#"value: "a.blend" -> "b.blend""#)),
-    ("jobEnvironments order", Jobs(|_, b| b.job_environments.as_mut().unwrap().reverse()),
+    ("jobEnvironments order",
+        Templates(same, |t| edited(&edited(t, LOG_ENV, ""), "  - name: Conda\n", &format!("{LOG_ENV}  - name: Conda\n"))),
         &[], Fields(r#"jobEnvironments.order: ["Conda","Log"] -> ["Log","Conda"]"#)),
-    ("step name with a bracket is written unescaped", Jobs(|_, b| b.steps[0].name = "P]rep".into()),
+    ("step name with a bracket is written unescaped",
+        Templates(same, |t| edited(&edited(t, PREP, "  - name: \"P]rep\"\n"), "dependsOn: Prep", "dependsOn: \"P]rep\"")),
         &[], Child("steps[P]rep]", Added)),
-    ("steps order", Jobs(|_, b| b.steps.reverse()), &[], Fields(r#"steps.order: ["Prep","Render"] -> ["Render","Prep"]"#)),
+    ("steps order", Templates(same, |t| format!("{}{PREP_STEP}", edited(t, PREP_STEP, ""))),
+        &[], Fields(r#"steps.order: ["Prep","Render"] -> ["Render","Prep"]"#)),
     ("step description", Text(PREP, "  - name: Prep\n    description: d\n"),
         &["steps[Prep]"], Fields(r#"description: null -> "d""#)),
     ("step dependencies", Text("    dependencies: [{dependsOn: Prep}]\n", ""),
@@ -325,6 +365,7 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
     ("step resolvedSymTab symbol added",
         Text("args: [\"{{Param.Scene}}\"]", "args: [\"{{Param.Scene}}\", \"{{Param.Quality}}\"]"),
         &["steps[Prep]"], Fields(r#"resolvedSymTab[Param.Quality]: null -> {"type":"string","value":"low"}"#)),
+    // `create_job` always writes a symbol table as an array.
     ("step resolvedSymTab not an array",
         Jobs(|_, b| b.steps[0].resolved_symtab = Some(SerializedSymbolTable::from_value(serde_json::json!({})))),
         &["steps[Prep]"], Fields(r#"resolvedSymTab: [{"name":"Param.Scene","type":"string","value":"a.blend"}] -> {}"#)),
@@ -334,9 +375,10 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
     ("action timeout", Text(RENDER_RUN, "{command: render, timeout: 60,"), ON_RUN, Fields(r#"timeout: null -> "60""#)),
     ("action cancelation", Text(RENDER_RUN, "{command: render, cancelation: {mode: TERMINATE},"),
         ON_RUN, Fields(r#"cancelation: null -> {"mode":"TERMINATE"}"#)),
-    ("step script let", Jobs(|_, b| b.steps[0].script.let_bindings = Some(vec!["x = 1".into()])),
+    ("step script let", Templates(same, |t| with_let(t, "      actions: {onRun: {command: prep")),
         &["steps[Prep]", "script"], Fields(r#"let: null -> ["x = 1"]"#)),
-    ("embeddedFiles order", Jobs(|_, b| prep_files(b).reverse()),
+    ("embeddedFiles order",
+        Text("{name: F, type: TEXT, data: one}, {name: G, type: TEXT, data: two}", "{name: G, type: TEXT, data: two}, {name: F, type: TEXT, data: one}"),
         &["steps[Prep]", "script"], Fields(r#"embeddedFiles.order: ["F","G"] -> ["G","F"]"#)),
     ("embedded file added", Text("data: two}]", "data: two}, {name: H, type: TEXT, data: three}]"),
         &["steps[Prep]", "script"], Child("embeddedFiles[H]", Added)),
@@ -345,25 +387,19 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
         FILE_F, Fields(r#"filename: null -> "f.txt""#)),
     ("embedded file runnable", Text("{name: F, type: TEXT,", "{name: F, type: TEXT, runnable: true,"),
         FILE_F, Fields(r#"runnable: null -> true"#)),
-    ("embedded file endOfLine", Jobs(|_, b| prep_files(b)[0].end_of_line = Some(EndOfLine::Crlf)),
+    ("embedded file endOfLine",
+        Templates(same, |t| edited(&with_extensions(t, "FEATURE_BUNDLE_1"), "{name: F, type: TEXT,", "{name: F, type: TEXT, endOfLine: CRLF,")),
         FILE_F, Fields(r#"endOfLine: null -> "CRLF""#)),
-    ("stepEnvironments order", Jobs(|a, b| {
-            a.steps[0].step_environments = a.job_environments.clone();
-            b.steps[0].step_environments = b.job_environments.clone().map(|mut e| { e.reverse(); e });
-        }), &["steps[Prep]"], Fields(r#"stepEnvironments.order: ["Conda","Log"] -> ["Log","Conda"]"#)),
+    ("stepEnvironments order",
+        Text("{name: A, variables: {X: a}}, {name: B, variables: {X: b}}", "{name: B, variables: {X: b}}, {name: A, variables: {X: a}}"),
+        &[RENDER], Fields(r#"stepEnvironments.order: ["A","B"] -> ["B","A"]"#)),
     ("step environment added",
         Text(PREP, "  - name: Prep\n    stepEnvironments: [{name: Tmp, variables: {DIR: /tmp}}]\n"),
         &["steps[Prep]"], Child("stepEnvironments[Tmp]", Added)),
-    ("parameterSpace added",
-        Text(PREP, "  - name: Prep\n    parameterSpace:\n      taskParameterDefinitions: [{name: Shot, type: INT, range: [1]}]\n"),
-        &["steps[Prep]"], Child("parameterSpace", Added)),
-    ("parameterSpace removed", Jobs(|_, b| b.steps[1].parameter_space = None),
-        &[RENDER], Child("parameterSpace", Removed)),
-    ("hostRequirements added",
-        Text(PREP, "  - name: Prep\n    hostRequirements: {attributes: [{name: attr.worker.os.family, anyOf: [linux]}]}\n"),
-        &["steps[Prep]"], Child("hostRequirements", Added)),
-    ("hostRequirements removed", Jobs(|_, b| b.steps[1].host_requirements = None),
-        &[RENDER], Child("hostRequirements", Removed)),
+    ("parameterSpace added", Text(PREP, PREP_SPACE), &["steps[Prep]"], Child("parameterSpace", Added)),
+    ("parameterSpace removed", Old(PREP, PREP_SPACE), &["steps[Prep]"], Child("parameterSpace", Removed)),
+    ("hostRequirements added", Text(PREP, PREP_ATTRS), &["steps[Prep]"], Child("hostRequirements", Added)),
+    ("hostRequirements removed", Old(PREP, PREP_ATTRS), &["steps[Prep]"], Child("hostRequirements", Removed)),
     ("combination", Text("    parameterSpace:\n", "    parameterSpace:\n      combination: \"Frame * Eye\"\n"),
         SPACE, Fields(r#"combination: null -> "Frame * Eye""#)),
     ("task parameter added", Text(FRAME, "        - {name: Pass, type: INT, range: [1]}\n        - {name: Frame"),
@@ -371,43 +407,50 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
     ("task parameter removed", Text("        - {name: Eye, type: STRING, range: [left, right]}\n", ""),
         SPACE, Child("taskParameterDefinitions[Eye]", Removed)),
     ("task parameter type", Text("{name: Eye, type: STRING", "{name: Eye, type: PATH"),
-        &[RENDER, "parameterSpace", "taskParameterDefinitions[Eye]"], Fields(r#"type: "STRING" -> "PATH""#)),
+        EYE_NODE, Fields(r#"type: "STRING" -> "PATH""#)),
     ("task parameter range", Param("Last", "20"), FRAME_NODE, Fields(r#"range: "1-10" -> "1-20""#)),
-    ("task parameter FLOAT", Jobs(|_, b| *frame(b) = TaskParameter::Float { range: vec![Float64::new(1.5).unwrap()] }),
+    ("task parameter FLOAT", Text(FRAME_DEF, "{name: Frame, type: FLOAT, range: [1.5]}"),
         FRAME_NODE, Fields(concat!(r#"type: "INT" -> "FLOAT""#, "\n", r#"range: "1-10" -> [1.5]"#))),
     ("task parameter STRING range", Text("range: [left, right]", "range: [left, centre]"),
-        &[RENDER, "parameterSpace", "taskParameterDefinitions[Eye]"], Fields(r#"range: ["left","right"] -> ["left","centre"]"#)),
-    ("task parameter PATH range", Jobs(|a, b| {
-            *frame(a) = TaskParameter::Path { range: vec!["a".into()] };
-            *frame(b) = TaskParameter::Path { range: vec!["b".into()] };
-        }), FRAME_NODE, Fields(r#"range: ["a"] -> ["b"]"#)),
-    ("task parameter chunks", Jobs(|_, b| {
-            if let TaskParameter::Int { chunks, .. } = frame(b) {
-                *chunks = Some(two_chunks());
-            }
-        }), FRAME_NODE, Fields(r#"chunks: null -> {"defaultTaskCount":2,"rangeConstraint":"CONTIGUOUS","targetRuntimeSeconds":null}"#)),
-    ("task parameter CHUNK[INT] with a list range",
-        Jobs(|_, b| *frame(b) = TaskParameter::ChunkInt { range: TaskParamRange::List(vec![1, 2]), chunks: two_chunks() }),
+        EYE_NODE, Fields(r#"range: ["left","right"] -> ["left","centre"]"#)),
+    ("task parameter PATH range",
+        Templates(|t| edited(t, "type: STRING, range: [left, right]", "type: PATH, range: [left, right]"),
+                  |t| edited(t, "type: STRING, range: [left, right]", "type: PATH, range: [left, centre]")),
+        EYE_NODE, Fields(r#"range: ["left","right"] -> ["left","centre"]"#)),
+    ("task parameter chunks", Templates(|t| chunked(t, "[1, 2]", 2), |t| chunked(t, "[1, 2]", 3)),
+        FRAME_NODE, Fields(r#"chunks: {"defaultTaskCount":2,"rangeConstraint":"CONTIGUOUS","targetRuntimeSeconds":null} -> {"defaultTaskCount":3,"rangeConstraint":"CONTIGUOUS","targetRuntimeSeconds":null}"#)),
+    ("task parameter CHUNK[INT] with a list range", Templates(same, |t| chunked(t, "[1, 2]", 2)),
         FRAME_NODE, Fields(concat!(
             r#"type: "INT" -> "CHUNK[INT]""#, "\n",
             r#"range: "1-10" -> [1,2]"#, "\n",
             r#"chunks: null -> {"defaultTaskCount":2,"rangeConstraint":"CONTIGUOUS","targetRuntimeSeconds":null}"#))),
+    // `create_job` writes every range expression in canonical form, so only
+    // hand-built ranges differ in display alone.
     ("task parameter range differing only in display",
         Jobs(|a, b| {
             *frame(a) = TaskParameter::Int { range: five_six(false), chunks: None };
             *frame(b) = TaskParameter::Int { range: five_six(true), chunks: Some(two_chunks()) };
         }), FRAME_NODE, Fields(r#"chunks: null -> {"defaultTaskCount":2,"rangeConstraint":"CONTIGUOUS","targetRuntimeSeconds":null}"#)),
-    ("amount", Text("min: 2}", "min: 4}"), &[RENDER, "hostRequirements"], Fields(r#"amounts[amount.worker.vcpu]: {"max":null,"min":2.0,"name":"amount.worker.vcpu"} -> {"max":null,"min":4.0,"name":"amount.worker.vcpu"}"#)),
+    ("amount", Text("min: 2}", "min: 4}"), HOST, Fields(r#"amounts[amount.worker.vcpu]: {"max":null,"min":2.0,"name":"amount.worker.vcpu"} -> {"max":null,"min":4.0,"name":"amount.worker.vcpu"}"#)),
     ("amount added", Text("{name: amount.worker.gpu, min: 1}", "{name: amount.worker.gpu, min: 1}, {name: amount.worker.memory, min: 1024}"),
-        &[RENDER, "hostRequirements"], Fields(r#"amounts[amount.worker.memory]: null -> {"max":null,"min":1024.0,"name":"amount.worker.memory"}"#)),
+        HOST, Fields(r#"amounts[amount.worker.memory]: null -> {"max":null,"min":1024.0,"name":"amount.worker.memory"}"#)),
     ("attribute removed", Text(", {name: attr.worker.cpu.arch, anyOf: [x86_64]}", ""),
-        &[RENDER, "hostRequirements"], Fields(r#"attributes[attr.worker.cpu.arch]: {"allOf":null,"anyOf":["x86_64"],"name":"attr.worker.cpu.arch"} -> null"#)),
+        HOST, Fields(r#"attributes[attr.worker.cpu.arch]: {"allOf":null,"anyOf":["x86_64"],"name":"attr.worker.cpu.arch"} -> null"#)),
     ("attribute", Text("anyOf: [linux]}", "anyOf: [linux, macos]}"),
-        &[RENDER, "hostRequirements"], Fields(r#"attributes[attr.worker.os.family]: {"allOf":null,"anyOf":["linux"],"name":"attr.worker.os.family"} -> {"allOf":null,"anyOf":["linux","macos"],"name":"attr.worker.os.family"}"#)),
-    ("amounts order", Jobs(|_, b| host(b).amounts.as_mut().unwrap().reverse()),
-        &[RENDER, "hostRequirements"], Fields(r#"amounts.order: ["amount.worker.vcpu","amount.worker.gpu"] -> ["amount.worker.gpu","amount.worker.vcpu"]"#)),
-    ("attributes order", Jobs(|_, b| host(b).attributes.as_mut().unwrap().reverse()),
-        &[RENDER, "hostRequirements"], Fields(r#"attributes.order: ["attr.worker.os.family","attr.worker.cpu.arch"] -> ["attr.worker.cpu.arch","attr.worker.os.family"]"#)),
+        HOST, Fields(r#"attributes[attr.worker.os.family]: {"allOf":null,"anyOf":["linux"],"name":"attr.worker.os.family"} -> {"allOf":null,"anyOf":["linux","macos"],"name":"attr.worker.os.family"}"#)),
+    ("amounts order",
+        Text("{name: amount.worker.vcpu, min: 2}, {name: amount.worker.gpu, min: 1}", "{name: amount.worker.gpu, min: 1}, {name: amount.worker.vcpu, min: 2}"),
+        HOST, Fields(r#"amounts.order: ["amount.worker.vcpu","amount.worker.gpu"] -> ["amount.worker.gpu","amount.worker.vcpu"]"#)),
+    ("attributes order",
+        Text("{name: attr.worker.os.family, anyOf: [linux]}, {name: attr.worker.cpu.arch, anyOf: [x86_64]}", "{name: attr.worker.cpu.arch, anyOf: [x86_64]}, {name: attr.worker.os.family, anyOf: [linux]}"),
+        HOST, Fields(r#"attributes.order: ["attr.worker.os.family","attr.worker.cpu.arch"] -> ["attr.worker.cpu.arch","attr.worker.os.family"]"#)),
+    ("amounts empty", Templates(|t| edited(t, PREP, PREP_ATTRS), |t| edited(t, PREP, &PREP_ATTRS.replace("{attributes:", "{amounts: [], attributes:"))),
+        PREP_HOST, Fields("amounts: null -> []")),
+    ("amounts added with an entry",
+        Templates(|t| edited(t, PREP, PREP_ATTRS), |t| edited(t, PREP, &PREP_ATTRS.replace("{attributes:", "{amounts: [{name: amount.worker.vcpu, min: 2}], attributes:"))),
+        PREP_HOST, Fields(r#"amounts[amount.worker.vcpu]: null -> {"max":null,"min":2.0,"name":"amount.worker.vcpu"}"#)),
+    ("attributes empty", Templates(|t| edited(t, PREP, PREP_AMOUNTS), |t| edited(t, PREP, &PREP_AMOUNTS.replace("min: 2}]}", "min: 2}], attributes: []}"))),
+        PREP_HOST, Fields("attributes: null -> []")),
     ("environment description", Text("  - name: Log\n", "  - name: Log\n    description: d\n"),
         &[LOG], Fields(r#"description: null -> "d""#)),
     ("environment variable", Text("{LEVEL: info}", "{LEVEL: debug}"), &[LOG], Fields(r#"variables[LEVEL]: "info" -> "debug""#)),
@@ -422,19 +465,13 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
     ("environment action added",
         Text("{onEnter: {command: activate}}", "{onEnter: {command: activate}, onExit: {command: stop}}"),
         &[CONDA, "script"], Child("onExit", Added)),
-    ("environment onWrapEnvEnter added", Jobs(|_, b| {
-            let s = conda_script(b);
-            s.actions.on_wrap_env_enter = s.actions.on_enter.clone();
-        }), &[CONDA, "script"], Child("onWrapEnvEnter", Added)),
-    ("environment onWrapTaskRun added", Jobs(|_, b| {
-            let s = conda_script(b);
-            s.actions.on_wrap_task_run = s.actions.on_enter.clone();
-        }), &[CONDA, "script"], Child("onWrapTaskRun", Added)),
-    ("environment onWrapEnvExit added", Jobs(|_, b| {
-            let s = conda_script(b);
-            s.actions.on_wrap_env_exit = s.actions.on_enter.clone();
-        }), &[CONDA, "script"], Child("onWrapEnvExit", Added)),
-    ("environment script let", Jobs(|_, b| conda_script(b).let_bindings = Some(vec!["x = 1".into()])),
+    ("environment onWrapEnvEnter", Templates(wrapped, |t| edited(&wrapped(t), "wrap-enter}", "wrap-enter2}")),
+        &[CONDA, "script", "onWrapEnvEnter"], Fields(r#"command: "wrap-enter" -> "wrap-enter2""#)),
+    ("environment onWrapTaskRun", Templates(wrapped, |t| edited(&wrapped(t), "wrap-task}", "wrap-task2}")),
+        &[CONDA, "script", "onWrapTaskRun"], Fields(r#"command: "wrap-task" -> "wrap-task2""#)),
+    ("environment onWrapEnvExit", Templates(wrapped, |t| edited(&wrapped(t), "wrap-exit}", "wrap-exit2}")),
+        &[CONDA, "script", "onWrapEnvExit"], Fields(r#"command: "wrap-exit" -> "wrap-exit2""#)),
+    ("environment script let", Templates(same, |t| with_let(t, "      actions: {onEnter")),
         &[CONDA, "script"], Fields(r#"let: null -> ["x = 1"]"#)),
     ("environment embedded file", Text("data: x}", "data: z}"),
         &[CONDA, "script", "embeddedFiles[Init]"], Fields(r#"data: "x" -> "z""#)),
@@ -443,11 +480,12 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
 #[test]
 fn single_edits() {
     for (what, edit, path, expect) in ROWS {
-        let mut old = job(BASE);
-        let mut new = match edit {
-            Text(from, to) => job(&edited(BASE, from, to)),
-            Param(k, v) => job_with(BASE, &[(k, v)]),
-            Jobs(_) => old.clone(),
+        let (mut old, mut new) = match edit {
+            Text(from, to) => (job(BASE), job(&edited(BASE, from, to))),
+            Old(from, to) => (job(&edited(BASE, from, to)), job(BASE)),
+            Templates(a, b) => (job(&a(BASE)), job(&b(BASE))),
+            Param(k, v) => (job(BASE), job_with(BASE, &[(k, v)])),
+            Jobs(_) => (job(BASE), job(BASE)),
         };
         if let Jobs(f) = edit {
             f(&mut old, &mut new);
@@ -478,6 +516,7 @@ fn single_edits() {
     }
 }
 
+/// Must match the field-line format of `DiffTree`'s `Display`.
 fn field_lines(node: &DiffNode) -> String {
     let lines: Vec<_> = node
         .field_changes

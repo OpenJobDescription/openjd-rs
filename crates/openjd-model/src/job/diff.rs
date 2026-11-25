@@ -173,8 +173,8 @@ impl DiffNode {
     }
 }
 
-/// The result of a diff: a tree of [`DiffNode`]s. The root has no segment,
-/// so it prints no line of its own; a tree is what a caller diffs and displays.
+/// The result of a diff: a tree of [`DiffNode`]s. Wraps the root node so that
+/// `Display` prints only the changes below it.
 ///
 /// `Display` writes the changed nodes as indented text, in the format
 /// `specs/model/job-diff.md` "Display" gives.
@@ -600,13 +600,29 @@ fn expand_host_requirements(n: &mut DiffNode, a: &HostRequirements, b: &HostRequ
         amounts,
         attributes,
     } = a;
+    empty_list_field(n, "amounts", amounts, &b.amounts);
     n.named_fields("amounts", amounts.as_deref(), b.amounts.as_deref(), |r| {
         &r.name
     });
+    empty_list_field(n, "attributes", attributes, &b.attributes);
     n.named_fields(
         "attributes",
         attributes.as_deref(),
         b.attributes.as_deref(),
         |r| &r.name,
     );
+}
+
+/// Record a whole `name` change between an absent and an empty list, which
+/// pair no elements. `create_job` keeps an empty host requirement list when
+/// the other one is not empty.
+fn empty_list_field<T: PartialEq + Serialize>(
+    n: &mut DiffNode,
+    name: &str,
+    a: &Option<Vec<T>>,
+    b: &Option<Vec<T>>,
+) {
+    if a.as_ref().is_none_or(Vec::is_empty) && b.as_ref().is_none_or(Vec::is_empty) {
+        n.field(name, a, b);
+    }
 }
