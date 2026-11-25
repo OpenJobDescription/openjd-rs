@@ -1945,3 +1945,223 @@ fn slice_with_unresolved_bound_releases_sliced_value() {
         .and_then(|p| p.with_memory_limit(1_500_000).evaluate(&[&st]))
         .unwrap_or_else(|e| panic!("{expr}: the discarded sliced value must be released: {e}"));
 }
+
+// ══════════════════════════════════════════════════════════════
+// Regex cache — entry cap, memory charge, and budget fallback
+// ══════════════════════════════════════════════════════════════
+
+/// One cache entry charges `REGEX_SIZE_LIMIT + pattern.len()` (just over
+/// 1 MiB).
+const ONE_REGEX_ENTRY: usize = 1 << 20;
+
+/// When a cache entry's charge does not fit the memory budget, the regex is
+/// compiled, used, and dropped uncached and uncharged, so small memory
+/// limits keep working and the reported peak never includes the entry.
+#[test]
+fn regex_cache_falls_back_uncached_when_charge_exceeds_budget() {
+    let r = eval_bounded(
+        "[len(re_findall('x' * (i + 1), 'x+')) for i in range(3)]",
+        500_000, // well below one 1 MiB entry
+    )
+    .unwrap_or_else(|e| panic!("uncached fallback must not fail: {e}"));
+    assert_eq!(r.value.to_display_string(), "[1, 1, 1]");
+    assert!(
+        r.peak_memory < ONE_REGEX_ENTRY,
+        "fallback must not charge the entry: peak {}",
+        r.peak_memory
+    );
+}
+
+/// Distinct patterns past the budget also fall back, and each call still
+/// returns the correct match.
+#[test]
+fn regex_cache_fallback_distinct_patterns_correct_results() {
+    let r = eval_bounded(
+        "[re_findall('a' + string(i), 'a' + string(i)) for i in range(3)]",
+        500_000,
+    )
+    .unwrap_or_else(|e| panic!("uncached fallback must not fail: {e}"));
+    assert_eq!(r.value.to_display_string(), r#"[["a0"], ["a1"], ["a2"]]"#);
+    assert!(r.peak_memory < ONE_REGEX_ENTRY, "peak {}", r.peak_memory);
+}
+
+/// A single repeated pattern should hit the cache and NOT be re-charged.
+/// This is the negative control: same expression shape, same iteration count,
+/// but one constant pattern.
+#[test]
+fn regex_cache_hit_not_recharged() {
+    // 100 iterations, same pattern 'x' every time → 1 compile, 1 charge.
+    // re_findall(haystack, pattern) — haystack varies, pattern is constant.
+    let r = eval_bounded(
+        "[re_findall(string(i), 'x') for i in range(100)]",
+        2_000_000,
+    )
+    .unwrap();
+    // The comprehension should succeed.  One cached compile charges ~1 MiB;
+    // 100 iterations reuse the cache hit with no re-charge, so peak stays
+    // well under 2 MiB.
+    assert!(r.peak_memory < 2_000_000, "peak {}", r.peak_memory);
+    assert!(
+        r.peak_memory > ONE_REGEX_ENTRY,
+        "the one cached entry must be charged: peak {}",
+        r.peak_memory
+    );
+}
+
+/// The cache entry count is bounded at MAX_REGEX_CACHE_ENTRIES (32), so the
+/// memory charged for 50 distinct patterns must stay near the charge for 32
+/// (the cap) rather than scaling with 50 — the first 32 are cached and
+/// charged, the remaining 18 compile-and-discard without charge.
+#[test]
+fn regex_cache_cap_bounds_memory() {
+    // 50 distinct patterns — the first 32 are cached and charged to the
+    // memory budget; the remaining 18 compile-and-discard without charge.
+    // Peak memory should be bounded by ~32 × REGEX_SIZE_LIMIT, NOT 50 ×.
+    let peak = eval_peak("[re_findall('x', string(i)) for i in range(50)]");
+    let peak_at_cap = eval_peak("[re_findall('x', string(i)) for i in range(32)]");
+    // 50 patterns should cost roughly the same as 32 (the cap), not 50/32 more.
+    // Allow 20% headroom for per-iteration transient overhead.
+    // Integer form of `peak < peak_at_cap * 1.2`.
+    assert!(
+        peak * 5 < peak_at_cap * 6,
+        "peak memory with 50 patterns ({peak}) should be bounded near 32 patterns ({peak_at_cap}), \
+         not proportional to 50. The cache cap is not working."
+    );
+    // The 18 patterns past the cap add less than one entry's charge.
+    assert!(
+        peak - peak_at_cap < ONE_REGEX_ENTRY,
+        "patterns past the cap must not be charged: 50 = {peak}, 32 = {peak_at_cap}"
+    );
+    // At the cap, all 32 entries are charged at once.
+    assert!(
+        peak_at_cap >= 32 * ONE_REGEX_ENTRY,
+        "all 32 cached entries must be charged: peak {peak_at_cap}"
+    );
+}
+
+/// The reported peak_memory for a distinct-pattern comprehension must be
+/// at least proportional to the number of distinct patterns compiled.
+/// This is the "assert the mechanism" test: if the cache ever becomes
+/// invisible to peak_memory again, this fails.
+#[test]
+fn regex_cache_peak_memory_proportional_to_distinct_patterns() {
+    // re_findall('x', string(i)) — pattern varies each iteration.
+    let peak_1 = eval_peak("[re_findall('x', string(i)) for i in range(1)]");
+    let peak_20 = eval_peak("[re_findall('x', string(i)) for i in range(20)]");
+    // 20 distinct patterns (all under the 32-entry cap) should charge
+    // substantially more than 1.  Conservative: at least 10×.
+    assert!(
+        peak_20 > peak_1 * 10,
+        "peak_memory should scale with distinct regex patterns: 1 pattern = {peak_1}, 20 patterns = {peak_20}"
+    );
+    // The 19 extra entries each charge at least REGEX_SIZE_LIMIT.
+    assert!(
+        peak_20 - peak_1 >= 19 * ONE_REGEX_ENTRY,
+        "each extra pattern must charge a full entry: 1 = {peak_1}, 20 = {peak_20}"
+    );
+}
+
+/// REGEX_SIZE_LIMIT (1 MiB) rejects patterns whose compiled NFA exceeds the
+/// cap.  The adversarial pattern below is well over 1 MiB compiled.
+#[test]
+fn regex_size_limit_rejects_large_nfa() {
+    // The pattern `(?:a{200}){200}z` produces a compiled NFA well over 1 MiB.
+    let e = ParsedExpression::new("re_findall('a', '(?:a{200}){200}z')")
+        .and_then(|p| p.evaluate(&SymbolTable::new()))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        e.contains("Invalid regex:") && e.contains("size limit"),
+        "expected regex size-limit error for large NFA pattern, got:\n{e}"
+    );
+}
+
+/// Each cached regex charges `REGEX_SIZE_LIMIT + pattern.len()`; two
+/// cached entries are live at once, so the peak is at least this.
+const TWO_REGEX_ENTRIES: usize = 2 * ONE_REGEX_ENTRY;
+
+fn unresolved_flag() -> SymbolTable {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Flag",
+        ExprValue::unresolved(openjd_expr::ExprType::BOOL),
+    )
+    .unwrap();
+    st
+}
+
+/// A regex cached inside a sub-expression whose value error is absorbed
+/// (an unresolved-test conditional's branch) stays cached, so its charge
+/// must survive the absorption's footprint reset. If the reset dropped it,
+/// the second pattern would be charged on top of a footprint that no
+/// longer counts the first, and the peak would report one entry, not two.
+#[test]
+fn regex_cache_charge_survives_absorbed_branch_reset() {
+    let peak = eval_peak_with(
+        "(len(re_findall('a', 'p0')) + int('nope') if Session.Flag else 0) \
+         + len(re_findall('a', 'p1'))",
+        &unresolved_flag(),
+    );
+    assert!(
+        peak > TWO_REGEX_ENTRIES,
+        "both cached regexes must be charged at once: peak {peak} <= {TWO_REGEX_ENTRIES}"
+    );
+}
+
+/// A comprehension whose body fails after caching a regex hands the cache
+/// back on its error exit; the charge must come back with it when an
+/// enclosing absorbed branch resets the footprint.
+#[test]
+fn regex_cache_charge_survives_comprehension_error_exit() {
+    let peak = eval_peak_with(
+        "([len(re_findall('a', 'p' + string(i))) + int('nope') for i in [0]] \
+         if Session.Flag else []) + [len(re_findall('a', 'q'))]",
+        &unresolved_flag(),
+    );
+    assert!(
+        peak > TWO_REGEX_ENTRIES,
+        "both cached regexes must be charged at once: peak {peak} <= {TWO_REGEX_ENTRIES}"
+    );
+}
+
+/// Nested comprehensions lend the cache child -> grandchild and back; the
+/// charges of entries cached in the inner scope must survive both the
+/// inner and the outer per-iteration resets.
+#[test]
+fn regex_cache_charge_survives_nested_comprehension_resets() {
+    let peak_1 = eval_peak("[[len(re_findall('x', string(i))) for j in [1]] for i in range(1)]");
+    let peak_20 = eval_peak("[[len(re_findall('x', string(i))) for j in [1]] for i in range(20)]");
+    assert!(
+        peak_20 > peak_1 * 10,
+        "nested comprehension must keep regex charges: 1 pattern = {peak_1}, 20 patterns = {peak_20}"
+    );
+}
+
+/// A comprehension over an unresolved iterable runs a typing pass on a
+/// child evaluator that borrows the cache; the entry it caches must stay
+/// charged when the typing pass resets the footprint, so a second
+/// distinct pattern afterwards puts two entries live at once.
+#[test]
+fn regex_cache_charge_survives_unresolved_iterable_typing() {
+    let mut st = SymbolTable::new();
+    st.set(
+        "Session.Items",
+        ExprValue::unresolved(openjd_expr::ExprType::list(openjd_expr::ExprType::STRING).unwrap()),
+    )
+    .unwrap();
+    let r = ParsedExpression::new(
+        "[len(re_findall('a', 'p0')) + len(s) for s in Session.Items] + [len(re_findall('a', 'p1'))]",
+    )
+    .and_then(|p| {
+        p.with_memory_limit(usize::MAX)
+            .with_operation_limit(DEFAULT_OPERATION_LIMIT)
+            .evaluate_with_metrics(&[&st])
+    })
+    .unwrap();
+    assert!(r.value.is_unresolved());
+    assert!(
+        r.peak_memory > TWO_REGEX_ENTRIES,
+        "both cached regexes must be charged at once: peak {} <= {TWO_REGEX_ENTRIES}",
+        r.peak_memory
+    );
+}
