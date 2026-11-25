@@ -334,8 +334,9 @@ reviewer asked for):
 ## Performance guideline
 
 A change made for performance follows quality-criteria Q14. This section is the
-method. Profiling compiles and measures both sides, so use these steps
-sparingly: only for a change whose purpose is performance.
+method, and [`docs/dev/performance.md`](../../docs/dev/performance.md) has the
+commands and scripts. Profiling compiles and measures both sides, so use these
+steps sparingly: only for a change whose purpose is performance.
 
 ### Techniques
 
