@@ -17,6 +17,11 @@ pub fn diff_environments(old: &Environment, new: &Environment) -> DiffTree;
 `diff_steps` and `diff_environments` return the same tree that `diff_jobs`
 builds below that step or environment.
 
+Inputs are what `create_job` produces: names unique within each collection,
+no empty optional lists or maps, and symbol tables as `create_job` writes
+them. For other inputs the diff still returns a tree and never panics, but
+the tree may not attribute every change.
+
 ## Nodes
 
 A `DiffTree` is a tree of `DiffNode`s. The root compares the two arguments.
@@ -51,9 +56,8 @@ Elements of collections are matched by identity, not position.
 | `variables` | map | key | field changes, key order |
 | `resolvedSymTab` | list | `name` | field changes, name order |
 
-Names are unique within a collection. `create_job` guarantees this, and the
-diff assumes it. An element's segment is `collection[name]`, with the name
-written as is, unescaped.
+An element's segment is `collection[name]`, with the name written as is,
+unescaped.
 
 ## Order
 
@@ -67,10 +71,6 @@ maps never record an order change and reordered map entries are `Unchanged`.
 order. A reordered task parameter definition list with no `combination` is
 `Unchanged` although it iterates tasks in another order (see "Out of scope").
 
-An optional list or map that is absent on one side and empty on the other is
-recorded as one field change named after the collection (`null -> []`). The
-model types allow it, though `create_job` writes neither empty form.
-
 ## Resolved symbol tables
 
 A step's or environment's actions keep their format strings unresolved:
@@ -79,17 +79,16 @@ A step's or environment's actions keep their format strings unresolved:
 environment references. Each symbol whose entry differs is one field change
 `resolvedSymTab[NAME]`, the way `variables[K]` works: `before` and `after`
 are that entry without its `name` (`{"type":...,"value":...}`), or `null`
-when the symbol is absent on that side. When a side is not an array of
-uniquely named entries, or no entry differs (an absent table against an empty
-one, or the same entries in another order), the change is one whole-value
-`resolvedSymTab` field. So a job parameter change shows on its
-`parameters[K]` node and on exactly the job environments and steps that read
-it. A step environment
-has no `resolvedSymTab` of its own, so its reads show on its step. A change
-that value equality ignores, such as a float's spelling (`2.5` to `2.50`),
-shows only on the readers, and `parameters[K]` stays `Unchanged`. A
-parameter that only feeds a template-scope field, such as a task parameter
-range, shows on that field instead.
+when the symbol is absent on that side. A table that is not an array of
+named entries is one whole-value `resolvedSymTab` change.
+
+So a job parameter change shows on its `parameters[K]` node and on exactly
+the job environments and steps that read it. A step environment has no
+`resolvedSymTab` of its own, so its reads show on its step. A change that
+value equality ignores, such as a float's spelling (`2.5` to `2.50`), shows
+only on the readers, and `parameters[K]` stays `Unchanged`. A parameter that
+only feeds a template-scope field, such as a task parameter range, shows on
+that field instead.
 
 ## Values
 
@@ -106,8 +105,9 @@ differs only in how it displays (`5,6` and `5-6`) is not a `range` change.
 `Display` writes a tree as indented text, two spaces per level. Each changed
 child is a line with `~` (modified), `+` (added) or `-` (removed) and its
 segment; each field change is a line `field: before -> after`, values as
-compact JSON, under its node. The root has no line, and an unchanged tree
-writes nothing.
+compact JSON, under its node. A node's field lines come before its children,
+in the order "Tree shape" lists the fields. The root has no line, and an
+unchanged tree writes nothing.
 
 ```
 ~ parameters[Scene]
@@ -120,17 +120,17 @@ writes nothing.
 
 | node | segment | own fields | children |
 |---|---|---|---|
-| Job | (root) | `name`, `description`, `extensions`, `steps.order`, `jobEnvironments`, `jobEnvironments.order` | `parameters[K]`, `jobEnvironments[N]`, `steps[N]` |
+| Job | (root) | `name`, `description`, `extensions`, `jobEnvironments.order`, `steps.order` | `parameters[K]`, `jobEnvironments[N]`, `steps[N]` |
 | JobParameter | `parameters[K]` | `name`, `type`, `value` | none |
-| Step | `steps[N]` | `name`, `description`, `dependencies`, `resolvedSymTab[NAME]` (or `resolvedSymTab`), `stepEnvironments`, `stepEnvironments.order` | `script`, `stepEnvironments[N]`, `parameterSpace`, `hostRequirements` |
-| Environment | `jobEnvironments[N]`, `stepEnvironments[N]` | `name`, `description`, `variables`, `variables[K]`, `resolvedSymTab[NAME]` (or `resolvedSymTab`) | `script` |
-| StepScript | `script` | `let`, `embeddedFiles`, `embeddedFiles.order` | `onRun`, `embeddedFiles[N]` |
-| EnvironmentScript | `script` | `let`, `embeddedFiles`, `embeddedFiles.order` | `onEnter`, `onWrapEnvEnter`, `onWrapTaskRun`, `onWrapEnvExit`, `onExit`, `embeddedFiles[N]` |
+| Step | `steps[N]` | `name`, `description`, `dependencies`, `resolvedSymTab[NAME]` (or `resolvedSymTab`), `stepEnvironments.order` | `script`, `stepEnvironments[N]`, `parameterSpace`, `hostRequirements` |
+| Environment | `jobEnvironments[N]`, `stepEnvironments[N]` | `name`, `description`, `variables[K]`, `resolvedSymTab[NAME]` (or `resolvedSymTab`) | `script` |
+| StepScript | `script` | `let`, `embeddedFiles.order` | `onRun`, `embeddedFiles[N]` |
+| EnvironmentScript | `script` | `let`, `embeddedFiles.order` | `onEnter`, `onWrapEnvEnter`, `onWrapTaskRun`, `onWrapEnvExit`, `onExit`, `embeddedFiles[N]` |
 | Action | `onRun`, `onEnter`, ... | `command`, `args`, `timeout`, `cancelation` | none |
 | EmbeddedFile | `embeddedFiles[N]` | `name`, `type`, `filename`, `data`, `runnable`, `endOfLine` | none |
 | ParameterSpace | `parameterSpace` | `combination` | `taskParameterDefinitions[K]` |
 | TaskParameter | `taskParameterDefinitions[K]` | `type`, `range`, `chunks` | none |
-| HostRequirements | `hostRequirements` | `amounts`, `amounts.order`, `amounts[N]`, and the same for `attributes` | none |
+| HostRequirements | `hostRequirements` | `amounts.order`, `amounts[N]`, `attributes.order`, `attributes[N]` | none |
 
 ## Out of scope
 
@@ -138,9 +138,9 @@ writes nothing.
 - Tasks. Task parameter definitions are a map, so their order is not a
   change, although it fixes task iteration order. Which tasks a change adds
   or removes is not computed.
-- Applying a diff, and any command-line interface. Segments are the only
-  identity a node carries; a structured identity for applying a diff comes
-  with that work.
+- Applying a diff, and any command-line interface. A caller reads an
+  element's name from its `segment` (`collection[name]`); a structured
+  identity may come with applying a diff.
 - Options such as a depth limit. `diff_*` always expands every `Modified`
   node.
 

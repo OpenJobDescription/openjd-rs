@@ -13,6 +13,7 @@ use crate::types::{EndOfLine, JobParameterType, ModelExtension};
 use crate::{create_job, decode_job_template, preprocess_job_parameters, CallerLimits};
 use crate::{JobParameterInputValues, PathParameterOptions};
 use openjd_expr::symbol_table::SerializedSymbolTable;
+use openjd_expr::value::Float64;
 use openjd_expr::RangeExpr;
 
 const BASE: &str = r#"
@@ -175,6 +176,24 @@ fn children_print_in_key_order_then_old_side_first() {
     );
 }
 
+/// The use the spec states: the changed steps' names, read from segments.
+#[test]
+fn changed_step_names_read_from_segments() {
+    let new = format!(
+        "{}{PUBLISH}",
+        edited(BASE, "command: render", "command: render2")
+    );
+    let tree = diff_jobs(&job(BASE), &job(&new));
+    let names: Vec<_> = tree
+        .root()
+        .children
+        .iter()
+        .filter(|c| c.is_changed())
+        .filter_map(|c| c.segment.strip_prefix("steps[")?.strip_suffix(']'))
+        .collect();
+    assert_eq!(names, ["Render", "Publish"]);
+}
+
 /// A three-step reorder is one field change with both sides' orders, and
 /// every step is unchanged.
 #[test]
@@ -295,9 +314,6 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
     ("parameter value", Param("Scene", "b.blend"), &["parameters[Scene]"], Fields(r#"value: "a.blend" -> "b.blend""#)),
     ("jobEnvironments order", Jobs(|_, b| b.job_environments.as_mut().unwrap().reverse()),
         &[], Fields(r#"jobEnvironments.order: ["Conda","Log"] -> ["Log","Conda"]"#)),
-    ("jobEnvironments absent versus empty",
-        Jobs(|a, b| { a.job_environments = None; b.job_environments = Some(Vec::new()); }),
-        &[], Fields(r#"jobEnvironments: null -> []"#)),
     ("step name with a bracket is written unescaped", Jobs(|_, b| b.steps[0].name = "P]rep".into()),
         &[], Child("steps[P]rep]", Added)),
     ("steps order", Jobs(|_, b| b.steps.reverse()), &[], Fields(r#"steps.order: ["Prep","Render"] -> ["Render","Prep"]"#)),
@@ -312,10 +328,6 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
     ("step resolvedSymTab not an array",
         Jobs(|_, b| b.steps[0].resolved_symtab = Some(SerializedSymbolTable::from_value(serde_json::json!({})))),
         &["steps[Prep]"], Fields(r#"resolvedSymTab: [{"name":"Param.Scene","type":"string","value":"a.blend"}] -> {}"#)),
-    ("step resolvedSymTab absent versus empty", Jobs(|a, b| {
-            a.steps[0].resolved_symtab = None;
-            b.steps[0].resolved_symtab = Some(SerializedSymbolTable::from_value(serde_json::json!([])));
-        }), &["steps[Prep]"], Fields(r#"resolvedSymTab: null -> []"#)),
     ("action command", Text("command: render", "command: render2"), ON_RUN, Fields(r#"command: "render" -> "render2""#)),
     ("action args", Text("[\"{{Task.Param.Frame}}\"]", "[\"{{Task.Param.Frame}}\", x]"),
         ON_RUN, Fields(r#"args: ["{{Task.Param.Frame}}"] -> ["{{Task.Param.Frame}}","x"]"#)),
@@ -326,6 +338,8 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
         &["steps[Prep]", "script"], Fields(r#"let: null -> ["x = 1"]"#)),
     ("embeddedFiles order", Jobs(|_, b| prep_files(b).reverse()),
         &["steps[Prep]", "script"], Fields(r#"embeddedFiles.order: ["F","G"] -> ["G","F"]"#)),
+    ("embedded file added", Text("data: two}]", "data: two}, {name: H, type: TEXT, data: three}]"),
+        &["steps[Prep]", "script"], Child("embeddedFiles[H]", Added)),
     ("embedded file data", Text("data: one", "data: uno"), FILE_F, Fields(r#"data: "one" -> "uno""#)),
     ("embedded file filename", Text("{name: F, type: TEXT,", "{name: F, type: TEXT, filename: f.txt,"),
         FILE_F, Fields(r#"filename: null -> "f.txt""#)),
@@ -359,6 +373,14 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
     ("task parameter type", Text("{name: Eye, type: STRING", "{name: Eye, type: PATH"),
         &[RENDER, "parameterSpace", "taskParameterDefinitions[Eye]"], Fields(r#"type: "STRING" -> "PATH""#)),
     ("task parameter range", Param("Last", "20"), FRAME_NODE, Fields(r#"range: "1-10" -> "1-20""#)),
+    ("task parameter FLOAT", Jobs(|_, b| *frame(b) = TaskParameter::Float { range: vec![Float64::new(1.5).unwrap()] }),
+        FRAME_NODE, Fields(concat!(r#"type: "INT" -> "FLOAT""#, "\n", r#"range: "1-10" -> [1.5]"#))),
+    ("task parameter STRING range", Text("range: [left, right]", "range: [left, centre]"),
+        &[RENDER, "parameterSpace", "taskParameterDefinitions[Eye]"], Fields(r#"range: ["left","right"] -> ["left","centre"]"#)),
+    ("task parameter PATH range", Jobs(|a, b| {
+            *frame(a) = TaskParameter::Path { range: vec!["a".into()] };
+            *frame(b) = TaskParameter::Path { range: vec!["b".into()] };
+        }), FRAME_NODE, Fields(r#"range: ["a"] -> ["b"]"#)),
     ("task parameter chunks", Jobs(|_, b| {
             if let TaskParameter::Int { chunks, .. } = frame(b) {
                 *chunks = Some(two_chunks());
@@ -376,6 +398,10 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
             *frame(b) = TaskParameter::Int { range: five_six(true), chunks: Some(two_chunks()) };
         }), FRAME_NODE, Fields(r#"chunks: null -> {"defaultTaskCount":2,"rangeConstraint":"CONTIGUOUS","targetRuntimeSeconds":null}"#)),
     ("amount", Text("min: 2}", "min: 4}"), &[RENDER, "hostRequirements"], Fields(r#"amounts[amount.worker.vcpu]: {"max":null,"min":2.0,"name":"amount.worker.vcpu"} -> {"max":null,"min":4.0,"name":"amount.worker.vcpu"}"#)),
+    ("amount added", Text("{name: amount.worker.gpu, min: 1}", "{name: amount.worker.gpu, min: 1}, {name: amount.worker.memory, min: 1024}"),
+        &[RENDER, "hostRequirements"], Fields(r#"amounts[amount.worker.memory]: null -> {"max":null,"min":1024.0,"name":"amount.worker.memory"}"#)),
+    ("attribute removed", Text(", {name: attr.worker.cpu.arch, anyOf: [x86_64]}", ""),
+        &[RENDER, "hostRequirements"], Fields(r#"attributes[attr.worker.cpu.arch]: {"allOf":null,"anyOf":["x86_64"],"name":"attr.worker.cpu.arch"} -> null"#)),
     ("attribute", Text("anyOf: [linux]}", "anyOf: [linux, macos]}"),
         &[RENDER, "hostRequirements"], Fields(r#"attributes[attr.worker.os.family]: {"allOf":null,"anyOf":["linux"],"name":"attr.worker.os.family"} -> {"allOf":null,"anyOf":["linux","macos"],"name":"attr.worker.os.family"}"#)),
     ("amounts order", Jobs(|_, b| host(b).amounts.as_mut().unwrap().reverse()),
@@ -385,10 +411,8 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
     ("environment description", Text("  - name: Log\n", "  - name: Log\n    description: d\n"),
         &[LOG], Fields(r#"description: null -> "d""#)),
     ("environment variable", Text("{LEVEL: info}", "{LEVEL: debug}"), &[LOG], Fields(r#"variables[LEVEL]: "info" -> "debug""#)),
-    ("environment variables absent versus empty", Jobs(|a, b| {
-            a.job_environments.as_mut().unwrap()[1].variables = Some(Default::default());
-            b.job_environments.as_mut().unwrap()[1].variables = None;
-        }), &[LOG], Fields(r#"variables: {} -> null"#)),
+    ("environment variable added", Text("{LEVEL: info}", "{LEVEL: info, COLOR: auto}"),
+        &[LOG], Fields(r#"variables[COLOR]: null -> "auto""#)),
     ("environment resolvedSymTab", Param("Quality", "high"), &[CONDA], Fields(r#"resolvedSymTab[Param.Quality]: {"type":"string","value":"low"} -> {"type":"string","value":"high"}"#)),
     ("environment script added",
         Text("    variables: {LEVEL: info}\n", "    variables: {LEVEL: info}\n    script:\n      actions: {onExit: {command: flush}}\n"),
@@ -402,6 +426,10 @@ const ROWS: &[(&str, Edit, &[&str], Expect)] = &[
             let s = conda_script(b);
             s.actions.on_wrap_env_enter = s.actions.on_enter.clone();
         }), &[CONDA, "script"], Child("onWrapEnvEnter", Added)),
+    ("environment onWrapTaskRun added", Jobs(|_, b| {
+            let s = conda_script(b);
+            s.actions.on_wrap_task_run = s.actions.on_enter.clone();
+        }), &[CONDA, "script"], Child("onWrapTaskRun", Added)),
     ("environment onWrapEnvExit added", Jobs(|_, b| {
             let s = conda_script(b);
             s.actions.on_wrap_env_exit = s.actions.on_enter.clone();

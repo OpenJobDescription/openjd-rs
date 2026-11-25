@@ -213,8 +213,6 @@ impl core::cmp::PartialEq for openjd_model::job::diff::DiffStatus
 pub fn openjd_model::job::diff::DiffStatus::eq(&self, &openjd_model::job::diff::DiffStatus) -> bool
 impl core::fmt::Debug for openjd_model::job::diff::DiffStatus
 pub fn openjd_model::job::diff::DiffStatus::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::hash::Hash for openjd_model::job::diff::DiffStatus
-pub fn openjd_model::job::diff::DiffStatus::hash<__H: core::hash::Hasher>(&self, &mut __H)
 impl core::marker::Copy for openjd_model::job::diff::DiffStatus
 impl core::marker::StructuralPartialEq for openjd_model::job::diff::DiffStatus
 #[non_exhaustive] pub struct openjd_model::job::diff::DiffNode

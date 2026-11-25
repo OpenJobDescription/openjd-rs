@@ -5,17 +5,9 @@
 //! Structural diff of instantiated jobs, steps and environments.
 //!
 //! **Status: unstable.** This module may change or be removed in any
-//! release without notice.
-//!
-//! [`diff_jobs`], [`diff_steps`] and [`diff_environments`] compare two
-//! values of the same model type and return a [`DiffTree`]. A node is
-//! [`Unchanged`](DiffStatus::Unchanged) exactly when the two sides are
-//! equal under the model's `PartialEq`. A [`Modified`](DiffStatus::Modified)
-//! node records its own differing fields and has one child per pair of
-//! sub-values. Elements of named collections are matched by name or map
-//! key, not by position.
-//!
-//! See `specs/model/job-diff.md`.
+//! release without notice. [`diff_jobs`], [`diff_steps`] and
+//! [`diff_environments`] return a [`DiffTree`] of what differs, where;
+//! `specs/model/job-diff.md` gives the semantics.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -33,7 +25,7 @@ use crate::job::{
 use crate::types::TaskParameterType;
 
 /// How the two sides of a [`DiffNode`] relate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DiffStatus {
     /// Both sides are present and equal.
@@ -120,20 +112,9 @@ impl DiffNode {
         self.field_with(name, a, b, to_json);
     }
 
-    /// Record an optional collection that is absent on one side and empty
-    /// on the other. `a` and `b` are `None` when absent, else whether empty.
-    fn presence(&mut self, collection: &str, a: Option<bool>, b: Option<bool>, empty: Value) {
-        match (a, b) {
-            (None, Some(true)) => self.field_with(collection, &Value::Null, &empty, Clone::clone),
-            (Some(true), None) => self.field_with(collection, &empty, &Value::Null, Clone::clone),
-            _ => {}
-        }
-    }
-
     /// Pair the elements of two optional named lists by name, old-side
     /// order first, then new-only elements. Records `<collection>.order`
-    /// when the shared names are in a different relative order, and
-    /// `<collection>` when one side is absent and the other empty.
+    /// when the shared names are in a different relative order.
     fn match_names<'a, T>(
         &mut self,
         collection: &str,
@@ -141,13 +122,6 @@ impl DiffNode {
         b: Option<&'a [T]>,
         name: fn(&T) -> &str,
     ) -> Vec<(&'a str, Option<&'a T>, Option<&'a T>)> {
-        let empty = Value::Array(Vec::new());
-        self.presence(
-            collection,
-            a.map(<[T]>::is_empty),
-            b.map(<[T]>::is_empty),
-            empty,
-        );
         let (a, b) = (a.unwrap_or_default(), b.unwrap_or_default());
         let a_by: HashMap<&str, &T> = a.iter().map(|v| (name(v), v)).collect();
         let b_by: HashMap<&str, &T> = b.iter().map(|v| (name(v), v)).collect();
@@ -199,7 +173,8 @@ impl DiffNode {
     }
 }
 
-/// The result of a diff: a tree of [`DiffNode`]s.
+/// The result of a diff: a tree of [`DiffNode`]s. The root has no segment,
+/// so it prints no line of its own; a tree is what a caller diffs and displays.
 ///
 /// `Display` writes the changed nodes as indented text, in the format
 /// `specs/model/job-diff.md` "Display" gives.
@@ -271,6 +246,7 @@ pub fn diff_environments(old: &Environment, new: &Environment) -> DiffTree {
     }
 }
 
+/// Model types always serialize, so the fallback is unreachable for model values.
 fn to_json<T: Serialize + ?Sized>(v: &T) -> Value {
     serde_json::to_value(v).unwrap_or_else(|e| Value::String(format!("<unserializable: {e}>")))
 }
@@ -321,49 +297,41 @@ fn by_key<'a, V>(
 }
 
 /// Record one `resolvedSymTab[NAME]` field change per symbol whose entry
-/// differs, each side the entry without its `name`, or `null` when absent.
-/// Falls back to one whole `resolvedSymTab` change when a side is not an
-/// array of named entries, or when no entry differs (an absent table
-/// against an empty one, or the same entries in another order).
+/// differs, each side the entry without its `name`, or `null` when absent;
+/// or one whole `resolvedSymTab` change when a side is not an array of
+/// named entries.
 fn symtab_fields(
     n: &mut DiffNode,
     a: &Option<SerializedSymbolTable>,
     b: &Option<SerializedSymbolTable>,
 ) {
-    if a == b {
-        return;
-    }
-    let (Some(x), Some(y)) = (symtab_entries(a), symtab_entries(b)) else {
-        n.field("resolvedSymTab", a, b);
-        return;
-    };
-    let before = n.field_changes.len();
-    for (key, (x, y)) in by_key(&x, &y) {
-        n.field(&format!("resolvedSymTab[{key}]"), &x, &y);
-    }
-    if n.field_changes.len() == before {
-        n.field("resolvedSymTab", a, b);
+    match (symtab_entries(a), symtab_entries(b)) {
+        (Some(x), Some(y)) => {
+            for (key, (x, y)) in by_key(&x, &y) {
+                n.field(&format!("resolvedSymTab[{key}]"), &x, &y);
+            }
+        }
+        _ => n.field("resolvedSymTab", a, b),
     }
 }
 
-/// A transport symbol table's entries by name, each without its `name`.
-/// `None` unless every entry is an object with a unique string `name`.
+/// A symbol table's entries by name, each without its `name`. `None` unless
+/// every entry is an object with a string `name`.
 fn symtab_entries(t: &Option<SerializedSymbolTable>) -> Option<BTreeMap<String, Value>> {
     let Some(t) = t else {
         return Some(BTreeMap::new());
     };
-    let list = t.as_value().as_array()?;
-    let mut entries = BTreeMap::new();
-    for entry in list {
-        let mut entry = entry.as_object()?.clone();
-        let Some(Value::String(name)) = entry.remove("name") else {
-            return None;
-        };
-        if entries.insert(name, Value::Object(entry)).is_some() {
-            return None;
-        }
-    }
-    Some(entries)
+    t.as_value()
+        .as_array()?
+        .iter()
+        .map(|entry| {
+            let mut entry = entry.as_object()?.clone();
+            let Value::String(name) = entry.remove("name")? else {
+                return None;
+            };
+            Some((name, Value::Object(entry)))
+        })
+        .collect()
 }
 
 // Each expand_* destructures its type without `..`, so a new model field
@@ -482,12 +450,6 @@ fn expand_environment(n: &mut DiffNode, a: &Environment, b: &Environment) {
     } = a;
     n.field("name", name, &b.name);
     n.field("description", description, &b.description);
-    n.presence(
-        "variables",
-        variables.as_ref().map(HashMap::is_empty),
-        b.variables.as_ref().map(HashMap::is_empty),
-        Value::Object(serde_json::Map::new()),
-    );
     for (key, (x, y)) in by_key(variables.iter().flatten(), b.variables.iter().flatten()) {
         n.field(&format!("variables[{key}]"), &x, &y);
     }

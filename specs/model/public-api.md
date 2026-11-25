@@ -1282,7 +1282,7 @@ dynamically.
 ## Job Diff (unstable)
 
 **Status: unstable.** `job::diff` may change or be removed in any release
-without notice. Design: [job-diff.md](job-diff.md).
+without notice. Semantics: [job-diff.md](job-diff.md).
 
 ```rust
 pub fn diff_jobs(old: &Job, new: &Job) -> DiffTree;
@@ -1318,22 +1318,6 @@ pub struct FieldChange {
     pub after: serde_json::Value,
 }
 ```
-
-Each function compares two values of one model type and cannot fail. The
-root node compares the two arguments and has an empty `segment`.
-`DiffTree::is_changed` is the root's `is_changed`, which is true for any
-status other than `Unchanged`.
-
-A node is `Unchanged` exactly when the two sides are equal under the type's
-`PartialEq`. Only a `Modified` node has `field_changes` and `children`; its
-children include unchanged ones, so `child(segment)` finds any sub-value
-present on either side. `segment` names a collection element by its name or
-map key, as in `steps[Render]` or `parameters[Scene]`. A `FieldChange`'s
-`before` and `after` are JSON, with `null` for an absent value. Names must be
-unique within each collection, which `create_job` guarantees.
-
-`Display` writes the changed nodes as indented text, in the format
-[job-diff.md](job-diff.md#display) gives.
 
 ## Step Dependency Graph
 
