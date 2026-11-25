@@ -224,6 +224,10 @@ This repo requires [conventional commit](https://www.conventionalcommits.org/en/
 
 Types: `feat`, `fix`, `test`, `docs`, `refactor`, `ci`, `chore`, `perf`
 
+A `perf` change, and the speed or memory claims it makes, follow
+[quality-criteria Q14](docs/dev/quality-criteria.md) and the
+`implement-change` skill's "Performance guideline".
+
 Append `!` for breaking changes (e.g., `feat!: ...`) and include a `BREAKING CHANGE` footer. **Note:** This is relaxed during pre-release — make any change that improves things. Enable strict breaking-change tracking once the project reaches stable release.
 
 Commit messages and the PR description name every change a caller can

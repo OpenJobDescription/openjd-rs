@@ -92,7 +92,8 @@ in the `eval-crate` skill's Specification References table.
 **Q6. Rust practice and performance.** Code SHOULD follow Rust idioms where they
 make sense, and MUST prefer `Result` to panicking on input-dependent failures.
 Algorithms MUST NOT be `O(N²)` when `O(N)` is readily available. Performance is
-balanced against readability, not maximized.
+balanced against readability, not maximized. A change made for performance
+follows Q14.
 
 **Q7. Python reference parity.** Where a crate has a Python equivalent (listed
 in the `eval-crate` skill's Python Reference Branch table), divergences in
@@ -235,6 +236,42 @@ skip. Whether a name exists does not depend on any value, so every run that
 evaluates that sub-expression fails. `specs/expr/values.md` and
 `specs/expr/evaluator.md` state both rules for the constructs they cover.
 
+**Q14. Performance changes.** A change made for performance, and every speed
+or memory claim such a change makes, MUST meet these rules. Q14 judges
+changes; a whole-crate evaluation does not apply it.
+`skills/implement-change/SKILL.md` § "Performance guideline" gives the
+techniques and tools.
+
+- **Output is unchanged.** Every message, path, caret, count, and order MUST
+  be the same as before, for valid and invalid input, under any
+  `CallerLimits` and extension set. Passing tests is not enough evidence: the
+  claim needs a differential of the old and new code (§3).
+- **Claims count work.** A speed claim MUST cite counted work (instructions,
+  evaluations, or allocations) measured on both sides. Wall time supports a
+  claim only when the two binaries run interleaved, with a null test (the same
+  binary at two paths) and a no-op control, a command that runs none of the
+  changed code (`openjd --help` for the CLI). A count without a time
+  confirmation is not enough either: a change can do less work and still run
+  slower.
+- **Peak memory does not rise.** A change MUST NOT raise peak memory unless
+  it states the increase and bounds it with a named constant, which a
+  counting-allocator test pins. A change that keeps a value alive longer
+  (sharing, caching, buffering errors to keep their order) MUST show its peak
+  with such a test either way. Error messages can embed evaluated values, so
+  they count.
+- **Shortcuts take only the proven path.** A shared or cached result is used
+  only where it is identical to what the original code computed, such as an
+  evaluation that reported nothing. Every other path keeps the original
+  sequence.
+- **Removed work is the speed-up.** Splitting, moving, or inlining code is
+  presumed speed-neutral within a crate in release builds; a claim that it is
+  faster needs the counted evidence above like any other. Splitting an
+  `async fn` inside a CPU-bound loop adds a state machine per iteration and is
+  not neutral.
+
+Q14 does not ask for speed. Q6 still balances performance against
+readability; Q14 governs how a performance change is made and proven.
+
 ## 3. Evidence
 
 No claim is accepted on the strength of having been generated. Each kind of
@@ -252,10 +289,13 @@ claim needs a specific kind of evidence:
 | "this is fixed" | the test that failed before the fix, now passing |
 | "these two implementations diverge" | the same input run through both paths, with both outputs |
 | "this pair is pinned" | the equivalence test, by name |
+| "output is unchanged" (Q14) | a differential of the old and new code with the invocation count and `0 differences`: the binaries over the conformance templates and edge cases for what the CLI reaches, and library-level probes for other `CallerLimits` and for crates the CLI does not drive |
+| "this is faster" (Q14) | counted work on both sides (for example a callgrind instruction diff), plus interleaved wall time with a null test and a no-op control |
+| "memory is not higher" (Q14) | peak heap from a counting allocator on both sides, the same cases in the same order, and per-process costs measured in their own process |
 
-The bug, untested, Python-divergence, dead-code, fixed, and
-two-implementation-divergence claims MUST be established by execution, not by
-reasoning.
+The bug, untested, Python-divergence, dead-code, fixed,
+two-implementation-divergence, and Q14 claims MUST be established by
+execution, not by reasoning.
 
 ## 4. Finding labels
 
@@ -277,8 +317,8 @@ consequence, not the effort needed to fix it.
 
 | Severity | Meaning | Examples |
 |----------|---------|----------|
-| **high** | Wrong behavior, or a statement people will act on that is false. | Incorrect results, panics on reachable input, conformance violations, security issues, `public-api.md` contradicting the code or the public API listing, a spec that contradicts the code in an area other work relies on |
-| **medium** | Correct today, but quality has degraded in a way that will cause defects or cost later. | Specified behavior with no test that would catch its breakage, misleading or unlocated error messages, inconsistent public naming, undocumented Python divergences, a rule implemented twice without the cross-references and equivalence pin Q11 requires, avoidable super-linear algorithms on realistic inputs, missing `///` docs |
+| **high** | Wrong behavior, or a statement people will act on that is false. | Incorrect results, panics on reachable input, conformance violations, security issues, `public-api.md` contradicting the code or the public API listing, a spec that contradicts the code in an area other work relies on, a performance change that alters output or raises peak memory without a stated bound |
+| **medium** | Correct today, but quality has degraded in a way that will cause defects or cost later. | Specified behavior with no test that would catch its breakage, misleading or unlocated error messages, inconsistent public naming, undocumented Python divergences, a rule implemented twice without the cross-references and equivalence pin Q11 requires, avoidable super-linear algorithms on realistic inputs, a performance claim without the evidence Q14 requires, a stated memory bound with no test that fails when it is exceeded, missing `///` docs |
 | **low** | Polish. | Wording, internal naming, test organization, minor duplication that encodes no rule, idiomatic rewrites with no behavioral effect |
 
 A report's prioritized recommendations MAY reorder findings by value or
@@ -329,7 +369,8 @@ leaving the file behind.
 1. When several verifiers run, they MUST get disjoint slices and different
    angles, chosen from: spec fidelity (Q1, Q2, Q8, Q10), implementation
    correctness (Q3, Q5, Q6, Q11, Q12, Q13), test adequacy by mutation (Q4),
-   and Python divergence (Q7).
+   and Python divergence (Q7), plus, for a performance change only,
+   performance (Q14).
 2. Each verifier MUST be told that it is one of several and will not see the
    others' results, so that it checks rather than defers.
 3. Each finding comes back labelled as in §4.

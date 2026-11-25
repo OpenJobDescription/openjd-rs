@@ -19,6 +19,8 @@ process) see [AGENTS.md](../../AGENTS.md).
 - [Working through quality-report findings](working-through-findings.md) —
   how to choose findings to focus on, scope each PR, and drive an agent
   through addressing them between baseline and the next regeneration.
+- [Measuring a performance change](performance.md): the commands and
+  scripts (`scripts/perf/`) behind quality-criteria Q14's evidence.
 
 ## Agent skills
 
