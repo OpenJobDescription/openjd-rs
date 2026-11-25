@@ -38,7 +38,7 @@ pub struct FunctionEntry {
 }
 
 pub struct FunctionLibrary {
-    functions: HashMap<String, Vec<FunctionEntry>>,
+    functions: HashMap<String, Arc<Vec<FunctionEntry>>>,
 }
 ```
 
@@ -487,11 +487,17 @@ API; the publicly exported entry point is
 ## Caching
 
 The default library skeleton (no host context) is immutable and contains only
-`fn` pointers, so it is `Send + Sync`. A crate-private `LazyLock<FunctionLibrary>`
-holds it; `FunctionLibrary::for_profile` builds on top of it per the profile's
-host-context setting and caches the result in a per-profile `Arc` map keyed
-on the rules-independent portion of the profile (see
-[profile.md § ProfileKey](../../crates/openjd-expr/src/profile.rs)).
+`fn` pointers, so it is `Send + Sync`. A crate-private
+`LazyLock<Arc<FunctionLibrary>>` holds it, built once per process: parsing the
+built-in signatures is a large share of a short `openjd check`. The no-host
+profile bucket is that same `Arc`; `FunctionLibrary::for_profile` derives the
+other buckets from it per the profile's host-context setting and caches the
+result in a per-profile `Arc` map keyed on the rules-independent portion of the
+profile (see [profile.md § ProfileKey](../../crates/openjd-expr/src/profile.rs)).
+Each name's overload list is shared between a library and its clones and copied
+on the first registration that changes it, so deriving a bucket copies the name
+map (its keys and table) while the overload lists stay shared, rather than
+copying every signature.
 
 ```rust
 pub fn for_profile(profile: &ExprProfile) -> Arc<FunctionLibrary>;
@@ -622,8 +628,8 @@ let updated_lib = FunctionLibrary::for_profile(&updated_profile);
 ```
 
 The underlying no-host skeleton is cached and shared across `for_profile`
-calls, so the per-call cost is a `HashMap` clone plus one
-`apply_path_mapping` registration — not a full library rebuild.
+calls, so the per-call cost is a `HashMap` clone (shared overload lists)
+plus one `apply_path_mapping` registration — not a full library rebuild.
 
 ### Host-Context Function Inventory
 

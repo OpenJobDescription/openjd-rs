@@ -172,8 +172,7 @@ impl SymbolTable {
     }
 
     fn set_value(&mut self, key: &str, value: ExprValue) -> Result<(), SymbolTableError> {
-        let parts: Vec<&str> = key.split('.').collect();
-        if parts.len() == 1 {
+        let Some((prefix, last)) = key.rsplit_once('.') else {
             if matches!(self.table.get(key), Some(SymbolTableEntry::Table(_))) {
                 return Err(SymbolTableError {
                     key: key.to_string(),
@@ -183,13 +182,23 @@ impl SymbolTable {
             self.table
                 .insert(key.to_string(), SymbolTableEntry::Value(value));
             return Ok(());
-        }
+        };
         let mut current = self;
-        for &part in &parts[..parts.len() - 1] {
-            let entry = current
-                .table
-                .entry(part.to_string())
-                .or_insert_with(|| SymbolTableEntry::Table(SymbolTable::new()));
+        for part in prefix.split('.') {
+            // Look up before inserting, so an existing table costs no key copy.
+            if !current.table.contains_key(part) {
+                current.table.insert(
+                    part.to_string(),
+                    SymbolTableEntry::Table(SymbolTable::new()),
+                );
+            }
+            let Some(entry) = current.table.get_mut(part) else {
+                // Inserted above, so this is not reached.
+                return Err(SymbolTableError {
+                    key: key.to_string(),
+                    conflict: part.to_string(),
+                });
+            };
             current = match entry {
                 SymbolTableEntry::Table(t) => t,
                 _ => {
@@ -200,7 +209,7 @@ impl SymbolTable {
                 }
             };
         }
-        let last = parts.last().unwrap().to_string();
+        let last = last.to_string();
         if matches!(current.table.get(&last), Some(SymbolTableEntry::Table(_))) {
             return Err(SymbolTableError {
                 key: key.to_string(),
@@ -218,16 +227,20 @@ impl SymbolTable {
 
     /// Get an entry at a dotted path.
     pub fn get(&self, key: &str) -> Option<&SymbolTableEntry> {
-        let parts: Vec<&str> = key.split('.').collect();
+        let mut parts = key.split('.');
         let mut current = self;
-        for (i, &part) in parts.iter().enumerate() {
-            match current.table.get(part) {
-                Some(SymbolTableEntry::Table(t)) if i < parts.len() - 1 => current = t,
-                Some(entry) if i == parts.len() - 1 => return Some(entry),
-                _ => return None,
+        let mut part = parts.next()?;
+        loop {
+            let entry = current.table.get(part)?;
+            match (parts.next(), entry) {
+                (None, entry) => return Some(entry),
+                (Some(next), SymbolTableEntry::Table(t)) => {
+                    current = t;
+                    part = next;
+                }
+                (Some(_), SymbolTableEntry::Value(_)) => return None,
             }
         }
-        None
     }
 
     /// Get a value at a dotted path, returning None if not found or if it's a table.

@@ -14,7 +14,8 @@ use crate::profile::{ExprProfile, ExprRevision, HostContext, HostKind, ProfileKe
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
-pub(crate) static DEFAULT_LIBRARY: LazyLock<FunctionLibrary> = LazyLock::new(build_default_library);
+pub(crate) static DEFAULT_LIBRARY: LazyLock<Arc<FunctionLibrary>> =
+    LazyLock::new(|| Arc::new(build_default_library()));
 
 /// Cache of per-profile libraries, keyed by the rules-independent portion
 /// of an [`ExprProfile`].
@@ -41,12 +42,18 @@ static PROFILE_CACHE: LazyLock<Mutex<HashMap<ProfileKey, Arc<FunctionLibrary>>>>
 /// `ExprRevision` variant *or* a new `ExprExtension` variant produces
 /// a compile error here, forcing an explicit decision about how the
 /// new variant affects the library.
-fn build_library_skeleton(profile: &ExprProfile) -> FunctionLibrary {
+///
+/// The skeleton is shared, not copied: the no-host bucket of a revision with
+/// no extensions holds the same `Arc` as [`DEFAULT_LIBRARY`] and the host
+/// buckets are derived from it, so a process parses the built-in signatures
+/// once. An extension that adds
+/// functions would copy it first (`Arc::make_mut`).
+fn build_library_skeleton(profile: &ExprProfile) -> Arc<FunctionLibrary> {
     let lib = match profile.revision() {
         ExprRevision::V2026_02 => {
             // Base library for 2026-02. Future revisions can diverge
             // here.
-            build_default_library()
+            Arc::clone(&DEFAULT_LIBRARY)
         } // Intentionally no wildcard: this match lives in the same
           // crate as `ExprRevision`, so adding a new revision variant
           // will produce a compile error here.
@@ -112,11 +119,14 @@ impl FunctionLibrary {
                 // registrations. For the Unresolved bucket we then
                 // register the stub inline; for WithRules we defer to
                 // the caller below.
-                let mut skeleton = build_library_skeleton(profile);
+                let skeleton = build_library_skeleton(profile);
                 if matches!(key.host_kind, HostKind::Unresolved) {
-                    register_unresolved_host_context_functions(&mut skeleton);
+                    let mut lib = (*skeleton).clone();
+                    register_unresolved_host_context_functions(&mut lib);
+                    Arc::new(lib)
+                } else {
+                    skeleton
                 }
-                Arc::new(skeleton)
             }))
         };
 
@@ -136,12 +146,12 @@ impl FunctionLibrary {
                 Arc::clone(
                     cache
                         .entry(base_key)
-                        .or_insert_with(|| Arc::new(build_library_skeleton(profile))),
+                        .or_insert_with(|| build_library_skeleton(profile)),
                 )
             };
             // Clone the base library and register host context on the clone.
-            // The clone is cheap — `FunctionLibrary` holds `Arc<dyn Fn>`
-            // entries in its `HashMap`.
+            // The clone is cheap: `FunctionLibrary` holds each overload list
+            // behind an `Arc`.
             let mut derived = (*base).clone();
             register_host_context_functions(&mut derived, Arc::clone(mapper));
             return Arc::new(derived);
@@ -888,7 +898,7 @@ mod tests {
     /// are at most 4 deep, far below the limit.
     #[test]
     fn signatures_are_at_most_4_deep() {
-        let mut lib = DEFAULT_LIBRARY.clone();
+        let mut lib = (**DEFAULT_LIBRARY).clone();
         register_unresolved_host_context_functions(&mut lib);
         let deepest = lib
             .function_names()

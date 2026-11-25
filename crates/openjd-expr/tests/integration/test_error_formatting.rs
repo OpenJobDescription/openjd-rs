@@ -1674,3 +1674,20 @@ fn type_too_deep_in_a_comprehension_body() {
         ],
     );
 }
+
+/// A unary operator that fails at run time puts the caret on the whole
+/// operation, not on its operand.
+#[test]
+fn unary_minus_overflow_points_at_the_operation() {
+    let mut st = SymbolTable::new();
+    st.set("Param.X", ExprValue::Int(i64::MIN)).unwrap();
+    assert_err_exact(
+        "1 + -Param.X",
+        &st,
+        &[
+            "Integer overflow: result is outside the 64-bit signed range\n",
+            "  1 + -Param.X\n",
+            "      ^~~~~~~~",
+        ],
+    );
+}

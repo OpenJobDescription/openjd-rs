@@ -670,15 +670,17 @@ impl<'a> Evaluator<'a> {
         self.track(result?)
     }
 
+    /// `node` builds the AST node the error is positioned on; it runs only
+    /// when the call fails, so a successful call does not clone the AST.
     fn dispatch_with_node(
         &mut self,
         name: &str,
         args: Vec<ExprValue>,
-        node: Option<&ast::Expr>,
+        node: impl FnOnce() -> ast::Expr,
     ) -> Result<ExprValue, ExpressionError> {
         self.dispatch_released(name, args).map_err(|e| {
-            if let (Some(src), Some(n)) = (self.expr_source, node) {
-                e.with_node(src, n)
+            if let Some(src) = self.expr_source {
+                e.with_node(src, &node())
             } else {
                 e
             }
@@ -861,8 +863,8 @@ impl<'a> Evaluator<'a> {
         };
         let attr = a.attr.as_str();
         let prop_name = format!("__property_{attr}__");
-        let attr_node = ast::Expr::Attribute(a.clone());
-        match self.dispatch_with_node(&prop_name, vec![value.clone()], Some(&attr_node)) {
+        let attr_node = || ast::Expr::Attribute(a.clone());
+        match self.dispatch_with_node(&prop_name, vec![value.clone()], attr_node) {
             Ok(v) => Ok(v),
             Err(e) if contains_budget_error(&e) => Err(e),
             Err(_) => {
@@ -891,7 +893,7 @@ impl<'a> Evaluator<'a> {
                         } else {
                             ExpressionError::new(message)
                         };
-                        return Err(err.with_node(src, &attr_node));
+                        return Err(err.with_node(src, &attr_node()));
                     }
                 }
 
@@ -911,7 +913,7 @@ impl<'a> Evaluator<'a> {
                         return Err(ExpressionError::new(format!(
                             "'{attr}' property is not available for {val_type_str}. Available for: {}",
                             valid_types.join(", ")
-                        )).with_node(src, &attr_node));
+                        )).with_node(src, &attr_node()));
                     }
                 }
 
@@ -924,7 +926,7 @@ impl<'a> Evaluator<'a> {
                 } else {
                     ExpressionError::new(message)
                 };
-                Err(err.with_node(src, &attr_node))
+                Err(err.with_node(src, &attr_node()))
             }
         }
     }
@@ -935,11 +937,7 @@ impl<'a> Evaluator<'a> {
 
         let left = self.eval_node(&b.left, None)?;
         let right = self.eval_node(&b.right, None)?;
-        self.dispatch_with_node(
-            op_name,
-            vec![left, right],
-            Some(&ast::Expr::BinOp(b.clone())),
-        )
+        self.dispatch_with_node(op_name, vec![left, right], || ast::Expr::BinOp(b.clone()))
     }
 
     fn eval_unaryop(&mut self, u: &ast::ExprUnaryOp) -> Result<ExprValue, ExpressionError> {
@@ -969,7 +967,7 @@ impl<'a> Evaluator<'a> {
             }
         }
         let operand = self.eval_node(&u.operand, None)?;
-        self.dispatch_with_node(op_name, vec![operand], Some(&ast::Expr::UnaryOp(u.clone())))
+        self.dispatch_with_node(op_name, vec![operand], || ast::Expr::UnaryOp(u.clone()))
     }
 
     /// `and` / `or`. EXPR semantics: `or` returns the first operand that
@@ -1748,12 +1746,9 @@ impl<'a> Evaluator<'a> {
             }
 
             // Dispatch 4-arg __getitem__ through the library
-            let node = ast::Expr::Subscript(s.clone());
-            return self.dispatch_with_node(
-                "__getitem__",
-                vec![value, start, stop, step],
-                Some(&node),
-            );
+            return self.dispatch_with_node("__getitem__", vec![value, start, stop, step], || {
+                ast::Expr::Subscript(s.clone())
+            });
         }
 
         let slice = self.eval_node(&s.slice, None)?;
@@ -1791,11 +1786,9 @@ impl<'a> Evaluator<'a> {
             crate::types::list_forms(&unwrap_unresolved(&value.expr_type()))?
                 .iter()
                 .all(|f| *f == empty_list);
-        let result = self.dispatch_with_node(
-            "__getitem__",
-            vec![value, slice],
-            Some(&ast::Expr::Subscript(s.clone())),
-        )?;
+        let result = self.dispatch_with_node("__getitem__", vec![value, slice], || {
+            ast::Expr::Subscript(s.clone())
+        })?;
         // Typed `noreturn` with a receiver every form of which is the empty
         // list (`__getitem__(list[nulltype], int)`): indexing it fails on
         // every run. Report it here, where it happens, rather than as a
