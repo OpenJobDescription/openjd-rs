@@ -52,6 +52,10 @@ jobs:
     if: ${{ github.repository == 'OpenJobDescription/openjd-rs' }}
     runs-on: ubuntu-latest
     environment: release
+    # Read by release-train-dispatch below.
+    outputs:
+      releases_created: ${{ steps.release-plz.outputs.releases_created }}
+      releases: ${{ steps.release-plz.outputs.releases }}
     permissions:
       # Push git tags and create GitHub Releases.
       contents: write
@@ -102,6 +106,57 @@ jobs:
             echo "Uploading THIRD-PARTY-LICENSES to release $tag"
             gh release upload "$tag" THIRD-PARTY-LICENSES --clobber
           done
+
+  # Start the release train of openjd-model-for-python (the Python bindings) as soon as a crate it builds on is
+  # published, instead of waiting for that repo's daily check of crates.io. The dispatch only starts its
+  # release_train.yml on its default branch; that workflow checks crates.io itself and decides whether there is
+  # work. The token is a bot-owned fine-grained token with Actions read and write only on the OpenJD repos the
+  # train starts. Without it the job does nothing and the daily check still picks the release up.
+  release-train-dispatch:
+    name: Start the openjd-model release train
+    needs: release-plz-release
+    if: ${{ github.repository == 'OpenJobDescription/openjd-rs' && needs.release-plz-release.outputs.releases_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    timeout-minutes: 15
+    steps:
+      - name: Wait for the crates on crates.io, then dispatch
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TRAIN_DISPATCH_TOKEN }}
+          RELEASES_JSON: ${{ needs.release-plz-release.outputs.releases }}
+        run: |
+          set -euo pipefail
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::RELEASE_TRAIN_DISPATCH_TOKEN is not set; openjd-model-for-python picks the release up on its daily run."
+            exit 0
+          fi
+          # The crates openjd-model-for-python builds on, as <name>/<version> for the crates.io API.
+          mapfile -t crates < <(echo "$RELEASES_JSON" | jq -r '.[]
+            | select(.package_name == "openjd-model" or .package_name == "openjd-expr" or .package_name == "openjd-sessions")
+            | "\(.package_name)/\(.version)"')
+          if [ "${#crates[@]}" -eq 0 ]; then
+            echo "::notice::No crate openjd-model-for-python builds on was released; nothing to dispatch."
+            exit 0
+          fi
+          # The train reads the newest versions from the crates.io API, so wait (at most 10 minutes) until each
+          # released version is visible there. crates.io asks API clients to send a User-Agent.
+          deadline=$((SECONDS + 600))
+          for crate in "${crates[@]}"; do
+            until curl -fs -o /dev/null -A "openjd-rs release workflow (https://github.com/OpenJobDescription/openjd-rs)" \
+                "https://crates.io/api/v1/crates/$crate"; do
+              if [ "$SECONDS" -ge "$deadline" ]; then
+                echo "::warning::$crate is not visible on crates.io after 10 minutes; dispatching anyway."
+                break
+              fi
+              sleep 15
+            done
+          done
+          # A failed dispatch does not fail the release: the daily run of openjd-model-for-python is the backstop.
+          if gh workflow run release_train.yml --repo OpenJobDescription/openjd-model-for-python --ref mainline; then
+            echo "Started the release train of openjd-model-for-python for: ${crates[*]}"
+          else
+            echo "::warning::Could not dispatch release_train.yml in openjd-model-for-python; its daily run picks the release up."
+          fi
 
   # Open or update the Release PR. This runs on every push to main.
   release-plz-pr:
