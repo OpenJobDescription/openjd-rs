@@ -169,8 +169,71 @@ streaming trade-off — the copies MUST cross-reference each other at both
 sites and MUST be pinned by an equivalence test that fails when either copy
 changes alone. Existing equivalence pins: openjd-expr's
 `tests/integration/test_coercion_drift.rs` and the sessions helper framer
-test in `crates/openjd-sessions/src/subprocess.rs`. Incidentally
+test in `crates/openjd-sessions/src/subprocess.rs`. A change that fixes
+a rule MUST fix every copy of it in this repository, or route the copies
+through one implementation. Copies are easy to miss in the cross-user helper
+(`crates/openjd-sessions/src/helper/`), in public `validate_*` functions
+beside the internal checks they mirror, and in the fuzz-target oracles in
+`fuzz/`, which repeat the library's exemptions. A fix belongs where the code
+is on the target branch, including code that a merged refactor has moved. A
+copy in a Python reference implementation falls under Q7. Incidentally
 similar code that encodes no shared rule is not a Q11 finding.
+
+**Q12. Sibling shapes of a type.** A rule about how a value of one type is
+parsed, checked, coerced, typed, rendered, or path-mapped MUST also apply to
+the type's sibling shapes, unless the specs say how a shape differs. For a
+list, it applies to each element. Tests SHOULD cover each shape. The sibling
+shapes are:
+
+- template parameter types `T` and `LIST[T]`, plus `LIST[LIST[INT]]` for
+  `INT`;
+- expression types `T`, `list[T]`, `list[list[T]]`, the empty
+  `list[nulltype]`, `T?`, a union that contains `T` or `list[T]`, and
+  `unresolved[T]`, plus `range_expr` for `int`;
+- both ends of each implicit coercion the value passes through (2026-02
+  Expression Language §1.2.3), such as `path` and `string` or `int` and
+  `float`, together with the list form of each coercion, which applies
+  element by element;
+- each representation of a value: a JSON or YAML number and a numeric string
+  (`5.0` and `"5.0"`), and a `FLOAT` whose original text is kept (`2.50`) as
+  well as one that is computed and rendered again.
+
+Tests SHOULD include these edge values:
+
+| Type | Edge values |
+|------|-------------|
+| `FLOAT` | `2.50` (text kept), `-0.0`, `1e999`, `inf`, `nan`, and an integral `5.0` given where an `INT` is expected |
+| `INT` | `i64::MIN`, `i64::MAX`, a value above `i64::MAX`, `+5`, `1_000`, `٣` (U+0663) |
+| `PATH` | relative, absolute, a URI (`s3://bucket/key`), a trailing separator, a Windows drive path, a UNC path |
+| `STRING` | empty, surrounded by white space, non-ASCII |
+| Any list | empty, one element, elements of mixed types |
+
+For example, the `PATH` default rules apply to each `LIST[PATH]` element
+(#421), and `path([])` matches a `path(list[nulltype])` overload (#576).
+
+**Q13. Every source of a value, at every stage.** A rule about a value MUST
+hold wherever the value can come from:
+
+- a literal, a format string embedded in a longer string, a whole-field
+  `{{ ... }}` expression, a list element, and a fully static expression;
+- a job template default, an environment template default, and a submitted
+  value, given as CLI `-p` text, as JSON text, or as a native list through a
+  binding;
+- a step written with a SimpleAction such as `bash:`, as well as one written
+  with a `<StepScript>` (`script:` with `actions`);
+- every field the specification links to the rule, including rarely used
+  ones such as `notifyPeriodInSeconds`, environment `onEnter` and `onExit`
+  timeouts, SimpleAction `timeout`, and host requirement amounts.
+
+It MUST also hold at each stage that applies it: template decode and
+`openjd check`, `create_job`, and run time. Each stage reports a violation
+with a located message (Q3), and SHOULD use the message and field path that
+the other stages use. An earlier stage MUST NOT reject a template that every
+later stage accepts, with one exception: a name that resolves nowhere MUST be
+reported at template validation, even in a sub-expression that some runs
+skip. Whether a name exists does not depend on any value, so every run that
+evaluates that sub-expression fails. `specs/expr/values.md` and
+`specs/expr/evaluator.md` state both rules for the constructs they cover.
 
 ## 3. Evidence
 
@@ -265,8 +328,8 @@ leaving the file behind.
 ### Verifier rules
 1. When several verifiers run, they MUST get disjoint slices and different
    angles, chosen from: spec fidelity (Q1, Q2, Q8, Q10), implementation
-   correctness (Q3, Q5, Q6, Q11), test adequacy by mutation (Q4), and Python
-   divergence (Q7).
+   correctness (Q3, Q5, Q6, Q11, Q12, Q13), test adequacy by mutation (Q4),
+   and Python divergence (Q7).
 2. Each verifier MUST be told that it is one of several and will not see the
    others' results, so that it checks rather than defers.
 3. Each finding comes back labelled as in §4.

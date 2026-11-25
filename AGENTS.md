@@ -226,6 +226,11 @@ Types: `feat`, `fix`, `test`, `docs`, `refactor`, `ci`, `chore`, `perf`
 
 Append `!` for breaking changes (e.g., `feat!: ...`) and include a `BREAKING CHANGE` footer. **Note:** This is relaxed during pre-release — make any change that improves things. Enable strict breaking-change tracking once the project reaches stable release.
 
+Commit messages and the PR description name every change a caller can
+observe, and what consumers outside this repository need at their next update.
+The [`implement-change` skill](skills/implement-change/SKILL.md#the-pull-request)
+says what to write when a PR is opened and after every later push.
+
 ### Test Quality Standard
 
 When writing tests that check for validation or evaluation failures, assert on the **full error message content** — not just that an error occurred. This ensures error messages are stable, human-readable, and match the Python implementation.
@@ -273,6 +278,12 @@ fn empty_command() {
   rather than re-implementing it. A necessary second copy is cross-referenced
   at both sites and pinned by an equivalence test
   ([quality-criteria Q11](docs/dev/quality-criteria.md)).
+- Sibling shapes: a change to how one type is handled also covers the type's
+  other shapes, such as `LIST[FLOAT]` beside `FLOAT`
+  ([quality-criteria Q12](docs/dev/quality-criteria.md)).
+- Every source and stage: a rule about a value holds wherever the value comes
+  from, and at `openjd check`, job creation, and run time
+  ([quality-criteria Q13](docs/dev/quality-criteria.md)).
 - See [DEVELOPMENT.md](DEVELOPMENT.md) for more.
 
 ## CI Pipeline
