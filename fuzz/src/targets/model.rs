@@ -33,7 +33,7 @@ use openjd_expr::{
     ExprValue, ExpressionError, FormatString, FormatStringOptions, FunctionLibrary, HostContext,
     PathFormat, SymbolTable,
 };
-use openjd_model::job::diff::{diff_environments, diff_jobs, diff_steps};
+use openjd_model::job::diff::{diff_environments, diff_jobs, diff_steps, DiffNode, DiffStatus};
 use openjd_model::job::{Job, Step};
 use openjd_model::template::{EnvironmentTemplate, JobTemplate};
 use openjd_model::{
@@ -258,7 +258,7 @@ pub fn pipeline(
         Ok(j2) => {
             oracle!(j2 == job, "create_job is nondeterministic");
             oracle!(hash_of(&j2) == hash_of(&job), "equal jobs hash differently");
-            check_self_diff(&job, &j2);
+            check_diff(&job);
         }
         Err(e) => oracle!(false, "create_job succeeded once then failed: {e}"),
     }
@@ -271,25 +271,57 @@ pub fn pipeline(
     }
 }
 
-/// Two equal jobs diff as unchanged at the root and at every step.
-fn check_self_diff(job: &Job, same: &Job) {
-    let d = diff_jobs(job, same);
+/// Diff the job against copies with its steps reversed and its first step
+/// renamed. Every modified node explains itself, a reorder is only
+/// `steps.order`, and a rename is a removal and an addition.
+fn check_diff(job: &Job) {
+    fn attributed(n: &DiffNode) -> bool {
+        (n.status != DiffStatus::Modified
+            || !n.field_changes.is_empty()
+            || n.children.iter().any(DiffNode::is_changed))
+            && n.children.iter().all(attributed)
+    }
+    let mut reversed = job.clone();
+    reversed.steps.reverse();
+    let d = diff_jobs(job, &reversed);
+    oracle!(attributed(d.root()), "unattributed change:\n{d}");
     oracle!(
-        !d.is_changed() && d.to_string().is_empty(),
-        "diff_jobs reports a change between equal jobs:\n{d}"
+        d.is_changed() == (job.steps.len() > 1) && d.is_changed() != d.to_string().is_empty(),
+        "reversing the steps is a change exactly when there are two or more, and Display is empty exactly when unchanged:\n{d}"
     );
-    oracle!(
-        job.steps
-            .iter()
-            .all(|s| d.root().child(&format!("steps[{}]", s.name)).is_none()),
-        "diff_jobs expanded an unchanged root"
-    );
-    for (a, b) in job.steps.iter().zip(&same.steps) {
+    if job.steps.len() > 1 {
+        let root = d.root();
         oracle!(
-            !diff_steps(a, b).is_changed(),
-            "diff_steps reports a change between equal steps"
+            root.field_changes.len() == 1 && root.field_changes[0].field == "steps.order",
+            "a step reorder is not exactly steps.order:\n{d}"
+        );
+        oracle!(
+            root.children.iter().all(|c| !c.is_changed()),
+            "a step reorder changed a child:\n{d}"
         );
     }
+    let Some(first) = job.steps.first() else {
+        return;
+    };
+    let mut step = first.clone();
+    step.name.push('\u{1}');
+    oracle!(
+        diff_steps(first, &step).root().field_changes[0].field == "name",
+        "diff_steps missed a rename"
+    );
+    if job.steps.iter().any(|s| s.name == step.name) {
+        return;
+    }
+    let mut renamed = job.clone();
+    renamed.steps[0] = step;
+    let d = diff_jobs(job, &renamed);
+    oracle!(attributed(d.root()), "unattributed change:\n{d}");
+    let status = |name: &str| d.root().child(&format!("steps[{name}]")).map(|c| c.status);
+    oracle!(
+        status(&first.name) == Some(DiffStatus::Removed)
+            && status(&renamed.steps[0].name) == Some(DiffStatus::Added),
+        "a renamed step is not removed and added:\n{d}"
+    );
 }
 
 fn check_dependencies(job: &Job) {
@@ -882,9 +914,12 @@ pub fn env_gen(data: &[u8]) {
         let _ = st.set(&format!("Param.{}", p.name), v);
     }
     let env = openjd_model::convert_environment_with_symtab(t.environment(), Some(&st));
+    let mut renamed = env.clone();
+    renamed.name.push('\u{1}');
+    let d = diff_environments(&env, &renamed);
     oracle!(
-        !diff_environments(&env, &env.clone()).is_changed(),
-        "diff_environments reports a change between equal environments"
+        d.root().field_changes.len() == 1 && d.root().field_changes[0].field == "name",
+        "diff_environments missed a rename:\n{d}"
     );
     if let Some(rs) = &env.resolved_symtab {
         oracle!(

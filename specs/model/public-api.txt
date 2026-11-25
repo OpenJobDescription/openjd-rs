@@ -201,7 +201,7 @@ pub fn openjd_model::job::create_job::evaluate_let_bindings(&[alloc::string::Str
 pub fn openjd_model::job::create_job::merge_job_parameter_definitions(&openjd_model::template::JobTemplate, &[openjd_model::template::EnvironmentTemplate]) -> core::result::Result<alloc::vec::Vec<openjd_model::job::create_job::parameters::MergedParameterDefinition>, openjd_model::error::ModelError>
 pub fn openjd_model::job::create_job::preprocess_job_parameters(&openjd_model::template::JobTemplate, &openjd_model::types::JobParameterInputValues, &[openjd_model::template::EnvironmentTemplate], &openjd_model::job::create_job::parameters::PathParameterOptions<'_>) -> core::result::Result<openjd_model::types::JobParameterValues, openjd_model::error::ModelError>
 pub mod openjd_model::job::diff
-pub enum openjd_model::job::diff::DiffStatus
+#[non_exhaustive] pub enum openjd_model::job::diff::DiffStatus
 pub openjd_model::job::diff::DiffStatus::Added
 pub openjd_model::job::diff::DiffStatus::Modified
 pub openjd_model::job::diff::DiffStatus::Removed

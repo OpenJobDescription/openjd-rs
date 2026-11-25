@@ -1308,6 +1308,7 @@ impl DiffNode {
     pub fn child(&self, segment: &str) -> Option<&DiffNode>;
 }
 
+#[non_exhaustive]
 pub enum DiffStatus { Unchanged, Added, Removed, Modified }
 
 #[non_exhaustive]
@@ -1331,9 +1332,8 @@ map key, as in `steps[Render]` or `parameters[Scene]`. A `FieldChange`'s
 `before` and `after` are JSON, with `null` for an absent value. Names must be
 unique within each collection, which `create_job` guarantees.
 
-`Display` writes the changed nodes as indented text, one line per changed node
-(`~`, `+` or `-` and its segment) and one per field change
-(`field: before -> after`). An unchanged tree writes nothing.
+`Display` writes the changed nodes as indented text, in the format
+[job-diff.md](job-diff.md#values) gives.
 
 ## Step Dependency Graph
 

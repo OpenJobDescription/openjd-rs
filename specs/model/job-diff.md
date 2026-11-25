@@ -51,7 +51,8 @@ Elements of collections are matched by identity, not position.
 | `variables` | map | key | field changes, key order |
 
 Names are unique within a collection. `create_job` guarantees this, and the
-diff assumes it.
+diff assumes it. An element's segment is `collection[name]`, with the name
+written as is, unescaped.
 
 ## Order
 
@@ -72,9 +73,12 @@ A step's or environment's actions keep their format strings unresolved:
 `resolvedSymTab`, which `create_job` filters to the symbols that step or
 environment references. `resolvedSymTab` is an ordinary field compared as a
 whole value. So a job parameter change shows on its `parameters[K]` node and
-on exactly the steps and environments that read it. A parameter that only
-feeds a template-scope field, such as a task parameter range, shows on that
-field instead.
+on exactly the job environments and steps that read it. A step environment
+has no `resolvedSymTab` of its own, so its reads show on its step. A change
+that value equality ignores, such as a float's spelling (`2.5` to `2.50`),
+shows only on the readers, and `parameters[K]` stays `Unchanged`. A
+parameter that only feeds a template-scope field, such as a task parameter
+range, shows on that field instead.
 
 ## Values
 
@@ -85,9 +89,10 @@ fields: `type` (its spec string, such as `CHUNK[INT]`), `range` (the range
 expression string, or the list) and `chunks`.
 
 `Display` writes a tree as indented text, two spaces per level. Each changed
-child is a line with `~`, `+` or `-` and its segment; each field change is a
-line `field: before -> after` under its node. The root has no line, and an
-unchanged tree writes nothing.
+child is a line with `~` (modified), `+` (added) or `-` (removed) and its
+segment; each field change is a line `field: before -> after`, values as
+compact JSON, under its node. The root has no line, and an unchanged tree
+writes nothing.
 
 ```
 ~ parameters[Scene]
@@ -118,7 +123,9 @@ unchanged tree writes nothing.
 - Tasks. Task parameter definitions are a map, so their order is not a
   change, although it fixes task iteration order. Which tasks a change adds
   or removes is not computed.
-- Applying a diff, and any command-line interface.
+- Applying a diff, and any command-line interface. Segments are the only
+  identity a node carries; a structured identity for applying a diff comes
+  with that work.
 - Options such as a depth limit. `diff_*` always expands every `Modified`
   node.
 

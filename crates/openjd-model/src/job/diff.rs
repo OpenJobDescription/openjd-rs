@@ -32,6 +32,7 @@ use crate::types::TaskParameterType;
 
 /// How the two sides of a [`DiffNode`] relate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum DiffStatus {
     /// Both sides are present and equal.
     Unchanged,
@@ -48,7 +49,8 @@ pub enum DiffStatus {
 #[non_exhaustive]
 pub struct FieldChange {
     /// The field's camelCase name, as the job serializes it. An entry of a
-    /// keyed collection reads `variables[KEY]`; the relative order of a
+    /// keyed collection reads `variables[KEY]`, `amounts[NAME]` or
+    /// `attributes[NAME]`; the relative order of a
     /// named list's shared elements reads `<collection>.order`.
     pub field: String,
     /// The old value as JSON; `null` when the field is absent.
@@ -197,11 +199,8 @@ impl DiffNode {
 
 /// The result of a diff: a tree of [`DiffNode`]s.
 ///
-/// `Display` writes the changed nodes as indented text: one line per
-/// changed child (`~` modified, `+` added, `-` removed, then its segment),
-/// and one line per field change (`field: before -> after`, values as
-/// compact JSON) under its node. The root has no line of its own, and an
-/// unchanged tree writes nothing.
+/// `Display` writes the changed nodes as indented text, in the format
+/// `specs/model/job-diff.md` "Values" gives.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiffTree {
     root: DiffNode,
