@@ -810,3 +810,46 @@ fn register_sig_empty_signature_returns_error() {
     let result = lib.register_sig("bad", "", |_, _| Ok(ExprValue::Null));
     assert!(result.is_err());
 }
+
+/// A library and its clone do not share registrations: registering on one,
+/// or merging into it, leaves the other as it was.
+#[test]
+fn cloned_library_registrations_are_independent() {
+    fn one(_: &mut dyn EvalContext, _: &[ExprValue]) -> Result<ExprValue, ExpressionError> {
+        Ok(ExprValue::Int(1))
+    }
+    let mut base = FunctionLibrary::new();
+    base.register_sig("f", "(int) -> int", one).unwrap();
+    let mut copy = base.clone();
+    copy.register_sig("f", "(string) -> int", one).unwrap();
+    copy.register_sig("g", "() -> int", one).unwrap();
+    assert_eq!(base.get_signatures("f").len(), 1);
+    assert!(base.get_signatures("g").is_empty());
+    assert_eq!(copy.get_signatures("f").len(), 2);
+
+    let mut extra = FunctionLibrary::new();
+    extra.register_sig("f", "(float) -> int", one).unwrap();
+    let merged = base.clone().merge(extra);
+    assert_eq!(merged.get_signatures("f").len(), 2);
+    assert_eq!(base.get_signatures("f").len(), 1);
+}
+
+/// Each host-context library is derived from the shared built-in library
+/// without changing it: the template-scope library keeps the concrete
+/// `path` implementation and has no `apply_path_mapping`.
+#[test]
+fn host_context_libraries_do_not_change_the_template_library() {
+    let unresolved = ExprProfile::current().with_host_context(HostContext::Unresolved);
+    let _ = FunctionLibrary::for_profile(&unresolved);
+    let rules =
+        ExprProfile::current().with_host_context(HostContext::with_rules(Vec::new()).unwrap());
+    let _ = FunctionLibrary::for_profile(&rules);
+    let template = FunctionLibrary::for_profile(&ExprProfile::current());
+    assert!(template.get_signatures("apply_path_mapping").is_empty());
+    let parsed = ParsedExpression::new("path('/a/b').name").unwrap();
+    let value = parsed
+        .with_library(&template)
+        .evaluate(&[&SymbolTable::new()])
+        .unwrap();
+    assert_eq!(value, ExprValue::String("b".into()));
+}

@@ -78,7 +78,9 @@ pub trait EvalContext {
 /// Registry of functions available in expressions.
 #[derive(Clone, Default)]
 pub struct FunctionLibrary {
-    functions: HashMap<String, Vec<FunctionEntry>>,
+    // Overload lists are shared between clones and copied on first write,
+    // so deriving a profile's library from the default one is cheap.
+    functions: HashMap<String, Arc<Vec<FunctionEntry>>>,
 }
 
 impl FunctionLibrary {
@@ -100,13 +102,10 @@ impl FunctionLibrary {
             + Sync
             + 'static,
     {
-        self.functions
-            .entry(name.to_string())
-            .or_default()
-            .push(FunctionEntry {
-                signature,
-                implementation: Arc::new(implementation),
-            });
+        Arc::make_mut(self.functions.entry(name.to_string()).or_default()).push(FunctionEntry {
+            signature,
+            implementation: Arc::new(implementation),
+        });
     }
 
     /// Register from spec notation: `lib.register_sig("len", "(list[T1]) -> int", len_list)`
@@ -148,7 +147,13 @@ impl FunctionLibrary {
     /// gives an unresolved value instead. A name with no overloads is left
     /// alone.
     pub(crate) fn make_unresolved(&mut self, name: &str, matches: impl Fn(&ExprType) -> bool) {
-        for entry in self.functions.get_mut(name).into_iter().flatten() {
+        let Some(entries) = self.functions.get_mut(name) else {
+            return;
+        };
+        if !entries.iter().any(|e| matches(&e.signature)) {
+            return;
+        }
+        for entry in Arc::make_mut(entries) {
             if matches(&entry.signature) {
                 let ret = entry.signature.sig_return().clone();
                 entry.implementation = Arc::new(move |_, _| Ok(ExprValue::unresolved(ret.clone())));
@@ -160,7 +165,8 @@ impl FunctionLibrary {
     #[must_use]
     pub fn merge(mut self, other: FunctionLibrary) -> Self {
         for (name, entries) in other.functions {
-            self.functions.entry(name).or_default().extend(entries);
+            Arc::make_mut(self.functions.entry(name).or_default())
+                .extend(Arc::unwrap_or_clone(entries));
         }
         self
     }
@@ -850,13 +856,15 @@ fn unresolved_return_type(
 /// argument of type `list[nulltype]` — the empty form of a list with a
 /// union element type, or an empty literal.
 fn empty_list_overload_mismatch(entry: &FunctionEntry, arg_types: &[ExprType]) -> bool {
-    let empty = ExprType::fixed(ExprType::list(ExprType::NULLTYPE));
+    static EMPTY: std::sync::LazyLock<ExprType> =
+        std::sync::LazyLock::new(|| ExprType::fixed(ExprType::list(ExprType::NULLTYPE)));
+    let empty = &*EMPTY;
     entry
         .signature
         .sig_params()
         .iter()
         .zip(arg_types)
-        .any(|(p, a)| *p == empty && *a != empty)
+        .any(|(p, a)| p == empty && a != empty)
 }
 
 /// The return type of the first signature the dispatch phases match for

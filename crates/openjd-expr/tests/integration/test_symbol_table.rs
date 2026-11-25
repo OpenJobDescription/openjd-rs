@@ -949,3 +949,71 @@ fn serialized_symtab_eq_is_transport_level() {
         "transport equality preserves the original literal"
     );
 }
+
+// ══════════════════════════════════════════════════════════════
+// Dotted-path edge cases: empty segments and conflict reporting
+// ══════════════════════════════════════════════════════════════
+
+/// Empty segments are ordinary keys: `"a..b"` is `a` → `""` → `b`, and a
+/// leading or trailing dot adds an empty key at that end.
+#[test]
+fn dotted_paths_with_empty_segments() {
+    let mut st = SymbolTable::new();
+    st.set("a..b", 1).unwrap();
+    st.set(".lead", 2).unwrap();
+    st.set("trail.", 3).unwrap();
+    // ".lead" made "" a table, so a value cannot be set there.
+    let err = st.set("", 4).unwrap_err();
+    assert_eq!((err.key.as_str(), err.conflict.as_str()), ("", ""));
+    assert_eq!(st.get_value("a..b"), Some(&ExprValue::Int(1)));
+    assert!(st.get_table("a.").is_some());
+    assert_eq!(st.get_value(".lead"), Some(&ExprValue::Int(2)));
+    assert_eq!(st.get_value("trail."), Some(&ExprValue::Int(3)));
+    let mut fresh = SymbolTable::new();
+    fresh.set("", 4).unwrap();
+    assert_eq!(fresh.get_value(""), Some(&ExprValue::Int(4)));
+    let mut keys: Vec<&str> = st.keys().collect();
+    keys.sort();
+    assert_eq!(keys, vec!["", "a", "trail"]);
+}
+
+/// A lookup through a value, or past the end of a path, finds nothing.
+#[test]
+fn get_through_a_value_is_none() {
+    let mut st = SymbolTable::new();
+    st.set("A.B", 1).unwrap();
+    assert!(st.get("A.B.C").is_none());
+    assert!(st.get("A.X").is_none());
+    assert!(st.get("Z").is_none());
+    assert!(matches!(
+        st.get("A"),
+        Some(openjd_expr::symbol_table::SymbolTableEntry::Table(_))
+    ));
+}
+
+/// The error names the whole key and the segment that conflicts, whether
+/// that segment is an intermediate value, the last segment, or a
+/// single-segment key over a table.
+#[test]
+fn set_conflict_names_the_conflicting_segment() {
+    let mut st = SymbolTable::new();
+    st.set("A.B", 1).unwrap();
+    st.set("T.X", 1).unwrap();
+    let mid = st.set("A.B.C.D", 2).unwrap_err();
+    assert_eq!((mid.key.as_str(), mid.conflict.as_str()), ("A.B.C.D", "B"));
+    let last = st.set("A", 2).unwrap_err();
+    assert_eq!((last.key.as_str(), last.conflict.as_str()), ("A", "A"));
+    let nested_last = st.set("Q.T", 1).and_then(|()| st.set("Q", 2)).unwrap_err();
+    assert_eq!(
+        (nested_last.key.as_str(), nested_last.conflict.as_str()),
+        ("Q", "Q")
+    );
+    st.set("T.X.Y", 1).unwrap_err();
+    st.set("N.M.T", 1).unwrap();
+    let deep_last = st.set("N.M", 2).unwrap_err();
+    assert_eq!(
+        (deep_last.key.as_str(), deep_last.conflict.as_str()),
+        ("N.M", "M")
+    );
+    assert_eq!(st.get_value("A.B"), Some(&ExprValue::Int(1)));
+}

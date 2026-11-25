@@ -290,7 +290,9 @@ fn format_path(path: &[PathElement], out: &mut String) {
 /// Helper: extend a path with a field name.
 #[must_use]
 pub fn path_field(base: &[PathElement], field: &str) -> Vec<PathElement> {
-    let mut p = base.to_vec();
+    // Sized for the new element, so the push does not reallocate.
+    let mut p = Vec::with_capacity(base.len() + 1);
+    p.extend_from_slice(base);
     p.push(PathElement::Field(field.to_string()));
     p
 }
@@ -298,7 +300,9 @@ pub fn path_field(base: &[PathElement], field: &str) -> Vec<PathElement> {
 /// Helper: extend a path with an index.
 #[must_use]
 pub fn path_index(base: &[PathElement], index: usize) -> Vec<PathElement> {
-    let mut p = base.to_vec();
+    // Sized for the new element, so the push does not reallocate.
+    let mut p = Vec::with_capacity(base.len() + 1);
+    p.extend_from_slice(base);
     p.push(PathElement::Index(index));
     p
 }

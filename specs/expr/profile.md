@@ -189,7 +189,9 @@ the rules themselves. Consequences:
 `build_library_skeleton(profile)` is where the revision and extension
 axes turn into registrations: an exhaustive `match profile.revision()`
 plus an exhaustive `for ext in profile.extensions() { match *ext {} }`,
-each a compile-error sentinel for the first new variant.
+each a compile-error sentinel for the first new variant. It returns the
+shared default library's `Arc`; an extension that adds functions would copy
+it first (`Arc::make_mut`).
 
 ## Relationship to Other Documents
 

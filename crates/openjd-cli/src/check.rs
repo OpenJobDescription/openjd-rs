@@ -27,10 +27,13 @@ pub fn execute(args: CheckArgs) -> Result<(), Box<dyn std::error::Error>> {
         &crate::common::caller_limits(),
     )?;
 
+    // Owned, so the template value can be moved into the decoder below
+    // instead of copied.
     let version_str = template_value
         .get("specificationVersion")
         .and_then(|v| v.as_str())
-        .ok_or("Missing field 'specificationVersion'")?;
+        .ok_or("Missing field 'specificationVersion'")?
+        .to_string();
 
     let exts = crate::common::parse_extensions(&args.extensions)?;
     let supported: Vec<&str> = exts.iter().map(|s| s.as_str()).collect();
@@ -39,14 +42,14 @@ pub fn execute(args: CheckArgs) -> Result<(), Box<dyn std::error::Error>> {
     match version {
         Ok(v) if v.is_job_template() => {
             parse::decode_job_template(
-                template_value.clone(),
+                template_value,
                 Some(&supported),
                 &crate::common::caller_limits(),
             )?;
         }
         Ok(v) if v.is_environment_template() => {
             parse::decode_environment_template(
-                template_value.clone(),
+                template_value,
                 Some(&supported),
                 &crate::common::caller_limits(),
             )?;
