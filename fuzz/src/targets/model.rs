@@ -272,7 +272,8 @@ pub fn pipeline(
 }
 
 /// Diff the job against copies with its steps reversed, its first step's
-/// description changed, and its first step renamed. Every modified node
+/// description changed, and its first step renamed, and diff its first job
+/// environment against its first step environment. Every modified node
 /// explains itself, a reorder is only `steps.order`, a description change
 /// is that step's `description`, and a rename is a removal and an addition.
 fn check_diff(job: &Job) {
@@ -304,6 +305,16 @@ fn check_diff(job: &Job) {
     }
     if let [a, b, ..] = job.steps.as_slice() {
         let d = diff_steps(a, b);
+        oracle!(attributed(d.root()), "unattributed change:\n{d}");
+    }
+    let job_env = job.job_environments.iter().flatten().next();
+    let step_env = job
+        .steps
+        .iter()
+        .flat_map(|s| s.step_environments.iter().flatten())
+        .next();
+    if let (Some(a), Some(b)) = (job_env, step_env) {
+        let d = diff_environments(a, b);
         oracle!(attributed(d.root()), "unattributed change:\n{d}");
     }
     let Some(first) = job.steps.first() else {

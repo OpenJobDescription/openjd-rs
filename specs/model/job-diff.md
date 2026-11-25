@@ -21,10 +21,10 @@ across jobs whose names differ. A later change uses the tree to plan how to
 apply a change to a running job.
 
 Inputs are what `create_job` produces: names unique within each collection,
-no empty optional lists or maps except a host requirement list (`amounts` or
-`attributes` may be empty when the other is not), and symbol tables as
-`create_job` writes them. For other inputs the diff still returns a tree and
-never panics, but the tree may not attribute every change.
+no empty optional lists or maps outside the keyed collections (see
+"Identity"), and symbol tables as `create_job` writes them. For other inputs
+the diff still returns a tree and never panics, but the tree may not
+attribute every change.
 
 ## Nodes
 
@@ -63,6 +63,14 @@ Elements of collections are matched by identity, not position.
 An element's segment is `collection[name]`, with the name written as is,
 unescaped.
 
+The collections whose children column says "field changes" are keyed
+collections: their elements get no node. Each entry that differs is one field
+change `collection[KEY]`, whose `before` and `after` are the entry without
+its `name`, or `null` when the entry is absent on that side. When the two
+collections differ but no entry does, such as an absent list against an empty
+one, the collection is one whole-value field change (`amounts: null -> []`).
+So a keyed collection never leaves its node unattributed.
+
 ## Order
 
 A list's `PartialEq` depends on order, so a list whose shared names are in a
@@ -80,11 +88,9 @@ order. A reordered task parameter definition list with no `combination` is
 A step's or environment's actions keep their format strings unresolved:
 `command` stays `{{Param.Scene}}`. The value a parameter contributes is in
 `resolvedSymTab`, which `create_job` filters to the symbols that step or
-environment references. Each symbol whose entry differs is one field change
-`resolvedSymTab[NAME]`, the way `variables[K]` works: `before` and `after`
-are that entry without its `name` (`{"type":...,"value":...}`), or `null`
-when the symbol is absent on that side. A table that is not an array of
-named entries is one whole-value `resolvedSymTab` change.
+environment references. It is a keyed collection, so a symbol whose entry
+differs is one field change `resolvedSymTab[NAME]`, with sides such as
+`{"type":...,"value":...}`.
 
 So a job parameter change shows on its `parameters[K]` node and on exactly
 the job environments and steps that read it. A step environment has no
@@ -93,6 +99,10 @@ value equality ignores, such as a float's spelling (`2.5` to `2.50`), shows
 only on the readers, and `parameters[K]` stays `Unchanged`. A parameter that
 only feeds a template-scope field, such as a task parameter range, shows on
 that field instead.
+
+`diff_environments` can compare a job environment with a step environment.
+A step environment carries no table, so the job environment's table shows as
+a whole-value change (`resolvedSymTab: [] -> null`) or as its entries.
 
 ## Values
 
@@ -127,14 +137,14 @@ unchanged tree writes nothing.
 | Job | (root) | `name`, `description`, `extensions`, `jobEnvironments.order`, `steps.order` | `parameters[K]`, `jobEnvironments[N]`, `steps[N]` |
 | JobParameter | `parameters[K]` | `name`, `type`, `value` | none |
 | Step | `steps[N]` | `name`, `description`, `dependencies`, `resolvedSymTab[NAME]` (or `resolvedSymTab`), `stepEnvironments.order` | `script`, `stepEnvironments[N]`, `parameterSpace`, `hostRequirements` |
-| Environment | `jobEnvironments[N]`, `stepEnvironments[N]` | `name`, `description`, `variables[K]`, `resolvedSymTab[NAME]` (or `resolvedSymTab`) | `script` |
+| Environment | `jobEnvironments[N]`, `stepEnvironments[N]` | `name`, `description`, `variables[K]` (or `variables`), `resolvedSymTab[NAME]` (or `resolvedSymTab`) | `script` |
 | StepScript | `script` | `let`, `embeddedFiles.order` | `onRun`, `embeddedFiles[N]` |
 | EnvironmentScript | `script` | `let`, `embeddedFiles.order` | `onEnter`, `onWrapEnvEnter`, `onWrapTaskRun`, `onWrapEnvExit`, `onExit`, `embeddedFiles[N]` |
 | Action | `onRun`, `onEnter`, ... | `command`, `args`, `timeout`, `cancelation` | none |
 | EmbeddedFile | `embeddedFiles[N]` | `name`, `type`, `filename`, `data`, `runnable`, `endOfLine` | none |
 | ParameterSpace | `parameterSpace` | `combination` | `taskParameterDefinitions[K]` |
 | TaskParameter | `taskParameterDefinitions[K]` | `type`, `range`, `chunks` | none |
-| HostRequirements | `hostRequirements` | `amounts` (absent against empty), `amounts.order`, `amounts[N]`, `attributes` (absent against empty), `attributes.order`, `attributes[N]` | none |
+| HostRequirements | `hostRequirements` | `amounts.order`, `amounts[N]` (or `amounts`), `attributes.order`, `attributes[N]` (or `attributes`) | none |
 
 ## Out of scope
 

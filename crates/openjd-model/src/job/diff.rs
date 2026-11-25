@@ -12,7 +12,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
-use openjd_expr::symbol_table::SerializedSymbolTable;
 use openjd_expr::value::Float64;
 use serde::Serialize;
 use serde_json::Value;
@@ -44,8 +43,10 @@ pub enum DiffStatus {
 pub struct FieldChange {
     /// The field's camelCase name, as the job serializes it. An entry of a
     /// keyed collection reads `variables[KEY]`, `amounts[NAME]`,
-    /// `attributes[NAME]` or `resolvedSymTab[NAME]`; the relative order of
-    /// a named list's shared elements reads `<collection>.order`.
+    /// `attributes[NAME]` or `resolvedSymTab[NAME]`, or the collection's
+    /// name when the whole collection differs and no entry does; the
+    /// relative order of a named list's shared elements reads
+    /// `<collection>.order`.
     pub field: String,
     /// The old value as JSON; `null` when the field is absent.
     pub before: Value,
@@ -155,20 +156,6 @@ impl DiffNode {
         for (key, x, y) in self.match_names(collection, a, b, name) {
             self.children
                 .extend(pair(format!("{collection}[{key}]"), x, y, expand));
-        }
-    }
-
-    /// One `<collection>[name]` field change per differing element of a
-    /// named list whose elements get no node of their own.
-    fn named_fields<T: PartialEq + Serialize>(
-        &mut self,
-        collection: &str,
-        a: Option<&[T]>,
-        b: Option<&[T]>,
-        name: fn(&T) -> &str,
-    ) {
-        for (key, x, y) in self.match_names(collection, a, b, name) {
-            self.field(&format!("{collection}[{key}]"), &x, &y);
         }
     }
 }
@@ -296,42 +283,80 @@ fn by_key<'a, V>(
     pairs
 }
 
-/// Record one `resolvedSymTab[NAME]` field change per symbol whose entry
-/// differs, each side the entry without its `name`, or `null` when absent;
-/// or one whole `resolvedSymTab` change when a side is not an array of
-/// named entries.
-fn symtab_fields(
+/// How a keyed collection is keyed, and the order of its entry changes.
+#[derive(Clone, Copy, PartialEq)]
+enum Keys {
+    /// A map, by key, in key order.
+    Map,
+    /// A list, by element `name`, in name order.
+    Names,
+    /// A list, by element `name`, in old-side order then new-only; records
+    /// `<collection>.order`.
+    OrderedNames,
+}
+
+/// Record one `<collection>[KEY]` per differing entry, each side the entry
+/// without its `name`, or `null` when absent. When the two values differ but
+/// no entry does, such as absent against empty, the whole collection is one
+/// change, so a keyed collection never leaves its node unattributed.
+fn keyed_fields<T: PartialEq + Serialize + ?Sized>(
     n: &mut DiffNode,
-    a: &Option<SerializedSymbolTable>,
-    b: &Option<SerializedSymbolTable>,
+    collection: &str,
+    a: &T,
+    b: &T,
+    keys: Keys,
 ) {
-    match (symtab_entries(a), symtab_entries(b)) {
-        (Some(x), Some(y)) => {
-            for (key, (x, y)) in by_key(&x, &y) {
-                n.field(&format!("resolvedSymTab[{key}]"), &x, &y);
-            }
+    if a == b {
+        return;
+    }
+    let (a, b) = (to_json(a), to_json(b));
+    let start = n.field_changes.len();
+    if let (Some(x), Some(y)) = (entries(&a, keys), entries(&b, keys)) {
+        let pairs: Vec<_> = if keys == Keys::OrderedNames {
+            n.match_names(collection, Some(&x), Some(&y), |e| &e.0)
+                .into_iter()
+                .map(|(k, x, y)| (k, x.map(|e| &e.1), y.map(|e| &e.1)))
+                .collect()
+        } else {
+            by_key(x.iter().map(|(k, v)| (k, v)), y.iter().map(|(k, v)| (k, v)))
+                .into_iter()
+                .map(|(k, (x, y))| (k, x, y))
+                .collect()
+        };
+        for (key, x, y) in pairs {
+            n.field(&format!("{collection}[{key}]"), &x, &y);
         }
-        _ => n.field("resolvedSymTab", a, b),
+    }
+    if n.field_changes.len() == start {
+        n.field_changes.push(FieldChange {
+            field: collection.to_string(),
+            before: a,
+            after: b,
+        });
     }
 }
 
-/// A symbol table's entries by name, each without its `name`. `None` unless
-/// every entry is an object with a string `name`.
-fn symtab_entries(t: &Option<SerializedSymbolTable>) -> Option<BTreeMap<String, Value>> {
-    let Some(t) = t else {
-        return Some(BTreeMap::new());
-    };
-    t.as_value()
-        .as_array()?
-        .iter()
-        .map(|entry| {
-            let mut entry = entry.as_object()?.clone();
-            let Value::String(name) = entry.remove("name")? else {
-                return None;
-            };
-            Some((name, Value::Object(entry)))
-        })
-        .collect()
+/// A collection's entries by key: none when absent, a map's own entries, or
+/// a list's elements by their string `name`, each without it. `None` for a
+/// value of another shape.
+fn entries(v: &Value, keys: Keys) -> Option<Vec<(String, Value)>> {
+    match (v, keys) {
+        (Value::Null, _) => Some(Vec::new()),
+        (Value::Object(map), Keys::Map) => {
+            Some(map.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        }
+        (Value::Array(list), Keys::Names | Keys::OrderedNames) => list
+            .iter()
+            .map(|element| {
+                let mut element = element.as_object()?.clone();
+                let Value::String(name) = element.remove("name")? else {
+                    return None;
+                };
+                Some((name, Value::Object(element)))
+            })
+            .collect(),
+        _ => None,
+    }
 }
 
 // Each expand_* destructures its type without `..`, so a new model field
@@ -396,7 +421,13 @@ fn expand_step(n: &mut DiffNode, a: &Step, b: &Step) {
     n.field("name", name, &b.name);
     n.field("description", description, &b.description);
     n.field("dependencies", dependencies, &b.dependencies);
-    symtab_fields(n, resolved_symtab, &b.resolved_symtab);
+    keyed_fields(
+        n,
+        "resolvedSymTab",
+        resolved_symtab,
+        &b.resolved_symtab,
+        Keys::Names,
+    );
     n.children.push(compare(
         "script".into(),
         script,
@@ -450,10 +481,14 @@ fn expand_environment(n: &mut DiffNode, a: &Environment, b: &Environment) {
     } = a;
     n.field("name", name, &b.name);
     n.field("description", description, &b.description);
-    for (key, (x, y)) in by_key(variables.iter().flatten(), b.variables.iter().flatten()) {
-        n.field(&format!("variables[{key}]"), &x, &y);
-    }
-    symtab_fields(n, resolved_symtab, &b.resolved_symtab);
+    keyed_fields(n, "variables", variables, &b.variables, Keys::Map);
+    keyed_fields(
+        n,
+        "resolvedSymTab",
+        resolved_symtab,
+        &b.resolved_symtab,
+        Keys::Names,
+    );
     n.children.extend(pair(
         "script".into(),
         script.as_ref(),
@@ -600,29 +635,12 @@ fn expand_host_requirements(n: &mut DiffNode, a: &HostRequirements, b: &HostRequ
         amounts,
         attributes,
     } = a;
-    empty_list_field(n, "amounts", amounts, &b.amounts);
-    n.named_fields("amounts", amounts.as_deref(), b.amounts.as_deref(), |r| {
-        &r.name
-    });
-    empty_list_field(n, "attributes", attributes, &b.attributes);
-    n.named_fields(
+    keyed_fields(n, "amounts", amounts, &b.amounts, Keys::OrderedNames);
+    keyed_fields(
+        n,
         "attributes",
-        attributes.as_deref(),
-        b.attributes.as_deref(),
-        |r| &r.name,
+        attributes,
+        &b.attributes,
+        Keys::OrderedNames,
     );
-}
-
-/// Record a whole `name` change between an absent and an empty list, which
-/// pair no elements. `create_job` keeps an empty host requirement list when
-/// the other one is not empty.
-fn empty_list_field<T: PartialEq + Serialize>(
-    n: &mut DiffNode,
-    name: &str,
-    a: &Option<Vec<T>>,
-    b: &Option<Vec<T>>,
-) {
-    if a.as_ref().is_none_or(Vec::is_empty) && b.as_ref().is_none_or(Vec::is_empty) {
-        n.field(name, a, b);
-    }
 }
