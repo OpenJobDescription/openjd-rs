@@ -224,7 +224,7 @@ fn assert_wall_clock_timestamps(format: &str, tz: &str, offset_seconds: i32, utc
             "timestamp {ts:?} does not match {shape}, stdout: {stdout}"
         );
         let civil: jiff::civil::DateTime = ts.trim_end_matches('Z').parse().unwrap();
-        let instant = civil.to_zoned(zone.clone()).unwrap().timestamp();
+        let instant = civil.to_zoned_datetime(zone.clone()).unwrap().timestamp();
         assert!(
             earliest <= instant && instant <= latest,
             "timestamp {ts:?} at UTC offset {offset_seconds}s is {instant}, \
