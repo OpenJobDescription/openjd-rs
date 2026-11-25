@@ -236,34 +236,37 @@ skip. Whether a name exists does not depend on any value, so every run that
 evaluates that sub-expression fails. `specs/expr/values.md` and
 `specs/expr/evaluator.md` state both rules for the constructs they cover.
 
-**Q14. Performance changes.** A change made for performance, and any claim
-that something is faster or uses less memory, MUST meet these rules.
+**Q14. Performance changes.** A change made for performance, and every speed
+or memory claim such a change makes, MUST meet these rules. Q14 judges
+changes; a whole-crate evaluation does not apply it.
 `skills/implement-change/SKILL.md` § "Performance guideline" gives the
 techniques and tools.
 
 - **Output is unchanged.** Every message, path, caret, count, and order MUST
   be the same as before, for valid and invalid input, under any
   `CallerLimits` and extension set. Passing tests is not enough evidence: the
-  claim needs a differential run of the old and new binaries (§3).
+  claim needs a differential of the old and new code (§3).
 - **Claims count work.** A speed claim MUST cite counted work (instructions,
   evaluations, or allocations) measured on both sides. Wall time supports a
   claim only when the two binaries run interleaved, with a null test (the same
   binary at two paths) and a no-op control (`--version` or a minimal
   template). A count without a time confirmation is not enough either: a
   change can do less work and still run slower.
-- **Peak memory does not rise.** A change that keeps a value alive longer
-  (sharing, caching, buffering errors to keep their order) MUST NOT raise peak
-  memory, or MUST state the increase and bound it with a named constant. A
-  counting-allocator test that fails on the regression MUST pin the bound.
-  Error messages can embed evaluated values, so they count.
+- **Peak memory does not rise.** A change MUST NOT raise peak memory unless
+  it states the increase and bounds it with a named constant, which a
+  counting-allocator test pins. A change that keeps a value alive longer
+  (sharing, caching, buffering errors to keep their order) MUST show its peak
+  with such a test either way. Error messages can embed evaluated values, so
+  they count.
 - **Shortcuts take only the proven path.** A shared or cached result is used
   only where it is identical to what the original code computed, such as an
   evaluation that reported nothing. Every other path keeps the original
   sequence.
-- **Only removed work is a speed-up.** Splitting, moving, or inlining code is
-  speed-neutral in release builds and MUST NOT be claimed as faster. Splitting
-  an `async fn` inside a CPU-bound loop adds a state machine per iteration and
-  is not neutral.
+- **Removed work is the speed-up.** Splitting, moving, or inlining code is
+  presumed speed-neutral within a crate in release builds; a claim that it is
+  faster needs the counted evidence above like any other. Splitting an
+  `async fn` inside a CPU-bound loop adds a state machine per iteration and is
+  not neutral.
 
 Q14 does not ask for speed. Q6 still balances performance against
 readability; Q14 governs how a performance change is made and proven.
@@ -285,7 +288,7 @@ claim needs a specific kind of evidence:
 | "this is fixed" | the test that failed before the fix, now passing |
 | "these two implementations diverge" | the same input run through both paths, with both outputs |
 | "this pair is pinned" | the equivalence test, by name |
-| "output is unchanged" (Q14) | a differential run of the old and new binaries over the conformance templates and edge cases, with the invocation count and `0 differences` |
+| "output is unchanged" (Q14) | a differential of the old and new code with the invocation count and `0 differences`: the binaries over the conformance templates and edge cases for what the CLI reaches, and library-level probes for other `CallerLimits` and for crates the CLI does not drive |
 | "this is faster" (Q14) | counted work on both sides (for example a callgrind instruction diff), plus interleaved wall time with a null test and a no-op control |
 | "memory is not higher" (Q14) | peak heap from a counting allocator on both sides, one process per workload |
 
@@ -365,8 +368,8 @@ leaving the file behind.
 1. When several verifiers run, they MUST get disjoint slices and different
    angles, chosen from: spec fidelity (Q1, Q2, Q8, Q10), implementation
    correctness (Q3, Q5, Q6, Q11, Q12, Q13), test adequacy by mutation (Q4),
-   Python divergence (Q7), and performance (Q14: parity differential and
-   peak memory).
+   and Python divergence (Q7), plus, for a performance change only,
+   performance (Q14: parity differential and peak memory).
 2. Each verifier MUST be told that it is one of several and will not see the
    others' results, so that it checks rather than defers.
 3. Each finding comes back labelled as in §4.

@@ -349,12 +349,13 @@ performance, or one that changes how long a value lives on a hot path.
    counter (callgrind works without hardware counters) on at least a minimal
    template and a large one, and compare per function. Instruction counts do
    not depend on machine load or binary layout.
-3. **Confirm with time.** Run the old and new binaries interleaved, with a
-   null test (the same binary at two paths) and a no-op control. A count can
-   fall while time rises; a faster allocator did exactly that here.
-4. **Prove output is unchanged.** Run both binaries over the conformance
-   templates and generated edge cases (valid and invalid, several extension
-   sets) and diff everything they print. Add full-message tests for the paths
+3. **Confirm with time,** with the controls Q14 and §3 name. A count can fall
+   while time rises: a faster global allocator cut instructions and made short
+   CLI runs slower.
+4. **Prove output is unchanged.** Diff the old and new code as §3 describes:
+   the binaries over the conformance templates and generated edge cases
+   (valid and invalid, several extension sets), and library-level probes
+   where the CLI does not reach. Add full-message tests for the paths
    the change touches, with the expected text captured from the old code; they
    must pass there too.
 5. **Price what stays alive.** For any sharing or caching, write down what is
@@ -371,8 +372,8 @@ performance, or one that changes how long a value lives on a hot path.
 
 ### Performance review by a sub-agent
 
-For a performance change, give one auditor the performance angle (Q14)
-instead of, or in addition to, the usual angles. Its brief: build both sides
+For a performance change, add one auditor with the performance angle (Q14)
+to the tier's auditors, who keep their angles, including mutation (Q4). Its brief: build both sides
 in its own worktrees; rerun the output differential, including library-level
 probes under `CallerLimits`; and probe peak memory with a large temporary at
 each later site while something from an earlier site is still alive, for each
@@ -393,6 +394,6 @@ audit goes. It never permits skipping one.
 | Dependency or lockfile bump | 1 | Q9 (`cargo deny`, MSRV), Q2 (API breakage in dependents' use), Q8 |
 | Ordinary code change inside one crate | 1 | All criteria, Q4 with at least one mutation per new behavior |
 | Public API change, cross-crate change, or new feature | 2–4 with disjoint angles (§6 "Verifier rules", item 1), each mutation auditor in its own worktree | All criteria |
-| Performance change (`perf:`) | The tier of the code it touches, with one auditor on the performance angle (§ "Performance guideline") | Q14, Q4, and the tier's criteria |
+| Performance change (`perf:`), or a change to how long a value lives on a hot path | The tier of the code it touches, plus one auditor on the performance angle (§ "Performance guideline") | The tier's criteria, and Q14 for the added auditor |
 
 When in doubt, use the deeper tier.
