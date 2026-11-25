@@ -333,8 +333,8 @@ reviewer asked for):
 
 ## Performance guideline
 
-A change made for performance follows quality-criteria Q14. This section is
-the method. Profiling compiles and measures both sides, so use these steps
+A change made for performance follows quality-criteria Q14. This section is the
+method. Profiling compiles and measures both sides, so use these steps
 sparingly: only for a change whose purpose is performance.
 
 ### Techniques
@@ -346,40 +346,42 @@ sparingly: only for a change whose purpose is performance.
    presumed neutral; a speed claim for it needs Q14's counted evidence.
 2. **Count before and after.** Profile a release build with an instruction
    counter (callgrind works without hardware counters) on at least a minimal
-   input and a large one (for the CLI, a minimal template and a large one), and compare per function. Instruction counts do
-   not depend on machine load or binary layout.
+   input and a large one (for the CLI, a minimal template and a large one), and
+   compare per function. Instruction counts do not depend on machine load or
+   binary layout.
 3. **Confirm with time,** with the controls Q14 and §3 name. A count can fall
    while time rises: a faster global allocator cut instructions and made short
    CLI runs slower.
 4. **Prove output is unchanged.** Diff the old and new code as §3 describes:
-   the binaries over the conformance templates and generated edge cases
-   (valid and invalid, several extension sets), and library-level probes
-   where the CLI does not reach. Add full-message tests for the paths
-   the change touches, with the expected text captured from the old code; they
-   must pass there too.
+   the binaries over the conformance templates and generated edge cases (valid
+   and invalid, several extension sets), and library-level probes where the CLI
+   does not reach. Add full-message tests for the paths the change touches,
+   with the expected text captured from the old code; they must pass there too.
 5. **Price what stays alive.** For any sharing or caching, write down what is
    kept and until when. Keep the original loop structure, share only between
    adjacent sites, and drop what the old code dropped where it dropped it.
-   Report errors into the caller's collection rather than buffering them.
-   When something must be kept across steps or passes, bound it with a named
+   Report errors into the caller's collection rather than buffering them. When
+   something must be kept across steps or passes, bound it with a named
    constant and measure the real bytes kept, not an estimate.
-6. **Pin memory with a test.** Add a counting-allocator test (one `#[test]`
-   in its own test binary, as in `crates/openjd-snapshots/tests/decode_memory.rs`)
-   with limits of the old peak plus any stated budget. Put a large temporary at
-   each site that runs after the changed one, and large error text alive
-   across later sites; show the test fails on the regression it guards.
+6. **Pin memory with a test.** When the change shares, caches, buffers, or
+   raises peak memory, add a counting-allocator test (one `#[test]` in its own
+   test binary, as in `crates/openjd-snapshots/tests/decode_memory.rs`) with
+   limits of the old peak plus any stated budget. Put a large temporary at each
+   site that runs after the changed one, and large error text alive across
+   later sites; show the test fails on the regression it guards.
 
 ### Performance review by a sub-agent
 
-For a performance change, add one auditor with the performance angle (Q14)
-to the tier's auditors, who keep their angles, including mutation (Q4). Its
-brief: build both sides in its own worktrees; rerun the output differential, including library-level
-probes under `CallerLimits`; and probe peak memory with a large temporary at
+For a performance change, add one auditor with the performance angle (Q14) to
+the tier's auditors, who keep their angles, including mutation (Q4), and leave
+Q14 to it. Its brief: build both sides in its own worktrees; rerun the output
+differential, including library-level probes under `CallerLimits`; check each
+speed claim's counted evidence; and probe peak memory with a large temporary at
 each later site while something from an earlier site is still alive, for each
 state of the input the change special-cases. The same brief can be run on its
-own as an exploration, before implementing, to find out what a proposed
-sharing would keep alive. Run it once per round at most; it is the most
-expensive angle to compile and measure.
+own as an exploration, before implementing, to find out what a proposed sharing
+would keep alive. Run it once per round at most; it is the most expensive angle
+to compile and measure.
 
 ## Audit depth
 

@@ -369,7 +369,7 @@ leaving the file behind.
    angles, chosen from: spec fidelity (Q1, Q2, Q8, Q10), implementation
    correctness (Q3, Q5, Q6, Q11, Q12, Q13), test adequacy by mutation (Q4),
    and Python divergence (Q7), plus, for a performance change only,
-   performance (Q14: parity differential and peak memory).
+   performance (Q14).
 2. Each verifier MUST be told that it is one of several and will not see the
    others' results, so that it checks rather than defers.
 3. Each finding comes back labelled as in §4.
