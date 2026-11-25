@@ -149,8 +149,8 @@ impl FunctionLibrary {
                 )
             };
             // Clone the base library and register host context on the clone.
-            // The clone is cheap — `FunctionLibrary` holds `Arc<dyn Fn>`
-            // entries in its `HashMap`.
+            // The clone is cheap: `FunctionLibrary` holds each overload list
+            // behind an `Arc`.
             let mut derived = (*base).clone();
             register_host_context_functions(&mut derived, Arc::clone(mapper));
             return Arc::new(derived);

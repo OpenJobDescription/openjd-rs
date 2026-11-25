@@ -1008,7 +1008,11 @@ fn set_conflict_names_the_conflicting_segment() {
         (nested_last.key.as_str(), nested_last.conflict.as_str()),
         ("Q", "Q")
     );
-    st.set("T.X.Y", 1).unwrap_err();
+    let through_value = st.set("T.X.Y", 1).unwrap_err();
+    assert_eq!(
+        (through_value.key.as_str(), through_value.conflict.as_str()),
+        ("T.X.Y", "X")
+    );
     st.set("N.M.T", 1).unwrap();
     let deep_last = st.set("N.M", 2).unwrap_err();
     assert_eq!(

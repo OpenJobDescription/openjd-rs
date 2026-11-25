@@ -38,7 +38,7 @@ pub struct FunctionEntry {
 }
 
 pub struct FunctionLibrary {
-    functions: HashMap<String, Vec<FunctionEntry>>,
+    functions: HashMap<String, Arc<Vec<FunctionEntry>>>,
 }
 ```
 
@@ -495,8 +495,9 @@ other buckets from it per the profile's host-context setting and caches the
 result in a per-profile `Arc` map keyed on the rules-independent portion of the
 profile (see [profile.md § ProfileKey](../../crates/openjd-expr/src/profile.rs)).
 Each name's overload list is shared between a library and its clones and copied
-on the first registration that changes it, so deriving a bucket costs a map of
-reference-count increments rather than a copy of every signature.
+on the first registration that changes it, so deriving a bucket copies the name
+map (its keys and table) while the overload lists stay shared, rather than
+copying every signature.
 
 ```rust
 pub fn for_profile(profile: &ExprProfile) -> Arc<FunctionLibrary>;
