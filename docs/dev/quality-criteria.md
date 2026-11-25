@@ -249,9 +249,9 @@ techniques and tools.
 - **Claims count work.** A speed claim MUST cite counted work (instructions,
   evaluations, or allocations) measured on both sides. Wall time supports a
   claim only when the two binaries run interleaved, with a null test (the same
-  binary at two paths) and a no-op control (`--version` or a minimal
-  template). A count without a time confirmation is not enough either: a
-  change can do less work and still run slower.
+  binary at two paths) and a no-op control (a minimal input: `--version` or a
+  minimal template for the CLI). A count without a time confirmation is not
+  enough either: a change can do less work and still run slower.
 - **Peak memory does not rise.** A change MUST NOT raise peak memory unless
   it states the increase and bounds it with a named constant, which a
   counting-allocator test pins. A change that keeps a value alive longer

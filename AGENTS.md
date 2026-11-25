@@ -224,7 +224,7 @@ This repo requires [conventional commit](https://www.conventionalcommits.org/en/
 
 Types: `feat`, `fix`, `test`, `docs`, `refactor`, `ci`, `chore`, `perf`
 
-A `perf` change and any speed or memory claim follow
+A `perf` change, and the speed or memory claims it makes, follow
 [quality-criteria Q14](docs/dev/quality-criteria.md) and the
 `implement-change` skill's "Performance guideline".
 
