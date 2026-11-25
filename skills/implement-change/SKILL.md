@@ -349,7 +349,7 @@ steps sparingly: only for a change whose purpose is performance.
    counter (callgrind works without hardware counters) on at least a minimal
    input and a large one (for the CLI, a minimal template and a large one), and
    compare per function. Instruction counts do not depend on machine load or
-   binary layout, but vary by about 0.1% between runs of the same binary.
+   binary layout; `docs/dev/performance.md` says how much they still vary.
 3. **Confirm with time,** with the controls Q14 and §3 name. A count can fall
    while time rises: a faster global allocator cut instructions and made short
    CLI runs slower.

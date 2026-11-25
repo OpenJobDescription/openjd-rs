@@ -38,11 +38,14 @@ MIN=../openjd-specifications/conformance-tests/2023-09/base/job_templates/1.1--m
 ```bash
 uv run scripts/perf/difftest.py "$OLD" "$NEW" \
     ../openjd-specifications/conformance-tests/2023-09 \
-    --extensions '' --extensions EXPR,FEATURE_BUNDLE_1,TASK_CHUNKING
+    --extensions default --extensions '' --extensions EXPR,FEATURE_BUNDLE_1
 ```
 
 It runs `check` (and `summary` for job templates) on every template, once per
-extension set, and compares exit code, stdout and stderr. Add a directory of
+extension set, and compares exit code, stdout and stderr. `default` runs
+without `--extensions`, so every extension is enabled; keep it in the list, or
+templates that need an extension stop at the extension check and the code
+after it is never compared. Add a directory of
 your own edge cases for the paths the change touches: valid and invalid
 templates, errors at each site, each state of any input the change
 special-cases. The result to quote is `N invocations, 0 differences`.
@@ -96,6 +99,12 @@ so nothing else allocates while it measures. Copy the allocator from
 For each case, run the operation inside `peak_during`, and assert the base's
 measured peak plus any budget the change states. Write the test on the change,
 copy it into the base worktree, and record the base's peaks in the limits.
+
+Process-wide caches (the built-in function library, for one) are built by
+whichever case runs first, so later cases in the same process do not see that
+cost. Keep the case order the same on both sides, and measure a per-process
+cost in its own process: one case per test binary, or one case per run
+selected by an environment variable.
 
 The cases that find regressions keep something large alive while a later step
 does something large: a large value or a large error message (`y = int(x)`

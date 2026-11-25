@@ -27,7 +27,7 @@
 # Example:
 #   uv run scripts/perf/difftest.py /tmp/openjd-main target/release/openjd \
 #       ../openjd-specifications/conformance-tests/2023-09 \
-#       --extensions '' --extensions EXPR,FEATURE_BUNDLE_1
+#       --extensions default --extensions '' --extensions EXPR,FEATURE_BUNDLE_1
 #
 # CallerLimits cannot be set from the CLI, so library behaviour under other
 # limits needs a library-level probe (see docs/dev/performance.md).
@@ -151,7 +151,10 @@ def main() -> int:
         "--extensions",
         action="append",
         metavar="SET",
-        help="pass --extensions SET (repeatable; default: the CLI's default set)",
+        help=(
+            "pass --extensions SET (repeatable); 'default' runs without the flag, "
+            "which is also what happens when this option is not given"
+        ),
     )
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     ap.add_argument(
@@ -169,6 +172,7 @@ def main() -> int:
     if opts.timeout <= 0:
         sys.exit("--timeout must be positive")
     ext_sets = [None] if opts.extensions is None else opts.extensions
+    ext_sets = [None if e == "default" else e for e in ext_sets]
 
     with tempfile.TemporaryDirectory(prefix="openjd-difftest-") as scratch:
         templates = collect(opts.dirs, scratch)

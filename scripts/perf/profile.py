@@ -7,9 +7,8 @@
 #
 # Instruction counts do not depend on machine load or binary layout, so a
 # difference between two profiles is a difference in work done
-# (quality-criteria Q14). They still vary by about 0.1% between runs of the
-# same binary (randomly seeded hash maps, worker threads): profile each side
-# twice and claim only differences well above that spread. This reads callgrind's output format directly
+# (quality-criteria Q14). They still vary a little between runs of the same
+# binary; docs/dev/performance.md says how to read a difference. This reads callgrind's output format directly
 # (https://valgrind.org/docs/manual/cl-format.html), so it does not depend on
 # the text layout of `callgrind_annotate`, which changes between releases.
 #
@@ -135,14 +134,21 @@ def load(path: str) -> Profile:
     def fail(lineno: int, what: str) -> None:
         sys.exit(f"{path}:{lineno}: {what}; not a callgrind output file?")
 
+    def refuse(lineno: int, what: str) -> None:
+        sys.exit(f"{path}:{lineno}: {what}")
+
     event, total, npos = "", 0, 1
     prof = None
     fn = ""
     pending_call: tuple[str, int] | None = None  # (callee, count)
     seen_header = False
-    if not os.path.isfile(path):
-        sys.exit(f"{path}: no such file")
-    with open(path, encoding="utf-8", errors="replace") as fh:
+    if os.path.isdir(path):
+        sys.exit(f"{path}: is a directory")
+    try:
+        fh = open(path, encoding="utf-8", errors="replace")  # noqa: SIM115
+    except OSError as e:
+        sys.exit(f"{path}: {e.strerror}")
+    with fh:
         for lineno, raw in enumerate(fh, 1):
             line = raw.rstrip("\n")
             if not line or line.startswith("#"):
@@ -180,8 +186,16 @@ def load(path: str) -> Profile:
                     fail(lineno, f"unreadable {line[:60]!r}")
             elif key in kind_of:
                 resolve(key, value)  # keep the compression tables complete
-            elif line.startswith("part:") and line.split()[1:2] != ["1"]:
-                fail(lineno, "a later part of a split profile; profile with one part")
+            elif (line.startswith("part:") and line.split()[1:2] != ["1"]) or (
+                line.startswith("desc: Trigger:")
+                and line != "desc: Trigger: Program termination"
+            ):
+                refuse(
+                    lineno,
+                    "one part of a split profile (a --dump-before or --dump-after "
+                    "option, perhaps from VALGRIND_OPTS or a .valgrindrc); "
+                    "profile with one part",
+                )
             elif line.startswith(("version:", "events:")):
                 seen_header = True
                 if line.startswith("events:"):
@@ -195,9 +209,24 @@ def load(path: str) -> Profile:
                     fail(lineno, f"unreadable {line[:60]!r}")
     if prof is None:
         sys.exit(f"{path}: no cost lines; not a callgrind file?")
-    if not prof.total:
-        prof.total = sum(prof.self_cost.values())
+    counted = sum(prof.self_cost.values())
+    if prof.total and counted != prof.total:
+        sys.exit(
+            f"{path}: function costs add up to {counted:,} but the header says "
+            f"{prof.total:,}; the file is truncated or incomplete"
+        )
+    prof.total = counted
     return prof
+
+
+def is_callgrind_file(path: str) -> bool:
+    if not os.path.isfile(path) or os.path.islink(path):
+        return False
+    try:
+        with open(path, "rb") as fh:
+            return fh.readline().startswith(b"# callgrind format")
+    except OSError:
+        return False
 
 
 def tool(name: str) -> str:
@@ -250,12 +279,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not args.command:
         sys.exit("run: give the command after '--'")
     # Remove an earlier profile first, so a run that fails cannot report it.
-    try:
-        os.remove(args.out)
-    except FileNotFoundError:
-        pass
-    except OSError as e:
-        sys.exit(f"{args.out}: {e.strerror}")
+    # Only a callgrind file is removed: `run -- BINARY ...` (OUT left out)
+    # binds the binary to OUT, and must not delete it.
+    if os.path.lexists(args.out):
+        if not is_callgrind_file(args.out):
+            sys.exit(
+                f"{args.out} exists and is not a callgrind file; refusing to overwrite it"
+            )
+        try:
+            os.remove(args.out)
+        except OSError as e:
+            sys.exit(f"{args.out}: {e.strerror}")
     proc = subprocess.run(
         [
             tool("valgrind"),
