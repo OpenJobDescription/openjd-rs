@@ -65,6 +65,7 @@ AREAS = [
     ("model", r"openjd_model::"),
     ("sessions", r"openjd_sessions::"),
     ("snapshots", r"openjd_snapshots::"),
+    ("cli", r"^<?openjd::"),
     ("dynamic loader", r"^(_dl_|do_lookup_x|check_match|strcmp$)"),
     ("std/core/alloc other", r"^<?(core|alloc|std)::"),
 ]
@@ -137,7 +138,9 @@ def load(path: str) -> Profile:
     def refuse(lineno: int, what: str) -> None:
         sys.exit(f"{path}:{lineno}: {what}")
 
-    event, total, npos = "", 0, 1
+    event, npos = "", 1
+    summary: int | None = None
+    totals: int | None = None
     prof = None
     fn = ""
     pending_call: tuple[str, int] | None = None  # (callee, count)
@@ -158,7 +161,7 @@ def load(path: str) -> Profile:
                 if not seen_header:
                     fail(lineno, "cost line before any 'version:' or 'events:' header")
                 if prof is None:
-                    prof = Profile(event or "Ir", total)
+                    prof = Profile(event or "Ir", 0)
                 try:
                     cost = _first_cost(line.split(), npos)
                 except ValueError:
@@ -204,16 +207,23 @@ def load(path: str) -> Profile:
                 npos = len(line.split()) - 1
             elif line.startswith(("summary:", "totals:")):
                 try:
-                    total = int(line.split()[1])
+                    n = int(line.split()[1])
                 except (ValueError, IndexError):
                     fail(lineno, f"unreadable {line[:60]!r}")
+                if line.startswith("summary:"):
+                    summary = n
+                else:
+                    totals = n
     if prof is None:
         sys.exit(f"{path}: no cost lines; not a callgrind file?")
     counted = sum(prof.self_cost.values())
-    if prof.total and counted != prof.total:
+    # `totals:` (written last) is the sum of the cost lines; `summary:` (in the
+    # header) can differ from it slightly under --cache-sim.
+    expected = totals if totals is not None else summary
+    if expected is not None and counted != expected:
         sys.exit(
-            f"{path}: function costs add up to {counted:,} but the header says "
-            f"{prof.total:,}; the file is truncated or incomplete"
+            f"{path}: function costs add up to {counted:,} but the file says "
+            f"{expected:,}; the file is truncated or incomplete"
         )
     prof.total = counted
     return prof
@@ -272,7 +282,7 @@ def short(name: str, width: int = 120) -> str:
 
 
 def is_openjd(name: str) -> bool:
-    return bool(re.match(r"^<?openjd_", name)) and "{closure" not in name
+    return bool(re.match(r"^<?openjd(_|::)", name)) and "{closure" not in name
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -294,7 +304,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         [
             tool("valgrind"),
             "--tool=callgrind",
-            f"--callgrind-out-file={args.out}",
+            # valgrind expands %p and %q{VAR} here; escape them so the file
+            # written is the OUT checked above.
+            f"--callgrind-out-file={args.out.replace('%', '%%')}",
             # One file for the whole run, whatever VALGRIND_OPTS or a
             # .valgrindrc asks for; load() reads a single part.
             "--dump-every-bb=0",

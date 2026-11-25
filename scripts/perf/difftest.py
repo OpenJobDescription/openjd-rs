@@ -77,7 +77,7 @@ def collect(dirs: list[str], scratch: str) -> list[str]:
 def is_job_template(path: str) -> bool:
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
-            return "jobtemplate-" in fh.read(8192)
+            return "jobtemplate-" in fh.read()
     except OSError as e:
         sys.exit(f"{path}: {e.strerror}")
 
@@ -140,6 +140,42 @@ def show(args: list[str], a: Result, b: Result) -> str:
     return "\n".join(lines)
 
 
+PROBE_TEMPLATE = """\
+specificationVersion: jobtemplate-2023-09
+name: probe
+steps:
+- name: s
+  script:
+    actions:
+      onRun:
+        command: echo
+"""
+
+
+def check_extension_sets(
+    old: str, new: str, ext_sets: list, scratch: str, timeout: float
+) -> None:
+    """Exit unless both binaries accept every extension set.
+
+    A set they reject (a misspelt name) fails every template the same way on
+    both sides, which would read as "0 differences".
+    """
+    probe = os.path.join(scratch, "extension-probe.yaml")
+    with open(probe, "w", encoding="utf-8") as fh:
+        fh.write(PROBE_TEMPLATE)
+    for ext in ext_sets:
+        if ext is None:
+            continue
+        for b in (old, new):
+            code, out, err = run(b, ["check", probe, "--extensions", ext], timeout)
+            if code != 0:
+                msg = (err or out).decode(errors="replace").strip().splitlines()
+                sys.exit(
+                    f"{b} rejects --extensions {ext!r} on a minimal template: "
+                    f"{msg[0] if msg else f'exit {code}'}"
+                )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Compare two openjd binaries' output over many templates."
@@ -175,6 +211,7 @@ def main() -> int:
     ext_sets = [None if e == "default" else e for e in ext_sets]
 
     with tempfile.TemporaryDirectory(prefix="openjd-difftest-") as scratch:
+        check_extension_sets(opts.old, opts.new, ext_sets, scratch, opts.timeout)
         templates = collect(opts.dirs, scratch)
         if not templates:
             sys.exit(f"no templates found under {', '.join(opts.dirs)}")

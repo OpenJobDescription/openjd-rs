@@ -291,7 +291,7 @@ claim needs a specific kind of evidence:
 | "this pair is pinned" | the equivalence test, by name |
 | "output is unchanged" (Q14) | a differential of the old and new code with the invocation count and `0 differences`: the binaries over the conformance templates and edge cases for what the CLI reaches, and library-level probes for other `CallerLimits` and for crates the CLI does not drive |
 | "this is faster" (Q14) | counted work on both sides (for example a callgrind instruction diff), plus interleaved wall time with a null test and a no-op control |
-| "memory is not higher" (Q14) | peak heap from a counting allocator on both sides, one process per workload |
+| "memory is not higher" (Q14) | peak heap from a counting allocator on both sides, the same cases in the same order, and per-process costs measured in their own process |
 
 The bug, untested, Python-divergence, dead-code, fixed,
 two-implementation-divergence, and Q14 claims MUST be established by

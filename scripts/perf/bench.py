@@ -14,7 +14,8 @@
 # work with scripts/perf/profile.py.
 #
 # Usage:
-#   scripts/perf/bench.py [-n RUNS] [--warmup N] LABEL=BINARY [LABEL=BINARY ...] -- ARGS...
+#   scripts/perf/bench.py [-n RUNS] [--warmup N] [--no-null-test]
+#       LABEL=BINARY [LABEL=BINARY ...] -- ARGS...
 #
 # Example:
 #   scripts/perf/bench.py -n 40 main=/tmp/openjd-main new=target/release/openjd \
@@ -98,6 +99,11 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="openjd-bench-") as tmp:
         if not opts.no_null_test:
             label, path = binaries[0]
+            if any(seen == f"{label}-copy" for seen, _ in binaries):
+                sys.exit(
+                    f"label {label}-copy is taken by the null test; rename it "
+                    "or pass --no-null-test"
+                )
             copy = os.path.join(tmp, os.path.basename(path) + "-copy")
             shutil.copy2(path, copy)
             binaries.append((f"{label}-copy", copy))

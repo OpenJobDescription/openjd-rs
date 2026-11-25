@@ -44,11 +44,11 @@ uv run scripts/perf/difftest.py "$OLD" "$NEW" \
 It runs `check` (and `summary` for job templates) on every template, once per
 extension set, and compares exit code, stdout and stderr. `default` runs
 without `--extensions`, so every extension is enabled; keep it in the list, or
-templates that need an extension stop at the extension check and the code
-after it is never compared. Add a directory of
-your own edge cases for the paths the change touches: valid and invalid
-templates, errors at each site, each state of any input the change
-special-cases. The result to quote is `N invocations, 0 differences`.
+templates that need an extension stop at the extension check and the code after
+it is never compared. Add a directory of your own edge cases for the paths the
+change touches: valid and invalid templates, errors at each site, each state of
+any input the change special-cases. The result to quote is
+`N invocations, 0 differences`.
 
 Once, check that the harness can see a difference: run it against a binary
 from an older commit that is known to print something different.
@@ -65,12 +65,11 @@ scripts/perf/profile.py diff /tmp/old.cg /tmp/new.cg
 ```
 
 `diff` prints the total change in instructions and the functions whose
-inclusive cost moved most. Instruction counts do not depend on load or
-layout, so this is the number a speed claim cites. They still vary by about
-0.1% between runs of the same binary (randomly seeded hash maps, worker
-threads): profile each side twice and claim only differences well above that
-spread. To find work worth
-removing, start from one profile:
+inclusive cost moved most. Instruction counts do not depend on load or layout,
+so this is the number a speed claim cites. They still vary by about 0.1%
+between runs of the same binary (randomly seeded hash maps, worker threads):
+profile each side twice and claim only differences well above that spread. To
+find work worth removing, start from one profile:
 
 ```bash
 scripts/perf/profile.py report /tmp/old.cg              # areas, top functions, allocation sites
