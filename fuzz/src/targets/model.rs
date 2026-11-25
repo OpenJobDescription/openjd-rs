@@ -271,9 +271,10 @@ pub fn pipeline(
     }
 }
 
-/// Diff the job against copies with its steps reversed and its first step
-/// renamed. Every modified node explains itself, a reorder is only
-/// `steps.order`, and a rename is a removal and an addition.
+/// Diff the job against copies with its steps reversed, its first step's
+/// description changed, and its first step renamed. Every modified node
+/// explains itself, a reorder is only `steps.order`, a description change
+/// is that step's `description`, and a rename is a removal and an addition.
 fn check_diff(job: &Job) {
     fn attributed(n: &DiffNode) -> bool {
         (n.status != DiffStatus::Modified
@@ -292,7 +293,8 @@ fn check_diff(job: &Job) {
     if job.steps.len() > 1 {
         let root = d.root();
         oracle!(
-            root.field_changes.len() == 1 && root.field_changes[0].field == "steps.order",
+            root.field_changes.len() == 1
+                && root.field_changes.first().map(|c| c.field.as_str()) == Some("steps.order"),
             "a step reorder is not exactly steps.order:\n{d}"
         );
         oracle!(
@@ -300,26 +302,49 @@ fn check_diff(job: &Job) {
             "a step reorder changed a child:\n{d}"
         );
     }
+    if let [a, b, ..] = job.steps.as_slice() {
+        let d = diff_steps(a, b);
+        oracle!(attributed(d.root()), "unattributed change:\n{d}");
+    }
     let Some(first) = job.steps.first() else {
         return;
     };
+    let mut described = job.clone();
+    let mut text = first.description.clone().unwrap_or_default();
+    text.push('\u{1}');
+    if let Some(s) = described.steps.first_mut() {
+        s.description = Some(text);
+    }
+    let d = diff_jobs(job, &described);
+    oracle!(attributed(d.root()), "unattributed change:\n{d}");
+    let fields =
+        |n: &DiffNode| -> Vec<String> { n.field_changes.iter().map(|c| c.field.clone()).collect() };
+    let node = d.root().child(&format!("steps[{}]", first.name));
+    oracle!(
+        node.map(|n| (n.status, fields(n)))
+            == Some((DiffStatus::Modified, vec!["description".into()])),
+        "a description change is not that step's description:\n{d}"
+    );
     let mut step = first.clone();
     step.name.push('\u{1}');
     oracle!(
-        diff_steps(first, &step).root().field_changes[0].field == "name",
+        fields(diff_steps(first, &step).root()) == ["name"],
         "diff_steps missed a rename"
     );
     if job.steps.iter().any(|s| s.name == step.name) {
         return;
     }
+    let new_name = step.name.clone();
     let mut renamed = job.clone();
-    renamed.steps[0] = step;
+    if let Some(s) = renamed.steps.first_mut() {
+        *s = step;
+    }
     let d = diff_jobs(job, &renamed);
     oracle!(attributed(d.root()), "unattributed change:\n{d}");
     let status = |name: &str| d.root().child(&format!("steps[{name}]")).map(|c| c.status);
     oracle!(
         status(&first.name) == Some(DiffStatus::Removed)
-            && status(&renamed.steps[0].name) == Some(DiffStatus::Added),
+            && status(&new_name) == Some(DiffStatus::Added),
         "a renamed step is not removed and added:\n{d}"
     );
 }
@@ -918,7 +943,8 @@ pub fn env_gen(data: &[u8]) {
     renamed.name.push('\u{1}');
     let d = diff_environments(&env, &renamed);
     oracle!(
-        d.root().field_changes.len() == 1 && d.root().field_changes[0].field == "name",
+        d.root().field_changes.len() == 1
+            && d.root().field_changes.first().map(|c| c.field.as_str()) == Some("name"),
         "diff_environments missed a rename:\n{d}"
     );
     if let Some(rs) = &env.resolved_symtab {

@@ -1333,7 +1333,7 @@ map key, as in `steps[Render]` or `parameters[Scene]`. A `FieldChange`'s
 unique within each collection, which `create_job` guarantees.
 
 `Display` writes the changed nodes as indented text, in the format
-[job-diff.md](job-diff.md#values) gives.
+[job-diff.md](job-diff.md#display) gives.
 
 ## Step Dependency Graph
 

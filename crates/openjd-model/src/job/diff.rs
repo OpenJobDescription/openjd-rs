@@ -20,6 +20,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
+use openjd_expr::symbol_table::SerializedSymbolTable;
+use openjd_expr::value::Float64;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -49,9 +51,9 @@ pub enum DiffStatus {
 #[non_exhaustive]
 pub struct FieldChange {
     /// The field's camelCase name, as the job serializes it. An entry of a
-    /// keyed collection reads `variables[KEY]`, `amounts[NAME]` or
-    /// `attributes[NAME]`; the relative order of a
-    /// named list's shared elements reads `<collection>.order`.
+    /// keyed collection reads `variables[KEY]`, `amounts[NAME]`,
+    /// `attributes[NAME]` or `resolvedSymTab[NAME]`; the relative order of
+    /// a named list's shared elements reads `<collection>.order`.
     pub field: String,
     /// The old value as JSON; `null` when the field is absent.
     pub before: Value,
@@ -200,7 +202,7 @@ impl DiffNode {
 /// The result of a diff: a tree of [`DiffNode`]s.
 ///
 /// `Display` writes the changed nodes as indented text, in the format
-/// `specs/model/job-diff.md` "Values" gives.
+/// `specs/model/job-diff.md` "Display" gives.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiffTree {
     root: DiffNode,
@@ -318,6 +320,52 @@ fn by_key<'a, V>(
     pairs
 }
 
+/// Record one `resolvedSymTab[NAME]` field change per symbol whose entry
+/// differs, each side the entry without its `name`, or `null` when absent.
+/// Falls back to one whole `resolvedSymTab` change when a side is not an
+/// array of named entries, or when no entry differs (an absent table
+/// against an empty one, or the same entries in another order).
+fn symtab_fields(
+    n: &mut DiffNode,
+    a: &Option<SerializedSymbolTable>,
+    b: &Option<SerializedSymbolTable>,
+) {
+    if a == b {
+        return;
+    }
+    let (Some(x), Some(y)) = (symtab_entries(a), symtab_entries(b)) else {
+        n.field("resolvedSymTab", a, b);
+        return;
+    };
+    let before = n.field_changes.len();
+    for (key, (x, y)) in by_key(&x, &y) {
+        n.field(&format!("resolvedSymTab[{key}]"), &x, &y);
+    }
+    if n.field_changes.len() == before {
+        n.field("resolvedSymTab", a, b);
+    }
+}
+
+/// A transport symbol table's entries by name, each without its `name`.
+/// `None` unless every entry is an object with a unique string `name`.
+fn symtab_entries(t: &Option<SerializedSymbolTable>) -> Option<BTreeMap<String, Value>> {
+    let Some(t) = t else {
+        return Some(BTreeMap::new());
+    };
+    let list = t.as_value().as_array()?;
+    let mut entries = BTreeMap::new();
+    for entry in list {
+        let mut entry = entry.as_object()?.clone();
+        let Some(Value::String(name)) = entry.remove("name") else {
+            return None;
+        };
+        if entries.insert(name, Value::Object(entry)).is_some() {
+            return None;
+        }
+    }
+    Some(entries)
+}
+
 // Each expand_* destructures its type without `..`, so a new model field
 // fails to compile here until the diff handles it.
 
@@ -380,7 +428,7 @@ fn expand_step(n: &mut DiffNode, a: &Step, b: &Step) {
     n.field("name", name, &b.name);
     n.field("description", description, &b.description);
     n.field("dependencies", dependencies, &b.dependencies);
-    n.field("resolvedSymTab", resolved_symtab, &b.resolved_symtab);
+    symtab_fields(n, resolved_symtab, &b.resolved_symtab);
     n.children.push(compare(
         "script".into(),
         script,
@@ -443,7 +491,7 @@ fn expand_environment(n: &mut DiffNode, a: &Environment, b: &Environment) {
     for (key, (x, y)) in by_key(variables.iter().flatten(), b.variables.iter().flatten()) {
         n.field(&format!("variables[{key}]"), &x, &y);
     }
-    n.field("resolvedSymTab", resolved_symtab, &b.resolved_symtab);
+    symtab_fields(n, resolved_symtab, &b.resolved_symtab);
     n.children.extend(pair(
         "script".into(),
         script.as_ref(),
@@ -543,40 +591,45 @@ fn expand_parameter_space(n: &mut DiffNode, a: &StepParameterSpace, b: &StepPara
 fn expand_task_parameter(n: &mut DiffNode, a: &TaskParameter, b: &TaskParameter) {
     let (a_type, a_range, a_chunks) = task_parameter_parts(a);
     let (b_type, b_range, b_chunks) = task_parameter_parts(b);
-    n.field("type", a_type, b_type);
-    n.field("range", &a_range, &b_range);
+    n.field_with("type", &a_type, &b_type, |t| t.as_spec_str().into());
+    n.field_with("range", &a_range, &b_range, Range::to_json);
     n.field("chunks", &a_chunks, &b_chunks);
 }
 
-/// A task parameter as its `type` string, its `range` (a range expression
-/// string or a list) and its `chunks`.
-fn task_parameter_parts(p: &TaskParameter) -> (&'static str, Value, Option<&ResolvedChunks>) {
-    let int_range = |r: &TaskParamRange<i64>| match r {
-        TaskParamRange::List(v) => to_json(v),
-        TaskParamRange::RangeExpr(r) => Value::String(r.to_string()),
-    };
+/// A task parameter's range, compared by value. A range expression's
+/// `PartialEq` ignores how it is displayed; its JSON is its display string.
+#[derive(PartialEq)]
+enum Range<'a> {
+    Int(&'a TaskParamRange<i64>),
+    Float(&'a [Float64]),
+    Text(&'a [String]),
+}
+
+impl Range<'_> {
+    fn to_json(&self) -> Value {
+        match self {
+            Range::Int(TaskParamRange::List(v)) => to_json(v),
+            Range::Int(TaskParamRange::RangeExpr(r)) => Value::String(r.to_string()),
+            Range::Float(v) => to_json(v),
+            Range::Text(v) => to_json(v),
+        }
+    }
+}
+
+/// A task parameter as its type, its range and its chunks.
+fn task_parameter_parts(
+    p: &TaskParameter,
+) -> (TaskParameterType, Range<'_>, Option<&ResolvedChunks>) {
     match p {
-        TaskParameter::Int { range, chunks } => (
-            TaskParameterType::Int.as_spec_str(),
-            int_range(range),
-            chunks.as_ref(),
-        ),
-        TaskParameter::Float { range } => {
-            (TaskParameterType::Float.as_spec_str(), to_json(range), None)
+        TaskParameter::Int { range, chunks } => {
+            (TaskParameterType::Int, Range::Int(range), chunks.as_ref())
         }
-        TaskParameter::String { range } => (
-            TaskParameterType::String.as_spec_str(),
-            to_json(range),
-            None,
-        ),
-        TaskParameter::Path { range } => {
-            (TaskParameterType::Path.as_spec_str(), to_json(range), None)
+        TaskParameter::Float { range } => (TaskParameterType::Float, Range::Float(range), None),
+        TaskParameter::String { range } => (TaskParameterType::String, Range::Text(range), None),
+        TaskParameter::Path { range } => (TaskParameterType::Path, Range::Text(range), None),
+        TaskParameter::ChunkInt { range, chunks } => {
+            (TaskParameterType::ChunkInt, Range::Int(range), Some(chunks))
         }
-        TaskParameter::ChunkInt { range, chunks } => (
-            TaskParameterType::ChunkInt.as_spec_str(),
-            int_range(range),
-            Some(chunks),
-        ),
     }
 }
 

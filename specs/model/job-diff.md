@@ -49,6 +49,7 @@ Elements of collections are matched by identity, not position.
 | `hostRequirements.amounts`, `.attributes` | list | `name` | field changes, same order |
 | `parameters`, `taskParameterDefinitions` | map | key | key order |
 | `variables` | map | key | field changes, key order |
+| `resolvedSymTab` | list | `name` | field changes, name order |
 
 Names are unique within a collection. `create_job` guarantees this, and the
 diff assumes it. An element's segment is `collection[name]`, with the name
@@ -62,6 +63,10 @@ in each side's order. A pure reorder is then a `Modified` parent with that one
 field change and unchanged children. A map's `PartialEq` ignores order, so
 maps never record an order change and reordered map entries are `Unchanged`.
 
+`Unchanged` means equal under `PartialEq`, which does not imply the same task
+order. A reordered task parameter definition list with no `combination` is
+`Unchanged` although it iterates tasks in another order (see "Out of scope").
+
 An optional list or map that is absent on one side and empty on the other is
 recorded as one field change named after the collection (`null -> []`). The
 model types allow it, though `create_job` writes neither empty form.
@@ -71,9 +76,15 @@ model types allow it, though `create_job` writes neither empty form.
 A step's or environment's actions keep their format strings unresolved:
 `command` stays `{{Param.Scene}}`. The value a parameter contributes is in
 `resolvedSymTab`, which `create_job` filters to the symbols that step or
-environment references. `resolvedSymTab` is an ordinary field compared as a
-whole value. So a job parameter change shows on its `parameters[K]` node and
-on exactly the job environments and steps that read it. A step environment
+environment references. Each symbol whose entry differs is one field change
+`resolvedSymTab[NAME]`, the way `variables[K]` works: `before` and `after`
+are that entry without its `name` (`{"type":...,"value":...}`), or `null`
+when the symbol is absent on that side. When a side is not an array of
+uniquely named entries, or no entry differs (an absent table against an empty
+one, or the same entries in another order), the change is one whole-value
+`resolvedSymTab` field. So a job parameter change shows on its
+`parameters[K]` node and on exactly the job environments and steps that read
+it. A step environment
 has no `resolvedSymTab` of its own, so its reads show on its step. A change
 that value equality ignores, such as a float's spelling (`2.5` to `2.50`),
 shows only on the readers, and `parameters[K]` stays `Unchanged`. A
@@ -86,7 +97,11 @@ range, shows on that field instead.
 derived `Serialize` output. A job parameter's `type` is its spec string and its
 `value` is `ExprValue::transport_value`. A task parameter definition has three
 fields: `type` (its spec string, such as `CHUNK[INT]`), `range` (the range
-expression string, or the list) and `chunks`.
+expression string, or the list) and `chunks`. Each is compared by its typed
+value, and JSON is only how a side is written, so a range expression that
+differs only in how it displays (`5,6` and `5-6`) is not a `range` change.
+
+## Display
 
 `Display` writes a tree as indented text, two spaces per level. Each changed
 child is a line with `~` (modified), `+` (added) or `-` (removed) and its
@@ -98,7 +113,7 @@ writes nothing.
 ~ parameters[Scene]
   value: "a.blend" -> "b.blend"
 ~ steps[Prep]
-  resolvedSymTab: [{"name":"Param.Scene",...}] -> [{"name":"Param.Scene",...}]
+  resolvedSymTab[Param.Scene]: {"type":"string","value":"a.blend"} -> {"type":"string","value":"b.blend"}
 ```
 
 ## Tree shape
@@ -107,8 +122,8 @@ writes nothing.
 |---|---|---|---|
 | Job | (root) | `name`, `description`, `extensions`, `steps.order`, `jobEnvironments`, `jobEnvironments.order` | `parameters[K]`, `jobEnvironments[N]`, `steps[N]` |
 | JobParameter | `parameters[K]` | `name`, `type`, `value` | none |
-| Step | `steps[N]` | `name`, `description`, `dependencies`, `resolvedSymTab`, `stepEnvironments`, `stepEnvironments.order` | `script`, `stepEnvironments[N]`, `parameterSpace`, `hostRequirements` |
-| Environment | `jobEnvironments[N]`, `stepEnvironments[N]` | `name`, `description`, `variables`, `variables[K]`, `resolvedSymTab` | `script` |
+| Step | `steps[N]` | `name`, `description`, `dependencies`, `resolvedSymTab[NAME]` (or `resolvedSymTab`), `stepEnvironments`, `stepEnvironments.order` | `script`, `stepEnvironments[N]`, `parameterSpace`, `hostRequirements` |
+| Environment | `jobEnvironments[N]`, `stepEnvironments[N]` | `name`, `description`, `variables`, `variables[K]`, `resolvedSymTab[NAME]` (or `resolvedSymTab`) | `script` |
 | StepScript | `script` | `let`, `embeddedFiles`, `embeddedFiles.order` | `onRun`, `embeddedFiles[N]` |
 | EnvironmentScript | `script` | `let`, `embeddedFiles`, `embeddedFiles.order` | `onEnter`, `onWrapEnvEnter`, `onWrapTaskRun`, `onWrapEnvExit`, `onExit`, `embeddedFiles[N]` |
 | Action | `onRun`, `onEnter`, ... | `command`, `args`, `timeout`, `cancelation` | none |
