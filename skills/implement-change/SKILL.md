@@ -331,6 +331,56 @@ reviewer asked for):
   messages describe an earlier design, say in the description which commits
   describe the result, so the squash commit's body can be trimmed at merge.
 
+## Performance guideline
+
+A change made for performance follows quality-criteria Q14. This section is
+the method. Profiling and mutation runs compile the workspace more than once,
+so use the heavy steps sparingly: only for a change whose purpose is
+performance, or one that changes how long a value lives on a hot path.
+
+### Techniques
+
+1. **Find removed work, not moved code.** Look for the same computation done
+   more than once: an expression evaluated at several sites, a symbol table or
+   library rebuilt per item, a value cloned only for an error path, a fixed
+   per-process cost paid on every CLI call. Splitting or moving a function is
+   not a speed-up (Q14).
+2. **Count before and after.** Profile a release build with an instruction
+   counter (callgrind works without hardware counters) on at least a minimal
+   template and a large one, and compare per function. Instruction counts do
+   not depend on machine load or binary layout.
+3. **Confirm with time.** Run the old and new binaries interleaved, with a
+   null test (the same binary at two paths) and a no-op control. A count can
+   fall while time rises; a faster allocator did exactly that here.
+4. **Prove output is unchanged.** Run both binaries over the conformance
+   templates and generated edge cases (valid and invalid, several extension
+   sets) and diff everything they print. Add full-message tests for the paths
+   the change touches, with the expected text captured from the old code; they
+   must pass there too.
+5. **Price what stays alive.** For any sharing or caching, write down what is
+   kept and until when. Keep the original loop structure, share only between
+   adjacent sites, and drop what the old code dropped where it dropped it.
+   Report errors into the caller's collection rather than buffering them.
+   When something must be kept across steps or passes, bound it with a named
+   constant and measure the real bytes kept, not an estimate.
+6. **Pin memory with a test.** Add a counting-allocator test (one `#[test]`
+   in its own test binary, as in `crates/openjd-snapshots/tests/decode_memory.rs`)
+   with limits of the old peak plus any stated budget. Put a large temporary at
+   each site that runs after the changed one, and large error text alive
+   across later sites; show the test fails on the regression it guards.
+
+### Performance review by a sub-agent
+
+For a performance change, give one auditor the performance angle (Q14)
+instead of, or in addition to, the usual angles. Its brief: build both sides
+in its own worktrees; rerun the output differential, including library-level
+probes under `CallerLimits`; and probe peak memory with a large temporary at
+each later site while something from an earlier site is still alive, for each
+state of the input the change special-cases. The same brief can be run on its
+own as an exploration, before implementing, to find out what a proposed
+sharing would keep alive. Run it once per round at most; it is the most
+expensive angle to compile and measure.
+
 ## Audit depth
 
 Scale the audit to the change, but always run one. A tier sets how deep the
@@ -343,5 +393,6 @@ audit goes. It never permits skipping one.
 | Dependency or lockfile bump | 1 | Q9 (`cargo deny`, MSRV), Q2 (API breakage in dependents' use), Q8 |
 | Ordinary code change inside one crate | 1 | All criteria, Q4 with at least one mutation per new behavior |
 | Public API change, cross-crate change, or new feature | 2–4 with disjoint angles (§6 "Verifier rules", item 1), each mutation auditor in its own worktree | All criteria |
+| Performance change (`perf:`) | The tier of the code it touches, with one auditor on the performance angle (§ "Performance guideline") | Q14, Q4, and the tier's criteria |
 
 When in doubt, use the deeper tier.
