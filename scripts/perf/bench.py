@@ -104,10 +104,18 @@ def main() -> int:
 
         times: dict[str, list[float]] = {label: [] for label, _ in binaries}
         expected_code: int | None = None
+        last_code: dict[str, int] = {}
         for i in range(opts.warmup + opts.runs):
             k = i % len(binaries)
             for label, path in binaries[k:] + binaries[:k]:
                 elapsed, code = run_once(path, cmd_args)
+                if label in last_code and code != last_code[label]:
+                    sys.exit(
+                        f"{label} exited {code} in round {i + 1} but {last_code[label]} "
+                        "before: its exit code is not stable, so its runs are not "
+                        "comparable"
+                    )
+                last_code[label] = code
                 if expected_code is None:
                     expected_code = code
                 elif code != expected_code:

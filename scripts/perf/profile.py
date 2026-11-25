@@ -5,9 +5,11 @@
 #
 # Instruction-level profiles of one command with valgrind's callgrind tool.
 #
-# Instruction counts are exact and do not depend on machine load or binary
-# layout, so a difference between two profiles is a difference in work done
-# (quality-criteria Q14). This reads callgrind's output format directly
+# Instruction counts do not depend on machine load or binary layout, so a
+# difference between two profiles is a difference in work done
+# (quality-criteria Q14). They still vary by about 0.1% between runs of the
+# same binary (randomly seeded hash maps, worker threads): profile each side
+# twice and claim only differences well above that spread. This reads callgrind's output format directly
 # (https://valgrind.org/docs/manual/cl-format.html), so it does not depend on
 # the text layout of `callgrind_annotate`, which changes between releases.
 #
@@ -178,6 +180,8 @@ def load(path: str) -> Profile:
                     fail(lineno, f"unreadable {line[:60]!r}")
             elif key in kind_of:
                 resolve(key, value)  # keep the compression tables complete
+            elif line.startswith("part:") and line.split()[1:2] != ["1"]:
+                fail(lineno, "a later part of a split profile; profile with one part")
             elif line.startswith(("version:", "events:")):
                 seen_header = True
                 if line.startswith("events:"):
@@ -198,11 +202,22 @@ def load(path: str) -> Profile:
 
 def tool(name: str) -> str:
     if name == "valgrind" and os.environ.get("VALGRIND"):
-        return os.environ["VALGRIND"]
+        found = shutil.which(os.environ["VALGRIND"])
+        if not found:
+            sys.exit(f"VALGRIND={os.environ['VALGRIND']} is not an executable")
+        return found
     found = shutil.which(name)
     if not found:
         sys.exit(f"{name} not found on PATH (install valgrind, or set VALGRIND)")
     return found
+
+
+def nonneg_int(text: str) -> int:
+    """argparse type: a non-negative integer."""
+    n = int(text)
+    if n < 0:
+        raise argparse.ArgumentTypeError("must not be negative")
+    return n
 
 
 def compile_regex(pattern: str) -> re.Pattern:
@@ -239,11 +254,17 @@ def cmd_run(args: argparse.Namespace) -> int:
         os.remove(args.out)
     except FileNotFoundError:
         pass
+    except OSError as e:
+        sys.exit(f"{args.out}: {e.strerror}")
     proc = subprocess.run(
         [
             tool("valgrind"),
             "--tool=callgrind",
             f"--callgrind-out-file={args.out}",
+            # One file for the whole run, whatever VALGRIND_OPTS or a
+            # .valgrindrc asks for; load() reads a single part.
+            "--dump-every-bb=0",
+            "--separate-threads=no",
             *args.command,
         ],
         stdout=subprocess.DEVNULL,
@@ -347,18 +368,18 @@ def main() -> int:
     p.add_argument("command", nargs=argparse.REMAINDER)
     p = sub.add_parser("report", help="where the instructions go")
     p.add_argument("out")
-    p.add_argument("--top", type=int, default=20)
+    p.add_argument("--top", type=nonneg_int, default=20)
     p = sub.add_parser("diff", help="per-function change between two profiles")
     p.add_argument("old")
     p.add_argument("new")
-    p.add_argument("--top", type=int, default=15)
+    p.add_argument("--top", type=nonneg_int, default=15)
     p.add_argument(
         "--match", help="regex of functions to compare (default: openjd functions)"
     )
     p = sub.add_parser("callers", help="who calls the matching functions")
     p.add_argument("out")
     p.add_argument("regex")
-    p.add_argument("--top", type=int, default=10)
+    p.add_argument("--top", type=nonneg_int, default=10)
     args = ap.parse_args()
     if args.cmd == "run" and args.command[:1] == ["--"]:
         args.command = args.command[1:]

@@ -14,7 +14,9 @@ the `valgrind` package; on macOS or Windows, use a Linux container).
 ## 1. Build both sides
 
 Build the base and the change as release binaries in separate worktrees, so
-each keeps its own `target/`:
+each keeps its own `target/`. The commands below expect a checkout of
+[openjd-specifications](https://github.com/OpenJobDescription/openjd-specifications)
+next to this repository, as the conformance suite does:
 
 ```bash
 git worktree add --detach ../openjd-base origin/main
@@ -60,8 +62,11 @@ scripts/perf/profile.py diff /tmp/old.cg /tmp/new.cg
 ```
 
 `diff` prints the total change in instructions and the functions whose
-inclusive cost moved most. Instruction counts are exact and do not depend on
-load or layout, so this is the number a speed claim cites. To find work worth
+inclusive cost moved most. Instruction counts do not depend on load or
+layout, so this is the number a speed claim cites. They still vary by about
+0.1% between runs of the same binary (randomly seeded hash maps, worker
+threads): profile each side twice and claim only differences well above that
+spread. To find work worth
 removing, start from one profile:
 
 ```bash

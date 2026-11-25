@@ -56,11 +56,11 @@ def collect(dirs: list[str], scratch: str) -> list[str]:
             for name in sorted(files):
                 path = os.path.join(root, name)
                 if name.endswith(".test.yaml"):
-                    with open(path, encoding="utf-8") as fh:
-                        try:
+                    try:
+                        with open(path, encoding="utf-8") as fh:
                             doc = yaml.safe_load(fh)
-                        except yaml.YAMLError as e:
-                            sys.exit(f"{path}: {e}")
+                    except (OSError, UnicodeDecodeError, yaml.YAMLError) as e:
+                        sys.exit(f"{path}: {e}")
                     if not isinstance(doc, dict) or "template" not in doc:
                         continue
                     dest = os.path.join(scratch, f"{len(out):05d}-{name}")
@@ -75,11 +75,16 @@ def collect(dirs: list[str], scratch: str) -> list[str]:
 
 
 def is_job_template(path: str) -> bool:
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        return "jobtemplate-" in fh.read(8192)
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return "jobtemplate-" in fh.read(8192)
+    except OSError as e:
+        sys.exit(f"{path}: {e.strerror}")
 
 
-Result = tuple[int, str, str]
+# Exit code, stdout and stderr as bytes, so output that is not UTF-8 is
+# compared exactly; it is decoded only to show a difference.
+Result = tuple[int, bytes, bytes]
 # Exit status recorded for an invocation that timed out; no real exit is this.
 TIMED_OUT = -(10**9)
 
@@ -90,15 +95,11 @@ def run(binary: str, args: list[str], timeout: float) -> Result:
             [binary, *args], capture_output=True, timeout=timeout, check=False
         )
     except subprocess.TimeoutExpired:
-        return (TIMED_OUT, "", f"<timed out after {timeout}s>")
-    return (
-        p.returncode,
-        p.stdout.decode(errors="replace"),
-        p.stderr.decode(errors="replace"),
-    )
+        return (TIMED_OUT, b"", f"<timed out after {timeout}s>".encode())
+    return (p.returncode, p.stdout, p.stderr)
 
 
-def as_multiset(r: Result) -> tuple[int, list[str], list[str]]:
+def as_multiset(r: Result) -> tuple[int, list[bytes], list[bytes]]:
     return (r[0], sorted(r[1].splitlines()), sorted(r[2].splitlines()))
 
 
@@ -125,8 +126,8 @@ def show(args: list[str], a: Result, b: Result) -> str:
     for name, x, y in (("stdout", a[1], b[1]), ("stderr", a[2], b[2])):
         if x != y:
             diff = difflib.unified_diff(
-                x.splitlines(),
-                y.splitlines(),
+                x.decode(errors="backslashreplace").splitlines(),
+                y.decode(errors="backslashreplace").splitlines(),
                 f"old {name}",
                 f"new {name}",
                 lineterm="",
