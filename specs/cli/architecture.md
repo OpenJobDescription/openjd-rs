@@ -19,7 +19,7 @@ session management logic lives in the CLI crate itself.
 
 ```
 src/
-├── main.rs       # Entry point: Cli/Commands structs, SessionLogger, tokio::main
+├── main.rs       # Entry point: Cli/Commands structs, SessionLogger, the run runtime
 ├── check.rs      # CheckArgs + execute(): template validation
 ├── summary.rs    # SummaryArgs + execute(): job/step summary output
 ├── run/
@@ -43,7 +43,7 @@ Each command module exports an `Args` struct (clap derive) and an `execute()` fu
 | `clap` | Argument parsing via derive macros (`Parser`, `Subcommand`, `Args`) |
 | `serde_json` | JSON output formatting, inline JSON parameter parsing, path mapping rule loading |
 | `serde-saphyr` | YAML output formatting and YAML parameter/task file loading |
-| `tokio` | Async runtime (`rt-multi-thread`, `macros`) for session execution |
+| `tokio` | Async runtime (`rt-multi-thread`, `macros`, `signal`) for session execution |
 | `log` | Logging facade; custom `Log` impl that prints subprocess output and `EXCEPTION_INFO` warnings and errors |
 | `jiff` | Timestamp formatting (local, UTC) for session logs |
 
@@ -112,15 +112,19 @@ preflight, environment lifecycle, step/task execution, adaptive chunking, and re
 helpers. This keeps cleanup state centralized without introducing a reusable session
 abstraction that no other command needs.
 
-### Async Main
+### Runtime
 
-The `#[tokio::main]` attribute creates a multi-thread tokio runtime. Only the `run` command
-is async (it awaits session actions), but the runtime is created unconditionally because
-tokio's runtime initialization is cheap and having a consistent async context simplifies
-future additions.
+`main` is synchronous. Only the `run` command is async (it awaits session actions), so
+`main` builds a multi-thread tokio runtime for `run` alone and blocks on it. `check` and
+`summary` run without a runtime. Starting one is a fixed cost per process that grows with
+the core count, and on a many-core host it exceeds validating a small template.
 
-`check` and `summary` are synchronous functions called from the async main — tokio handles
-this transparently.
+The `run` runtime has `RUN_WORKER_THREADS` (2) workers rather than one per core, unless
+`TOKIO_WORKER_THREADS` sets the count. A session runs one action at a time, and one worker
+per core makes every task start slower on a many-core host. When `run` fails, `main`
+prints the error and exits while the runtime is still alive, because dropping the runtime
+waits for its blocking-pool work. A runtime that cannot be built is reported as
+`ERROR: Failed to start the async runtime: <error>` with exit code 1.
 
 ### Global State for Logging
 

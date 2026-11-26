@@ -31,7 +31,7 @@ implementation:
 | Argument parsing | argparse with manual subparser wiring | clap derive macros |
 | Output formatting | `@print_cli_result` decorator on dataclass results | Result structs implementing `CliResult`, rendered by the shared `print_cli_result` |
 | Session management | `LocalSession` context manager with signal handlers | Direct `Session` API calls in async `execute()` |
-| Async runtime | None (synchronous, threads in sessions layer) | tokio multi-thread runtime |
+| Async runtime | None (synchronous, threads in sessions layer) | tokio multi-thread runtime, for `run` only |
 | Logging | `LocalSessionLogHandler` (Python `logging.Handler`) | Custom `log::Log` impl filtering on kv metadata |
 | Context-aware help | `JobTemplateHelpAction` (argparse `Action` subclass) | `try_context_aware_help()` intercepting args before clap |
 | Schema command | `openjd schema --version` (Pydantic `model_json_schema`) | Not yet implemented |
