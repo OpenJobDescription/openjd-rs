@@ -20,6 +20,10 @@ use std::time::Instant;
 static SESSION_START: OnceLock<Instant> = OnceLock::new();
 static TIMESTAMP_FORMAT: OnceLock<String> = OnceLock::new();
 
+/// Worker threads for `run`. A session runs one action at a time, and one
+/// worker per core makes every task start slower on a many-core host.
+const RUN_WORKER_THREADS: usize = 2;
+
 fn format_log_timestamp() -> String {
     let fmt = TIMESTAMP_FORMAT
         .get()
@@ -111,8 +115,7 @@ enum Commands {
     Run(run::RunArgs),
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     log::set_boxed_logger(Box::new(SessionLogger)).expect("failed to set logger");
     log::set_max_level(LevelFilter::Info);
 
@@ -138,12 +141,33 @@ async fn main() {
     let result = match cli.command {
         Commands::Check(args) => check::execute(args),
         Commands::Summary(args) => summary::execute(args),
-        Commands::Run(args) => run::execute(args).await,
+        // Only `run` is async, so `check` and `summary` do not start a
+        // runtime and its worker threads.
+        Commands::Run(args) => {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(RUN_WORKER_THREADS)
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => exit_with_error(format!("Failed to start the async runtime: {e}")),
+            };
+            // Exit while the runtime is alive: dropping it waits for
+            // blocking-pool work, such as a stdout read abandoned on Windows.
+            if let Err(e) = rt.block_on(run::execute(args)) {
+                exit_with_error(e);
+            }
+            Ok(())
+        }
     };
     if let Err(e) = result {
-        eprintln!("ERROR: {e}");
-        std::process::exit(1);
+        exit_with_error(e);
     }
+}
+
+fn exit_with_error(e: impl std::fmt::Display) -> ! {
+    eprintln!("ERROR: {e}");
+    std::process::exit(1);
 }
 
 #[cfg(test)]
