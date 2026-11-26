@@ -162,13 +162,13 @@ separate dup per handle can fail and leave that handle unable to cancel." In
 the same way, a test comment "a lost cancel used to leave the action running"
 becomes "a cancel must reach the helper even when the dup fails".
 
-A Q10 finding is low severity, or medium when a reader could take the past
-behavior it describes for the current behavior.
-
 A sentence that says a state cannot occur, or that a check always or never
 fires, MUST name the function, test, or measurement that makes it true, so
-that a reader can check it against the code. Such a sentence that names
-nothing is a low finding, and one that is false is rated by §5.
+that a reader can check it against the code.
+
+A Q10 finding is low severity, or medium when a reader could take the past
+behavior it describes for the current behavior. A false sentence of the kind
+just described is rated by §5 instead, because a reader acts on it.
 
 **Q11. One home per rule.** A semantic rule — a spec constraint, a parse or
 coercion rule, a wire format, a classification, a policy constant — SHOULD
@@ -235,9 +235,9 @@ hold wherever the value can come from:
 - every field the specification links to the rule, including rarely used
   ones such as `notifyPeriodInSeconds`, environment `onEnter` and `onExit`
   timeouts, SimpleAction `timeout`, and host requirement amounts;
-- a value rebuilt from its serialized form, such as a `RangeExpr`, a job, or a
-  symbol table read back with `Deserialize`, which MUST apply the checks and
-  caps of the constructor the parser uses.
+- a value rebuilt from its serialized form, such as a `RangeExpr`, a symbol
+  table, or a job's steps and environments read back with `Deserialize`, which
+  MUST apply the checks and caps of the constructor the parser uses.
 
 It MUST also hold at each stage that applies it: template decode and
 `openjd check`, `create_job`, and run time, and at each site within a stage

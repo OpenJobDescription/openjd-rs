@@ -103,10 +103,10 @@ current behavior follow quality-criteria §3: cite `file:line`, or run it.
 - Carry the change to every sibling shape of each type it touches (Q12), and
   to every source and stage of each value it touches (Q13). When the change
   fixes a rule, fix every copy of the rule (Q11).
-- Bound every size that input can set, and keep failures visible: a cap
-  checked before the value is built and the same budget charging on every
-  path (Q14), checked arithmetic and conversions on those sizes (Q6), and no
-  failure dropped without a stated reason (Q15).
+- Bound every size that input can set: a cap checked before the value is
+  built and the same budget charging on every path (Q14), and checked
+  arithmetic and conversions on those sizes (Q6). Keep failures visible
+  (Q15).
 - Write spec text and comments about the code as it is, not about the change
   or what it replaced. That history goes in the commit message (Q10).
 - Strike through resolved report items in the same change (Q9).
@@ -166,10 +166,13 @@ before the implement commit, so that the audit is not the first to find
 untested behavior. Stage the change, write its diff with
 `git diff --cached --output=../change.diff $(git merge-base HEAD origin/main)`,
 and run `cargo mutants --in-diff ../change.diff` with `--output` outside the
-repository, never `--in-place`. cargo-mutants builds and tests in copies of
-the tree, so the working tree is left alone (quality-criteria §6 "Mutation
-testing"). Add a test for each `MISSED` mutant, or say in the implement
-commit's body why the mutant is equivalent.
+repository, never `--in-place`. This is the one mutation run outside a
+dedicated worktree (quality-criteria §6 "Mutation testing"): no auditor shares
+the tree yet, and cargo-mutants edits only its copies of the tree. The copies
+include untracked files, so move scratch files out first. Add a test for each
+`MISSED` mutant, or say in the implement commit's body why the mutant is
+equivalent. If `cargo mutants --version` fails, say so there and in the audit
+inputs, as for any check that cannot run locally.
 
 If a check cannot run locally (no Docker, no test user, no S3 bucket), say so
 in the audit inputs and the final summary, and rely on CI for it. Local
@@ -209,8 +212,8 @@ Instruct the auditor to:
 - check every spec line, doc comment, and code comment the diff adds or
   edits against Q10: it describes the code as it is, not the change,
   including text that a later commit in the range made false;
-- run each new or changed test without the change, as step 3 describes,
-  before mutating: a test that passes there pins nothing (Q4);
+- before mutating, check each new or changed test the way step 3
+  describes;
 - check that the diff does what the scope statement says, no more and no
   less. Unrequested scope is a finding;
 - return each finding with its criterion ID, severity (§5), label (§4), and
