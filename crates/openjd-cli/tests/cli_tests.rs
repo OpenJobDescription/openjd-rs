@@ -4637,3 +4637,177 @@ steps:
         }
     }
 }
+
+// ============================================================
+// Group: Async runtime (threads per command)
+// ============================================================
+
+/// `check` and `summary` start no runtime, `run` starts `RUN_WORKER_THREADS`
+/// workers unless `TOKIO_WORKER_THREADS` sets the count, and a runtime that
+/// cannot be built is a reported error. Threads are counted from
+/// `/proc/<pid>/task` while the process waits on a FIFO.
+#[cfg(target_os = "linux")]
+mod runtime_threads {
+    use super::*;
+    use std::path::Path;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    const MINIMAL: &str = r#"specificationVersion: "jobtemplate-2023-09"
+name: Minimal
+steps:
+  - name: S
+    script:
+      actions:
+        onRun:
+          command: echo
+"#;
+
+    fn mkfifo(path: &Path) {
+        let status = Command::new("mkfifo").arg(path).status().expect("mkfifo");
+        assert!(status.success(), "mkfifo {}", path.display());
+    }
+
+    /// Runs `f` on a thread and fails the test if it does not finish in time,
+    /// so a FIFO nobody opens cannot hang the suite.
+    fn within<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(f());
+        });
+        rx.recv_timeout(Duration::from_secs(30))
+            .unwrap_or_else(|_| panic!("timed out: {what}"))
+    }
+
+    fn thread_names(pid: u32) -> Vec<String> {
+        std::fs::read_dir(format!("/proc/{pid}/task"))
+            .expect("read /proc/<pid>/task")
+            .map(|e| {
+                let comm = e.expect("task entry").path().join("comm");
+                std::fs::read_to_string(comm)
+                    .expect("read comm")
+                    .trim()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_check_and_summary_start_no_threads() {
+        for cmd in ["check", "summary"] {
+            let dir = tempfile::TempDir::new().unwrap();
+            let fifo = dir.path().join("template.yaml");
+            mkfifo(&fifo);
+            let mut child = cli_command(&[cmd, fifo.to_str().unwrap()])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawn openjd");
+            // Opening the FIFO for writing returns once openjd has opened it
+            // to read the template, after any start-up threads exist.
+            let writer_path = fifo.clone();
+            let writer = within("openjd opening the template", move || {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(writer_path)
+                    .expect("open FIFO")
+            });
+            let names = thread_names(child.id());
+            drop(writer_with(writer, MINIMAL));
+            let status = child.wait().expect("wait");
+            assert_eq!(
+                names,
+                vec!["openjd".to_string()],
+                "{cmd}: threads {names:?}"
+            );
+            assert!(status.success(), "{cmd}: {status}");
+        }
+    }
+
+    fn writer_with(mut f: std::fs::File, text: &str) -> std::fs::File {
+        use std::io::Write;
+        f.write_all(text.as_bytes()).expect("write template");
+        f
+    }
+
+    #[test]
+    fn test_run_starts_two_workers_unless_tokio_worker_threads_is_set() {
+        for (setting, expected) in [(None, 2), (Some("3"), 3)] {
+            let dir = tempfile::TempDir::new().unwrap();
+            let ready = dir.path().join("ready");
+            let release = dir.path().join("release");
+            mkfifo(&ready);
+            mkfifo(&release);
+            // The task signals on `ready`, then waits until `release` is opened.
+            let template = dir.path().join("t.yaml");
+            std::fs::write(
+                &template,
+                format!(
+                    r#"specificationVersion: "jobtemplate-2023-09"
+name: Wait
+steps:
+  - name: S
+    script:
+      actions:
+        onRun:
+          command: /bin/sh
+          args: ["-c", "printf x > '{}'; cat '{}' > /dev/null"]
+"#,
+                    ready.display(),
+                    release.display()
+                ),
+            )
+            .unwrap();
+            let mut cmd = cli_command(&["run", template.to_str().unwrap()]);
+            match setting {
+                Some(n) => cmd.env("TOKIO_WORKER_THREADS", n),
+                None => cmd.env_remove("TOKIO_WORKER_THREADS"),
+            };
+            let mut child = cmd
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .spawn()
+                .expect("spawn openjd");
+            let ready_path = ready.clone();
+            within("the task starting", move || {
+                std::fs::read(ready_path).expect("read ready FIFO")
+            });
+            let workers = thread_names(child.id())
+                .into_iter()
+                .filter(|n| n == "tokio-rt-worker")
+                .count();
+            let release_path = release.clone();
+            within("releasing the task", move || {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(release_path)
+                    .expect("open release FIFO")
+            });
+            let status = child.wait().expect("wait");
+            assert_eq!(workers, expected, "TOKIO_WORKER_THREADS={setting:?}");
+            assert!(status.success(), "{status}");
+        }
+    }
+
+    /// With 5 file descriptors, building the runtime fails with an error the
+    /// CLI reports. The limit is specific: tokio panics instead at 7 or 8,
+    /// where its signal driver cannot get a descriptor.
+    #[test]
+    fn test_run_reports_a_runtime_that_cannot_be_built() {
+        let mut f = tempfile::NamedTempFile::with_suffix(".yaml").unwrap();
+        std::io::Write::write_all(&mut f, MINIMAL.as_bytes()).unwrap();
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args([
+            "-c",
+            "ulimit -n 5 && exec \"$0\" run \"$1\"",
+            openjd_bin().to_str().unwrap(),
+            f.path().to_str().unwrap(),
+        ]);
+        let output = cmd.output().expect("run openjd");
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "ERROR: Failed to start the async runtime: Too many open files (os error 24)\n"
+        );
+    }
+}

@@ -20,8 +20,9 @@ use std::time::Instant;
 static SESSION_START: OnceLock<Instant> = OnceLock::new();
 static TIMESTAMP_FORMAT: OnceLock<String> = OnceLock::new();
 
-/// Worker threads for `run`. A session runs one action at a time, and one
-/// worker per core makes every task start slower on a many-core host.
+/// Worker threads for `run` unless `TOKIO_WORKER_THREADS` is set. A session
+/// runs one action at a time, and one worker per core makes every task start
+/// slower on a many-core host.
 const RUN_WORKER_THREADS: usize = 2;
 
 fn format_log_timestamp() -> String {
@@ -144,11 +145,11 @@ fn main() {
         // Only `run` is async, so `check` and `summary` do not start a
         // runtime and its worker threads.
         Commands::Run(args) => {
-            let rt = match tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(RUN_WORKER_THREADS)
-                .enable_all()
-                .build()
-            {
+            let mut builder = tokio::runtime::Builder::new_multi_thread();
+            if std::env::var_os("TOKIO_WORKER_THREADS").is_none() {
+                builder.worker_threads(RUN_WORKER_THREADS);
+            }
+            let rt = match builder.enable_all().build() {
                 Ok(rt) => rt,
                 Err(e) => exit_with_error(format!("Failed to start the async runtime: {e}")),
             };

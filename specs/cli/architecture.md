@@ -43,7 +43,7 @@ Each command module exports an `Args` struct (clap derive) and an `execute()` fu
 | `clap` | Argument parsing via derive macros (`Parser`, `Subcommand`, `Args`) |
 | `serde_json` | JSON output formatting, inline JSON parameter parsing, path mapping rule loading |
 | `serde-saphyr` | YAML output formatting and YAML parameter/task file loading |
-| `tokio` | Async runtime (`rt-multi-thread`, `macros`) for session execution |
+| `tokio` | Async runtime (`rt-multi-thread`, `macros`, `signal`) for session execution |
 | `log` | Logging facade; custom `Log` impl that prints subprocess output and `EXCEPTION_INFO` warnings and errors |
 | `jiff` | Timestamp formatting (local, UTC) for session logs |
 
@@ -119,10 +119,11 @@ abstraction that no other command needs.
 `summary` run without a runtime. Starting one is a fixed cost per process that grows with
 the core count, and on a many-core host it exceeds validating a small template.
 
-The `run` runtime has `RUN_WORKER_THREADS` (2) workers rather than one per core. A session
-runs one action at a time, and one worker per core makes every task start slower on a
-many-core host. When `run` fails, `main` prints the error and exits while the runtime is
-still alive, because dropping the runtime waits for its blocking-pool work.
+The `run` runtime has `RUN_WORKER_THREADS` (2) workers rather than one per core, unless
+`TOKIO_WORKER_THREADS` sets the count. A session runs one action at a time, and one worker
+per core makes every task start slower on a many-core host. When `run` fails, `main`
+prints the error and exits while the runtime is still alive, because dropping the runtime
+waits for its blocking-pool work.
 
 ### Global State for Logging
 
