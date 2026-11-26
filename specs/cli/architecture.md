@@ -123,7 +123,8 @@ The `run` runtime has `RUN_WORKER_THREADS` (2) workers rather than one per core,
 `TOKIO_WORKER_THREADS` sets the count. A session runs one action at a time, and one worker
 per core makes every task start slower on a many-core host. When `run` fails, `main`
 prints the error and exits while the runtime is still alive, because dropping the runtime
-waits for its blocking-pool work.
+waits for its blocking-pool work. A runtime that cannot be built is reported as
+`ERROR: Failed to start the async runtime: <error>` with exit code 1.
 
 ### Global State for Logging
 
