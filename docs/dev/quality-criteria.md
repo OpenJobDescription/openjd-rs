@@ -91,8 +91,14 @@ in the `eval-crate` skill's Specification References table.
 
 **Q6. Rust practice and performance.** Code SHOULD follow Rust idioms where they
 make sense, and MUST prefer `Result` to panicking on input-dependent failures.
-Algorithms MUST NOT be `O(N²)` when `O(N)` is readily available. Performance is
-balanced against readability, not maximized.
+Arithmetic and narrowing casts on a size, count, or index that input can set
+MUST use checked, saturating, or widening arithmetic and `try_from`
+conversions, and recursion whose depth input can set MUST be bounded. `usize`
+is 32 bits on wasm32, so a cast that is lossless on a 64-bit host can truncate
+there. For example, task, chunk, and value counts are 64-bit on wasm32
+(#482), and `ExprType` nesting depth is bounded (#578). Algorithms MUST NOT be
+`O(N²)` when `O(N)` is readily available. Performance is balanced against
+readability, not maximized.
 
 **Q7. Python reference parity.** Where a crate has a Python equivalent (listed
 in the `eval-crate` skill's Python Reference Branch table), divergences in
@@ -159,6 +165,11 @@ becomes "a cancel must reach the helper even when the dup fails".
 A Q10 finding is low severity, or medium when a reader could take the past
 behavior it describes for the current behavior.
 
+A sentence that says a state cannot occur, or that a check always or never
+fires, MUST name the function, test, or measurement that makes it true, so
+that a reader can check it against the code. Such a sentence that names
+nothing is a low finding, and one that is false is rated by §5.
+
 **Q11. One home per rule.** A semantic rule — a spec constraint, a parse or
 coercion rule, a wire format, a classification, a policy constant — SHOULD
 have a single implementation that every path routes through. Parallel copies
@@ -223,17 +234,44 @@ hold wherever the value can come from:
   with a `<StepScript>` (`script:` with `actions`);
 - every field the specification links to the rule, including rarely used
   ones such as `notifyPeriodInSeconds`, environment `onEnter` and `onExit`
-  timeouts, SimpleAction `timeout`, and host requirement amounts.
+  timeouts, SimpleAction `timeout`, and host requirement amounts;
+- a value rebuilt from its serialized form, such as a `RangeExpr`, a job, or a
+  symbol table read back with `Deserialize`, which MUST apply the checks and
+  caps of the constructor the parser uses.
 
 It MUST also hold at each stage that applies it: template decode and
-`openjd check`, `create_job`, and run time. Each stage reports a violation
-with a located message (Q3), and SHOULD use the message and field path that
-the other stages use. An earlier stage MUST NOT reject a template that every
-later stage accepts, with one exception: a name that resolves nowhere MUST be
-reported at template validation, even in a sub-expression that some runs
-skip. Whether a name exists does not depend on any value, so every run that
-evaluates that sub-expression fails. `specs/expr/values.md` and
-`specs/expr/evaluator.md` state both rules for the constructs they cover.
+`openjd check`, `create_job`, and run time, and at each site within a stage
+that evaluates the value, such as every place that evaluates `let` bindings. Each
+stage reports a violation with a located message (Q3), and SHOULD use the
+message and field path that the other stages use. An earlier stage MUST NOT
+reject a template that every later stage accepts, with one exception: a name
+that resolves nowhere MUST be reported at template validation, even in a
+sub-expression that some runs skip. Whether a name exists does not depend on
+any value, so every run that evaluates that sub-expression fails.
+`specs/expr/values.md` and `specs/expr/evaluator.md` state both rules for the
+constructs they cover.
+
+**Q14. Resource limits.** Every value or collection whose size input can set
+MUST have a named cap that the code checks before it builds the value, and a
+test SHOULD exceed the cap. A cap on each item does not bound their sum or a
+queue of them. Where code charges a memory or operation budget, every path
+between the charge and its release, early returns and error paths included,
+MUST keep, release, or absorb the charge as its sibling paths do. It MUST NOT
+turn a budget error into a different error or into success, because an
+enclosing construct that absorbs errors would then continue past the limit.
+For example, a string function's output size is checked before the string is
+built (#284), and a memory or operation limit error stays one through
+`eval_attribute`, which replaces other errors with friendlier ones (#418).
+
+**Q15. Failures stay visible.** Code MUST NOT discard a failure it cannot
+handle, and MUST NOT report success for work that failed. Where code drops a
+failure on purpose (`.ok()`, `let _ =`, `unwrap_or_default()`, or `|| true`
+and `2>/dev/null` in a script), a comment SHOULD say why the failure cannot
+change the outcome. A `match` that classifies errors or decides whether to
+refuse input SHOULD name each variant of an enum this workspace defines, so
+that a variant added later is a compile error rather than a silent default.
+For example, a session group that does not resolve is an error, not a skipped
+`chown` followed by a wider mode (#603).
 
 ## 3. Evidence
 
@@ -248,14 +286,15 @@ claim needs a specific kind of evidence:
 | "this is a bug" | a test that fails on the code in question |
 | "this is untested" | a mutant that survives the test suite: a `cargo mutants` result, or a hand mutation made in an isolated copy (see §6 "Mutation testing") |
 | "Python diverges" | the same input run through both implementations, with both outputs |
+| "another implementation behaves this way" (Python, CPython, SQLite, a JavaScript engine), in a finding or in text a change adds | the input run through that implementation, with its version and output |
 | "this is dead code" | a demonstration that it is unreachable |
 | "this is fixed" | the test that failed before the fix, now passing |
 | "these two implementations diverge" | the same input run through both paths, with both outputs |
 | "this pair is pinned" | the equivalence test, by name |
 
-The bug, untested, Python-divergence, dead-code, fixed, and
-two-implementation-divergence claims MUST be established by execution, not by
-reasoning.
+The bug, untested, Python-divergence, dead-code, fixed,
+two-implementation-divergence, and other-implementation claims MUST be
+established by execution, not by reasoning.
 
 ## 4. Finding labels
 
@@ -328,8 +367,8 @@ leaving the file behind.
 ### Verifier rules
 1. When several verifiers run, they MUST get disjoint slices and different
    angles, chosen from: spec fidelity (Q1, Q2, Q8, Q10), implementation
-   correctness (Q3, Q5, Q6, Q11, Q12, Q13), test adequacy by mutation (Q4),
-   and Python divergence (Q7).
+   correctness (Q3, Q5, Q6, Q11, Q12, Q13, Q14, Q15), test adequacy by
+   mutation (Q4), and Python divergence (Q7).
 2. Each verifier MUST be told that it is one of several and will not see the
    others' results, so that it checks rather than defers.
 3. Each finding comes back labelled as in §4.
@@ -351,7 +390,11 @@ working tree:
   agent's file tools can usually edit when `/tmp` is out of bounds. Each
   verifier uses its own worktree, so mutation verifiers MAY run in parallel
   with each other and with other angles, if the machine has the disk and CPU:
-  each worktree is a cold build of several GB. A worktree adds no commits or
+  each worktree is a cold build of several GB. Give each worktree its own
+  target directory: when two worktrees share one `CARGO_TARGET_DIR`, cargo can
+  treat the second tree's sources as already built and return the first
+  tree's binary. When a check compares builds of two commits, confirm that the
+  binaries differ before comparing their output. A worktree adds no commits or
   branches, so it does not count as touching git history. Remove it with
   `git worktree remove --force <path>` before returning.
 - Use [cargo-mutants](https://mutants.rs/) first. Run it inside the worktree,

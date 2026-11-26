@@ -77,6 +77,13 @@ current behavior follow quality-criteria §3: cite `file:line`, or run it.
   step 5.
 - For a bug fix, write the failing test first and record its failure output.
   That output is the evidence for "this is fixed" (quality-criteria §3).
+- Check that every new or changed test fails without the change, and record
+  how. In a worktree (quality-criteria §6 "Mutation testing"), run a test
+  file the change adds or edits under `tests/` against the merge base, or
+  revert the code that a unit test covers and run the unit test. A test that
+  does not build at the merge base counts as failing. A test that passes
+  without the change pins nothing (Q4), unless the commit body says it guards
+  behavior the change keeps.
 - For any change to the public API surface (Q2), regenerate the listings
   with `bash scripts/check_public_api.sh --update`, review their diff, and
   update `public-api.md` to describe the added or changed items, keeping
@@ -85,6 +92,10 @@ current behavior follow quality-criteria §3: cite `file:line`, or run it.
   and a new `allow(missing_docs)` is not an option.
 - Search the whole repo for the concepts the change touches, not just the
   crate (Q8).
+- When the change adds an item of a kind that documents list (an error
+  variant, a field, a log or CLI flag, a source file, a crate, a dependency),
+  `git grep` the name of an existing item of that kind, and add the new item
+  wherever that item appears (Q8).
 - Route the change through the existing implementation of any rule it
   touches rather than adding a parallel copy. If a second implementation is
   genuinely necessary, add the cross-references and the equivalence pin in
@@ -92,6 +103,10 @@ current behavior follow quality-criteria §3: cite `file:line`, or run it.
 - Carry the change to every sibling shape of each type it touches (Q12), and
   to every source and stage of each value it touches (Q13). When the change
   fixes a rule, fix every copy of the rule (Q11).
+- Bound every size that input can set, and keep failures visible: a cap
+  checked before the value is built and the same budget charging on every
+  path (Q14), checked arithmetic and conversions on those sizes (Q6), and no
+  failure dropped without a stated reason (Q15).
 - Write spec text and comments about the code as it is, not about the change
   or what it replaced. That history goes in the commit message (Q10).
 - Strike through resolved report items in the same change (Q9).
@@ -135,6 +150,9 @@ Add the following checks when they apply:
   template validation or job execution behavior changed;
 - the S3 integration tests, when `openjd-snapshots` changed (see `AGENTS.md`);
 - `scripts/check_copyright_headers.sh`, when files were added;
+- `actionlint` and `zizmor` on each workflow file the change edits, when
+  `.github/workflows/` changed. Fix the findings the change introduces, and
+  list the ones that were already there for the user (step 6);
 - the fuzz crate's replay tests (`cargo test --manifest-path fuzz/Cargo.toml
   --no-default-features`), fmt, and clippy (`--no-default-features --lib
   --tests --examples`, as `fuzz.yml` runs it), when library behavior, public API,
@@ -142,6 +160,16 @@ Add the following checks when they apply:
   `python3 scripts/check_fuzz_api_coverage.py --generate` (Python 3.11+,
   pinned nightly, cargo-llvm-cov), when public functions were added or
   removed. See `AGENTS.md` "Fuzzing".
+
+For a change to library or CLI code, also run cargo-mutants on the change
+before the implement commit, so that the audit is not the first to find
+untested behavior. Stage the change, write its diff with
+`git diff --cached --output=../change.diff $(git merge-base HEAD origin/main)`,
+and run `cargo mutants --in-diff ../change.diff` with `--output` outside the
+repository, never `--in-place`. cargo-mutants builds and tests in copies of
+the tree, so the working tree is left alone (quality-criteria §6 "Mutation
+testing"). Add a test for each `MISSED` mutant, or say in the implement
+commit's body why the mutant is equivalent.
 
 If a check cannot run locally (no Docker, no test user, no S3 bucket), say so
 in the audit inputs and the final summary, and rely on CI for it. Local
@@ -179,7 +207,10 @@ Instruct the auditor to:
   calls what changed, specs and docs anywhere in the repo that describe it
   (Q8), and tests that should have changed but did not;
 - check every spec line, doc comment, and code comment the diff adds or
-  edits against Q10: it describes the code as it is, not the change;
+  edits against Q10: it describes the code as it is, not the change,
+  including text that a later commit in the range made false;
+- run each new or changed test without the change, as step 3 describes,
+  before mutating: a test that passes there pins nothing (Q4);
 - check that the diff does what the scope statement says, no more and no
   less. Unrequested scope is a finding;
 - return each finding with its criterion ID, severity (§5), label (§4), and
@@ -216,7 +247,10 @@ Handle each finding from the audit:
   whether it joins this change. An unfixed copy of a rule the change fixes is
   in scope (Q11), not a pre-existing problem.
 
-After fixing, rerun step 4, then make the **fix commit** (see "Commits").
+Before the fix commit, re-read every spec line and comment the branch adds,
+and every comment that names a symbol the fix changed, and correct what the
+fix made false (Q1, Q10). Then rerun step 4 and make the **fix commit** (see
+"Commits").
 
 ### 7. Loop
 
@@ -286,6 +320,9 @@ Rules for every stage commit:
 - Stage specific files, never `git add .`, and confirm that no
   `audit_probe_*` file is included.
 - Sign off each commit (`git commit -s`).
+- A claim about tests, files, counts, or tools quotes the command that shows
+  it, as the gate results do. When a later stage finds an earlier claim
+  false, its commit body corrects it.
 - Add new commits rather than amending or rebasing earlier stages away. The
   stage history is the record of the loop.
 
@@ -310,6 +347,12 @@ updates: the openjd-model-for-python bindings (an integer width such as
 `usize` in `__len__`, a field type change, or the mapping from error variant
 to Python exception), the JavaScript surface of openjd-for-js, and any Python
 reference pull request that must be released at the same time.
+
+**Before every push**, merge the target branch into the topic branch, or
+rebase onto it keeping every stage commit. Then read
+`git diff --stat origin/main...HEAD` for any file the scope does not name, and
+check that each criterion the branch cites (`Q<n>`) still says the same on the
+target branch.
 
 **On submission**, when the PR is opened:
 
@@ -339,7 +382,7 @@ audit goes. It never permits skipping one.
 | Change | Auditors per round | Criteria emphasis |
 |--------|--------------------|-------------------|
 | Docs, comments, or specs only, with no behavior change | 1 | Q1, Q8 (does the text match the code?), Q9, Q10 |
-| CI workflows, skills, or process docs | 1 | Q1, Q8, Q9 (workflows parse, and any tool allowlist covers the new instructions), Q10 |
+| CI workflows, skills, or process docs | 1 | Q1, Q8, Q9 (workflows parse, the change adds no `actionlint` or `zizmor` findings, and any tool allowlist covers the new instructions), Q10 |
 | Dependency or lockfile bump | 1 | Q9 (`cargo deny`, MSRV), Q2 (API breakage in dependents' use), Q8 |
 | Ordinary code change inside one crate | 1 | All criteria, Q4 with at least one mutation per new behavior |
 | Public API change, cross-crate change, or new feature | 2–4 with disjoint angles (§6 "Verifier rules", item 1), each mutation auditor in its own worktree | All criteria |
