@@ -273,7 +273,9 @@ fn empty_command() {
 - `cargo fmt` before committing (nightly rustfmt for some options).
 - `cargo clippy` clean with `-D warnings` — no warnings allowed.
 - All public items must have `///` documentation comments. The `missing_docs` lint (enabled in `[workspace.lints]`) enforces this. Older items carry an item-level `missing-docs burn-down` allow. Don't add new ones, and document anything you add inside an allowed item (a field or variant), because the lint can't see it.
-- Prefer `Result` types over panicking.
+- Prefer `Result` types over panicking, and use checked arithmetic and
+  `try_from` conversions on sizes that input can set
+  ([quality-criteria Q6](docs/dev/quality-criteria.md)).
 - One home per rule: route through an existing implementation of a rule
   rather than re-implementing it. A necessary second copy is cross-referenced
   at both sites and pinned by an equivalence test
@@ -284,6 +286,12 @@ fn empty_command() {
 - Every source and stage: a rule about a value holds wherever the value comes
   from, and at `openjd check`, job creation, and run time
   ([quality-criteria Q13](docs/dev/quality-criteria.md)).
+- Resource limits: a size that input can set has a cap checked before the
+  value is built, and a budget is charged the same way on every path
+  ([quality-criteria Q14](docs/dev/quality-criteria.md)).
+- Failures stay visible: don't drop an error you cannot handle, and say why
+  when you drop one on purpose
+  ([quality-criteria Q15](docs/dev/quality-criteria.md)).
 - See [DEVELOPMENT.md](DEVELOPMENT.md) for more.
 
 ## CI Pipeline
