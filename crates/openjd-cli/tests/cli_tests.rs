@@ -4668,15 +4668,31 @@ steps:
         assert!(status.success(), "mkfifo {}", path.display());
     }
 
-    /// Runs `f` on a thread and fails the test if it does not finish in time,
-    /// so a FIFO nobody opens cannot hang the suite.
-    fn within<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
+    /// Runs `f` on a thread and fails the test as soon as `child` exits or
+    /// 30 s pass without `f` finishing, so a FIFO nobody opens cannot hang
+    /// the suite.
+    fn within<T: Send + 'static>(
+        child: &mut std::process::Child,
+        what: &str,
+        f: impl FnOnce() -> T + Send + 'static,
+    ) -> T {
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || {
             let _ = tx.send(f());
         });
-        rx.recv_timeout(Duration::from_secs(30))
-            .unwrap_or_else(|_| panic!("timed out: {what}"))
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Ok(value) = rx.recv_timeout(Duration::from_millis(50)) {
+                return value;
+            }
+            if let Some(status) = child.try_wait().expect("try_wait") {
+                panic!("openjd exited ({status}) before {what}");
+            }
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                panic!("timed out: {what}");
+            }
+        }
     }
 
     fn thread_names(pid: u32) -> Vec<String> {
@@ -4706,7 +4722,7 @@ steps:
             // Opening the FIFO for writing returns once openjd has opened it
             // to read the template, after any start-up threads exist.
             let writer_path = fifo.clone();
-            let writer = within("openjd opening the template", move || {
+            let writer = within(&mut child, "openjd opening the template", move || {
                 std::fs::OpenOptions::new()
                     .write(true)
                     .open(writer_path)
@@ -4730,6 +4746,10 @@ steps:
         f
     }
 
+    /// Blocking-pool threads share the worker name; `run` starts none on
+    /// Linux, so the count is the workers. On a 2-core host one worker per
+    /// core also gives 2, so the unset case only tells the two apart on
+    /// other core counts.
     #[test]
     fn test_run_starts_two_workers_unless_tokio_worker_threads_is_set() {
         for (setting, expected) in [(None, 2), (Some("3"), 3)] {
@@ -4769,7 +4789,7 @@ steps:
                 .spawn()
                 .expect("spawn openjd");
             let ready_path = ready.clone();
-            within("the task starting", move || {
+            within(&mut child, "the task starting", move || {
                 std::fs::read(ready_path).expect("read ready FIFO")
             });
             let workers = thread_names(child.id())
@@ -4777,7 +4797,7 @@ steps:
                 .filter(|n| n == "tokio-rt-worker")
                 .count();
             let release_path = release.clone();
-            within("releasing the task", move || {
+            within(&mut child, "releasing the task", move || {
                 std::fs::OpenOptions::new()
                     .write(true)
                     .open(release_path)
@@ -4790,16 +4810,18 @@ steps:
     }
 
     /// With 5 file descriptors, building the runtime fails with an error the
-    /// CLI reports. The limit is specific: tokio panics instead at 7 or 8,
-    /// where its signal driver cannot get a descriptor.
+    /// CLI reports. The limit is specific: at 4 the dynamic loader fails, and
+    /// at 7 or 8 tokio panics in its signal driver. Descriptors inherited
+    /// from the test harness count against it, so the shell closes them.
     #[test]
     fn test_run_reports_a_runtime_that_cannot_be_built() {
         let mut f = tempfile::NamedTempFile::with_suffix(".yaml").unwrap();
         std::io::Write::write_all(&mut f, MINIMAL.as_bytes()).unwrap();
-        let mut cmd = Command::new("/bin/sh");
+        let mut cmd = Command::new("bash");
         cmd.args([
             "-c",
-            "ulimit -n 5 && exec \"$0\" run \"$1\"",
+            "for fd in $(ls /proc/$$/fd); do if [ \"$fd\" -gt 2 ]; then exec {fd}>&-; fi; done; \
+             ulimit -n 5 && exec \"$0\" run \"$1\"",
             openjd_bin().to_str().unwrap(),
             f.path().to_str().unwrap(),
         ]);
