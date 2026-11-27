@@ -207,11 +207,12 @@ impl Session {
     /// the exit fails — either before its action starts (building the
     /// symbol table, path mapping, wrap-hook setup) or with an `onExit`
     /// that ends Failed, Canceled or Timeout — like any other action.
-    /// An exit-time input (`resolved_symtab`, or the from-scratch table
-    /// when it is `None`) that can't build the symbol table doesn't fail
-    /// the exit while the table the environment was entered with still
-    /// builds: the `onExit` runs with that one and the session log
-    /// records a warning (session.md § Exit).
+    /// With `resolved_symtab` `None`, the exit builds from the table the
+    /// environment was entered with, as the enter did. An exit-time input
+    /// that can't build the symbol table doesn't fail the exit while its
+    /// fallback (the stored table, or from scratch when the stored one is
+    /// the input) still builds: the `onExit` runs with that one and the
+    /// session log records a warning (session.md § Exit).
     /// It never brings an ending-only session back to Ready, for example
     /// after an earlier action ended Failed, Canceled or Timeout;
     /// only `clear_ending_only` does that.
