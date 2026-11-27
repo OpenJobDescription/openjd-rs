@@ -48,7 +48,7 @@ pub enum SymlinkPolicy {
 |--------|---------|---------|-----------|----------|
 | `CollapseEscaping` | ✓ (default) | ✓ (default) | ✓ (default) | — |
 | `CollapseAll` | ✓ | ✓ | ✓ | — |
-| `ExcludeEscaping` | ✓ | ✓ | — | — |
+| `ExcludeEscaping` | ✓ | ✓ | ✓ | — |
 | `ExcludeAll` | ✓ | ✓ | ✓ | ✓ |
 | `Preserve` | ✓ | — | — | ✓ (default) |
 | `TransitiveIncludeTargets` | ✓ | — | — | — |
@@ -84,7 +84,7 @@ When a symlink is collapsed, it is replaced with the actual content at its targe
 
 **Directory target:** The symlink is replaced with the entire directory tree at the target. All entries appear under the symlink's path. Nested symlinks are handled recursively.
 
-In SUBTREE, collapsing looks up targets in the manifest data (no filesystem access). The `resolve_symlink()` helper follows symlink chains up to 64 hops, detecting cycles. The `expand_dir_symlink()` helper remaps directory contents under the symlink's path.
+In SUBTREE, collapsing looks up targets in the manifest data (no filesystem access), following symlink chains up to 64 hops and detecting cycles. A symlink nested in the expanded directory is kept, with its target made relative to the subtree, when that target is strictly inside the subtree (`CollapseEscaping`); otherwise it is collapsed. `CollapseAll` collapses every nested symlink. A collapsed nested symlink to a directory is expanded in turn. A link to the subtree root, to a directory being expanded, or to a directory containing one of those is a cycle and is skipped, and each nested directory symlink is expanded at most once per top-level symlink (see [SUBTREE symlink resolution](snapshot_operation_subtree.md#symlink-resolution)). This differs from COLLECT, which keeps a nested link whose target is inside the collapsed directory, remapped under the link path; SUBTREE keeps only links whose target is inside the subtree.
 
 ## Cycle Detection
 

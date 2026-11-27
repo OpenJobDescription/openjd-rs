@@ -4,8 +4,8 @@
 
 use super::memory_pool::{default_max_memory_bytes, MemoryPool};
 use super::rate::SlidingWindowRate;
-use crate::data_cache::AsyncDataCache;
-use crate::hash::{hash_data, WHOLE_FILE_CHUNK_SIZE};
+use crate::data_cache::{multipart_threshold, upload_multipart, AsyncDataCache};
+use crate::hash::{hash_data, hash_file_and_parts, open_file, read_chunks, uses_chunks};
 use crate::hash_cache::{HashCache, WHOLE_FILE_RANGE_END};
 use crate::manifest::{AbsManifest, Manifest};
 use std::collections::HashMap;
@@ -216,13 +216,11 @@ async fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
         let file_size = file.size.unwrap_or(0);
         stats.total_files += 1;
         stats.total_bytes = stats.total_bytes.saturating_add(file_size);
-        let use_chunks =
-            chunk_size > 0 && chunk_size != WHOLE_FILE_CHUNK_SIZE && file_size as i64 > chunk_size;
         work_items.push(WorkItem {
             index: i,
             path: file.path.clone(),
             mtime: file.mtime.unwrap_or(0),
-            use_chunks,
+            use_chunks: uses_chunks(file_size, chunk_size),
             file_size,
         });
     }
@@ -289,27 +287,13 @@ async fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
                     if !force_rehash {
                         let path = Path::new(&item.path);
                         if item.use_chunks {
-                            let csu = cs as u64;
-                            let mut all_cached = true;
-                            let mut cached_hashes = Vec::new();
-                            let mut offset: u64 = 0;
-                            while offset < item.file_size {
-                                let end = std::cmp::min(offset + csu, item.file_size);
-                                if let Some(h) = cache.get_if_fresh(
-                                    path,
-                                    &alg,
-                                    offset as i64,
-                                    end as i64,
-                                    item.mtime,
-                                ) {
-                                    cached_hashes.push(h);
-                                } else {
-                                    all_cached = false;
-                                    break;
-                                }
-                                offset = end;
-                            }
-                            if all_cached && !cached_hashes.is_empty() {
+                            if let Some(cached_hashes) = cache.get_chunks_if_fresh(
+                                path,
+                                &alg,
+                                item.file_size,
+                                cs as u64,
+                                item.mtime,
+                            ) {
                                 // Step 2: Check if all chunks exist in data cache
                                 let mut all_exist = true;
                                 for h in &cached_hashes {
@@ -365,11 +349,13 @@ async fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
                 let _mem_permit = pool.acquire(item.file_size as usize).await;
 
                 let part_size = dc.multipart_part_size();
-                let multipart_threshold = 2 * part_size as u64;
 
                 let fr = if item.use_chunks {
-                    process_chunked_async(item.path, cs as u64, alg, dc, dedup).await?
-                } else if item.file_size >= multipart_threshold && dc.as_multipart().is_some() {
+                    process_chunked_async(item.path, cs as u64, item.file_size, alg, dc, dedup)
+                        .await?
+                } else if item.file_size >= multipart_threshold(part_size)
+                    && dc.as_multipart().is_some()
+                {
                     process_whole_multipart(item.path, item.file_size, alg, dc, part_size, dedup)
                         .await?
                 } else {
@@ -418,13 +404,7 @@ async fn hash_upload_manifest<P: Clone + Send + Sync, K: Clone + Send + Sync>(
             }
             FileResult::Chunked { hashes, .. } => {
                 if let Some(ref cache) = options.hash_cache {
-                    let cs = chunk_size as u64;
-                    let mut offset: u64 = 0;
-                    for h in &hashes {
-                        let end = std::cmp::min(offset + cs, file_size);
-                        let _ = cache.put(path, alg_str, offset as i64, end as i64, h, mtime);
-                        offset = end;
-                    }
+                    cache.put_chunks(path, alg_str, file_size, chunk_size as u64, &hashes, mtime);
                 }
                 file.chunk_hashes = Some(hashes);
             }
@@ -576,28 +556,15 @@ async fn process_whole_multipart(
     part_size: usize,
     dedup: UploadDedup,
 ) -> crate::Result<FileResult> {
-    // Stage 1: Streaming hash
+    // Stage 1: Streaming hash, keeping each part's hash so stage 3 can check
+    // that the parts it uploads are the bytes that were hashed.
     let path2 = path.clone();
-    let ps = part_size;
-    let hash = tokio::task::spawn_blocking(move || {
-        use std::io::Read;
-        use xxhash_rust::xxh3::Xxh3Default;
-        let mut f = std::fs::File::open(&path2).map_err(|e| {
-            crate::SnapshotError::Io(std::io::Error::new(e.kind(), format!("{path2}: {e}")))
-        })?;
-        let mut hasher = Xxh3Default::new();
-        let mut buf = vec![0u8; ps];
-        loop {
-            let n = f.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buf[..n]);
-        }
-        Ok::<_, crate::SnapshotError>(format!("{:032x}", hasher.digest128()))
+    let (hash, part_hashes) = tokio::task::spawn_blocking(move || {
+        hash_file_and_parts(Path::new(&path2), part_size as u64, file_size)
     })
     .await
     .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
+    let part_hashes = Arc::new(part_hashes);
 
     // Stage 2: Check data cache, then dedup map
     if data_cache
@@ -637,68 +604,38 @@ async fn process_whole_multipart(
     let mp = data_cache
         .as_multipart()
         .expect("process_whole_multipart requires MultipartDataCache support");
-    let upload_id = mp
-        .create_multipart_upload(&hash, &alg_str)
-        .await
-        .map_err(crate::SnapshotError::Io)?;
-
-    let upload_result = async {
-        let num_parts = (file_size as usize).div_ceil(part_size) as i32;
-        let mut upload_handles = Vec::new();
-
-        for part_num in 1..=num_parts {
-            let offset = (part_num as u64 - 1) * part_size as u64;
-            let this_part_size = std::cmp::min(part_size as u64, file_size - offset) as usize;
-            let path_clone = path.clone();
-            let dc = data_cache.clone();
-            let h = hash.clone();
-            let a = alg_str.clone();
-            let uid = upload_id.clone();
-
-            upload_handles.push(tokio::spawn(async move {
-                let part_data = tokio::task::spawn_blocking(move || {
+    // `upload_multipart` aborts the upload on failure, before waiters are
+    // notified below.
+    let upload_result =
+        upload_multipart(mp, &hash, &alg_str, file_size, part_size, |start, end| {
+            let path = path.clone();
+            let expected = part_hashes[(start / part_size as u64) as usize].clone();
+            async move {
+                let data = tokio::task::spawn_blocking(move || {
                     use std::io::{Read, Seek, SeekFrom};
-                    let mut f = std::fs::File::open(&path_clone)?;
-                    f.seek(SeekFrom::Start(offset))?;
-                    let mut buf = vec![0u8; this_part_size];
+                    let mut f = open_file(Path::new(&path))?;
+                    f.seek(SeekFrom::Start(start))?;
+                    let mut buf = vec![0u8; (end - start) as usize];
                     f.read_exact(&mut buf)?;
-                    Ok::<_, std::io::Error>(buf)
+                    let actual = hash_data(&buf);
+                    if actual != expected {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "{path} changed while uploading: part at offset {start} hashed \
+                                 {expected} before the upload and {actual} during it"
+                            ),
+                        ));
+                    }
+                    Ok(buf)
                 })
                 .await
                 .map_err(|e| crate::SnapshotError::Task(e.to_string()))?
                 .map_err(crate::SnapshotError::Io)?;
-
-                let etag = dc
-                    .as_multipart()
-                    .expect("MultipartDataCache support verified above")
-                    .upload_part(&h, &a, &uid, part_num, part_data)
-                    .await
-                    .map_err(crate::SnapshotError::Io)?;
-                Ok::<_, crate::SnapshotError>((part_num, etag))
-            }));
-        }
-
-        let mut parts: Vec<(i32, String)> = Vec::new();
-        for handle in upload_handles {
-            let (part_num, etag) = handle
-                .await
-                .map_err(|e| crate::SnapshotError::Task(e.to_string()))??;
-            parts.push((part_num, etag));
-        }
-        parts.sort_by_key(|(num, _)| *num);
-
-        mp.complete_multipart_upload(&hash, &alg_str, &upload_id, parts)
-            .await
-            .map_err(crate::SnapshotError::Io)?;
-
-        Ok::<_, crate::SnapshotError>(())
-    }
-    .await;
-
-    // Abort the multipart upload on failure before notifying waiters
-    if let Err(ref _e) = upload_result {
-        let _ = mp.abort_multipart_upload(&hash, &alg_str, &upload_id).await;
-    }
+                Ok((data, ()))
+            }
+        })
+        .await;
 
     // Notify waiters and clean up dedup map regardless of success/failure
     {
@@ -720,41 +657,19 @@ async fn process_whole_multipart(
 async fn process_chunked_async(
     path: String,
     chunk_size: u64,
+    expected_size: u64,
     alg_str: String,
     data_cache: Arc<dyn AsyncDataCache>,
     dedup: UploadDedup,
 ) -> crate::Result<FileResult> {
-    // Stage 1: Read and hash all chunks in blocking thread
+    // Stage 1: Read and hash all chunks in blocking thread. `read_chunks`
+    // is the reader `hash_file_chunked` uses, so a file whose size on disk
+    // differs from the manifest fails here as it does in the `hash` op.
     let chunks: Vec<(String, Vec<u8>)> = tokio::task::spawn_blocking(move || {
-        use std::io::{Read, Seek};
-        let mut f = std::fs::File::open(&path).map_err(|e| {
-            crate::SnapshotError::Io(std::io::Error::new(e.kind(), format!("{path}: {e}")))
-        })?;
         let mut result = Vec::new();
-        let mut buf = vec![0u8; chunk_size as usize];
-        loop {
-            match f.read_exact(&mut buf) {
-                Ok(()) => {
-                    let hash = hash_data(&buf);
-                    result.push((hash, buf.clone()));
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
-                    let consumed = result.len() as u64 * chunk_size;
-                    f.seek(std::io::SeekFrom::Start(consumed))?;
-                    let mut remainder = Vec::new();
-                    f.read_to_end(&mut remainder)?;
-                    if !remainder.is_empty() {
-                        let hash = hash_data(&remainder);
-                        result.push((hash, remainder));
-                    }
-                    break;
-                }
-                Err(e) => return Err(crate::SnapshotError::Io(e)),
-            }
-        }
-        if result.is_empty() {
-            result.push((hash_data(&[]), vec![]));
-        }
+        read_chunks(Path::new(&path), chunk_size, expected_size, |chunk| {
+            result.push((hash_data(chunk), chunk.to_vec()))
+        })?;
         Ok::<_, crate::SnapshotError>(result)
     })
     .await
@@ -1013,5 +928,285 @@ mod tests {
             assert!(data_cache.object_exists(h, "xxh128").await.unwrap());
             assert_eq!(data_cache.get_object(h, "xxh128").await.unwrap().len(), 256);
         }
+    }
+
+    /// A chunked file whose on-disk size differs from the manifest fails the
+    /// same way the `hash` op does, and writes no hash-cache ranges computed
+    /// from the stale manifest size.
+    #[tokio::test]
+    async fn chunked_upload_rejects_size_change() {
+        let tmp = TempDir::new().unwrap();
+        let (path, mtime) = make_test_file(tmp.path(), "grown.bin", &[7u8; 10]);
+        let cache_dir = TempDir::new().unwrap();
+        let hc_dir = TempDir::new().unwrap();
+        let hash_cache = Arc::new(HashCache::new(hc_dir.path()).unwrap());
+        let manifest: AbsSnapshot = Manifest::new(HashAlgorithm::Xxh128, 4)
+            .with_files(vec![FileEntry::file(&path, 8, mtime)]);
+
+        let data_cache: Arc<dyn AsyncDataCache> =
+            Arc::new(FileSystemDataCache::new(cache_dir.path().join("data")).unwrap());
+        let err = hash_upload_abs_manifest(
+            &AbsManifest::Snapshot(manifest.clone()),
+            data_cache,
+            HashUploadOptions {
+                hash_cache: Some(hash_cache.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!("IO error: file size mismatch for {path}: expected 8, found 10")
+        );
+
+        // The `hash` op rejects the same input with the same message.
+        let hash_err = crate::ops::hash_abs_manifest(
+            &AbsManifest::Snapshot(manifest),
+            crate::ops::HashOptions::default(),
+        )
+        .map(|_| ())
+        .unwrap_err();
+        assert_eq!(hash_err.to_string(), err.to_string());
+
+        for (start, end) in [(0, 4), (4, 8), (8, 10)] {
+            assert_eq!(
+                hash_cache.get(Path::new(&path), "xxh128", start, end),
+                None,
+                "range {start}..{end} cached"
+            );
+        }
+    }
+
+    /// A multipart cache with 4-byte parts (multipart threshold 8 bytes).
+    /// When `rewrite` is set it overwrites the source file with same-size
+    /// content as the upload starts: after the hashing pass, before any part
+    /// is read for upload. When `delete` is set it removes the source file
+    /// at the same point. When `fail_complete` is set, completing fails.
+    struct RewriteOnUploadCache {
+        source: String,
+        rewrite: bool,
+        delete: bool,
+        fail_complete: bool,
+        puts: Mutex<Vec<Vec<u8>>>,
+        parts: Mutex<Vec<(i32, Vec<u8>)>>,
+        completed: Mutex<Option<Vec<u8>>>,
+        aborted: AtomicBool,
+    }
+
+    impl RewriteOnUploadCache {
+        fn new(source: &str, rewrite: bool) -> Self {
+            Self {
+                source: source.to_string(),
+                rewrite,
+                delete: false,
+                fail_complete: false,
+                puts: Mutex::default(),
+                parts: Mutex::default(),
+                completed: Mutex::default(),
+                aborted: AtomicBool::default(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl AsyncDataCache for RewriteOnUploadCache {
+        fn object_key(&self, h: &str, a: &str) -> String {
+            format!("{h}.{a}")
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn multipart_part_size(&self) -> usize {
+            4
+        }
+        fn as_multipart(&self) -> Option<&dyn crate::data_cache::MultipartDataCache> {
+            Some(self)
+        }
+        async fn object_exists(&self, _h: &str, _a: &str) -> std::io::Result<bool> {
+            Ok(false)
+        }
+        async fn put_object(&self, h: &str, _a: &str, d: Vec<u8>) -> std::io::Result<String> {
+            self.puts.lock().unwrap().push(d);
+            Ok(h.to_string())
+        }
+        async fn get_object(&self, _h: &str, _a: &str) -> std::io::Result<Vec<u8>> {
+            unreachable!("upload does not get")
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::data_cache::MultipartDataCache for RewriteOnUploadCache {
+        async fn create_multipart_upload(&self, _h: &str, _a: &str) -> std::io::Result<String> {
+            if self.rewrite {
+                std::fs::write(&self.source, b"ABCDEFGHIJ")?;
+            }
+            if self.delete {
+                std::fs::remove_file(&self.source)?;
+            }
+            Ok("uid".into())
+        }
+        async fn upload_part(
+            &self,
+            _h: &str,
+            _a: &str,
+            _uid: &str,
+            pn: i32,
+            data: Vec<u8>,
+        ) -> std::io::Result<String> {
+            self.parts.lock().unwrap().push((pn, data));
+            Ok(format!("etag-{pn}"))
+        }
+        async fn complete_multipart_upload(
+            &self,
+            _h: &str,
+            _a: &str,
+            _uid: &str,
+            _parts: Vec<(i32, String)>,
+        ) -> std::io::Result<()> {
+            if self.fail_complete {
+                return Err(std::io::Error::other("complete failed"));
+            }
+            let mut parts = self.parts.lock().unwrap().clone();
+            parts.sort_by_key(|(n, _)| *n);
+            *self.completed.lock().unwrap() =
+                Some(parts.into_iter().flat_map(|(_, d)| d).collect());
+            Ok(())
+        }
+        async fn abort_multipart_upload(
+            &self,
+            _h: &str,
+            _a: &str,
+            _uid: &str,
+        ) -> std::io::Result<()> {
+            self.aborted.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    async fn upload_whole_multipart(cache: Arc<RewriteOnUploadCache>) -> crate::Result<FileResult> {
+        let source = cache.source.clone();
+        process_whole_multipart(
+            source,
+            10,
+            "xxh128".into(),
+            cache,
+            4,
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn whole_multipart_upload_stores_the_hashed_bytes() {
+        let tmp = TempDir::new().unwrap();
+        let (path, _) = make_test_file(tmp.path(), "big.bin", b"0123456789");
+        let cache = Arc::new(RewriteOnUploadCache::new(&path, false));
+        let FileResult::Whole { hash, uploaded, .. } =
+            upload_whole_multipart(cache.clone()).await.unwrap()
+        else {
+            panic!("expected a whole-file result");
+        };
+        assert!(uploaded);
+        assert_eq!(hash, hash_data(b"0123456789"));
+        assert_eq!(
+            cache.completed.lock().unwrap().as_deref(),
+            Some(&b"0123456789"[..])
+        );
+        assert!(!cache.aborted.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn whole_multipart_upload_rejects_file_changed_after_hashing() {
+        let tmp = TempDir::new().unwrap();
+        let (path, _) = make_test_file(tmp.path(), "big.bin", b"0123456789");
+        let cache = Arc::new(RewriteOnUploadCache::new(&path, true));
+        let err = upload_whole_multipart(cache.clone())
+            .await
+            .map(|_| ())
+            .unwrap_err()
+            .to_string();
+        // Parts are read concurrently, so whichever fails first is reported.
+        let parts: [(u64, &[u8], &[u8]); 3] = [
+            (0, b"0123", b"ABCD"),
+            (4, b"4567", b"EFGH"),
+            (8, b"89", b"IJ"),
+        ];
+        let expected: Vec<String> = parts
+            .iter()
+            .map(|(offset, before, during)| {
+                format!(
+                    "IO error: {path} changed while uploading: part at offset {offset} hashed {} \
+                     before the upload and {} during it",
+                    hash_data(before),
+                    hash_data(during)
+                )
+            })
+            .collect();
+        assert!(expected.contains(&err), "{err}");
+        assert!(cache.aborted.load(Ordering::SeqCst));
+        assert_eq!(*cache.completed.lock().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn whole_multipart_upload_aborts_when_complete_fails() {
+        let tmp = TempDir::new().unwrap();
+        let (path, _) = make_test_file(tmp.path(), "big.bin", b"0123456789");
+        let mut cache = RewriteOnUploadCache::new(&path, false);
+        cache.fail_complete = true;
+        let cache = Arc::new(cache);
+        let err = upload_whole_multipart(cache.clone())
+            .await
+            .map(|_| ())
+            .unwrap_err();
+        assert_eq!(err.to_string(), "IO error: complete failed");
+        assert!(cache.aborted.load(Ordering::SeqCst));
+    }
+
+    /// Unchunked files at or above the multipart threshold (8 bytes here) go
+    /// through multipart upload; smaller ones are put whole.
+    #[tokio::test]
+    async fn whole_files_use_multipart_from_the_threshold() {
+        for (content, multipart) in [(&b"1234567"[..], false), (&b"12345678"[..], true)] {
+            let tmp = TempDir::new().unwrap();
+            let (path, mtime) = make_test_file(tmp.path(), "f.bin", content);
+            let cache = Arc::new(RewriteOnUploadCache::new(&path, false));
+            let manifest: AbsSnapshot =
+                Manifest::new(HashAlgorithm::Xxh128, crate::WHOLE_FILE_CHUNK_SIZE)
+                    .with_files(vec![FileEntry::file(&path, content.len() as u64, mtime)]);
+            hash_upload_abs_manifest(
+                &AbsManifest::Snapshot(manifest),
+                cache.clone(),
+                HashUploadOptions::default(),
+            )
+            .await
+            .unwrap();
+            let completed = cache.completed.lock().unwrap().clone();
+            let puts = cache.puts.lock().unwrap().clone();
+            if multipart {
+                assert_eq!(completed.as_deref(), Some(content), "{content:?}");
+                assert!(puts.is_empty(), "{content:?}");
+            } else {
+                assert_eq!(completed, None, "{content:?}");
+                assert_eq!(puts, [content.to_vec()], "{content:?}");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn whole_multipart_upload_names_a_file_removed_after_hashing() {
+        let tmp = TempDir::new().unwrap();
+        let (path, _) = make_test_file(tmp.path(), "big.bin", b"0123456789");
+        let mut cache = RewriteOnUploadCache::new(&path, false);
+        cache.delete = true;
+        let cache = Arc::new(cache);
+        let err = upload_whole_multipart(cache.clone())
+            .await
+            .map(|_| ())
+            .unwrap_err();
+        // The OS's own wording for the missing file, which differs by platform.
+        let os_message = std::fs::File::open(&path).unwrap_err().to_string();
+        assert_eq!(err.to_string(), format!("IO error: {path}: {os_message}"));
+        assert!(cache.aborted.load(Ordering::SeqCst));
     }
 }

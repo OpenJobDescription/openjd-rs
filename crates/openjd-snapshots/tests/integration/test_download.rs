@@ -1872,7 +1872,8 @@ async fn statistics_saturate_on_huge_declared_sizes() {
     let dc = new_data_cache(&cache_dir);
     let hc = Arc::new(openjd_snapshots::HashCache::new(hc_dir.path()).unwrap());
     let huge = 1u64 << 63;
-    let cs = DEFAULT_FILE_CHUNK_SIZE as u64;
+    // Two chunks per huge file, so a chunked entry's hash list is valid.
+    let cs = 1u64 << 62;
     let mtime_of = |p: &std::path::Path| {
         std::fs::metadata(p)
             .unwrap()
@@ -1902,13 +1903,22 @@ async fn statistics_saturate_on_huge_declared_sizes() {
                 )
                 .unwrap();
             }
-            // Chunk hash-cache hit: one chunk, cached for its range.
+            // Chunk hash-cache hit: both chunks cached for their ranges.
             2 | 3 => {
                 std::fs::write(&dest, b"x").unwrap();
-                hc.put(&dest, "xxh128", 0, cs as i64, &hash, mtime_of(&dest))
+                for (start, end) in [(0, cs), (cs, huge)] {
+                    hc.put(
+                        &dest,
+                        "xxh128",
+                        start as i64,
+                        end as i64,
+                        &hash,
+                        mtime_of(&dest),
+                    )
                     .unwrap();
+                }
                 e.hash = None;
-                e.chunk_hashes = Some(vec![hash]);
+                e.chunk_hashes = Some(vec![hash.clone(), hash]);
             }
             // Exists, not cached: skipped by the conflict policy.
             4 | 5 => std::fs::write(&dest, b"x").unwrap(),
@@ -1919,7 +1929,7 @@ async fn statistics_saturate_on_huge_declared_sizes() {
     }
 
     let result = download_abs_manifest(
-        &AbsManifest::Snapshot(make_snapshot(files)),
+        &AbsManifest::Snapshot(Manifest::new(HashAlgorithm::Xxh128, cs as i64).with_files(files)),
         dc.clone(),
         DownloadOptions {
             hash_cache: Some(hc),

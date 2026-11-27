@@ -520,8 +520,11 @@ fn directory_symlink_collapsed_with_implicit_dirs() {
     assert!(p.contains("link/b.png"));
 }
 
+/// A nested symlink in an expanded directory whose target is outside the
+/// subtree is collapsed, as `collect` collapses escaping links in a collapsed
+/// directory, so the subtree holds no link to a target it lacks.
 #[test]
-fn directory_symlink_with_nested_symlink_collapse_escaping_preserves() {
+fn directory_symlink_with_nested_escaping_symlink_collapse_escaping_collapses() {
     let m = rel(
         vec![
             FileEntry::symlink("assets/textures/link", "assets/shared/v2"),
@@ -546,12 +549,33 @@ fn directory_symlink_with_nested_symlink_collapse_escaping_preserves() {
     assert_eq!(reg.hash.as_deref(), Some("h1"));
     assert!(reg.symlink_target.is_none());
 
-    // CollapseEscaping preserves nested symlinks inside expanded directories
     let nested = by_path["link/nested_link"];
-    assert_eq!(
-        nested.symlink_target.as_deref(),
-        Some("assets/data/actual.png")
+    assert!(nested.symlink_target.is_none());
+    assert_eq!(nested.hash.as_deref(), Some("h2"));
+    assert!(result.validate().is_ok(), "{:?}", result.validate());
+}
+
+/// A nested symlink in an expanded directory whose target is inside the
+/// subtree is kept, with its target relative to the subtree.
+#[test]
+fn directory_symlink_with_nested_internal_symlink_collapse_escaping_preserves() {
+    let m = rel(
+        vec![
+            FileEntry::symlink("assets/textures/link", "assets/shared/v2"),
+            FileEntry::symlink("assets/shared/v2/nested_link", "assets/textures/local.png"),
+            hf("assets/textures/local.png", "h3", 300, 3000),
+        ],
+        vec![],
     );
+    let result =
+        subtree_rel_snapshot(&m, "assets/textures", SymlinkPolicy::CollapseEscaping).unwrap();
+    let nested = result
+        .files
+        .iter()
+        .find(|f| f.path == "link/nested_link")
+        .unwrap();
+    assert_eq!(nested.symlink_target.as_deref(), Some("local.png"));
+    assert!(result.validate().is_ok(), "{:?}", result.validate());
 }
 
 #[test]
@@ -584,6 +608,327 @@ fn directory_symlink_with_nested_symlink_collapse_all_resolves() {
     assert_eq!(nested.hash.as_deref(), Some("h2"));
     assert_eq!(nested.size, Some(200));
     assert!(nested.symlink_target.is_none());
+}
+
+/// A nested symlink to a directory outside the subtree is expanded in turn,
+/// under both collapsing policies.
+#[test]
+fn directory_symlink_with_nested_directory_symlink_expands() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/dlink", "/x"),
+            hf("/x/a.txt", "ha", 1, 10),
+            FileEntry::symlink("/x/sub", "/y"),
+            hf("/y/b.txt", "hb", 2, 20),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let files: Vec<_> = result
+            .files
+            .iter()
+            .map(|f| {
+                (
+                    f.path.as_str(),
+                    f.hash.as_deref(),
+                    f.symlink_target.as_deref(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            files,
+            [
+                ("dlink/a.txt", Some("ha"), None),
+                ("dlink/sub/b.txt", Some("hb"), None)
+            ],
+            "{policy}"
+        );
+        assert!(result.validate().is_ok(), "{:?}", result.validate());
+    }
+}
+
+/// A nested symlink back to a directory being expanded, or to one containing
+/// it, is a cycle and is skipped.
+#[test]
+fn directory_symlink_with_nested_cycle_is_skipped() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/dlink", "/x/d"),
+            hf("/x/d/a.txt", "ha", 1, 10),
+            FileEntry::symlink("/x/d/back", "/x/d"),
+            FileEntry::symlink("/x/d/up", "/x"),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["dlink/a.txt"], "{policy}");
+    }
+}
+
+/// Converging directory links are bounded: each nested symlink is collapsed
+/// at most once per top-level symlink, so a chain of diamonds does not
+/// expand exponentially.
+#[test]
+fn directory_symlink_with_converging_links_is_bounded() {
+    let depth = 40;
+    let mut files = vec![FileEntry::symlink("/p/dlink", "/l0")];
+    for i in 0..depth {
+        let next = format!("/l{}", i + 1);
+        files.push(FileEntry::symlink(format!("/l{i}/a"), &next));
+        files.push(FileEntry::symlink(format!("/l{i}/b"), &next));
+    }
+    files.push(hf(&format!("/l{depth}/f.txt"), "hf", 1, 10));
+    let m = abs(files, vec![]);
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let a_chain = format!("dlink/{}f.txt", "a/".repeat(depth));
+        let b_last = format!("dlink/{}b/f.txt", "a/".repeat(depth - 1));
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, [a_chain.as_str(), b_last.as_str()], "{policy}");
+    }
+}
+
+/// A symlink to the subtree root, or to a directory containing it, would copy
+/// the subtree into itself, so it is a cycle and is skipped: nested in an
+/// expanded directory under both collapsing policies, and at top level under
+/// `CollapseAll`.
+#[test]
+fn symlink_to_subtree_root_is_a_cycle() {
+    let m = abs(
+        vec![
+            hf("/p/x.txt", "hx", 1, 10),
+            FileEntry::symlink("/p/dlink", "/x"),
+            hf("/x/a.txt", "ha", 2, 20),
+            FileEntry::symlink("/x/up", "/p"),
+            FileEntry::symlink("/x/top", "/"),
+            FileEntry::symlink("/p/self", "/p"),
+        ],
+        vec![],
+    );
+    for (policy, expected) in [
+        (
+            SymlinkPolicy::CollapseEscaping,
+            vec!["x.txt", "dlink/a.txt", "self"],
+        ),
+        (SymlinkPolicy::CollapseAll, vec!["x.txt", "dlink/a.txt"]),
+    ] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, expected, "{policy}");
+    }
+}
+
+/// A symlink to a volume root is expanded like any other directory.
+#[test]
+fn symlink_to_drive_root_expands() {
+    let m = abs(
+        vec![
+            hf("C:/p/a.txt", "ha", 1, 10),
+            FileEntry::symlink("C:/p/l", "D:/"),
+            hf("D:/f.txt", "hf", 2, 20),
+            FileEntry::symlink("C:/p/m", "C:/x"),
+            hf("C:/x/g.txt", "hg", 3, 30),
+            FileEntry::symlink("C:/x/n", "D:/"),
+        ],
+        vec![],
+    );
+    let result = subtree_snapshot(&m, "C:/p", SymlinkPolicy::CollapseAll).unwrap();
+    let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, ["a.txt", "l/f.txt", "m/g.txt", "m/n/f.txt"]);
+}
+
+/// A symlink to a symlink to a directory is expanded, at top level and
+/// nested.
+#[test]
+fn symlink_chain_to_directory_expands() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/top", "/y"),
+            FileEntry::symlink("/p/dlink", "/x"),
+            FileEntry::symlink("/x/sub", "/y"),
+            FileEntry::symlink("/y", "/z"),
+            hf("/z/b.txt", "hb", 1, 10),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["top/b.txt", "dlink/sub/b.txt"], "{policy}");
+        assert!(result.validate().is_ok(), "{:?}", result.validate());
+    }
+}
+
+/// Sibling nested symlinks to the same directory are both expanded: the
+/// directory is no longer being expanded once the first expansion ends.
+#[test]
+fn sibling_nested_links_to_same_directory_both_expand() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/dlink", "/x"),
+            FileEntry::symlink("/x/s1", "/y"),
+            FileEntry::symlink("/x/s2", "/y"),
+            hf("/y/b.txt", "hb", 1, 10),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["dlink/s1/b.txt", "dlink/s2/b.txt"], "{policy}");
+    }
+}
+
+/// A cycle through more than one directory link is skipped: every directory
+/// being expanded is checked, not only the innermost.
+#[test]
+fn two_hop_directory_symlink_cycle_is_skipped() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/dlink", "/x"),
+            hf("/x/a.txt", "ha", 1, 10),
+            FileEntry::symlink("/x/s", "/y"),
+            hf("/y/b.txt", "hb", 2, 20),
+            FileEntry::symlink("/y/t", "/x"),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["dlink/a.txt", "dlink/s/b.txt"], "{policy}");
+    }
+}
+
+/// The once-per-link bound applies to nested directory symlinks only: a
+/// nested file symlink reached through converging directory links is copied
+/// on every path.
+#[test]
+fn converging_links_keep_every_nested_file_link() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/top", "/a"),
+            FileEntry::symlink("/a/l1", "/c"),
+            FileEntry::symlink("/a/l2", "/c"),
+            hf("/c/g.txt", "hg", 1, 10),
+            FileEntry::symlink("/c/f", "/real.txt"),
+            hf("/real.txt", "hr", 2, 20),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let files: Vec<_> = result
+            .files
+            .iter()
+            .map(|f| (f.path.as_str(), f.hash.as_deref()))
+            .collect();
+        assert_eq!(
+            files,
+            [
+                ("top/l1/f", Some("hr")),
+                ("top/l1/g.txt", Some("hg")),
+                ("top/l2/f", Some("hr")),
+                ("top/l2/g.txt", Some("hg"))
+            ],
+            "{policy}"
+        );
+    }
+}
+
+/// The once-per-link bound is per top-level symlink: two top-level links to
+/// the same directory each expand its nested directory links.
+#[test]
+fn top_level_links_to_same_directory_each_expand_nested_links() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/a", "/x"),
+            FileEntry::symlink("/p/b", "/x"),
+            FileEntry::symlink("/x/s", "/y"),
+            hf("/y/f.txt", "hf", 1, 10),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["a/s/f.txt", "b/s/f.txt"], "{policy}");
+    }
+}
+
+/// A symlink chain is followed for up to 64 hops: 63 intermediate links
+/// resolve to the file at the end, 64 do not.
+#[test]
+fn symlink_chain_is_followed_up_to_64_hops() {
+    let chain = |intermediate: usize| {
+        let mut files = vec![FileEntry::symlink("/p/l", "/c1")];
+        for i in 1..=intermediate {
+            files.push(FileEntry::symlink(format!("/c{i}"), format!("/c{}", i + 1)));
+        }
+        files.push(hf(&format!("/c{}", intermediate + 1), "hc", 1, 10));
+        abs(files, vec![])
+    };
+    for (intermediate, expected) in [(3, vec!["l"]), (63, vec!["l"]), (64, vec![])] {
+        let result =
+            subtree_snapshot(&chain(intermediate), "/p", SymlinkPolicy::CollapseAll).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, expected, "{intermediate} intermediate links");
+    }
+}
+
+/// A nested directory symlink skipped as a cycle on one path is not marked
+/// expanded, so a later path that reaches it without a cycle expands it.
+#[test]
+fn link_skipped_as_cycle_still_expands_on_another_path() {
+    let m = abs(
+        vec![
+            FileEntry::symlink("/p/t", "/a"),
+            FileEntry::symlink("/a/l1", "/b"),
+            FileEntry::symlink("/a/l2", "/c"),
+            hf("/b/f.txt", "hf", 1, 10),
+            FileEntry::symlink("/b/k", "/c"),
+            hf("/c/g.txt", "hg", 2, 20),
+            FileEntry::symlink("/c/m", "/b"),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            ["t/l1/f.txt", "t/l1/k/g.txt", "t/l2/g.txt", "t/l2/m/f.txt"],
+            "{policy}"
+        );
+    }
+}
+
+/// The cycle rule applies to the directory a symlink chain resolves to, not
+/// the first hop: chains back to the subtree root or to a directory being
+/// expanded are skipped, nested and at top level.
+#[test]
+fn cycle_through_symlink_chain_is_skipped() {
+    let m = abs(
+        vec![
+            hf("/p/x.txt", "hx", 1, 10),
+            FileEntry::symlink("/p/dlink", "/x"),
+            FileEntry::symlink("/p/self", "/lp"),
+            hf("/x/a.txt", "ha", 2, 20),
+            FileEntry::symlink("/x/up", "/lp"),
+            FileEntry::symlink("/lp", "/p"),
+            FileEntry::symlink("/x/back", "/lx"),
+            FileEntry::symlink("/lx", "/x"),
+        ],
+        vec![],
+    );
+    for policy in [SymlinkPolicy::CollapseEscaping, SymlinkPolicy::CollapseAll] {
+        let result = subtree_snapshot(&m, "/p", policy).unwrap();
+        let paths: Vec<_> = result.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["x.txt", "dlink/a.txt"], "{policy}");
+    }
 }
 
 // ===== TestSubtreeFileChunkSizePreservation =====

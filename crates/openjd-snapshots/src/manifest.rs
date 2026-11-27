@@ -3,7 +3,9 @@
 // SPDX-License-Identifier: (Apache-2.0 OR MIT)
 
 use crate::hash::HashAlgorithm;
-use crate::path_util::{is_absolute_path, normalize_path};
+use crate::path_util::{
+    implied_dirs, is_absolute_path, longest_common_dir_prefix, normalize_path, parent_dir,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::marker::PhantomData;
@@ -12,146 +14,6 @@ use std::marker::PhantomData;
 
 fn is_false(v: &bool) -> bool {
     !v
-}
-
-// --- Path helpers for common_root ---
-
-/// Returns the parent directory of a (normalized) path, using `/` separators.
-///
-/// - `/foo/bar/baz` → `/foo/bar`
-/// - `/foo` → `/` (immediate child of absolute root)
-/// - `/` → `/` (root's parent is itself; defensive — shouldn't arise in a file path)
-/// - `C:/foo/bar` → `C:/foo`
-/// - `C:/foo` → `C:/` (immediate child of drive root — preserve the slash so
-///   the caller can distinguish the drive root from a bare drive specifier)
-/// - `foo/bar` → `foo` (relative)
-/// - `foo` → `"."` (immediate child of the relative-path root)
-/// - `"."` → `"."` (relative root's parent is itself; defensive)
-/// - `""` → `""` (defensive)
-fn parent_dir(path: &str) -> &str {
-    if path.is_empty() || path == "/" || path == "." {
-        return path;
-    }
-    match path.rfind('/') {
-        None => ".",    // relative, no slash: parent is the relative root
-        Some(0) => "/", // absolute, single slash at start: parent is root
-        Some(2) if is_drive_letter_prefix(path) => &path[..3], // `C:/foo` → `C:/`
-        Some(i) => &path[..i],
-    }
-}
-
-/// Returns true if `path` starts with a Windows drive-letter prefix like
-/// `C:/`. Used to recognize drive roots so their trailing `/` is preserved
-/// (to distinguish the drive root `C:/` from the bare drive `C:`).
-fn is_drive_letter_prefix(path: &str) -> bool {
-    let bytes = path.as_bytes();
-    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'/'
-}
-
-/// Returns true if no entry in `live_paths` is a strict descendant of `dir`.
-///
-/// A path `p` is a strict descendant of `dir` when `p != dir` and one of:
-/// - `dir == "/"` (absolute root contains every absolute path)
-/// - `dir == "."` (relative root contains every relative path — i.e., every
-///   path that is not itself absolute or another copy of `.`)
-/// - `p` starts with `dir` followed by `/`
-fn dir_is_empty(dir: &str, live_paths: &HashSet<&str>) -> bool {
-    if dir == "/" {
-        // Absolute root: any other absolute path (starting with `/`) is a descendant.
-        !live_paths.iter().any(|p| *p != dir && p.starts_with('/'))
-    } else if dir == "." {
-        // Relative root: any other *relative* path is a descendant. A path is
-        // relative if it does not start with `/` and is not a drive-letter
-        // absolute path like `C:/...`.
-        !live_paths
-            .iter()
-            .any(|p| *p != dir && !p.starts_with('/') && !is_drive_letter_prefix(p))
-    } else {
-        let prefix = format!("{dir}/");
-        !live_paths
-            .iter()
-            .any(|p| *p != dir && p.starts_with(&prefix))
-    }
-}
-
-/// Returns the longest directory prefix that is an ancestor (or equal to)
-/// every path in `paths`. `paths` must be non-empty.
-///
-/// The result has no trailing slash, except when the result is a root path
-/// (POSIX `/` or a Windows drive root like `C:/`). If the computed boundary
-/// is an empty byte range (no shared directory prefix among relative paths),
-/// returns `"."` — the relative root — so the result is always a valid path.
-fn longest_common_dir_prefix(paths: &[&str]) -> String {
-    debug_assert!(!paths.is_empty());
-
-    // Step 1: find the longest common byte prefix `L` across all paths.
-    let first = paths[0];
-    let mut common_len = first.len();
-    for &p in &paths[1..] {
-        let a = first.as_bytes();
-        let b = p.as_bytes();
-        let upto = common_len.min(b.len());
-        let mut i = 0;
-        while i < upto && a[i] == b[i] {
-            i += 1;
-        }
-        common_len = i;
-        if common_len == 0 {
-            break;
-        }
-    }
-
-    // Step 2: determine whether byte `common_len` sits at a directory boundary.
-    //
-    // The common byte prefix is a valid directory iff every path that is
-    // strictly longer than `common_len` has `/` at position `common_len`.
-    // (If all paths have exactly length `common_len`, that's also a valid
-    // boundary — they're all equal, so the common path IS the result.)
-    //
-    // Otherwise, the common byte prefix ends mid-component (e.g. `/app/ba`
-    // from `["/app/bar", "/app/baz"]`, or `/a` from `["/a", "/ab"]`) and we
-    // must walk back to the last `/`.
-    let at_boundary = paths
-        .iter()
-        .filter(|p| p.len() > common_len)
-        .all(|p| p.as_bytes()[common_len] == b'/');
-
-    let boundary = if at_boundary {
-        common_len
-    } else {
-        // Walk back to the last `/` at or before common_len. If there is no
-        // slash at all, truncate to zero.
-        first[..common_len]
-            .rfind('/')
-            .map(|i| i + 1) // include the slash itself
-            .unwrap_or(0)
-    };
-
-    // Step 3: strip trailing `/` unless the result *is* a root path.
-    // Root paths keep their trailing `/`:
-    //   - "/" is the POSIX absolute root
-    //   - "C:/" (for any drive letter) is the root of a Windows drive
-    //
-    // For relative inputs that don't share any common directory prefix, the
-    // boundary is 0 and the result would be an empty string. Return "." in
-    // that case so the result is always a valid path that can be passed to
-    // operations like [`subtree_snapshot`] as the subtree root.
-    let result = &first[..boundary];
-    if is_root_path(result) {
-        result.to_string()
-    } else if result.is_empty() {
-        ".".to_string()
-    } else if let Some(stripped) = result.strip_suffix('/') {
-        stripped.to_string()
-    } else {
-        result.to_string()
-    }
-}
-
-/// Returns true if the path is a root path whose trailing `/` must be kept:
-/// either absolute root `/` or a Windows drive root like `C:/`.
-fn is_root_path(path: &str) -> bool {
-    path == "/" || (path.len() == 3 && is_drive_letter_prefix(path))
 }
 
 // --- Entry types ---
@@ -419,6 +281,63 @@ impl ValidatePaths for Rel {
     }
 }
 
+/// Checks a symlink entry's target against the manifest's path style `P`:
+/// an absolute manifest needs absolute targets, a relative one relative
+/// targets, and no target may be empty. [`Manifest::validate`], the v2023
+/// encoders, and the relative v2025 encoders apply it.
+pub(crate) fn check_symlink_target<P: ValidatePaths>(
+    path: &str,
+    target: &str,
+) -> crate::Result<()> {
+    P::validate_path(target).map_err(|_| {
+        crate::SnapshotError::Validation(format!(
+            "symlink_target path style mismatch for {path}: {target}"
+        ))
+    })
+}
+
+/// Checks a file's `chunk_hashes` against the manifest's
+/// `file_chunk_size_bytes`: a chunked file needs a size, a chunking
+/// manifest, a size above one chunk, and one hash per chunk. A file with no
+/// `chunk_hashes` passes. [`Manifest::validate`] applies it, and so does
+/// download, which may receive a manifest that was never validated.
+pub(crate) fn check_chunk_hashes(f: &FileEntry, file_chunk_size_bytes: i64) -> crate::Result<()> {
+    let Some(ref ch) = f.chunk_hashes else {
+        return Ok(());
+    };
+    let size = f.size.ok_or_else(|| {
+        crate::SnapshotError::Validation(format!(
+            "file with chunkhashes must have size: {}",
+            f.path
+        ))
+    })?;
+    if file_chunk_size_bytes <= 0 {
+        return Err(crate::SnapshotError::Validation(format!(
+            "file '{}' has chunkhashes but manifest has no chunking (fileChunkSizeBytes={})",
+            f.path, file_chunk_size_bytes
+        )));
+    }
+    let chunk_size = file_chunk_size_bytes as u64;
+    if !crate::hash::uses_chunks(size, file_chunk_size_bytes) {
+        return Err(crate::SnapshotError::Validation(format!(
+            "file '{}' with chunkhashes must have size > {} (chunk size), got {}",
+            f.path, chunk_size, size
+        )));
+    }
+    let expected = crate::hash::split_ranges(size, chunk_size).count();
+    if ch.len() != expected {
+        return Err(crate::SnapshotError::Validation(format!(
+            "file '{}' with size {} should have {} chunks (chunk_size={}), got {}",
+            f.path,
+            size,
+            expected,
+            chunk_size,
+            ch.len()
+        )));
+    }
+    Ok(())
+}
+
 #[allow(
     missing_docs,
     reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
@@ -567,49 +486,34 @@ impl<P, K> Manifest<P, K> {
     /// # }
     /// ```
     pub fn common_root(&self) -> Option<String> {
-        // Build the set of all non-deleted paths in the manifest.
-        // Used to determine whether each dir entry is "empty" (has no
-        // declared descendants).
-        let live_paths: HashSet<&str> = self
-            .files
-            .iter()
-            .filter(|f| !f.deleted)
-            .map(|f| f.path.as_str())
-            .chain(
-                self.dirs
-                    .iter()
-                    .filter(|d| !d.deleted)
-                    .map(|d| d.path.as_str()),
-            )
-            .collect();
-
-        // Collect contributor paths. Files contribute their parent directory;
-        // empty dirs contribute themselves.
-        //
-        // We collect into owned strings so borrows across the two sources
-        // (file parents, which are computed strings; and dir paths, which
-        // borrow from `self.dirs`) have a uniform type.
-        let mut contributors: Vec<String> = Vec::new();
-        for f in &self.files {
-            if f.deleted {
-                continue;
-            }
-            contributors.push(parent_dir(&f.path).to_string());
-        }
-        for d in &self.dirs {
-            if d.deleted {
-                continue;
-            }
-            if dir_is_empty(&d.path, &live_paths) {
-                contributors.push(d.path.clone());
-            }
-        }
-
+        let contributors = self.root_contributors();
         if contributors.is_empty() {
             return None;
         }
-        let refs: Vec<&str> = contributors.iter().map(String::as_str).collect();
-        Some(longest_common_dir_prefix(&refs))
+        Some(longest_common_dir_prefix(&contributors))
+    }
+
+    /// The paths a root for this manifest must contain, by the rules
+    /// [`common_root`](Self::common_root) documents: each non-deleted file's
+    /// parent directory, and each non-deleted empty directory. Partitioning
+    /// derives its roots from the same list.
+    pub(crate) fn root_contributors(&self) -> Vec<&str> {
+        let live_files = self.files.iter().filter(|f| !f.deleted);
+        let live_dirs = self.dirs.iter().filter(|d| !d.deleted);
+        let implied = implied_dirs(
+            live_files
+                .clone()
+                .map(|f| f.path.as_str())
+                .chain(live_dirs.clone().map(|d| d.path.as_str())),
+        );
+        live_files
+            .map(|f| parent_dir(&f.path))
+            .chain(
+                live_dirs
+                    .map(|d| d.path.as_str())
+                    .filter(|d| !implied.contains(d)),
+            )
+            .collect()
     }
 }
 
@@ -641,44 +545,8 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
             K::validate_deleted(d.deleted)?;
         }
 
-        // Validate chunkhashes
         for f in &self.files {
-            if let Some(ref ch) = f.chunk_hashes {
-                let size = f.size.ok_or_else(|| {
-                    crate::SnapshotError::Validation(format!(
-                        "file with chunkhashes must have size: {}",
-                        f.path
-                    ))
-                })?;
-                if self.file_chunk_size_bytes == crate::hash::WHOLE_FILE_CHUNK_SIZE {
-                    return Err(crate::SnapshotError::Validation(format!(
-                        "file '{}' has chunkhashes but manifest has no chunking (fileChunkSizeBytes={})",
-                        f.path, self.file_chunk_size_bytes
-                    )));
-                }
-                // The up-front check above guarantees `file_chunk_size_bytes`
-                // is either WHOLE_FILE_CHUNK_SIZE (handled above) or a
-                // positive integer, so this cast is lossless and non-zero.
-                let chunk_size = self.file_chunk_size_bytes as u64;
-                if size <= chunk_size {
-                    return Err(crate::SnapshotError::Validation(format!(
-                        "file '{}' with chunkhashes must have size > {} (chunk size), got {}",
-                        f.path, chunk_size, size
-                    )));
-                }
-                // Integer ceil-div: chunk_size is guaranteed > 0 above.
-                let expected = size.div_ceil(chunk_size) as usize;
-                if ch.len() != expected {
-                    return Err(crate::SnapshotError::Validation(format!(
-                        "file '{}' with size {} should have {} chunks (chunk_size={}), got {}",
-                        f.path,
-                        size,
-                        expected,
-                        chunk_size,
-                        ch.len()
-                    )));
-                }
-            }
+            check_chunk_hashes(f, self.file_chunk_size_bytes)?;
         }
 
         // Validate no duplicate paths across files and dirs
@@ -721,12 +589,7 @@ impl<P: ValidatePaths, K: ValidateKind> Manifest<P, K> {
                 )));
             }
         } else if let Some(ref target) = f.symlink_target {
-            P::validate_path(target).map_err(|_| {
-                crate::SnapshotError::Validation(format!(
-                    "symlink_target path style mismatch for {}: {}",
-                    f.path, target
-                ))
-            })?;
+            check_symlink_target::<P>(&f.path, target)?;
             if f.hash.is_some() || f.chunk_hashes.is_some() {
                 return Err(crate::SnapshotError::Validation(format!(
                     "symlink must not have hash or chunk_hashes: {}",

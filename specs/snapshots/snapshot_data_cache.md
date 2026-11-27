@@ -41,7 +41,7 @@ Examples:
 
 HASH_UPLOAD always computes the hash while reading data for upload, never uploading based on a pre-computed hash alone. This guarantees the content-addressed storage invariant: data stored for a hash key always equals its hash.
 
-**Large file exception:** When a file exceeds `max_memory_bytes` with `WHOLE_FILE_CHUNK_SIZE` mode, a two-pass approach is used. Per-part hashes are re-verified during the upload pass; mismatches abort the upload.
+**Large file exception:** When a `WHOLE_FILE_CHUNK_SIZE` file is at least the multipart threshold and the cache supports multipart upload, a two-pass approach is used. Per-part hashes from the hashing pass are re-verified during the upload pass; mismatches abort the upload. See [HASH_UPLOAD S3 behavior](snapshot_operation_hash_upload_s3.md#large-unchunked-files-two-passes).
 
 ### Existence Checking Strategy
 
@@ -264,7 +264,7 @@ fallible STS call out of the synchronous `new`.
 
 ### Multipart Transfers
 
-Files larger than `2 × multipart_part_size` (default 64MB) use S3 multipart upload/download with parallel parts.
+Files of at least `2 × multipart_part_size` (default 64MB; `multipart_threshold()`) use S3 multipart upload/download with parallel parts.
 
 ### S3 Check Cache
 

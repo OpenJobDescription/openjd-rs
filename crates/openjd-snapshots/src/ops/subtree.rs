@@ -6,198 +6,241 @@ use crate::manifest::{
     AbsSnapshot, AbsSnapshotDiff, DirEntry, FileEntry, Manifest, Snapshot, SnapshotDiff,
     SymlinkPolicy,
 };
-use crate::path_util::normalize_path;
+use crate::path_util::{normalize_path, strip_root};
+use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use tracing::warn;
 
-fn strip_prefix(path: &str, prefix: &str) -> Option<String> {
-    if prefix.is_empty() || prefix == "." {
-        return Some(path.to_string());
-    }
-    if path == prefix {
-        return Some(String::new());
-    }
-    let with_slash = if prefix.ends_with('/') {
-        prefix.to_string()
-    } else {
-        format!("{prefix}/")
-    };
-    path.strip_prefix(&with_slash).map(|s| s.to_string())
+/// The manifest's files, looked up by path and listed in path order so the
+/// files under a directory are one contiguous range.
+struct FileIndex<'a> {
+    by_path: HashMap<&'a str, &'a FileEntry>,
+    sorted: Vec<&'a FileEntry>,
 }
 
-/// Resolve a symlink target to a non-symlink file entry, following chains and detecting cycles.
-fn resolve_symlink<'a>(
-    target: &str,
-    file_lookup: &HashMap<&str, &'a FileEntry>,
-    max_depth: usize,
-) -> Option<&'a FileEntry> {
+impl<'a> FileIndex<'a> {
+    fn new(files: &'a [FileEntry]) -> Self {
+        let mut sorted: Vec<&FileEntry> = files.iter().collect();
+        sorted.sort_by(|a, b| a.path.cmp(&b.path));
+        let by_path = files.iter().map(|f| (f.path.as_str(), f)).collect();
+        Self { by_path, sorted }
+    }
+
+    /// The files strictly under directory `dir`, in path order. Matches
+    /// [`strip_root`]: a `dir` ending in `/` (`/`, `C:/`) is a prefix as-is.
+    fn under(&self, dir: &str) -> &[&'a FileEntry] {
+        let owned;
+        let prefix = if dir.ends_with('/') {
+            dir
+        } else {
+            owned = format!("{dir}/");
+            owned.as_str()
+        };
+        let lo = self.sorted.partition_point(|f| f.path.as_str() < prefix);
+        let len = self.sorted[lo..].partition_point(|f| f.path.starts_with(prefix));
+        &self.sorted[lo..lo + len]
+    }
+}
+
+/// What a symlink target finally names, after following symlink chains.
+enum Resolved<'a> {
+    /// A regular file entry.
+    File(&'a FileEntry),
+    /// A directory: the path has no entry but files lie under it.
+    Dir(&'a str),
+}
+
+/// Resolve a symlink target, following chains (up to 64 hops) and detecting
+/// cycles. `None` means the target is missing or the chain is a cycle.
+fn resolve_target<'a>(target: &'a str, index: &FileIndex<'a>) -> Option<Resolved<'a>> {
     let mut current = target;
     let mut visited = HashSet::new();
-    for _ in 0..max_depth {
+    for _ in 0..64 {
         if !visited.insert(current) {
             warn!(target, "symlink cycle detected, skipping");
-            return None; // cycle
+            return None;
         }
-        let entry = file_lookup.get(current)?;
-        match &entry.symlink_target {
-            None => return Some(entry),
-            Some(next) => current = next,
+        match index.by_path.get(current) {
+            Some(entry) => match entry.symlink_target.as_deref() {
+                None => return Some(Resolved::File(entry)),
+                Some(next) => current = next,
+            },
+            None if !index.under(current).is_empty() => return Some(Resolved::Dir(current)),
+            None => return None,
         }
     }
     None
 }
 
-/// Check if a target is a directory by looking for files under it.
-fn is_dir_target(target: &str, file_lookup: &HashMap<&str, &FileEntry>) -> bool {
-    let prefix = format!("{target}/");
-    file_lookup.keys().any(|k| k.starts_with(&prefix))
+/// State shared by the collapse of one top-level symlink.
+struct Collapse<'a, 'c> {
+    index: &'c FileIndex<'a>,
+    symlink_policy: SymlinkPolicy,
+    prefix: &'c str,
+    excluded: &'c [String],
+    /// The subtree root and the directories being expanded. A link to one of
+    /// them, or to a directory containing one, is a cycle.
+    expanding: Vec<&'c str>,
+    /// Nested directory symlinks already expanded. Each is expanded at most
+    /// once per top-level symlink, which bounds the output when directory
+    /// links converge.
+    visited: HashSet<&'a str>,
 }
 
-/// Expand a directory symlink: find all files under the target directory and remap them.
-///
-/// Nested symlinks inside the expanded directory are handled according to `symlink_policy`:
-/// - `CollapseAll`: nested symlinks are resolved to their real targets.
-/// - `CollapseEscaping`: nested symlinks are preserved (remapped but kept as symlinks),
-///   since the escaping decision was already made on the parent directory symlink.
-fn expand_dir_symlink(
-    link_rel_path: &str,
-    target: &str,
-    files: &[FileEntry],
-    file_lookup: &HashMap<&str, &FileEntry>,
-    symlink_policy: SymlinkPolicy,
-) -> Vec<FileEntry> {
-    let target_prefix = format!("{target}/");
-    let mut result = Vec::new();
-    for f in files {
-        if !f.path.starts_with(&target_prefix) {
-            continue;
-        }
-        let suffix = &f.path[target_prefix.len()..];
-        let new_path = format!("{link_rel_path}/{suffix}");
-        if let Some(ref sym_target) = f.symlink_target {
-            match symlink_policy {
-                SymlinkPolicy::CollapseAll => {
-                    // Resolve nested symlinks to their real targets
-                    if let Some(real) = resolve_symlink(sym_target, file_lookup, 64) {
-                        let mut entry = real.clone();
-                        entry.path = new_path;
-                        result.push(entry);
-                    }
-                }
-                _ => {
-                    // Preserve nested symlinks with remapped path
-                    let mut entry = f.clone();
-                    entry.path = new_path;
-                    result.push(entry);
-                }
+impl<'a: 'c, 'c> Collapse<'a, 'c> {
+    /// Collapse a symlink to `target` into output path `out_path`: a file
+    /// target becomes a copy of the file entry, a directory target is
+    /// expanded under `out_path`, and a missing target or a cycle gives
+    /// nothing. `nested` is the manifest path of a nested symlink, whose
+    /// directory target is expanded only the first time it is reached.
+    fn collapse(
+        &mut self,
+        out_path: &str,
+        nested: Option<&'a str>,
+        target: &'a str,
+        result: &mut Vec<FileEntry>,
+    ) {
+        match resolve_target(target, self.index) {
+            Some(Resolved::File(real)) => {
+                let mut entry = real.clone();
+                entry.path = out_path.to_string();
+                result.push(entry);
             }
-        } else {
-            let mut entry = f.clone();
-            entry.path = new_path;
-            result.push(entry);
+            Some(Resolved::Dir(dir)) => {
+                if self.expanding.iter().any(|e| strip_root(e, dir).is_some()) {
+                    warn!(target, "symlink cycle detected, skipping");
+                    return;
+                }
+                if nested.is_some_and(|link| !self.visited.insert(link)) {
+                    return;
+                }
+                self.expand_dir(out_path, dir, result);
+            }
+            None => {}
         }
     }
-    result
+
+    /// Expand directory `dir` under output path `out_path`.
+    ///
+    /// Nested symlinks inside the expanded directory are handled according to
+    /// `symlink_policy`:
+    /// - `CollapseAll`: nested symlinks are collapsed.
+    /// - `CollapseEscaping`: a nested symlink whose target is strictly inside
+    ///   the subtree at `prefix` (and not under an `excluded` root) is kept,
+    ///   with its target made relative to the subtree. Any other nested
+    ///   symlink is collapsed, so the result never holds a link to a target
+    ///   outside the subtree.
+    fn expand_dir(&mut self, out_path: &str, dir: &'a str, result: &mut Vec<FileEntry>) {
+        self.expanding.push(dir);
+        let index = self.index;
+        for f in index.under(dir) {
+            let suffix = strip_root(&f.path, dir).unwrap_or(&f.path);
+            let new_path = format!("{out_path}/{suffix}");
+            let Some(sym_target) = f.symlink_target.as_deref() else {
+                let mut entry = (*f).clone();
+                entry.path = new_path;
+                result.push(entry);
+                continue;
+            };
+            if self.symlink_policy != SymlinkPolicy::CollapseAll {
+                if let Some(rel_target) = subtree_rel_path(sym_target, self.prefix, self.excluded)
+                    .filter(|r| !r.is_empty())
+                {
+                    let mut entry = (*f).clone();
+                    entry.path = new_path;
+                    entry.symlink_target = Some(rel_target.to_string());
+                    result.push(entry);
+                    continue;
+                }
+            }
+            self.collapse(&new_path, Some(f.path.as_str()), sym_target, result);
+        }
+        self.expanding.pop();
+    }
+}
+
+/// The path of `path` relative to the subtree at `prefix`, or `None` if it is
+/// outside the subtree or under one of the `excluded` roots, which other
+/// subtrees hold.
+fn subtree_rel_path<'a>(path: &'a str, prefix: &str, excluded: &[String]) -> Option<&'a str> {
+    if excluded.iter().any(|e| strip_root(path, e).is_some()) {
+        return None;
+    }
+    strip_root(path, prefix)
 }
 
 fn process_files(
     files: &[FileEntry],
     prefix: &str,
+    excluded: &[String],
     symlink_policy: SymlinkPolicy,
-    file_lookup: &HashMap<&str, &FileEntry>,
 ) -> crate::Result<Vec<FileEntry>> {
+    // Built on first use: a subtree without symlinks to collapse needs none.
+    let index = OnceCell::new();
     let mut result = Vec::new();
     for f in files {
-        let rel_path = match strip_prefix(&f.path, prefix) {
+        let rel_path = match subtree_rel_path(&f.path, prefix, excluded) {
             Some(p) if !p.is_empty() => p,
-            Some(_) => continue,
-            None => continue,
+            _ => continue,
         };
-
-        if let Some(ref target) = f.symlink_target {
-            match symlink_policy {
-                SymlinkPolicy::ExcludeAll => continue,
-                SymlinkPolicy::CollapseAll => {
-                    // Check if target is a directory
-                    if is_dir_target(target, file_lookup) {
-                        result.extend(expand_dir_symlink(
-                            &rel_path,
-                            target,
-                            files,
-                            file_lookup,
-                            symlink_policy,
-                        ));
-                        continue;
-                    }
-                    // cycle or missing - skip
-                    if let Some(real) = resolve_symlink(target, file_lookup, 64) {
-                        let mut entry = real.clone();
-                        entry.path = rel_path;
-                        result.push(entry);
-                    }
+        let Some(target) = f.symlink_target.as_deref() else {
+            let mut entry = f.clone();
+            entry.path = rel_path.to_string();
+            result.push(entry);
+            continue;
+        };
+        match symlink_policy {
+            SymlinkPolicy::ExcludeAll => continue,
+            SymlinkPolicy::Preserve | SymlinkPolicy::TransitiveIncludeTargets => {
+                return Err(crate::SnapshotError::Validation(format!(
+                    "symlink_policy {} is not supported for subtree",
+                    symlink_policy
+                )));
+            }
+            SymlinkPolicy::CollapseEscaping | SymlinkPolicy::ExcludeEscaping => {
+                // A target under an excluded root is outside this subtree,
+                // so the link escapes it.
+                if let Some(rel_target) = subtree_rel_path(target, prefix, excluded) {
+                    let mut entry = f.clone();
+                    entry.path = rel_path.to_string();
+                    entry.symlink_target = Some(rel_target.to_string());
+                    result.push(entry);
                     continue;
                 }
-                SymlinkPolicy::Preserve | SymlinkPolicy::TransitiveIncludeTargets => {
-                    return Err(crate::SnapshotError::Validation(format!(
-                        "symlink_policy {} is not supported for subtree",
-                        symlink_policy
-                    )));
-                }
-                SymlinkPolicy::CollapseEscaping | SymlinkPolicy::ExcludeEscaping => {
-                    match strip_prefix(target, prefix) {
-                        Some(rel_target) => {
-                            // Non-escaping symlink
-                            let mut entry = f.clone();
-                            entry.path = rel_path;
-                            entry.symlink_target = Some(rel_target);
-                            result.push(entry);
-                        }
-                        None => {
-                            // Escaping symlink
-                            if symlink_policy == SymlinkPolicy::ExcludeEscaping {
-                                continue;
-                            }
-                            // CollapseEscaping: check if directory symlink
-                            if is_dir_target(target, file_lookup) {
-                                result.extend(expand_dir_symlink(
-                                    &rel_path,
-                                    target,
-                                    files,
-                                    file_lookup,
-                                    symlink_policy,
-                                ));
-                                continue;
-                            }
-                            // cycle or missing - skip
-                            if let Some(real) = resolve_symlink(target, file_lookup, 64) {
-                                let mut entry = real.clone();
-                                entry.path = rel_path;
-                                result.push(entry);
-                            }
-                        }
-                    }
+                if symlink_policy == SymlinkPolicy::ExcludeEscaping {
+                    continue;
                 }
             }
-        } else {
-            let mut entry = f.clone();
-            entry.path = rel_path;
-            result.push(entry);
+            SymlinkPolicy::CollapseAll => {}
         }
+        let mut collapse = Collapse {
+            index: index.get_or_init(|| FileIndex::new(files)),
+            symlink_policy,
+            prefix,
+            excluded,
+            expanding: if prefix.is_empty() || prefix == "." {
+                Vec::new()
+            } else {
+                vec![prefix]
+            },
+            visited: HashSet::new(),
+        };
+        collapse.collapse(rel_path, None, target, &mut result);
     }
     Ok(result)
 }
 
-fn process_dirs(dirs: &[DirEntry], prefix: &str) -> Vec<DirEntry> {
+fn process_dirs(dirs: &[DirEntry], prefix: &str, excluded: &[String]) -> Vec<DirEntry> {
     dirs.iter()
         .filter_map(|d| {
-            strip_prefix(&d.path, prefix).and_then(|rel| {
+            subtree_rel_path(&d.path, prefix, excluded).and_then(|rel| {
                 if rel.is_empty() {
                     None
                 } else {
                     Some(if d.deleted {
-                        DirEntry::deleted(&rel)
+                        DirEntry::deleted(rel)
                     } else {
-                        DirEntry::new(&rel)
+                        DirEntry::new(rel)
                     })
                 }
             })
@@ -208,6 +251,20 @@ fn process_dirs(dirs: &[DirEntry], prefix: &str) -> Vec<DirEntry> {
 fn subtree_impl<P: Clone, K: Clone>(
     manifest: &Manifest<P, K>,
     subtree: &str,
+    symlink_policy: SymlinkPolicy,
+) -> crate::Result<Manifest<crate::manifest::Rel, K>> {
+    subtree_excluding(manifest, subtree, &[], symlink_policy)
+}
+
+/// Extracts the subtree at `subtree`, leaving out the entries under the
+/// normalized `excluded` roots. A symlink whose target is under an excluded
+/// root escapes the subtree, and `symlink_policy` applies to it as to any
+/// escaping link. Partitioning uses this so that a derived root containing a
+/// given root holds neither that root's entries nor links into them.
+pub(crate) fn subtree_excluding<P: Clone, K: Clone>(
+    manifest: &Manifest<P, K>,
+    subtree: &str,
+    excluded: &[String],
     symlink_policy: SymlinkPolicy,
 ) -> crate::Result<Manifest<crate::manifest::Rel, K>> {
     if symlink_policy == SymlinkPolicy::Preserve
@@ -250,14 +307,8 @@ fn subtree_impl<P: Clone, K: Clone>(
         }
     }
 
-    let file_lookup: HashMap<&str, &FileEntry> = manifest
-        .files
-        .iter()
-        .map(|f| (f.path.as_str(), f))
-        .collect();
-
-    let files = process_files(&manifest.files, &prefix, symlink_policy, &file_lookup)?;
-    let dirs = process_dirs(&manifest.dirs, &prefix);
+    let files = process_files(&manifest.files, &prefix, excluded, symlink_policy)?;
+    let dirs = process_dirs(&manifest.dirs, &prefix, excluded);
 
     let mut result = Manifest::new(manifest.hash_alg, manifest.file_chunk_size_bytes);
     result.files = files;

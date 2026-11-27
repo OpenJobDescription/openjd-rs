@@ -154,6 +154,59 @@ impl HashCache {
             None
         }
     }
+
+    /// The cached chunk hashes of a chunked file, one per range of
+    /// [`split_ranges`](crate::hash::split_ranges)`(file_size, chunk_size)`,
+    /// if every range is cached and fresh for `current_mtime`. `None` if any
+    /// range misses or `chunk_size` is 0.
+    ///
+    /// The `hash`, `hash_upload`, and `download` operations all key chunk
+    /// entries through this and [`put_chunks`](Self::put_chunks).
+    pub(crate) fn get_chunks_if_fresh(
+        &self,
+        file_path: &Path,
+        algorithm: &str,
+        file_size: u64,
+        chunk_size: u64,
+        current_mtime: u64,
+    ) -> Option<Vec<String>> {
+        let hashes: Option<Vec<String>> = crate::hash::split_ranges(file_size, chunk_size)
+            .map(|(start, end)| {
+                self.get_if_fresh(
+                    file_path,
+                    algorithm,
+                    start as i64,
+                    end as i64,
+                    current_mtime,
+                )
+            })
+            .collect();
+        hashes.filter(|h| !h.is_empty())
+    }
+
+    /// Caches a chunked file's chunk hashes under the ranges
+    /// [`get_chunks_if_fresh`](Self::get_chunks_if_fresh) reads. Writes
+    /// nothing if `hashes` does not hold exactly one hash per range, so a
+    /// hash list that does not fit the file cannot be cached under the
+    /// wrong ranges. Individual write failures are ignored, as a cache miss
+    /// later only costs a rehash.
+    pub(crate) fn put_chunks(
+        &self,
+        file_path: &Path,
+        algorithm: &str,
+        file_size: u64,
+        chunk_size: u64,
+        hashes: &[String],
+        mtime: u64,
+    ) {
+        let ranges = crate::hash::split_ranges(file_size, chunk_size);
+        if ranges.clone().count() != hashes.len() {
+            return;
+        }
+        for ((start, end), hash) in ranges.zip(hashes) {
+            let _ = self.put(file_path, algorithm, start as i64, end as i64, hash, mtime);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -165,6 +218,37 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let cache = HashCache::new(tmp.path()).unwrap();
         (tmp, cache)
+    }
+
+    #[test]
+    fn chunk_entries_round_trip_by_range() {
+        let (_tmp, cache) = make_cache();
+        let path = Path::new("/tmp/chunked.bin");
+        let hashes = vec!["h0".to_string(), "h1".to_string(), "h2".to_string()];
+        cache.put_chunks(path, "xxh128", 10, 4, &hashes, 1000);
+        assert_eq!(
+            cache.get(path, "xxh128", 8, 10).map(|(h, _)| h).as_deref(),
+            Some("h2")
+        );
+        assert_eq!(
+            cache.get_chunks_if_fresh(path, "xxh128", 10, 4, 1000),
+            Some(hashes)
+        );
+        // Stale mtime, a different chunk size, or a zero chunk size misses.
+        assert_eq!(cache.get_chunks_if_fresh(path, "xxh128", 10, 4, 1001), None);
+        assert_eq!(cache.get_chunks_if_fresh(path, "xxh128", 10, 5, 1000), None);
+        assert_eq!(cache.get_chunks_if_fresh(path, "xxh128", 10, 0, 1000), None);
+    }
+
+    #[test]
+    fn put_chunks_writes_nothing_for_a_wrong_hash_count() {
+        let (_tmp, cache) = make_cache();
+        let path = Path::new("/tmp/chunked.bin");
+        let two = vec!["h0".to_string(), "h1".to_string()];
+        cache.put_chunks(path, "xxh128", 10, 4, &two, 1000);
+        for (start, end) in [(0, 4), (4, 8), (8, 10)] {
+            assert_eq!(cache.get(path, "xxh128", start, end), None);
+        }
     }
 
     #[test]
