@@ -129,6 +129,26 @@ fn host_scope_literal_path_type_errors_are_still_reported() {
 }
 
 #[test]
+fn host_scope_literal_path_subscripts_are_still_reported() {
+    // A subscript of a path fails on every worker (2026-02 §2.1.7 has no
+    // path receiver), and whether it does depends on no value, so it is
+    // refused at validation like the method call above, in every host
+    // field, for an index and for a slice.
+    for expr in [r#"path("/a/b")[0]"#, r#"path("/a/b")[0:1]"#] {
+        for field in HOST_FIELDS {
+            let err = decode(template(expr, field))
+                .err()
+                .unwrap_or_else(|| panic!("{field}: {expr} should be refused"))
+                .to_string();
+            assert!(
+                err.contains("Cannot subscript type path"),
+                "{field}: {expr}\n{err}"
+            );
+        }
+    }
+}
+
+#[test]
 fn template_scope_paths_are_unresolved_in_host_scope() {
     // A path a step-level let builds is TEMPLATE scope (POSIX), but the
     // session converts it to the worker's format before host-scope fields

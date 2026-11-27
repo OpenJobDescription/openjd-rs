@@ -356,33 +356,6 @@ fn unbound_return_text_ignores_string_literals() {
     assert!(!unbound("my_max(x) + 1"));
 }
 
-/// The `expr-range-slice-static-type` gate: any step but a non-negative
-/// literal may be negative, whether it is written with `-` or not.
-#[test]
-fn negative_step_slices() {
-    use openjd_fuzz::targets::expr::has_negative_step_slice as neg;
-    for may in [
-        "R[::-1]",
-        "R[1:2:Param.N]",
-        "R[::int(  )]",
-        "R[::(0-1)]",
-        "f(R[::x])[0]",
-    ] {
-        assert!(neg(may), "{may}");
-    }
-    for not in [
-        "R[::2]",
-        "R[1:2:]",
-        "R[::None]",
-        "R[1:2]",
-        "R[0]",
-        "f(a, b)[::1]",
-        "R[g(1:2)]",
-    ] {
-        assert!(!neg(not), "{not}");
-    }
-}
-
 /// Run `check_expression` on `src` with the static pass reading `statics`
 /// and the run reading `values`, and return the oracle violation it
 /// reports, if any. Statics that differ from the values (an `Unresolved` of

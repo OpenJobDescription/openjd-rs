@@ -528,3 +528,93 @@ fn slice_on_split_semicolon() {
         "[\"a\", \"b\", \"c\"]"
     );
 }
+
+// === A subscript's receiver is not coerced, concrete or unresolved ===
+//
+// 2026-02 §2.1.7 defines `__getitem__` for `list`, `range_expr` and `string`
+// only. A `path`, `int`, `float` or `bool` receiver is refused whether its
+// value is known or only its type is (`unresolved[T]`, as at template
+// validation), with the same message, so `openjd check` refuses what a run
+// refuses.
+
+fn eval_with(expr: &str, name: &str, value: ExprValue) -> Result<ExprValue, String> {
+    let mut st = SymbolTable::new();
+    st.set(name, value).unwrap();
+    ParsedExpression::new(expr)
+        .and_then(|p| p.with_path_format(PathFormat::Posix).evaluate(&[&st]))
+        .map_err(|e| e.to_string())
+}
+
+fn not_subscriptable() -> Vec<(ExprValue, &'static str)> {
+    vec![
+        (ExprValue::new_path("/a/b", PathFormat::Posix), "path"),
+        (ExprValue::Int(5), "int"),
+        (
+            ExprValue::Float(openjd_expr::value::Float64::new(2.5).unwrap()),
+            "float",
+        ),
+        (ExprValue::Bool(true), "bool"),
+    ]
+}
+
+#[test]
+fn unresolved_receiver_is_refused_as_a_concrete_one_is() {
+    for (value, type_name) in not_subscriptable() {
+        let unresolved = ExprValue::unresolved(value.expr_type());
+        for expr in ["X[0]", "X[0:1]", "X[::-1]"] {
+            let expected = format!("Cannot subscript type {type_name}\n");
+            for v in [value.clone(), unresolved.clone()] {
+                let unresolved = v.is_unresolved();
+                let err = eval_with(expr, "X", v).expect_err(&format!(
+                    "{expr} on a {type_name} (unresolved: {unresolved})"
+                ));
+                assert!(err.starts_with(&expected), "{expr}: got:\n{err}");
+            }
+        }
+    }
+}
+
+#[test]
+fn literal_path_receiver_is_refused_in_a_host_context_check() {
+    use openjd_expr::{ExprProfile, FunctionLibrary, HostContext};
+    // A host-context check reads `path('/a/b')` as `unresolved[path]`
+    // (specs/expr/function-library.md § Host Context).
+    let lib = FunctionLibrary::for_profile(
+        &ExprProfile::current().with_host_context(HostContext::Unresolved),
+    );
+    for expr in ["path('/a/b')[0]", "path('/a/b')[0:1]"] {
+        let err = ParsedExpression::new(expr)
+            .and_then(|p| p.with_library(&lib).evaluate(&[&SymbolTable::new()]))
+            .expect_err(expr)
+            .to_string();
+        assert!(
+            err.starts_with("Cannot subscript type path\n"),
+            "{expr}: got:\n{err}"
+        );
+    }
+}
+
+#[test]
+fn unresolved_subscriptable_receivers_are_typed() {
+    let unresolved = |t: &str| ExprValue::unresolved(ExprType::parse(t).unwrap());
+    for (t, expr, result) in [
+        ("string", "X[0]", "string"),
+        ("string", "X[0:1]", "string"),
+        ("list[int]", "X[0]", "int"),
+        ("list[int]", "X[1:]", "list[int]"),
+        ("range_expr", "X[0]", "int"),
+        // A slice of a range_expr is a range_expr for a positive step and a
+        // list[int] for a negative one, so the type is both.
+        ("range_expr", "X[::-1]", "list[int] | range_expr"),
+        // One member that takes a subscript is enough: a run may hold it.
+        ("path | string", "X[0]", "string"),
+        ("any", "X[0]", "any"),
+    ] {
+        let v = eval_with(expr, "X", unresolved(t)).unwrap_or_else(|e| panic!("{t} {expr}: {e}"));
+        assert_eq!(
+            v.expr_type(),
+            ExprType::unresolved(ExprType::parse(result).unwrap()).unwrap(),
+            "{t} {expr}"
+        );
+    }
+}

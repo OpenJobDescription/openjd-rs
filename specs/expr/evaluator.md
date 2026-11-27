@@ -758,8 +758,25 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
 ### Subscript (`eval_subscript`)
 Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 
+- The receiver is not implicitly coerced (2026-02 §2.1.7 defines
+  `__getitem__` for `list`, `range_expr` and `string` only; §1.2.4 states the
+  same rule for a method call's receiver). `check_subscript_receiver` decides
+  it from the receiver's *type*, before the index is evaluated, by matching
+  the first parameter of the library's `__getitem__` signatures of the call's
+  arity (two for an index, four for a slice) with `int` indices and no
+  coercion. A concrete `path` and an `unresolved[path]` therefore get the same
+  "Cannot subscript type path", so a host-context check refuses
+  `path("/a/b")[0]` and a PATH parameter's `Param.P[0]` as a run does; the
+  same holds for `int`, `float` and `bool` receivers. A union receiver passes
+  when one member does, and an `any` or type-variable receiver passes. The
+  check matches signatures only and builds no return type.
 - Negative indices wrap around (Python semantics)
-- Slices return the same type as the input (string→string, list→list)
+- Slices return the same type as the input (string→string, list→list). A
+  slice with an unresolved receiver, or of a concrete `range_expr` with an
+  unresolved bound, is typed by the `__getitem__` signatures, as an index is:
+  a `range_expr` slice is `range_expr | list[int]`, since a negative step
+  gives a list. A concrete `list[T]` or `string` with an unresolved bound
+  keeps its own type.
 - Out-of-bounds index raises an error; out-of-bounds slice clamps silently
 - Indexing a receiver every form of which is the empty list
   (`list[nulltype]`, e.g. `[None for x in L]`, or `[]` with an unresolved
@@ -781,9 +798,9 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 - A slice's four operands (receiver, start, stop, step) are tracked and
   released symmetrically. An omitted bound is passed to `__getitem__` as
   a `Null` placeholder, which is tracked when created so that dispatch's
-  release of every operand matches. When the result is a type-only
-  `Unresolved` (the receiver or any bound is unresolved), the operands
-  are released before the result is tracked. This is a success path, so
+  release of every operand matches. When a concrete list or string with an
+  unresolved bound gives its own type, the operands are released before the
+  result is tracked. This is a success path, so
   nothing else would reset the memory tracking.
 
 ## Dispatch Flow

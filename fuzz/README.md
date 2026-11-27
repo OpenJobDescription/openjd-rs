@@ -110,8 +110,7 @@ formats, and requires:
   check this direction. Known issues explain some rejections: a budget error in
   a sub-expression the static pass evaluated speculatively (a conditional
   branch, an `and` / `or` operand, a comprehension, a chained comparison),
-  `expr-speculative-budget-rejection`; a negative-step range slice used as a
-  list, `expr-range-slice-static-type`; a `flatten` that reads an empty list,
+  `expr-speculative-budget-rejection`; a `flatten` that reads an empty list,
   or a rejection about a list's element type after one,
   `expr-flatten-empty-element-type`; and a type error in a generated expression
   through an unbound-return signature, `expr-unbound-return-typevar`;

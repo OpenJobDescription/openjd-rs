@@ -1678,6 +1678,56 @@ impl<'a> Evaluator<'a> {
         self.track(list)
     }
 
+    /// Refuse `value[...]` when no `__getitem__` signature takes the
+    /// receiver as it is. The receiver of a subscript is not implicitly
+    /// coerced (2026-02 Expression Language §2.1.7 defines it for `list`,
+    /// `range_expr` and `string`; a `path`, a number or a `bool` does not
+    /// become a `string` to reach one), as the receiver of a method call
+    /// is not (§1.2.4). The decision is the library's: the receiver's type
+    /// is matched against the first parameter of its `__getitem__`
+    /// signatures of the call's arity, with `int` indices and without
+    /// coercion. Deciding at the type gives a concrete receiver and an
+    /// unresolved one of the same type the same answer, so `openjd check`
+    /// refuses what a run would. A union receiver passes when one of its
+    /// members does, and a receiver of unknown type (`any`, a type
+    /// variable) passes, since a run's value may be subscriptable. The
+    /// index and bounds are then checked by the dispatch itself, with
+    /// their usual coercions. Only signatures are matched; no return type
+    /// is built, so this cannot fail on a type that is too deep.
+    fn check_subscript_receiver(
+        &self,
+        value: &ExprValue,
+        n_args: usize,
+    ) -> Result<(), ExpressionError> {
+        if value.is_list() || matches!(value, ExprValue::String(_) | ExprValue::RangeExpr(_)) {
+            return Ok(());
+        }
+        let receiver = unwrap_unresolved(&value.expr_type());
+        let members = if receiver.code() == crate::types::TypeCode::Union {
+            receiver.params().to_vec()
+        } else {
+            vec![receiver.clone()]
+        };
+        let signatures = self.library.get_signatures("__getitem__");
+        let subscriptable = |form: &ExprType| {
+            form.code() == crate::types::TypeCode::Any
+                || is_type_variable(form)
+                || signatures.iter().any(|entry| {
+                    let mut args = Vec::with_capacity(n_args);
+                    args.push(form.clone());
+                    args.resize(n_args, ExprType::INT);
+                    entry.signature.sig_params().len() == n_args
+                        && entry.signature.match_call(&args).is_some()
+                })
+        };
+        if members.iter().any(subscriptable) {
+            return Ok(());
+        }
+        Err(ExpressionError::new(format!(
+            "Cannot subscript type {receiver}"
+        )))
+    }
+
     fn eval_subscript(&mut self, s: &ast::ExprSubscript) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
         // RFC 0005: the receiver and the index/slice bounds evaluate
@@ -1685,13 +1735,8 @@ impl<'a> Evaluator<'a> {
         // *result* (`[10, 20, 30][0]` with an `int` target must not try
         // to coerce the `list[int]` receiver or the index to int).
         let value = self.eval_node(&s.value, None)?;
-
-        // Reject subscript on path type
-        if matches!(&value, ExprValue::Path { .. }) {
-            return Err(ExpressionError::new(
-                "Cannot subscript type path".to_string(),
-            ));
-        }
+        let is_slice = matches!(&*s.slice, ast::Expr::Slice(_));
+        self.check_subscript_receiver(&value, if is_slice { 4 } else { 2 })?;
 
         // Handle slice syntax: value[start:stop:step]
         if let ast::Expr::Slice(sl) = &*s.slice {
@@ -1717,26 +1762,25 @@ impl<'a> Evaluator<'a> {
                 return Err(ExpressionError::new("Slice step cannot be zero"));
             }
 
-            // When the result is a type-only `Unresolved`, the operands
-            // are discarded. Release them before tracking the result;
-            // this is a success path, so nothing else would reset the
-            // memory tracking.
-            let unresolved_result = if value.is_unresolved() {
-                let inner = unwrap_unresolved(&value.expr_type());
-                Some(match inner.list_element_type() {
-                    Some(elem) => ExprValue::unresolved(ExprType::list(elem.clone())?),
-                    None => ExprValue::unresolved(inner),
-                })
-            } else if start.is_unresolved() || stop.is_unresolved() || step.is_unresolved() {
-                // Any unresolved bound makes the result unresolved.
-                if value.is_list() {
-                    let elem_type = value.list_elem_type().unwrap();
-                    Some(ExprValue::unresolved(ExprType::list(elem_type.clone())?))
-                } else if matches!(&value, ExprValue::String(_)) {
-                    Some(ExprValue::unresolved(ExprType::STRING))
-                } else {
-                    None
-                }
+            // An unresolved bound with a concrete list or string receiver
+            // gives the receiver's own type: a slice of a `list[T]` is a
+            // `list[T]` whichever bounds a run has. The operands are
+            // discarded, so they are released before the result is
+            // tracked; this is a success path, so nothing else would reset
+            // the memory tracking. An unresolved receiver, and a concrete
+            // `range_expr` with an unresolved bound, are typed by the
+            // library's `__getitem__` signatures below, as a single index
+            // is, so `r[::-1]` of an unresolved `range_expr` is
+            // `range_expr | list[int]`, as a run gives.
+            let bound_unresolved =
+                start.is_unresolved() || stop.is_unresolved() || step.is_unresolved();
+            let unresolved_result = if value.is_unresolved() || !bound_unresolved {
+                None
+            } else if value.is_list() {
+                let elem_type = value.list_elem_type().unwrap();
+                Some(ExprValue::unresolved(ExprType::list(elem_type.clone())?))
+            } else if matches!(&value, ExprValue::String(_)) {
+                Some(ExprValue::unresolved(ExprType::STRING))
             } else {
                 None
             };
