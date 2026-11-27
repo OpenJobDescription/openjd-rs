@@ -758,18 +758,23 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
 ### Subscript (`eval_subscript`)
 Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 
-- The receiver is not implicitly coerced (2026-02 §2.1.7 defines
-  `__getitem__` for `list`, `range_expr` and `string` only; §1.2.4 states the
-  same rule for a method call's receiver). `check_subscript_receiver` decides
-  it from the receiver's *type*, before the index is evaluated, by matching
-  the first parameter of the library's `__getitem__` signatures of the call's
-  arity (two for an index, four for a slice) with `int` indices and no
-  coercion. A concrete `path` and an `unresolved[path]` therefore get the same
-  "Cannot subscript type path", so a host-context check refuses
-  `path("/a/b")[0]` and a PATH parameter's `Param.P[0]` as a run does; the
-  same holds for `int`, `float` and `bool` receivers. A union receiver passes
-  when one member does, and an `any` or type-variable receiver passes. The
-  check matches signatures only and builds no return type.
+- The receiver is not implicitly coerced (2026-02 §2.1.7 and §2.1.8 define
+  `__getitem__` for `list`, `range_expr` and `string` only, and §1.3.8 says a
+  `path` takes neither; §1.2.4 states the same rule for a method call's
+  receiver). `check_subscript_receiver` decides it from the receiver's
+  *type*, after the index or bounds are evaluated and before dispatch, by
+  matching the first parameter of the library's `__getitem__` signatures of
+  the call's arity (two for an index, four for a slice) with `int` indices and
+  no coercion. A concrete receiver and an unresolved one of the same type
+  therefore get the same answer and the message a run gives: `Cannot
+  subscript type path` for a path, and the library's `No matching signature
+  for __getitem__(int, int)` for any other type, naming the arguments as they
+  are. So a host-context check refuses `path("/a/b")[0]`, a PATH parameter's
+  `Param.P[0]` and an INT parameter's `Param.I[0:1]` as a run does. A union
+  receiver passes when one member does, and an `any` receiver passes because
+  the signatures' type variables match it. The check matches signatures only
+  and builds no return type, and on refusal it releases the operands, as a
+  failed dispatch does.
 - Negative indices wrap around (Python semantics)
 - Slices return the same type as the input (string→string, list→list). A
   slice with an unresolved receiver, or of a concrete `range_expr` with an
@@ -888,3 +893,10 @@ Key differences:
    `list[T | nulltype]` rather than `list[T]`, and a filter or body that fails to
    type gives `list[nulltype]` rather than an error. The Python mainline is moving
    to these Rust bindings rather than being changed.
+6. **Subscript of an unresolved receiver** — Template validation refuses a
+   subscript or slice whose receiver's type takes none (`Param.P[0]` for a PATH
+   parameter, `Param.I[0:1]` for an INT one, `Session.WorkingDirectory[0]`), with
+   the message a run gives. The Python `expr` branch accepts these at validation
+   (it coerces an unresolved `path` receiver to `string`, and types an unresolved
+   slice without its signatures), and every run fails. A literal
+   `path("/a/b")[0]` is refused by both.

@@ -1679,26 +1679,29 @@ impl<'a> Evaluator<'a> {
     }
 
     /// Refuse `value[...]` when no `__getitem__` signature takes the
-    /// receiver as it is. The receiver of a subscript is not implicitly
-    /// coerced (2026-02 Expression Language §2.1.7 defines it for `list`,
-    /// `range_expr` and `string`; a `path`, a number or a `bool` does not
-    /// become a `string` to reach one), as the receiver of a method call
-    /// is not (§1.2.4). The decision is the library's: the receiver's type
-    /// is matched against the first parameter of its `__getitem__`
-    /// signatures of the call's arity, with `int` indices and without
-    /// coercion. Deciding at the type gives a concrete receiver and an
-    /// unresolved one of the same type the same answer, so `openjd check`
-    /// refuses what a run would. A union receiver passes when one of its
-    /// members does, and a receiver of unknown type (`any`, a type
-    /// variable) passes, since a run's value may be subscriptable. The
-    /// index and bounds are then checked by the dispatch itself, with
-    /// their usual coercions. Only signatures are matched; no return type
-    /// is built, so this cannot fail on a type that is too deep.
-    fn check_subscript_receiver(
-        &self,
-        value: &ExprValue,
-        n_args: usize,
-    ) -> Result<(), ExpressionError> {
+    /// receiver as it is. The receiver of a subscript or a slice is not
+    /// implicitly coerced (2026-02 Expression Language §2.1.7 and §2.1.8
+    /// define `__getitem__` for `list`, `range_expr` and `string`, and §1.3.8
+    /// says a `path` takes neither; a number or a `bool` does not become a
+    /// `string` to reach one), as the receiver of a method call is not
+    /// (§1.2.4). The decision is the library's: the receiver's type is
+    /// matched against the first parameter of its `__getitem__` signatures
+    /// of the call's arity (`args`: the receiver, then the index or the three
+    /// bounds), with `int` indices and without coercion. Deciding at the type
+    /// gives a concrete receiver and an unresolved one of the same type the
+    /// same answer, so `openjd check` refuses what a run would. A union
+    /// receiver passes when one of its members does, and an `any` one passes
+    /// because the signatures' type variables match it. The index and bounds are
+    /// then checked by the dispatch itself, with their usual coercions. Only
+    /// signatures are matched; no return type is built, so this cannot fail
+    /// on a type that is too deep.
+    ///
+    /// The message is the one a run gives: `Cannot subscript type path` for a
+    /// path, and otherwise the library's `No matching signature for
+    /// __getitem__(int, int)`, naming the arguments as they are. On refusal
+    /// the operands are released, as a failed dispatch releases them.
+    fn check_subscript_receiver(&mut self, args: &[&ExprValue]) -> Result<(), ExpressionError> {
+        let value = args[0];
         if value.is_list() || matches!(value, ExprValue::String(_) | ExprValue::RangeExpr(_)) {
             return Ok(());
         }
@@ -1710,22 +1713,33 @@ impl<'a> Evaluator<'a> {
         };
         let signatures = self.library.get_signatures("__getitem__");
         let subscriptable = |form: &ExprType| {
-            form.code() == crate::types::TypeCode::Any
-                || is_type_variable(form)
-                || signatures.iter().any(|entry| {
-                    let mut args = Vec::with_capacity(n_args);
-                    args.push(form.clone());
-                    args.resize(n_args, ExprType::INT);
-                    entry.signature.sig_params().len() == n_args
-                        && entry.signature.match_call(&args).is_some()
-                })
+            signatures.iter().any(|entry| {
+                let mut probe = Vec::with_capacity(args.len());
+                probe.push(form.clone());
+                probe.resize(args.len(), ExprType::INT);
+                entry.signature.sig_params().len() == args.len()
+                    && entry.signature.match_call(&probe).is_some()
+            })
         };
         if members.iter().any(subscriptable) {
             return Ok(());
         }
-        Err(ExpressionError::new(format!(
-            "Cannot subscript type {receiver}"
-        )))
+        let message = if receiver == ExprType::PATH {
+            "Cannot subscript type path".to_string()
+        } else {
+            let types: Vec<String> = args
+                .iter()
+                .map(|a| unwrap_unresolved(&a.expr_type()).to_string())
+                .collect();
+            format!(
+                "No matching signature for __getitem__({})",
+                types.join(", ")
+            )
+        };
+        for operand in args {
+            self.release(operand);
+        }
+        Err(ExpressionError::new(message))
     }
 
     fn eval_subscript(&mut self, s: &ast::ExprSubscript) -> Result<ExprValue, ExpressionError> {
@@ -1735,8 +1749,6 @@ impl<'a> Evaluator<'a> {
         // *result* (`[10, 20, 30][0]` with an `int` target must not try
         // to coerce the `list[int]` receiver or the index to int).
         let value = self.eval_node(&s.value, None)?;
-        let is_slice = matches!(&*s.slice, ast::Expr::Slice(_));
-        self.check_subscript_receiver(&value, if is_slice { 4 } else { 2 })?;
 
         // Handle slice syntax: value[start:stop:step]
         if let ast::Expr::Slice(sl) = &*s.slice {
@@ -1758,6 +1770,7 @@ impl<'a> Evaluator<'a> {
                 None => self.track(ExprValue::Null)?,
             };
 
+            self.check_subscript_receiver(&[&value, &start, &stop, &step])?;
             if let ExprValue::Int(0) = &step {
                 return Err(ExpressionError::new("Slice step cannot be zero"));
             }
@@ -1801,6 +1814,7 @@ impl<'a> Evaluator<'a> {
         }
 
         let slice = self.eval_node(&s.slice, None)?;
+        self.check_subscript_receiver(&[&value, &slice])?;
 
         // Check index type for unresolved values
         if slice.is_unresolved() {

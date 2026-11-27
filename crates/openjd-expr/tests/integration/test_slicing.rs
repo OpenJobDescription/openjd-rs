@@ -531,11 +531,11 @@ fn slice_on_split_semicolon() {
 
 // === A subscript's receiver is not coerced, concrete or unresolved ===
 //
-// 2026-02 §2.1.7 defines `__getitem__` for `list`, `range_expr` and `string`
-// only. A `path`, `int`, `float` or `bool` receiver is refused whether its
-// value is known or only its type is (`unresolved[T]`, as at template
-// validation), with the same message, so `openjd check` refuses what a run
-// refuses.
+// 2026-02 §2.1.7 and §2.1.8 define `__getitem__` for `list`, `range_expr` and
+// `string` only, and §1.3.8 says a path takes neither. A `path`, `int`,
+// `float` or `bool` receiver is refused whether its value is known or only
+// its type is (`unresolved[T]`, as at template validation), with the same
+// message a run gives, so `openjd check` refuses what a run refuses.
 
 fn eval_with(expr: &str, name: &str, value: ExprValue) -> Result<ExprValue, String> {
     let mut st = SymbolTable::new();
@@ -561,14 +561,26 @@ fn not_subscriptable() -> Vec<(ExprValue, &'static str)> {
 fn unresolved_receiver_is_refused_as_a_concrete_one_is() {
     for (value, type_name) in not_subscriptable() {
         let unresolved = ExprValue::unresolved(value.expr_type());
-        for expr in ["X[0]", "X[0:1]", "X[::-1]"] {
-            let expected = format!("Cannot subscript type {type_name}\n");
+        for (expr, args, caret) in [
+            ("X[0]", "int", "~^~~"),
+            ("X[0:1]", "int, int, nulltype", "~^~~~~"),
+            ("X[::-1]", "nulltype, nulltype, int", "~^~~~~~"),
+        ] {
+            let message = if type_name == "path" {
+                "Cannot subscript type path".to_string()
+            } else {
+                format!("No matching signature for __getitem__({type_name}, {args})")
+            };
+            let expected = format!("{message}\n  {expr}\n  {caret}");
             for v in [value.clone(), unresolved.clone()] {
                 let unresolved = v.is_unresolved();
                 let err = eval_with(expr, "X", v).expect_err(&format!(
                     "{expr} on a {type_name} (unresolved: {unresolved})"
                 ));
-                assert!(err.starts_with(&expected), "{expr}: got:\n{err}");
+                assert_eq!(
+                    err, expected,
+                    "{expr} on a {type_name} (unresolved: {unresolved})"
+                );
             }
         }
     }
@@ -582,14 +594,17 @@ fn literal_path_receiver_is_refused_in_a_host_context_check() {
     let lib = FunctionLibrary::for_profile(
         &ExprProfile::current().with_host_context(HostContext::Unresolved),
     );
-    for expr in ["path('/a/b')[0]", "path('/a/b')[0:1]"] {
+    for (expr, caret) in [
+        ("path('/a/b')[0]", "~~~~~~~~~~~~^~~"),
+        ("path('/a/b')[0:1]", "~~~~~~~~~~~~^~~~~"),
+    ] {
         let err = ParsedExpression::new(expr)
             .and_then(|p| p.with_library(&lib).evaluate(&[&SymbolTable::new()]))
             .expect_err(expr)
             .to_string();
-        assert!(
-            err.starts_with("Cannot subscript type path\n"),
-            "{expr}: got:\n{err}"
+        assert_eq!(
+            err,
+            format!("Cannot subscript type path\n  {expr}\n  {caret}")
         );
     }
 }
@@ -609,6 +624,7 @@ fn unresolved_subscriptable_receivers_are_typed() {
         // One member that takes a subscript is enough: a run may hold it.
         ("path | string", "X[0]", "string"),
         ("any", "X[0]", "any"),
+        ("any", "X[0:1]", "any"),
     ] {
         let v = eval_with(expr, "X", unresolved(t)).unwrap_or_else(|e| panic!("{t} {expr}: {e}"));
         assert_eq!(
@@ -617,4 +633,51 @@ fn unresolved_subscriptable_receivers_are_typed() {
             "{t} {expr}"
         );
     }
+}
+
+/// The check matches the signatures of the call's arity: a library whose
+/// only `__getitem__` takes an index refuses a slice of the same receiver.
+#[test]
+fn the_receiver_check_matches_signatures_of_the_calls_arity() {
+    use openjd_expr::FunctionLibrary;
+    let mut lib = FunctionLibrary::new();
+    lib.register_sig("__getitem__", "(string, int) -> string", |_, args| {
+        Ok(args[0].clone())
+    })
+    .unwrap();
+    let st = {
+        let mut st = SymbolTable::new();
+        st.set("X", ExprValue::unresolved(ExprType::STRING))
+            .unwrap();
+        st
+    };
+    let eval = |expr: &str| {
+        ParsedExpression::new(expr)
+            .and_then(|p| p.with_library(&lib).evaluate(&[&st]))
+            .map_err(|e| e.to_string())
+    };
+    eval("X[0]").unwrap();
+    assert_eq!(
+        eval("X[0:1]").unwrap_err(),
+        "No matching signature for __getitem__(string, int, int, nulltype)\n  X[0:1]\n  ~^~~~~"
+    );
+}
+
+/// A `noreturn` receiver gets the library's message, as it did when the
+/// dispatch alone decided, and as openjd-model-for-python gives.
+#[test]
+fn a_noreturn_receiver_gets_the_librarys_message() {
+    let err = eval_with("fail(X)[0]", "X", ExprValue::unresolved(ExprType::STRING)).unwrap_err();
+    assert_eq!(
+        err,
+        "No matching signature for __getitem__(noreturn, int)\n  fail(X)[0]\n  ~~~~~~~^~~"
+    );
+}
+
+/// The index is evaluated before the receiver is checked, so a name that
+/// resolves nowhere is still reported as such.
+#[test]
+fn an_undefined_index_is_reported_before_the_receiver() {
+    let err = eval_with("X[Typo]", "X", ExprValue::Int(5)).unwrap_err();
+    assert!(err.starts_with("Undefined variable: 'Typo'"), "{err}");
 }
