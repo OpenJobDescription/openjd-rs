@@ -205,9 +205,59 @@ two input modes:
   (`LIST[INT]`, `LIST[FLOAT]`, or an inner list of `LIST[LIST[INT]]`) is refused
   (`item[0]: Cannot coerce path to INT`), while the same text in JSON is a number. A JSON number
   is read as an `f64`, so `'[1.50]'` is `[1.5]` while a native float keeps `1.50`; the values are
-  equal, but an error quotes each form's text (`'1.50'` against `'1.5'`). An element error names the element in either form
+  equal, but an error quotes each form's text (`'1.50'` against `'1.5'`). A JSON number under an
+  INT element type is read by `numeric::json_number_as_i64` (see
+  [Integers are 64-bit](#integers-are-64-bit)), so `'[-9223372036854775808.0]'` is refused while a
+  native `Float` of -2^63 is read as `i64::MIN`. An element error names the element in either form
   (`item[1]: Value '1 000' is not a valid integer or integer string.`, or `item[1][0]: ...` in a
   `LIST[LIST[INT]]`).
+
+### Integers are 64-bit
+
+Every integer a template writes in an `<integer>` or `<intstring>` field is stored as an `i64`:
+an INT parameter's `default`, `minValue`, `maxValue`, `allowedValues` and `userInterface`
+`singleStepDelta`, the same fields of a `LIST[INT]` or `LIST[LIST[INT]]` default and `item`
+constraints, the elements of an `<IntRangeList>`, and the `CHUNK[INT]` chunk counts. A number
+outside `[-2^63, 2^63)` is a decode error in every one of them, whichever form it is written in:
+a YAML integer (`9223372036854775808`), a YAML float with no fractional part (`1.0e19`), or a
+numeric string (`'9223372036854775808'`). It is never rounded or saturated to another number.
+
+The rules live in `src/numeric.rs`:
+
+- `parse_intstring` reads an `<intstring>` through openjd-expr's `string` to `int` conversion
+  (`ExprValue::from_str_coerce`, the conversion a value submitted for an INT parameter goes
+  through), and says whether a refused string was an integer out of range or not an integer.
+  Template decode (`FlexInt`, `IntOrFormatString`), a resolved format string in an
+  `<IntRangeList>` or a chunk count, the static check of a resolved numeric field
+  (`validate_v2023_09/format_strings.rs`) and an action's literal `timeout` and
+  `notifyPeriodInSeconds` all read through it, each with its own located message.
+- `json_number_as_i64` reads a number, and `float_as_exact_i64` an integral float, through
+  openjd-expr's `float` to `int` conversion (2026-02 Expression Language §1.2.3). A number in a
+  submitted `LIST[INT]` or `LIST[LIST[INT]]` value given as JSON text goes through
+  `json_number_as_i64` (`coerce_json_to_job_parameter_type`), so `[-9223372036854775809]` is
+  refused (`Value '-9.223372036854776e+18' is not a valid integer or integer string.`, naming the
+  `f64` serde_json reads) rather than read as `-2^63`. A native float submitted for an INT
+  parameter goes through `float_as_exact_i64` in `coerce_to_job_parameter_type`.
+
+Decode messages: `Cannot convert '9223372036854775808' to int: number too large to fit in target
+type` for a string, which is openjd-expr's and openjd-model-for-python's message, and the same
+without quotes for a number. The YAML parser (serde-saphyr) reads an integer above `u64::MAX` or
+below `i64::MIN` as the nearest `f64`, so such a number is named as that `f64`
+(`Cannot convert 1e+20 to int: ...`). An integer just below `i64::MIN` rounds to exactly `-2^63`,
+which cannot be told apart from it, so an `f64` of `-2^63` is refused with a message that says to
+write `-9223372036854775808` as an integer; the integer itself is read as an `i64` and accepted.
+A JSON template is read by serde_json, which does the same. A YAML hexadecimal, octal or binary
+integer wider than 64 bits reaches this crate as a string and is refused as
+`Cannot parse '0x...' as integer`, since an `<intstring>` is base 10.
+
+The 64-bit range is the Expression Language's `int` (2026-02 §1.2.1). Template Schemas 2023-09
+§2.3 states no bound for INT, and this crate cannot hold a wider value with the EXPR extension or
+without it, so it refuses one rather than storing a different number.
+
+**Divergence from openjd-model-for-python:** Python accepts any integer when it validates the
+template, and refuses one outside the 64-bit range when it creates the job, with the string
+message above. It refuses an integral float such as `4.0` for an INT field, which this crate
+accepts.
 
 ## Validation Context and Extension Effects
 

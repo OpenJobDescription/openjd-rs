@@ -9,6 +9,7 @@
 
 pub mod error;
 pub mod job;
+mod numeric;
 pub mod template;
 pub use job::create_job;
 pub use job::step_dependency_graph;

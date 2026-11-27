@@ -496,7 +496,10 @@ type of `IntRange::List` (Template Schemas §3.4.1.1 `<IntRangeList>`, used
 by both `INT` and `CHUNK[INT]`) and the type of the two `ChunksDefinition`
 count fields. A JSON integer, an integer-valued float, or a string that
 parses as a base-10 integer (surrounding whitespace allowed) decodes to
-`Int`. A string containing `{{` decodes to `FormatString`, which is
+`Int`, when the number is inside the 64-bit signed range; one outside it
+fails to decode, in both forms, rather than being saturated (`Cannot convert
+'9223372036854775808' to int: number too large to fit in target type`; see
+[parameters.md](parameters.md#integers-are-64-bit)). A string containing `{{` decodes to `FormatString`, which is
 resolved at job creation, or fails to decode when it is not a valid
 format string. Decoding also fails for any other string, a non-integral
 float, a boolean, `null`, an array or an object. `as_i64()` returns the integer of
@@ -504,7 +507,9 @@ an `Int`, or `None` for a `FormatString`.
 
 `FlexInt` and `FlexFloat` are coercion-permissive newtypes around
 `i64` and `f64` respectively — they accept either a JSON number or
-a JSON string that parses as a number. Each has a `.0` field
+a JSON string that parses as a number. `FlexInt` reads a number the way
+`IntOrFormatString` does: an integer-valued float is accepted, and a number
+or numeric string outside the 64-bit signed range fails to decode. Each has a `.0` field
 holding the inner primitive value:
 
 ```rust

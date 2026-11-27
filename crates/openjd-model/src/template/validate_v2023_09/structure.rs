@@ -545,7 +545,7 @@ fn validate_action(
     if let Some(period) = notify_period {
         let raw = period.raw().trim();
         if !period.has_complex_expressions() && !raw.contains("{{") {
-            match raw.parse::<i64>() {
+            match crate::numeric::parse_intstring(raw) {
                 Ok(v) if v <= 0 => errors.add(path, "notifyPeriodInSeconds must be > 0."),
                 Ok(v) if v > 600 => errors.add(path, "notifyPeriodInSeconds must not exceed 600."),
                 Ok(_) => {}
@@ -561,7 +561,7 @@ fn validate_action(
     if let Some(timeout) = &action.timeout {
         let raw = timeout.raw().trim();
         if !timeout.has_complex_expressions() && !raw.contains("{{") {
-            match raw.parse::<i64>() {
+            match crate::numeric::parse_intstring(raw) {
                 Ok(v) if v <= 0 => errors.add(path, "timeout must be > 0."),
                 Ok(_) => {}
                 Err(_) => errors.add(path, "timeout must be a positive integer."),

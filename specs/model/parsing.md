@@ -106,7 +106,10 @@ Custom deserializers handle:
 - **`IntRange`/`StringRange`/`FloatRange`** — Distinguishes list vs expression string
 - **`IntOrFormatString`/`FloatRangeItem`** — A list element that is a number or a
   format string (`IntRange::List`, `FloatRange::List`, and the CHUNK[INT] chunks counts)
-- **`FlexInt`/`FlexFloat`** — Accepts multiple YAML value representations
+- **`FlexInt`/`FlexFloat`** — Accepts multiple YAML value representations. `FlexInt` and
+  `IntOrFormatString` read a number through one set of rules in `src/numeric.rs`, which refuse
+  a number outside the 64-bit signed range (see
+  [parameters.md](parameters.md#integers-are-64-bit))
 - **`BoolValue`** — Accepts boolean, numeric, and string representations
 
 ### Pass 4: Extension Resolution
