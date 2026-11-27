@@ -771,10 +771,16 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
   for __getitem__(int, int)` for any other type, naming the arguments as they
   are. So a host-context check refuses `path("/a/b")[0]`, a PATH parameter's
   `Param.P[0]` and an INT parameter's `Param.I[0:1]` as a run does. A union
-  receiver passes when one member does, and an `any` receiver passes because
-  the signatures' type variables match it. The check runs for every receiver,
-  after the index's and bounds' own checks (an undefined name, a zero step, an
-  index that cannot be an integer), so those keep their messages. It matches
+  receiver passes when one member does, and its result is typed from those
+  members only, so `X[0]` with `X` an unresolved `path | list[int]` is `int`
+  rather than `int | string`: `(Param.P if c else [1, 2])[0].upper()` is
+  refused at validation, as every run that reaches it fails. An `any`
+  receiver passes because the signatures' type variables match it. A concrete
+  `list`, `string` or `range_expr` is left to the dispatch, which decides it by
+  the same signatures. The check runs after the index's and bounds' own checks
+  (an undefined name, a zero step, an index that cannot be an integer), so a
+  subscript with two defects reports those first, for every receiver: a
+  concrete path with a zero step gets `Slice step cannot be zero`. It matches
   signatures only and builds no return type, and on refusal it releases the
   operands, as a failed dispatch does. In a comprehension typed over an
   unresolved list, a body that subscripts such a receiver fails to type, so the

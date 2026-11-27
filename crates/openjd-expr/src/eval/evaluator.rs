@@ -1687,24 +1687,37 @@ impl<'a> Evaluator<'a> {
     /// (§1.2.4). The decision is the library's: the receiver's type is
     /// matched against the first parameter of its `__getitem__` signatures
     /// of the call's arity (`args`: the receiver, then the index or the three
-    /// bounds), with `int` indices and without coercion. Deciding at the type,
-    /// for every receiver, gives a concrete receiver and an unresolved one of
-    /// the same type the same answer, so `openjd check` refuses what a run
-    /// would. It runs after the checks of the index and bounds themselves (an
-    /// undefined name, a zero step, an index that cannot be an integer), so
-    /// those keep their messages. A union
-    /// receiver passes when one of its members does, and an `any` one passes
-    /// because the signatures' type variables match it. The index and bounds are
-    /// then checked by the dispatch itself, with their usual coercions. Only
-    /// signatures are matched; no return type is built, so this cannot fail
-    /// on a type that is too deep.
+    /// bounds), with `int` indices and without coercion. Deciding at the type
+    /// gives a concrete receiver and an unresolved one of the same type the
+    /// same answer, so `openjd check` refuses what a run would. It runs after
+    /// the checks of the index and bounds themselves (an undefined name, a
+    /// zero step, an index that cannot be an integer), so those come first,
+    /// for every receiver. The index and bounds are then checked by the
+    /// dispatch itself, with their usual coercions. Only signatures are
+    /// matched; no return type is built, so this cannot fail on a type that
+    /// is too deep.
+    ///
+    /// A union receiver passes when one of its members does, and the result
+    /// is then typed from those members only: the returned `Some` is the
+    /// receiver narrowed to them, so `X[0]` with `X` a `path | list[int]` is
+    /// `int`, not the `int | string` a coerced `path` member would add. An
+    /// `any` receiver passes because the signatures' type variables match
+    /// it. A concrete list, string or range_expr is not checked here: the
+    /// dispatch decides it by the same signatures.
     ///
     /// The message is the one a run gives: `Cannot subscript type path` for a
     /// path, and otherwise the library's `No matching signature for
     /// __getitem__(int, int)`, naming the arguments as they are. On refusal
     /// the operands are released, as a failed dispatch releases them.
-    fn check_subscript_receiver(&mut self, args: &[&ExprValue]) -> Result<(), ExpressionError> {
-        let receiver = unwrap_unresolved(&args[0].expr_type());
+    fn check_subscript_receiver(
+        &mut self,
+        args: &[&ExprValue],
+    ) -> Result<Option<ExprValue>, ExpressionError> {
+        let value = args[0];
+        if value.is_list() || matches!(value, ExprValue::String(_) | ExprValue::RangeExpr(_)) {
+            return Ok(None);
+        }
+        let receiver = unwrap_unresolved(&value.expr_type());
         let members = if receiver.code() == crate::types::TypeCode::Union {
             receiver.params().to_vec()
         } else {
@@ -1720,8 +1733,18 @@ impl<'a> Evaluator<'a> {
                     && entry.signature.match_call(&probe).is_some()
             })
         };
-        if members.iter().any(subscriptable) {
-            return Ok(());
+        let passing: Vec<ExprType> = members
+            .iter()
+            .filter(|m| subscriptable(m))
+            .cloned()
+            .collect();
+        if passing.len() == members.len() {
+            return Ok(None);
+        }
+        if !passing.is_empty() {
+            let narrowed = ExprValue::unresolved(ExprType::union(passing)?);
+            self.release(value);
+            return self.track(narrowed).map(Some);
         }
         let message = if receiver == ExprType::PATH {
             "Cannot subscript type path".to_string()
@@ -1772,7 +1795,10 @@ impl<'a> Evaluator<'a> {
             if let ExprValue::Int(0) = &step {
                 return Err(ExpressionError::new("Slice step cannot be zero"));
             }
-            self.check_subscript_receiver(&[&value, &start, &stop, &step])?;
+            let value = match self.check_subscript_receiver(&[&value, &start, &stop, &step])? {
+                Some(narrowed) => narrowed,
+                None => value,
+            };
 
             // An unresolved bound with a concrete list or string receiver
             // gives the receiver's own type: a slice of a `list[T]` is a
@@ -1840,14 +1866,20 @@ impl<'a> Evaluator<'a> {
                 return Err(err);
             }
         }
-        self.check_subscript_receiver(&[&value, &slice])?;
-
-        // Single-index access: dispatch through library
+        // Decided on the receiver as written, before a union is narrowed to
+        // its subscriptable members: `int | list[nulltype]` is not always
+        // the empty list, though its only subscriptable member is.
         let empty_list = ExprType::fixed(ExprType::list(ExprType::NULLTYPE));
         let receiver_always_empty =
             crate::types::list_forms(&unwrap_unresolved(&value.expr_type()))?
                 .iter()
                 .all(|f| *f == empty_list);
+        let value = match self.check_subscript_receiver(&[&value, &slice])? {
+            Some(narrowed) => narrowed,
+            None => value,
+        };
+
+        // Single-index access: dispatch through library
         let result = self.dispatch_with_node(
             "__getitem__",
             vec![value, slice],

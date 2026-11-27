@@ -149,7 +149,19 @@ fn host_scope_literal_path_subscripts_are_still_reported() {
                 .err()
                 .unwrap_or_else(|| panic!("{field}: {expr} should be refused"))
                 .to_string();
-            assert!(err.contains(&located), "{field}: {expr}\n{err}");
+            let field_path = match *field {
+                "arg" => "steps[0] -> script -> actions -> onRun -> args[0]:",
+                "command" => "steps[0] -> script -> actions -> onRun -> command:",
+                "let" => "steps[0] -> script -> let[0]:",
+                "embedded file" => "steps[0] -> script -> embeddedFiles[0] -> data:",
+                "job env var" => "jobEnvironments[0] -> variables -> V:",
+                "step env script let" => "steps[0] -> stepEnvironments[0] -> script -> let[0]:",
+                other => panic!("no field path for {other}"),
+            };
+            assert!(
+                err.contains(&format!("{field_path}\n\t")) && err.contains(&located),
+                "{field}: {expr}\n{err}"
+            );
         }
     }
 }

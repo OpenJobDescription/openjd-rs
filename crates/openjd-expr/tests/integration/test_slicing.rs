@@ -622,7 +622,12 @@ fn unresolved_subscriptable_receivers_are_typed() {
         // list[int] for a negative one, so the type is both.
         ("range_expr", "X[::-1]", "list[int] | range_expr"),
         // One member that takes a subscript is enough: a run may hold it.
+        // The result is typed from the members that take one, so a `path`
+        // member adds nothing.
         ("path | string", "X[0]", "string"),
+        ("list[int] | path", "X[0]", "int"),
+        ("list[int] | path", "X[0:1]", "list[int]"),
+        ("int | list[string] | path", "X[-1]", "string"),
         ("any", "X[0]", "any"),
         ("any", "X[0:1]", "any"),
     ] {
@@ -663,8 +668,8 @@ fn the_receiver_check_matches_signatures_of_the_calls_arity() {
     );
 }
 
-/// A `noreturn` receiver gets the library's message, the one every other
-/// type that takes no subscript gets.
+/// A `noreturn` receiver gets the library's message, the one every type that
+/// takes no subscript gets except a path.
 #[test]
 fn a_noreturn_receiver_gets_the_librarys_message() {
     let err = eval_with("fail(X)[0]", "X", ExprValue::unresolved(ExprType::STRING)).unwrap_err();
