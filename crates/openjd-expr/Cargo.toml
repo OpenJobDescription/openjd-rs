@@ -51,9 +51,9 @@ ryu = { workspace = true }
 #
 # The `stacker` feature lets the parser grow its stack on deep recursion
 # (`-` * 65535 + `1` overflows a 32 MB stack without it). Keep it on.
-ruff_python_parser = { version = "=0.0.22", features = ["stacker"] }
-ruff_python_ast = "=0.0.22"
-ruff_text_size = "=0.0.22"
+ruff_python_parser = { version = "=0.0.23", features = ["stacker"] }
+ruff_python_ast = "=0.0.23"
+ruff_text_size = "=0.0.23"
 
 # NFKC-normalizes non-ASCII identifiers the same way the parser does, so a
 # keyword placeholder can be checked against every name the parser will see.
