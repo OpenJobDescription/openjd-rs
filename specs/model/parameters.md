@@ -64,12 +64,14 @@ Common methods on all variants:
 - `job_param_type() -> JobParameterType`
 - `default_value() -> Option<String>` — Returns the default as text job creation parses: the value
   for a scalar, JSON for a list. A `LIST[FLOAT]` item written as a numeric string is a JSON string
-  holding its spelling (`[1.5,"2.50"]`), so a reader of the JSON must accept a number or a string
-  for each item
+  holding the text it renders as (`[1.5,"2.50"]`), so a reader of the JSON must accept a number or
+  a string for each item
 - `check_constraints(&ExprValue) -> Result<(), String>` — Runtime value validation
 - `validate_definition(&EffectiveLimits) -> Result<(), Vec<String>>` — Template-level consistency (accumulates errors)
 
-A FLOAT default given as a string keeps its spelling in `default_value` (Template Schemas §7.5).
+A FLOAT default given as a string keeps its spelling in `default_value`, without the white space
+around it and without the notation §7.5 rule 1 drops, a leading `+` and redundant leading zeros
+(Template Schemas §7.5).
 One given as a YAML or JSON number is written by `openjd_expr::value::format_float`, CPython's
 `repr` (Expression Language §1.3.4), so `default: 2` is `"2.0"` and `default: 1e20` is `"1e+20"`.
 A `LIST[FLOAT]` default is JSON, and job creation reads a number item back as the same `f64`
@@ -184,11 +186,16 @@ two input modes:
   without the notation that is redundant to its value, a leading `+` and redundant leading zeros
   (§7.5 rule 1, `numeric::floatstring_text`, the rule a FLOAT range element follows):
   `default: [1.50, " +02.50"]` is `[1.5, 2.50]` (`default_value` writes the string item back as
-  a JSON string). A value submitted for a FLOAT parameter keeps its original form instead
-  (Expression Language §1.3.4): `" +03.10 "` is `+03.10`. **Divergence from
+  a JSON string). A value submitted for a FLOAT parameter keeps its original form where it is
+  used as a value (Expression Language §1.3.4): `" +03.10 "` is `+03.10` in `{{ Param.F }}`.
+  Once it is an element of a FLOAT task parameter range, through a format string element
+  (`['{{ Param.F }}']`) or a whole-field range expression (`{{ Param.LF }}`), it is rendered as
+  a range element's `<floatstring>` is, so it renders `3.10` there. **Divergence from
   openjd-model-for-python:** Python drops the `+` and the zeros of a FLOAT default, but keeps a
   leading `+` on a FLOAT range element (`'+4.25'` renders `+4.25`), which this crate drops, as
-  openjd-specifications#180's §7.5 rule 1 asks. The string the public `JobIntParameterDefinition::check_constraints` and
+  openjd-specifications#180's §7.5 rule 1 asks.
+
+  The string the public `JobIntParameterDefinition::check_constraints` and
   `JobFloatParameterDefinition::check_constraints` parse is trimmed too (job creation itself
   checks the merged definition, which receives the coerced value). A string element of a `LIST[INT]`,
   `LIST[FLOAT]` or `LIST[LIST[INT]]` value goes through the same coercion, so

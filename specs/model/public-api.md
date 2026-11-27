@@ -365,8 +365,9 @@ impl JobParameterDefinition {
     pub fn type_name(&self) -> &str;
     pub fn path_properties(&self) -> (Option<ObjectType>, Option<DataFlow>);
     /// The default as text job creation parses: the value for a scalar, JSON for a list.
-    /// A LIST[FLOAT] item written as a numeric string is a JSON string holding its
-    /// spelling (`[1.5,"2.50"]`), a number item a JSON number. Also what
+    /// A FLOAT default, or LIST[FLOAT] item, written as a numeric string is the text it
+    /// renders as: its spelling without a leading `+` or redundant leading zeros (§7.5).
+    /// The item is a JSON string (`[1.5,"2.50"]`), a number item a JSON number. Also what
     /// `MergedParameterDefinition::default` holds.
     pub fn default_value(&self) -> Option<String>;
 
@@ -510,11 +511,13 @@ an `Int`, or `None` for a `FormatString`.
 a JSON string that parses as a number. `FlexInt` reads a number the way
 `IntOrFormatString` does: an integer-valued float is accepted, and a number
 or numeric string outside the 64-bit signed range fails to decode. Each has a `.0` field
-holding the inner primitive value:
+holding the inner primitive value. `FlexFloat.1` is the text a value written as a
+numeric string renders as (its spelling without white space, a leading `+` or
+redundant leading zeros, Template Schemas §7.5), and `None` for a number:
 
 ```rust
 pub struct FlexInt(pub i64);
-pub struct FlexFloat(pub f64);
+pub struct FlexFloat(pub f64, pub Option<String>);
 ```
 
 ### `userInterface` types

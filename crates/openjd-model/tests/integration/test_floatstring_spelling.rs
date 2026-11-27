@@ -9,7 +9,8 @@
 //! writes one whose text reaches a Task: a FLOAT range element, written
 //! directly or resolved from a format string, a FLOAT parameter's `default`,
 //! and a `LIST[FLOAT]` default item. A value submitted for a FLOAT parameter
-//! keeps its original form (2026-02 Expression Language §1.3.4).
+//! keeps its original form as a value (2026-02 Expression Language §1.3.4),
+//! and is rendered as a range element's `<floatstring>` once it is one.
 
 use openjd_expr::path_mapping::PathFormat;
 use openjd_model::{
@@ -123,4 +124,59 @@ fn a_default_loses_a_leading_plus_and_redundant_zeros() {
 fn a_submitted_value_keeps_its_original_form() {
     let (params, _) = run(defaults_template(), &[("Submitted", " +03.10 ")]);
     assert_eq!(params["Submitted"].value.to_display_string(), "+03.10");
+}
+
+/// A submitted value keeps its original form as a value, and is rendered as a
+/// range element's `<floatstring>` once it is one: through a format string
+/// element and through a whole-field range expression alike, so the two forms
+/// give the same tasks.
+#[test]
+fn a_submitted_value_in_a_range_is_rendered_as_a_range_element() {
+    let template = "specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: T
+parameterDefinitions:
+- {name: P, type: FLOAT}
+- {name: LF, type: 'LIST[FLOAT]'}
+steps:
+- name: Step
+  parameterSpace:
+    taskParameterDefinitions:
+    - {name: F, type: FLOAT, range: ['{{Param.P}}', '{{ [Param.P] }}']}
+  script:
+    actions:
+      onRun: {command: foo}
+- name: Whole
+  parameterSpace:
+    taskParameterDefinitions:
+    - {name: F, type: FLOAT, range: '{{ Param.LF }}'}
+  script:
+    actions:
+      onRun: {command: foo}
+";
+    let (params, tasks) = run(
+        template,
+        &[("P", "+03.10"), ("LF", "[\"+03.10\", \"2.50\"]")],
+    );
+    assert_eq!(params["P"].value.to_display_string(), "+03.10");
+    assert_eq!(tasks, ["3.10", "3.10"]);
+
+    let jt = decode_job_template(
+        yaml_val(template),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut input = JobParameterInputValues::new();
+    for (k, v) in [("P", "+03.10"), ("LF", "[\"+03.10\", \"2.50\"]")] {
+        input.insert(k.to_string(), openjd_expr::ExprValue::String(v.to_string()));
+    }
+    let params = preprocess_job_parameters(&jt, &input, &[], &options()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
+    let whole: Vec<String> =
+        StepParameterSpaceIterator::new(job.steps[1].parameter_space.as_ref().unwrap())
+            .unwrap()
+            .map(|t| t["F"].value.to_display_string())
+            .collect();
+    assert_eq!(whole, ["3.10", "2.50"]);
 }

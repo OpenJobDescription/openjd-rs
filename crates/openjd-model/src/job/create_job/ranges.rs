@@ -691,9 +691,11 @@ fn resolve_float_range(
                         .enumerate()
                         .map(|(k, e)| match e {
                             // A float copied unchanged keeps its spelling
-                            // (Expression Language §1.3.4), by the same rule as
-                            // a range list element, so `{{ Param.LF }}` and
-                            // `["{{ Param.LF }}"]` give the same tasks. A
+                            // (Expression Language §1.3.4), rendered by the
+                            // rule a range list element's `<floatstring>` is
+                            // (§7.5: no leading `+` or redundant zeros), so
+                            // `{{ Param.LF }}` and `["{{ Param.LF }}"]` give the
+                            // same tasks. A
                             // template cannot give a float a spelling that is
                             // not a number, but an API caller's value can, and
                             // is rejected as in the list form. `k` indexes the

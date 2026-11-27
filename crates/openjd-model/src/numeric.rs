@@ -135,8 +135,9 @@ pub(crate) fn intstring_as_i64(s: &str) -> Result<i64, String> {
 /// goes through this: a FLOAT range element, written directly or resolved from
 /// a format string (`create_job::ranges`), and a FLOAT parameter's numeric
 /// strings, including a `LIST[FLOAT]` default item (`FlexFloat`). A value
-/// submitted for a FLOAT parameter does not: it keeps its original form
-/// (2026-02 Expression Language §1.3.4).
+/// submitted for a FLOAT parameter keeps its original form as a value (2026-02
+/// Expression Language §1.3.4), and goes through this only once it becomes a
+/// range element.
 pub(crate) fn floatstring_text(text: &str) -> Cow<'_, str> {
     let (sign, digits) = match text.as_bytes().first() {
         Some(b'+') => ("", &text[1..]),

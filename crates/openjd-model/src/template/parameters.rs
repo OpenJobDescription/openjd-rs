@@ -286,15 +286,17 @@ impl JobParameterDefinition {
     /// itself for a scalar, and JSON for a list.
     ///
     /// A `LIST[FLOAT]` default item written as a numeric string is a JSON string holding
-    /// its spelling without white space (`[1.5,"2.50"]` for `default: [1.5, " 2.50"]`),
-    /// so it keeps that spelling (Template Schemas §2.14); a number item is a JSON number.
+    /// the text it renders as: its spelling without white space, a leading `+` or redundant
+    /// leading zeros (`[1.5,"2.50"]` for `default: [1.5, " +02.50"]`; Template Schemas
+    /// §2.14, §7.5); a number item is a JSON number.
     /// A caller that reads the JSON back must accept both forms for each item.
     pub fn default_value(&self) -> Option<String> {
         match self {
             Self::STRING(p) => p.default.clone(),
             Self::INT(p) => p.default.as_ref().map(|v| v.to_string()),
-            // A default given as a string keeps its spelling (Template Schemas
-            // §7.5). One given as a number is written as a computed float is,
+            // A default given as a string keeps its spelling, less the
+            // notation §7.5 rule 1 drops (Template Schemas §7.5). One given as
+            // a number is written as a computed float is,
             // CPython's `repr` (Expression Language §1.3.4): `2` is `2.0`.
             Self::FLOAT(p) => p.default.as_ref().map(|v| {
                 v.1.clone()
