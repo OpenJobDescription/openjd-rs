@@ -388,8 +388,19 @@ impl Hash for StepParameterSpace {
 }
 
 /// A resolved task parameter with concrete range values.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+///
+/// A chunked parameter has exactly one representation, [`TaskParameter::ChunkInt`].
+/// `Int` carries no chunk configuration.
+///
+/// The serialized form is the one released versions wrote when `Int` had a
+/// `chunks: Option<ResolvedChunks>` field that was never set: an `int` parameter is
+/// written with `"chunks": null`, making the same serializer calls as before, so a
+/// document reads as a released version's did in any format. Deserializing an `int`
+/// parameter accepts `"chunks": null` or no `chunks`, and rejects any other value
+/// rather than dropping it, because the chunk configuration it holds would
+/// otherwise be lost silently.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(from = "wire::TaskParameter")]
 #[allow(
     missing_docs,
     reason = "missing-docs burn-down: predates the lint; document these items, then delete this attribute"
@@ -397,7 +408,6 @@ impl Hash for StepParameterSpace {
 pub enum TaskParameter {
     Int {
         range: TaskParamRange<i64>,
-        chunks: Option<ResolvedChunks>,
     },
     Float {
         range: Vec<Float64>,
@@ -421,10 +431,7 @@ impl Hash for TaskParameter {
     fn hash<H: Hasher>(&self, state: &mut H) {
         std::mem::discriminant(self).hash(state);
         match self {
-            Self::Int { range, chunks } => {
-                range.hash(state);
-                chunks.hash(state);
-            }
+            Self::Int { range } => range.hash(state),
             Self::Float { range } => {
                 range.len().hash(state);
                 for elem in range {
@@ -440,6 +447,109 @@ impl Hash for TaskParameter {
                 chunks.hash(state);
             }
         }
+    }
+}
+
+impl Serialize for TaskParameter {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let wire = match self {
+            Self::Int { range } => wire::TaskParameterRef::Int {
+                range,
+                chunks: None,
+            },
+            Self::Float { range } => wire::TaskParameterRef::Float { range },
+            Self::String { range } => wire::TaskParameterRef::String { range },
+            Self::Path { range } => wire::TaskParameterRef::Path { range },
+            Self::ChunkInt { range, chunks } => wire::TaskParameterRef::ChunkInt { range, chunks },
+        };
+        wire.serialize(serializer)
+    }
+}
+
+impl From<wire::TaskParameter> for TaskParameter {
+    fn from(wire: wire::TaskParameter) -> Self {
+        match wire {
+            // `chunks` is `None` here: a non-null one fails in `RejectChunks`.
+            wire::TaskParameter::Int { range, .. } => Self::Int { range },
+            wire::TaskParameter::Float { range } => Self::Float { range },
+            wire::TaskParameter::String { range } => Self::String { range },
+            wire::TaskParameter::Path { range } => Self::Path { range },
+            wire::TaskParameter::ChunkInt { range, chunks } => Self::ChunkInt { range, chunks },
+        }
+    }
+}
+
+/// The wire form of [`TaskParameter`]: its shape when `Int` still had
+/// `chunks: Option<ResolvedChunks>`, so the serialized form is unchanged.
+mod wire {
+    use super::{Float64, ResolvedChunks, TaskParamRange};
+    use serde::{Deserialize, Deserializer, Serialize};
+
+    /// The error for an `int` task parameter whose `chunks` is not null.
+    const INT_WITH_CHUNKS: &str = "an `int` task parameter cannot have `chunks`; a chunked \
+                                   parameter is `chunkInt` (CHUNK[INT])";
+
+    /// The value of a non-null `chunks` on an `int` parameter, which is always an
+    /// error. As the `T` of an `Option<T>` field, a null or missing `chunks` is `None`
+    /// without reaching it, and any other value fails here, where the format can
+    /// give its position, and without the format having to describe the value.
+    pub(super) enum RejectChunks {}
+
+    impl<'de> Deserialize<'de> for RejectChunks {
+        fn deserialize<D: Deserializer<'de>>(_: D) -> Result<Self, D::Error> {
+            Err(serde::de::Error::custom(INT_WITH_CHUNKS))
+        }
+    }
+
+    /// Deserialization form. Named `TaskParameter` because serde puts the Rust
+    /// type name in its error messages ("expected struct variant
+    /// TaskParameter::Float"), which therefore read as they did before.
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub(super) enum TaskParameter {
+        Int {
+            range: TaskParamRange<i64>,
+            /// Always `None` once read: see `RejectChunks`.
+            #[expect(dead_code, reason = "only read to accept a null `chunks`, never used")]
+            chunks: Option<RejectChunks>,
+        },
+        Float {
+            range: Vec<Float64>,
+        },
+        String {
+            range: Vec<String>,
+        },
+        Path {
+            range: Vec<String>,
+        },
+        ChunkInt {
+            range: TaskParamRange<i64>,
+            chunks: ResolvedChunks,
+        },
+    }
+
+    /// Serialization form, borrowing from the [`super::TaskParameter`] it writes.
+    #[derive(Serialize)]
+    #[serde(rename = "TaskParameter", rename_all = "camelCase")]
+    pub(super) enum TaskParameterRef<'a> {
+        Int {
+            range: &'a TaskParamRange<i64>,
+            /// Always `None`, written as `null` as released versions did.
+            chunks: Option<&'a ResolvedChunks>,
+        },
+        Float {
+            range: &'a Vec<Float64>,
+        },
+        String {
+            range: &'a Vec<String>,
+        },
+        Path {
+            range: &'a Vec<String>,
+        },
+        ChunkInt {
+            range: &'a TaskParamRange<i64>,
+            chunks: &'a ResolvedChunks,
+        },
     }
 }
 

@@ -244,10 +244,7 @@ fn resolve_task_parameter(
                 limits,
                 budgets,
             )?;
-            Ok(job::TaskParameter::Int {
-                range,
-                chunks: None,
-            })
+            Ok(job::TaskParameter::Int { range })
         }
         template::TaskParameterDefinition::FLOAT(p) => {
             let range = resolve_float_range(

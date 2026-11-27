@@ -34,13 +34,28 @@ product of parameter dimensions overflows `u64`). `get` returns `Option<TaskPara
 boundaries are not a function of the index alone).
 `set_chunks_default_task_count` takes `&mut self` (no `Arc<AtomicU64>` indirection).
 
+A space has at most one `CHUNK[INT]` parameter, as a template step does. `create_job`
+never emits more, and `new` rejects a hand-built or deserialized space with two, with
+`ModelError::DecodeValidation`: `Task parameters '<first>' and '<second>' are both
+CHUNK[INT]: only one CHUNK[INT] parameter is allowed per step.` The chunk metadata below
+describes one parameter, so a second would be chunked statically with its own size,
+missing from that metadata, with its `targetRuntimeSeconds` dropped without a signal. The
+check runs in definition order, before the second parameter's value bound (see
+"Chunking").
+
+**Divergence from the Python reference:** openjd-model-for-python's `StepParameterSpace`
+(the job-side model) does not check the count, and its `StepParameterSpaceIterator` takes
+its chunk metadata from the first `CHUNK[INT]` and iterates such a space. Neither
+implementation's `create_job` produces one: the template's `StepParameterSpaceDefinition`
+rejects a second `CHUNK[INT]` in both.
+
 `chunks_parameter_name` and `chunks_default_task_count` report for *any* chunked space,
 adaptive or not: both values are in the template, and a chunk override replaces the size.
 Only `set_chunks_default_task_count` is adaptive-specific, because only an adaptive size
 is mutable mid-walk.
 
 `new_with_chunk_override` accepts an optional chunk size that overrides the template's
-`defaultTaskCount` for all chunk nodes. When `Some(n)`, it also suppresses adaptive
+`defaultTaskCount` of the chunked parameter. When `Some(n)`, it also suppresses adaptive
 chunking (the parameter is treated as static with chunk size `n`).
 
 `reset` rewinds the iterator so a fresh `Iterator::next` walk yields the same elements
@@ -219,7 +234,10 @@ the offset and size of chunk `j` be computed without walking the chunks before i
 `StaticLayout` holds the chunk count, base chunk size (`small = total / num_chunks`), and
 remainder count (`leftovers = total % num_chunks`); the first `leftovers` chunks take one
 more value. Both `StaticChunkNode` and `StaticChunkIterator` build chunk `i` with the
-shared `static_chunk()`.
+shared `static_chunk()`. A space walks its nodes' iterators only when it is adaptive or
+CONTIGUOUS (see "Sequential Iteration"), and it has only one `CHUNK[INT]` parameter, so no
+space reaches `StaticChunkIterator` today; it exists because every node has an iterator, and
+a unit test walks it directly against `get`.
 
 A chunk is the values at a window of indices, and `noncontiguous_chunk()` builds it without
 listing them. For a range expression it is `RangeExpr::slice(offset, offset + size, 1)`,
@@ -358,8 +376,8 @@ CLI's `--task-params`).
 
 ### Chunk Override
 
-`new_with_chunk_override(space, Some(n))` overrides the `defaultTaskCount` for all chunk
-nodes. The override value is threaded through `make_leaf_node` → `make_chunk_node` and
+`new_with_chunk_override(space, Some(n))` overrides the `defaultTaskCount` of the chunked
+parameter. The override value is threaded through `make_leaf_node` → `make_chunk_node` and
 used in place of `chunks.default_task_count`. When an override is provided, adaptive
 chunking is suppressed (the parameter uses static chunking with the override size).
 
@@ -368,8 +386,8 @@ chunking is suppressed (the parameter uses static chunking with the override siz
 Two separate questions, tracked by two different flags.
 
 **Which path `Iterator::next` takes** is the `sequential` flag: adaptive chunking or
-contiguous chunking. Adaptive must be sequential because its chunk size can change
-part-way through a walk. Contiguous answers per index in O(log G), but its node iterator
+contiguous chunking, decided from the space's one `CHUNK[INT]` parameter. Adaptive must be
+sequential because its chunk size can change part-way through a walk. Contiguous answers per index in O(log G), but its node iterator
 walks the interval groups in O(1) per chunk, so both use the `node_iter` path. Every other space takes the random-access path, where
 `Iterator::next` is implemented as `get(current_index)`.
 

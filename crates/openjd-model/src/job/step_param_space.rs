@@ -633,10 +633,9 @@ impl NodeIterator for StaticChunkIterator {
 fn static_chunk(range: &job::TaskParamRange<i64>, layout: &StaticLayout, i: u64) -> RangeExpr {
     let (offset, size) = layout.bounds(i);
     noncontiguous_chunk(range, offset, offset + size)
-        // A CHUNK[INT] range is within the value bound, so the only error is
-        // the run cap, checked when the node was built. (An INT parameter
-        // with chunks, which only the public API builds, is not
-        // bound-checked: a list holding i64::MIN fails here.)
+        // Only a CHUNK[INT] range is chunked, and `new_inner` checked it
+        // against the value bound, so the only error is the run cap, checked
+        // when the node was built.
         .expect("chunks checked against the run cap when the node was built")
 }
 
@@ -1372,8 +1371,7 @@ impl AdaptiveChunkIterator {
                 chunk
             }
             // CHUNK[INT] values are within the range value bound (checked by
-            // `StepParameterSpaceIterator::new_inner`; an INT parameter with
-            // chunks, which only the public API builds, is not), so the error is the
+            // `StepParameterSpaceIterator::new_inner`), so the error is the
             // run cap: these values' canonical form has more than
             // MAX_RANGE_EXPR_CHUNKS runs, which takes more than
             // MAX_RANGE_EXPR_CHUNKS values. Shorten the chunk to
@@ -1471,10 +1469,12 @@ pub struct StepParameterSpaceIterator {
 impl StepParameterSpaceIterator {
     /// Construct from a resolved `StepParameterSpace`.
     ///
-    /// Among other errors, fails when static `NONCONTIGUOUS` chunking would
-    /// build a chunk with more than [`openjd_expr::MAX_RANGE_EXPR_CHUNKS`]
-    /// runs in canonical form, which no `RangeExpr` can hold; the error
-    /// names the parameter and the chunk.
+    /// Among other errors, fails when the space has more than one `CHUNK[INT]`
+    /// parameter (`create_job` never builds one; the error names the first
+    /// two), and when static `NONCONTIGUOUS` chunking would build a chunk with
+    /// more than [`openjd_expr::MAX_RANGE_EXPR_CHUNKS`] runs in canonical form,
+    /// which no `RangeExpr` can hold (the error names the parameter and the
+    /// chunk).
     pub fn new(space: &job::StepParameterSpace) -> Result<Self, ModelError> {
         Self::new_inner(space, None)
     }
@@ -1492,14 +1492,24 @@ impl StepParameterSpaceIterator {
         space: &job::StepParameterSpace,
         chunk_override: Option<u64>,
     ) -> Result<Self, ModelError> {
-        // CHUNK[INT] chunking arithmetic bounds values to |v| < 2^62
-        // (CHUNK_INT_VALUE_BOUND). create_job validates this, but
-        // StepParameterSpace is publicly constructible and deserializable,
-        // so re-validate here: an out-of-bound value would otherwise
-        // overflow when a chunk is built during iteration.
+        // `create_job` never emits more than one CHUNK[INT] parameter, nor one with a
+        // value of magnitude 2^62 or more (CHUNK_INT_VALUE_BOUND, which keeps the
+        // chunking arithmetic exact), but `StepParameterSpace` is publicly constructible
+        // and deserializable, so check both here. A second CHUNK[INT] has nowhere to go:
+        // the chunk metadata below describes one parameter, so a second would be chunked
+        // statically, missing from that metadata, with its `targetRuntimeSeconds`
+        // dropped without a signal.
+        let mut chunked: Option<(&String, &job::ResolvedChunks)> = None;
         for (name, param) in &space.task_parameter_definitions {
-            if let job::TaskParameter::ChunkInt { range, .. } = param {
+            if let job::TaskParameter::ChunkInt { range, chunks } = param {
+                if let Some((first, _)) = chunked {
+                    return Err(ModelError::DecodeValidation(format!(
+                        "Task parameters '{first}' and '{name}' are both CHUNK[INT]: only one \
+                         CHUNK[INT] parameter is allowed per step."
+                    )));
+                }
                 check_chunk_int_value_bound(name, range)?;
+                chunked = Some((name, chunks));
             }
         }
         let names: HashSet<String> = space.task_parameter_definitions.keys().cloned().collect();
@@ -1520,33 +1530,20 @@ impl StepParameterSpaceIterator {
 
         let expr = space.combination.as_deref().unwrap_or("*");
 
-        // The chunked parameter, its effective chunk size, and whether it is adaptive, all
-        // taken from the *same* parameter: the first CHUNK[INT] in definition order, which
-        // is what the Python reference reports too.
-        //
-        // Deriving them separately would let `chunks_parameter_name` name one parameter
-        // while `chunks_adaptive` described another. Template validation rejects more than
-        // one CHUNK[INT] per step, but `StepParameterSpace` is publicly constructible and
-        // deserializable — the same reason this function re-validates the value bound
-        // above — and openjd-cli feeds `chunks_parameter_name` back into adaptive
-        // chunk-size adjustment, so a mismatch would corrupt that feedback.
-        //
-        // Name and size are reported for any chunked space; only adaptive gets the mutable
-        // Arc, because only an adaptive size can change part-way through iteration.
+        // The chunked parameter (at most one, enforced above), its effective chunk size,
+        // and whether it is adaptive. Name and size are reported for any chunked space;
+        // only adaptive gets the mutable Arc, because only an adaptive size can change
+        // part-way through iteration.
         let mut chunks_param_name: Option<String> = None;
         let mut chunk_size: Option<u64> = None;
         let mut adaptive_info: Option<(String, Arc<AtomicU64>)> = None;
-        for (name, param) in &space.task_parameter_definitions {
-            if let job::TaskParameter::ChunkInt { chunks, .. } = param {
-                let effective = chunk_override.unwrap_or(chunks.default_task_count).max(1);
-                chunks_param_name = Some(name.clone());
-                chunk_size = Some(effective);
-                // An override pins the size, which rules out adaptive.
-                if chunk_override.is_none() && chunks.target_runtime_seconds.is_some_and(|t| t > 0)
-                {
-                    adaptive_info = Some((name.clone(), Arc::new(AtomicU64::new(effective))));
-                }
-                break;
+        if let Some((name, chunks)) = chunked {
+            let effective = chunk_override.unwrap_or(chunks.default_task_count).max(1);
+            chunks_param_name = Some(name.clone());
+            chunk_size = Some(effective);
+            // An override pins the size, which rules out adaptive.
+            if chunk_override.is_none() && chunks.target_runtime_seconds.is_some_and(|t| t > 0) {
+                adaptive_info = Some((name.clone(), Arc::new(AtomicU64::new(effective))));
             }
         }
 
@@ -1589,7 +1586,9 @@ impl StepParameterSpaceIterator {
         // over the range's interval groups, O(log G) per index, while the node iterator
         // walks the groups in O(1) per chunk. Random access is gated separately, on
         // `adaptive` alone.
-        let needs_sequential = adaptive || has_contiguous_chunks(space);
+        let contiguous = chunked
+            .is_some_and(|(_, chunks)| chunks.range_constraint == RangeConstraint::Contiguous);
+        let needs_sequential = adaptive || contiguous;
         let node_iter = if needs_sequential {
             Some(root.iter())
         } else {
@@ -1699,7 +1698,10 @@ impl StepParameterSpaceIterator {
         self.chunks_param_name.as_deref()
     }
 
-    /// Current default_task_count for adaptive chunking.
+    /// The chunk size of the chunked parameter, if any: the chunk override, else its
+    /// `defaultTaskCount`, raised to at least 1. For adaptive chunking, the current
+    /// size as last set by `set_chunks_default_task_count`, which may be 0 (chunking
+    /// treats 0 as 1).
     pub fn chunks_default_task_count(&self) -> Option<u64> {
         match &self.adaptive_chunk_size {
             // Adaptive: read the live value, which `set_chunks_default_task_count` may
@@ -1942,22 +1944,17 @@ fn make_leaf_node(
     })?;
 
     match param {
-        job::TaskParameter::Int { range, chunks } => {
-            if let Some(chunk_cfg) = chunks {
-                return make_chunk_node(name, range, chunk_cfg, adaptive_info, chunk_override);
-            }
-            match range {
-                job::TaskParamRange::List(v) => Ok(Box::new(RangeListNode {
-                    name: name.to_string(),
-                    param_type: TaskParameterType::Int,
-                    values: v.iter().map(|&i| ExprValue::Int(i)).collect(),
-                })),
-                job::TaskParamRange::RangeExpr(r) => Ok(Box::new(RangeExprNode {
-                    name: name.to_string(),
-                    range: r.clone(),
-                })),
-            }
-        }
+        job::TaskParameter::Int { range } => match range {
+            job::TaskParamRange::List(v) => Ok(Box::new(RangeListNode {
+                name: name.to_string(),
+                param_type: TaskParameterType::Int,
+                values: v.iter().map(|&i| ExprValue::Int(i)).collect(),
+            })),
+            job::TaskParamRange::RangeExpr(r) => Ok(Box::new(RangeExprNode {
+                name: name.to_string(),
+                range: r.clone(),
+            })),
+        },
         job::TaskParameter::Float { range } => Ok(Box::new(RangeListNode {
             name: name.to_string(),
             param_type: TaskParameterType::Float,
@@ -1979,21 +1976,6 @@ fn make_leaf_node(
             make_chunk_node(name, range, chunks, adaptive_info, chunk_override)
         }
     }
-}
-
-/// Whether any chunk parameter uses the contiguous constraint.
-///
-/// Such a space prefers sequential iteration: `ContiguousChunkNode` answers a single
-/// index by binary search over its interval groups, O(log G), while its node iterator
-/// takes O(1) per chunk.
-fn has_contiguous_chunks(space: &job::StepParameterSpace) -> bool {
-    space.task_parameter_definitions.values().any(|p| {
-        matches!(
-            p,
-            job::TaskParameter::ChunkInt { chunks, .. }
-                if chunks.range_constraint == RangeConstraint::Contiguous
-        )
-    })
 }
 
 /// Build a chunk node from a range and chunk config. Creates `AdaptiveChunkNode` when
@@ -2353,7 +2335,6 @@ mod tests {
     fn int_param(values: Vec<i64>) -> job::TaskParameter {
         job::TaskParameter::Int {
             range: job::TaskParamRange::List(values),
-            chunks: None,
         }
     }
 
@@ -2371,7 +2352,6 @@ mod tests {
     fn range_expr_param(expr: &str) -> job::TaskParameter {
         job::TaskParameter::Int {
             range: job::TaskParamRange::RangeExpr(expr.parse::<RangeExpr>().unwrap()),
-            chunks: None,
         }
     }
 
@@ -3003,23 +2983,170 @@ mod tests {
 
     #[test]
     fn test_chunk_metadata_and_adaptive_come_from_the_same_parameter() {
-        // Template validation rejects two CHUNK[INT] parameters per step, but
-        // StepParameterSpace is publicly constructible, so the getters must not describe
-        // different parameters. openjd-cli feeds chunks_parameter_name back into adaptive
-        // chunk-size adjustment, so a mismatch would corrupt that feedback.
+        // openjd-cli feeds chunks_parameter_name back into adaptive chunk-size
+        // adjustment, so the getters must all describe the one CHUNK[INT] parameter,
+        // wherever it sits in definition order and whatever precedes it.
+        let space = make_space(
+            vec![
+                ("A", int_param(vec![1, 2])),
+                ("AdaptiveFrame", adaptive_chunk_param((1..=10).collect(), 2)),
+                ("B", range_expr_param("1-3")),
+            ],
+            None,
+        );
+        let mut iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert_eq!(iter.chunks_parameter_name(), Some("AdaptiveFrame"));
+        assert!(iter.chunks_adaptive());
+        assert_eq!(iter.chunks_default_task_count(), Some(2));
+        iter.set_chunks_default_task_count(3);
+        assert_eq!(iter.chunks_default_task_count(), Some(3));
+    }
+
+    #[test]
+    fn test_static_chunk_node_iterator_agrees_with_get() {
+        // A space walks its nodes' own iterators only when it is adaptive or
+        // CONTIGUOUS, and it has at most one CHUNK[INT] parameter, so no space reaches
+        // a static NONCONTIGUOUS node's iterator; walk it directly. It must yield what
+        // `get` gives for each index, and again after `reset`.
+        for range in [
+            job::TaskParamRange::RangeExpr("1-4,10-13".parse::<RangeExpr>().unwrap()),
+            job::TaskParamRange::List(vec![9, 1, 2, 7, 3]),
+        ] {
+            let chunks = job::ResolvedChunks {
+                default_task_count: 2,
+                target_runtime_seconds: None,
+                range_constraint: RangeConstraint::Noncontiguous,
+            };
+            let node = make_chunk_node("F", &range, &chunks, &None, None).unwrap();
+            // `TaskParameterValue` has no `PartialEq`; compare the chunks' text.
+            let text = |set: &TaskParameterSet| match &set["F"].value {
+                ExprValue::RangeExpr(r) => r.to_string(),
+                other => panic!("expected a chunk, got {other:?}"),
+            };
+            let by_index: Vec<String> = (0..node.len())
+                .map(|i| {
+                    let mut set = TaskParameterSet::new();
+                    node.get(i, &mut set);
+                    text(&set)
+                })
+                .collect();
+            let mut it = node.iter();
+            for _ in 0..2 {
+                let mut walked = Vec::new();
+                let mut set = TaskParameterSet::new();
+                while it.next(&mut set) {
+                    walked.push(text(&set));
+                }
+                assert_eq!(walked, by_index, "{range:?}");
+                it.reset();
+            }
+            assert_eq!(by_index.len() as u64, node.len());
+            assert!(node.len() >= 3, "{range:?} should give several chunks");
+        }
+    }
+
+    #[test]
+    fn test_zero_target_runtime_is_not_adaptive() {
+        // `targetRuntimeSeconds: 0` is valid (§3.4.1.5 allows >= 0) and means static
+        // chunking: only a positive target is adaptive.
+        let mut param = adaptive_chunk_param((1..=10).collect(), 4);
+        if let job::TaskParameter::ChunkInt { chunks, .. } = &mut param {
+            chunks.target_runtime_seconds = Some(0);
+        }
+        let space = make_space(vec![("Frame", param)], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert!(!iter.chunks_adaptive());
+        assert_eq!(iter.len(), 3);
+        assert_eq!(iter.chunks_default_task_count(), Some(4));
+    }
+
+    #[test]
+    fn test_chunk_size_is_at_least_one() {
+        // A zero override or `defaultTaskCount` is read as 1, in the reported size
+        // and in the chunks.
+        let space = make_space(vec![("Frame", static_chunk_param("1-3", 0))], None);
+        let iter = StepParameterSpaceIterator::new(&space).unwrap();
+        assert_eq!(iter.chunks_default_task_count(), Some(1));
+        assert_eq!(iter.len(), 3);
+        let space = make_space(vec![("Frame", static_chunk_param("1-3", 2))], None);
+        let iter = StepParameterSpaceIterator::new_with_chunk_override(&space, Some(0)).unwrap();
+        assert_eq!(iter.chunks_default_task_count(), Some(1));
+        assert_eq!(iter.len(), 3);
+    }
+
+    /// The error a space with CHUNK[INT] parameters `first` and `second` gets.
+    fn two_chunk_int_error(first: &str, second: &str) -> String {
+        format!(
+            "Validation error: Task parameters '{first}' and '{second}' are both CHUNK[INT]: only one \
+             CHUNK[INT] parameter is allowed per step."
+        )
+    }
+
+    #[test]
+    fn test_second_chunk_int_parameter_is_rejected() {
+        // Template validation rejects two CHUNK[INT] parameters per step, and
+        // StepParameterSpace is publicly constructible, so the iterator rejects them
+        // too. The chunk metadata describes one parameter: a second would be
+        // chunked statically and missing from that metadata, with its
+        // targetRuntimeSeconds dropped without a signal.
         let space = make_space(
             vec![
                 ("StaticFrame", noncontiguous_static_chunk_param("1-10", 5)),
+                ("A", int_param(vec![1, 2])),
                 ("AdaptiveFrame", adaptive_chunk_param((1..=10).collect(), 2)),
             ],
             None,
         );
-        let iter = StepParameterSpaceIterator::new(&space).unwrap();
-        // The first CHUNK[INT] in definition order decides everything, as in the
-        // reference, which breaks out of its scan on the first one it finds.
-        assert_eq!(iter.chunks_parameter_name(), Some("StaticFrame"));
-        assert!(!iter.chunks_adaptive());
-        assert_eq!(iter.chunks_default_task_count(), Some(5));
+        for override_count in [None, Some(1)] {
+            let err = StepParameterSpaceIterator::new_with_chunk_override(&space, override_count)
+                .err()
+                .expect("two CHUNK[INT] parameters should be rejected");
+            assert!(
+                matches!(err, ModelError::DecodeValidation(_)),
+                "expected DecodeValidation, got {err:?}"
+            );
+            assert_eq!(
+                err.to_string(),
+                two_chunk_int_error("StaticFrame", "AdaptiveFrame"),
+                "override {override_count:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_second_chunk_int_rejected_with_a_combination_and_before_the_value_bound() {
+        // The check runs over the definitions, whatever the combination expression, and
+        // before the second parameter's value bound, so the error names the shape even
+        // when that parameter's values are also out of bounds.
+        let space = make_space(
+            vec![
+                ("F", static_chunk_param("1-10", 5)),
+                ("G", static_chunk_param("1-10", 5)),
+            ],
+            Some("(F, G)"),
+        );
+        let err = StepParameterSpaceIterator::new(&space).err().unwrap();
+        assert_eq!(err.to_string(), two_chunk_int_error("F", "G"));
+
+        let bad_second = make_space(
+            vec![
+                ("F", static_chunk_param("1-10", 5)),
+                (
+                    "G",
+                    job::TaskParameter::ChunkInt {
+                        range: job::TaskParamRange::List(vec![i64::MIN]),
+                        chunks: job::ResolvedChunks {
+                            default_task_count: 1,
+                            target_runtime_seconds: None,
+                            range_constraint: RangeConstraint::Contiguous,
+                        },
+                    },
+                ),
+            ],
+            None,
+        );
+        let err = StepParameterSpaceIterator::new(&bad_second).err().unwrap();
+        assert_eq!(err.to_string(), two_chunk_int_error("F", "G"));
     }
 
     #[test]

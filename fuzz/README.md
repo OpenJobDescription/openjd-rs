@@ -127,7 +127,7 @@ formats, and requires:
 space iteration → dependency graph → run-time resolution, and requires:
 preprocessing is idempotent; `create_job` is deterministic and
 Eq/Hash agree; `len()` matches iteration, `get(i)` equals the i-th iterated
-set, and every iterated set passes `contains`/`validate_containment`; topological order respects every dependency; and **a template that
+set, and every iterated set passes `contains`/`validate_containment`; topological order respects every dependency; every job task parameter and cancelation mode survives a serde round trip unchanged; and **a template that
 validates and instantiates never fails at run time with an error no value can
 cause** (an undefined symbol, an unknown function, a method or property no type
 has, or unsupported syntax), or with a refusal to order operands the library
