@@ -23,6 +23,7 @@
 //! `Eq`.
 
 pub mod create_job;
+pub mod diff;
 pub mod step_dependency_graph;
 pub mod step_param_space;
 
@@ -122,8 +123,9 @@ pub struct Step {
     pub parameter_space: Option<StepParameterSpace>,
     pub host_requirements: Option<HostRequirements>,
     pub dependencies: Option<Vec<StepDependency>>,
-    /// Complete symbol table at step scope in JSON transport format.
-    /// Contains Param.*, RawParam.*, Job.Name, Step.Name, and step-level let bindings.
+    /// Symbol table at step scope in JSON transport format, filtered to the
+    /// symbols that the step's script, let bindings and step environments
+    /// reference (Param.*, RawParam.*, Job.Name, Step.Name, let bindings).
     /// The session deserializes this with PathFormat::host() and layers
     /// Session.* and Task.* values on top at runtime.
     #[serde(rename = "resolvedSymTab", skip_serializing_if = "Option::is_none")]

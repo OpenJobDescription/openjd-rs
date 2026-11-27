@@ -40,6 +40,7 @@ openjd_model              — crate root re-exports, the main public surface
 ├── format_string         — re-exported from openjd_expr
 ├── job                   — instantiated (resolved) job types
 │   ├── create_job        — pipeline functions + MergedParameterDefinition
+│   ├── diff              — unstable diff of jobs, steps, environments
 │   ├── step_param_space  — StepParameterSpaceIterator
 │   └── step_dependency_graph — StepDependencyGraph + friends
 ├── symbol_table          — re-exported from openjd_expr
@@ -1289,6 +1290,52 @@ forces sequential iteration, because chunk size depends on runtime
 feedback; for that case, callers mutate
 `set_chunks_default_task_count` while iterating to reshape chunks
 dynamically.
+
+## Job Diff (unstable)
+
+**Status: unstable.** `job::diff` may change or be removed in any release
+without notice. Semantics: [job-diff.md](job-diff.md).
+
+```rust
+pub fn diff_jobs(old: &Job, new: &Job) -> DiffTree;
+pub fn diff_steps(old: &Step, new: &Step) -> DiffTree;
+pub fn diff_environments(old: &Environment, new: &Environment) -> DiffTree;
+
+pub struct DiffTree { /* private */ }
+impl DiffTree {
+    pub fn root(&self) -> &DiffNode;
+    pub fn is_changed(&self) -> bool;
+}
+impl Display for DiffTree;
+
+#[non_exhaustive]
+pub struct DiffNode {
+    pub segment: String,
+    pub status: DiffStatus,
+    pub field_changes: Vec<FieldChange>,
+    pub children: Vec<DiffNode>,
+}
+impl DiffNode {
+    pub fn is_changed(&self) -> bool;
+    pub fn child(&self, segment: &str) -> Option<&DiffNode>;
+}
+
+#[non_exhaustive]
+pub enum DiffStatus { Unchanged, Added, Removed, Modified }
+
+#[non_exhaustive]
+pub struct FieldChange {
+    pub field: String,
+    pub before: serde_json::Value,
+    pub after: serde_json::Value,
+}
+```
+
+- `DiffTree::root` returns the node that compares the two arguments.
+- `DiffTree::is_changed` says whether the two arguments differ.
+- `DiffNode::is_changed` says whether the node's status is not `Unchanged`.
+- `DiffNode::child` returns the child with the given segment, written as the
+  diff formats it, such as `steps[Render]`.
 
 ## Step Dependency Graph
 
