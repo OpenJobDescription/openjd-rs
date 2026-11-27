@@ -755,6 +755,19 @@ fn amount_min_bound_unreasonably_long_fails() {
     );
 }
 
+/// A static amount bound must be a finite number, and `min` may be 0. The
+/// empty static segment makes each a multi-segment string, which resolves
+/// to text and is parsed as job creation parses it.
+#[test]
+fn amount_static_text_bound_is_a_finite_non_negative_number() {
+    check_err_exact(
+        &job_with_amount("min", "{{ '' }}inf"),
+        "Model validation error: 1 validation error for JobTemplate\n\
+         steps[0] -> hostRequirements -> amounts[0] -> min:\n\tmust be a finite number.",
+    );
+    check_ok(&job_with_amount("min", "{{ '' }}0"));
+}
+
 #[test]
 fn amount_valid_and_unresolved_pass() {
     check_ok(&job_with_amount("min", "{{ 1.5 }}"));

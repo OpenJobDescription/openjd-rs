@@ -40,7 +40,7 @@ src/
 │       ├── limits.rs         # Pass 2: EffectiveLimits enforcement
 │       ├── structure.rs      # Pass 3: Structural validation via EffectiveRules
 │       ├── feature_bundle_1.rs # Pass 4: FEATURE_BUNDLE_1 gating
-│       ├── format_strings.rs # Pass 5: Format string reference validation
+│       ├── format_strings.rs # Pass 8: Format string reference validation
 │       ├── task_chunking.rs  # Pass 6: TASK_CHUNKING gating
 │       └── helpers.rs        # Shared regex patterns, constants, utilities
 └── job/                      # Instantiated job types (phase 2)
@@ -49,6 +49,7 @@ src/
     │   ├── mod.rs            # create_job() entry point
     │   ├── parameters.rs     # Parameter merging, preprocessing, symbol table
     │   ├── instantiate.rs    # Template → job type conversion
+    │   ├── host_requirements.rs # Host requirement resolution
     │   └── ranges.rs         # Range expression evaluation
     ├── step_param_space.rs   # Lazy parameter space iteration
     └── step_dependency_graph.rs # Step dependency graph

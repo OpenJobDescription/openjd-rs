@@ -52,6 +52,17 @@ fn check_env_err(s: &str, expected: &[&str]) {
     }
 }
 
+/// Decode `yaml`, which must fail with exactly `expected`; `extensions`
+/// are the ones the caller supports besides EXPR, FEATURE_BUNDLE_1 and
+/// TASK_CHUNKING.
+fn assert_message(extensions: &[&str], yaml: &str, expected: &str) {
+    let mut supported = vec!["EXPR", "FEATURE_BUNDLE_1", "TASK_CHUNKING"];
+    supported.extend(extensions);
+    let err = decode_job_template(yaml_val(yaml), Some(&supported), &CallerLimits::default())
+        .expect_err("Expected validation error");
+    assert_eq!(err.to_string(), expected);
+}
+
 // ══════════════════════════════════════════════════════════════
 // Template-level errors
 // ══════════════════════════════════════════════════════════════
@@ -113,6 +124,29 @@ fn duplicate_parameter_name() {
         "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "cmd"}}}}]
     }"#,
         &["parameterDefinitions[1]:\n\tduplicate parameter name: 'Foo'"],
+    );
+}
+
+/// A duplicated Job Parameter name is reported, and pass 8 types the name
+/// by its last definition.
+#[test]
+fn a_duplicated_parameter_name_is_typed_by_its_last_definition() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: Test
+parameterDefinitions: [{name: X, type: INT}, {name: X, type: STRING}]
+steps:
+- name: S
+  script: {actions: {onRun: {command: "{{ Param.X + 1 }}"}}}
+"#,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         parameterDefinitions[1]:\n\tduplicate parameter name: 'X'\n\
+         steps[0] -> script -> actions -> onRun -> command:\n\tFailed to parse interpolation \
+         expression at [0, 17]. Cannot use '+' operator with string and int\n  Param.X + 1\n  \
+         ~~~~~~~~^~~",
     );
 }
 
@@ -295,6 +329,146 @@ fn let_without_expr() {
             "script": {"actions": {"onRun": {"command": "cmd"}}}}]
     }"#,
         &["steps[0] -> let:\n\t'let' requires the EXPR extension."],
+    );
+}
+
+#[test]
+fn job_and_step_names_need_expr() {
+    // An Environment action's `timeout` (FEATURE_BUNDLE_1) is in the job
+    // scope, which has `Job.Name` only with EXPR.
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [FEATURE_BUNDLE_1]
+name: Test
+jobEnvironments:
+- name: E
+  script: {actions: {onEnter: {command: foo, timeout: "{{Job.Name}}"}}}
+steps:
+- name: S
+  script: {actions: {onRun: {command: foo}}}
+"#,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         jobEnvironments[0] -> script -> actions -> onEnter -> timeout:\n\tFailed to parse \
+         interpolation expression at [0, 12]. Undefined variable: 'Job.Name'.\n  Job.Name\n  \
+         ~~~~^~~~",
+    );
+    // A Step's template scope has `Step.Name` only with EXPR.
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+name: Test
+steps:
+- name: S
+  parameterSpace: {taskParameterDefinitions: [{name: F, type: STRING, range: ["{{Step.Name}}"]}]}
+  script: {actions: {onRun: {command: foo}}}
+"#,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\tFailed to \
+         parse interpolation expression at [0, 13]. Undefined variable: 'Step.Name'.\n  \
+         Step.Name\n  ~~~~~^~~~",
+    );
+}
+
+#[test]
+fn complex_expr_in_environment_embedded_file_without_expr() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+name: Test
+parameterDefinitions: [{name: X, type: INT}]
+jobEnvironments:
+- name: E
+  script:
+    embeddedFiles: [{name: f, type: TEXT, data: "{{ Param.X + 1 }}"}]
+    actions: {onEnter: {command: foo}}
+steps:
+- name: S
+  script: {actions: {onRun: {command: foo}}}
+"#,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         jobEnvironments[0] -> script -> embeddedFiles[0] -> data:\n\t\
+         complex expressions require the EXPR extension.",
+    );
+}
+
+#[test]
+fn a_chunked_task_parameter_is_a_range_expr() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR, TASK_CHUNKING]
+name: Test
+steps:
+- name: S
+  parameterSpace: {taskParameterDefinitions: [{name: F, type: "CHUNK[INT]", range: "1-4", chunks: {defaultTaskCount: 2, rangeConstraint: CONTIGUOUS}}]}
+  script: {actions: {onRun: {command: "{{ Task.Param.F + 1 }}"}}}
+"#,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         steps[0] -> script -> actions -> onRun -> command:\n\tFailed to parse interpolation \
+         expression at [0, 22]. Cannot use '+' operator with range_expr and int\n  \
+         Task.Param.F + 1\n  ~~~~~~~~~~~~~^~~",
+    );
+}
+
+/// A list comprehension variable must not shadow a `let` binding of its
+/// own script or, in a step script, of its Step.
+#[test]
+fn a_comprehension_variable_shadowing_a_let_binding() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: Test
+steps:
+- name: S
+  let: ["x = 1"]
+  script: {actions: {onRun: {command: "{{ [x for x in [1, 2]] }}"}}}
+"#,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         steps[0] -> script -> actions -> onRun -> command:\n\t\
+         List comprehension variable 'x' shadows a let binding",
+    );
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: Test
+steps:
+- name: S
+  stepEnvironments:
+  - name: E
+    script:
+      let: ["x = 1"]
+      actions: {onEnter: {command: "{{ [x for x in [1, 2]] }}"}}
+  script: {actions: {onRun: {command: foo}}}
+"#,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         JobTemplate: List comprehension variable 'x' shadows a let binding",
+    );
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: Test
+jobEnvironments:
+- name: J
+  script:
+    let: ["x = 1"]
+    actions: {onEnter: {command: "{{ [x for x in [1, 2]] }}"}}
+steps:
+- name: S
+  script: {actions: {onRun: {command: foo}}}
+"#,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         JobTemplate: List comprehension variable 'x' shadows a let binding",
     );
 }
 
@@ -546,5 +720,262 @@ fn membership_unresolved_parameter_of_wrong_type_is_refused_at_validation() {
             "steps[0] -> script -> actions -> onRun -> args[0]:",
             "Cannot use 'in' operator: item of type string is not compatible with the element type int of list[int]",
         ],
+    );
+}
+
+/// `RawParam.*` of a PATH is the unmapped string, and of a LIST[PATH] a
+/// list of strings, so a path property is not available on either.
+#[test]
+fn raw_param_of_a_path_or_list_of_paths_is_a_string() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: "{{ RawParam.P.name }}"
+parameterDefinitions:
+- {name: P, type: PATH, default: a/b}
+- {name: L, type: "LIST[PATH]", default: [a/b]}
+steps:
+- name: S
+  script: {actions: {onRun: {command: "{{ RawParam.L[0].name }}", args: ["{{ RawParam.P.upper() }}", "{{ RawParam.L[0].upper() }}"]}}}
+"#,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         name:\n\tFailed to parse interpolation expression at [0, 21]. 'name' property is not \
+         available for string. Available for: path\n  RawParam.P.name\n  ~~~~~~~~~~~^~~~\n\
+         steps[0] -> script -> actions -> onRun -> command:\n\tFailed to parse interpolation \
+         expression at [0, 24]. 'name' property is not available for string. Available for: \
+         path\n  RawParam.L[0].name\n  ~~~~~~~~~~~~~~^~~~",
+    );
+}
+
+/// A Step Environment reads the values of the Step's `let` names from the
+/// Step's task scope, after the script's own `let` bindings, so a script
+/// `let` that shadows a Step `let` gives the Step Environment its type.
+#[test]
+fn a_step_environment_reads_step_let_names_after_the_script_let_bindings() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: T
+steps:
+- name: S
+  let: ["x = 1"]
+  script: {let: ["x = 'a'"], actions: {onRun: {command: "{{ x }}"}}}
+  stepEnvironments:
+  - {name: E, variables: {V: "{{ x + 1 }}"}}
+"#,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> script -> let[0]:\n\t'x' shadows enclosing scope.\n\
+         steps[0] -> stepEnvironments[0] -> variables -> V:\n\tFailed to parse interpolation \
+         expression at [0, 11]. Cannot use '+' operator with string and int\n  x + 1\n  ~~^~~",
+    );
+}
+
+/// Without EXPR, a Step's `let` bindings bind nothing, so a Step `let`
+/// named like a task-scope symbol does not bring that symbol into a Step
+/// Environment.
+#[test]
+fn without_expr_a_step_let_adds_nothing_to_a_step_environment() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+name: T
+steps:
+- name: S
+  let: ["Task.Param.T = 1"]
+  parameterSpace: {taskParameterDefinitions: [{name: T, type: INT, range: "1-2"}]}
+  script: {actions: {onRun: {command: "{{ Task.Param.T }}"}}}
+  stepEnvironments:
+  - {name: E, variables: {V: "{{ Task.Param.T }}"}}
+"#,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> let:\n\t'let' requires the EXPR extension.\n\
+         steps[0] -> stepEnvironments[0] -> variables -> V:\n\tFailed to parse interpolation \
+         expression at [0, 18]. Undefined variable: 'Task.Param.T'.\n  Task.Param.T\n  \
+         ~~~~~~~~~~~^",
+    );
+}
+
+/// Structure reports a literal amount name that repeats an earlier literal
+/// one, and pass 8 reports a name that repeats a static one, so a literal
+/// name that repeats both is reported by each.
+#[test]
+fn a_duplicate_amount_name_is_reported_by_structure_and_by_pass_8() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: T
+steps:
+- name: S
+  hostRequirements:
+    amounts:
+    - {name: "{{ 'amount.custom.a' }}", min: 1}
+    - {name: amount.custom.a, min: 1}
+    - {name: amount.custom.a, min: 1}
+  script: {actions: {onRun: {command: x}}}
+"#,
+        "Model validation error: 3 validation errors for JobTemplate\n\
+         steps[0] -> hostRequirements -> amounts[2]:\n\tduplicate amount name 'amount.custom.a'.\n\
+         steps[0] -> hostRequirements -> amounts[1]:\n\tduplicate amount name 'amount.custom.a'.\n\
+         steps[0] -> hostRequirements -> amounts[2]:\n\tduplicate amount name 'amount.custom.a'.",
+    );
+}
+
+/// Without EXPR, a Step Environment's `variables`, action `args` and
+/// embedded-file `data` may use only bare references.
+#[test]
+fn without_expr_a_step_environment_rejects_complex_expressions() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+name: T
+parameterDefinitions: [{name: S, type: STRING, default: a}]
+steps:
+- name: S
+  script: {actions: {onRun: {command: x}}}
+  stepEnvironments:
+  - name: E
+    variables: {V: "{{ Param.S + 'x' }}"}
+    script:
+      actions: {onEnter: {command: x, args: ["{{ Param.S + 'x' }}"]}}
+      embeddedFiles: [{name: f, type: TEXT, data: "{{ Param.S + 'x' }}"}]
+"#,
+        "Model validation error: 3 validation errors for JobTemplate\n\
+         steps[0] -> stepEnvironments[0] -> variables -> V:\n\t\
+         complex expressions require the EXPR extension.\n\
+         steps[0] -> stepEnvironments[0] -> script -> actions -> onEnter -> args[0]:\n\t\
+         complex expressions require the EXPR extension.\n\
+         steps[0] -> stepEnvironments[0] -> script -> embeddedFiles[0] -> data:\n\t\
+         complex expressions require the EXPR extension.",
+    );
+}
+
+/// A duplicated Job Parameter name is set by each definition in turn, and
+/// the template scope has no PATH `Param.*`, so there an INT definition
+/// followed by a PATH one types `Param.X` as an int.
+#[test]
+fn a_duplicated_parameter_name_keeps_its_non_path_type_in_the_template_scope() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: "{{ Param.X + 1 }}"
+parameterDefinitions:
+- {name: X, type: INT}
+- {name: X, type: PATH}
+steps:
+- {name: S, script: {actions: {onRun: {command: x}}}}
+"#,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         parameterDefinitions[1]:\n\tduplicate parameter name: 'X'",
+    );
+}
+
+/// The comprehension-variable rules apply only with EXPR, which a
+/// comprehension needs.
+#[test]
+fn without_expr_no_comprehension_variable_rule_is_reported() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+name: T
+steps:
+- name: S
+  let: ["x = 1"]
+  script: {actions: {onRun: {command: "{{ [x for x in [1]] }}"}}}
+"#,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> let:\n\t'let' requires the EXPR extension.\n\
+         steps[0] -> script -> actions -> onRun -> command:\n\t\
+         complex expressions require the EXPR extension.",
+    );
+}
+
+/// Each SimpleAction field gets its own copy of the task scope, so its
+/// `let` bindings do not reach the Step Environments.
+#[test]
+fn a_simple_action_let_does_not_reach_the_step_environments() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR, FEATURE_BUNDLE_1]
+name: T
+steps:
+- name: S
+  let: ["x = 1"]
+  bash: {script: "echo {{ x }}", let: ["x = 'a'"]}
+  stepEnvironments:
+  - {name: E, variables: {V: "{{ x + 1 }}"}}
+"#,
+        "Model validation error: 1 validation error for JobTemplate\n\
+         steps[0] -> bash -> let[0]:\n\t'x' shadows enclosing scope.",
+    );
+}
+
+/// A Step's task scope takes only the `let` bindings pass 8 evaluates, so a
+/// binding with no expression named like a Job Parameter does not replace
+/// the task scope's own value: with a duplicated name, the template scope's
+/// INT `Param.Q` does not hide the task scope's PATH one.
+#[test]
+fn a_let_binding_with_no_expression_does_not_replace_a_task_scope_symbol() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: T
+parameterDefinitions:
+- {name: Q, type: INT}
+- {name: Q, type: PATH}
+steps:
+- name: S
+  let: ["Param.Q ="]
+  script: {actions: {onRun: {command: "{{ Param.Q + 1 }}"}}}
+"#,
+        "Model validation error: 3 validation errors for JobTemplate\n\
+         parameterDefinitions[1]:\n\tduplicate parameter name: 'Q'\n\
+         steps[0] -> let[0]:\n\tbinding 'Param.Q' has no expression after '='.\n\
+         steps[0] -> script -> actions -> onRun -> command:\n\tFailed to parse interpolation \
+         expression at [0, 17]. Cannot use '+' operator with path and int\n  Param.Q + 1\n  \
+         ~~~~~~~~^~~",
+    );
+}
+
+/// Pass 8 reports a fully static amount or attribute name that repeats an
+/// earlier literal one; structure, which compares only literal names, does
+/// not see it.
+#[test]
+fn a_static_capability_name_that_repeats_a_literal_one_is_reported() {
+    assert_message(
+        &[],
+        r#"
+specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: T
+steps:
+- name: S
+  hostRequirements:
+    amounts:
+    - {name: amount.custom.a, min: 1}
+    - {name: "{{ 'amount.custom.a' }}", min: 1}
+    attributes:
+    - {name: attr.custom.a, anyOf: [x]}
+    - {name: "{{ 'attr.custom.a' }}", anyOf: [x]}
+  script: {actions: {onRun: {command: x}}}
+"#,
+        "Model validation error: 2 validation errors for JobTemplate\n\
+         steps[0] -> hostRequirements -> amounts[1]:\n\tduplicate amount name 'amount.custom.a'.\n\
+         steps[0] -> hostRequirements -> attributes[1]:\n\tduplicate attribute name \
+         'attr.custom.a'.",
     );
 }

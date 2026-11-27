@@ -362,7 +362,7 @@ fn wrap_hooks_with_plain_inner_step_envs_ok() {
 // Template-variable registration (RFC 0008)
 //
 // These tests exercise the per-hook symbol scopes that
-// `validate_env_format_strings` sets up:
+// `validate_env_body` sets up:
 // - All three wrap hooks see `WrappedAction.{Command,Args,Environment,Timeout}`
 //   with identical shape.
 // - `onWrapEnvEnter` / `onWrapEnvExit` additionally see `WrappedEnv.Name`.

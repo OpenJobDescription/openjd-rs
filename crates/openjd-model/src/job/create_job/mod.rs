@@ -6,6 +6,7 @@
 //!
 //! Mirrors Python `_create_job.py` and `_merge_job_parameter.py`.
 
+mod host_requirements;
 mod instantiate;
 pub mod parameters;
 mod ranges;
@@ -261,7 +262,6 @@ pub fn create_job(
                 &env_symtab,
                 &symtab,
                 ctx,
-                limits.max_env_var_value_len,
                 &env_path,
                 &mut check_errors,
             );

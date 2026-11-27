@@ -1206,6 +1206,36 @@ fn test_create_job_host_requirements_resolved() {
     assert_eq!(amt.max, Some(16.0));
 }
 
+/// An amount whose resolved `min` equals its `max` is valid (§3.3.1: `min`
+/// must not exceed `max`).
+#[test]
+fn test_create_job_host_requirements_min_equal_to_max() {
+    let job = parse_and_create(
+        r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "Test",
+        "parameterDefinitions": [{"name": "Cpu", "type": "INT"}],
+        "steps": [{
+            "name": "S",
+            "hostRequirements": {
+                "amounts": [{"name": "amount.worker.vcpu", "min": "{{Param.Cpu}}", "max": "{{Param.Cpu}}"}]
+            },
+            "script": {"actions": {"onRun": {"command": "run"}}}
+        }]
+    }"#,
+        &[("Cpu", "4")],
+    );
+    let amt = &job.steps[0]
+        .host_requirements
+        .as_ref()
+        .unwrap()
+        .amounts
+        .as_ref()
+        .unwrap()[0];
+    assert_eq!((amt.min, amt.max), (Some(4.0), Some(4.0)));
+}
+
 #[test]
 fn test_create_job_parameter_space_int_list() {
     let job = parse_and_create(

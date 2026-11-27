@@ -132,6 +132,66 @@ fn template_scope_cancelation_notify_rejects_apply_path_mapping() {
     check_err(&t, &["apply_path_mapping"]);
 }
 
+#[test]
+fn template_scope_string_and_path_range_items_reject_apply_path_mapping() {
+    let t = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "test",
+        "parameterDefinitions": [{"name": "Val", "type": "PATH"}],
+        "steps": [{
+            "name": "S",
+            "parameterSpace": {"taskParameterDefinitions": [
+                {"name": "F", "type": "STRING", "range": ["{{ apply_path_mapping(RawParam.Val) }}"]},
+                {"name": "G", "type": "PATH", "range": ["{{ apply_path_mapping(RawParam.Val) }}"]}
+            ]},
+            "script": {"actions": {"onRun": {"command": "run"}}}
+        }]
+    }"#;
+    check_err(
+        t,
+        &[
+            "Model validation error: 2 validation errors for JobTemplate\n\
+           steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\t\
+           Failed to parse interpolation expression at [0, 38]. Unknown function: \
+           'apply_path_mapping'\n  apply_path_mapping(RawParam.Val)\n  \
+           ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\
+           steps[0] -> parameterSpace -> taskParameterDefinitions[1] -> range[0]:\n\t\
+           Failed to parse interpolation expression at [0, 38]. Unknown function: \
+           'apply_path_mapping'",
+        ],
+    );
+}
+
+#[test]
+fn template_scope_environment_action_timeout_rejects_apply_path_mapping() {
+    // An Environment action's `timeout` is in the job scope, which has no
+    // host functions either, though its `command` is in the session scope.
+    let t = r#"{
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR", "FEATURE_BUNDLE_1"],
+        "name": "test",
+        "parameterDefinitions": [{"name": "Val", "type": "PATH"}],
+        "jobEnvironments": [{
+            "name": "E",
+            "script": {"actions": {"onEnter": {
+                "command": "{{apply_path_mapping(Param.Val)}}",
+                "timeout": "{{len(apply_path_mapping(RawParam.Val))}}"
+            }}}
+        }],
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "run"}}}}]
+    }"#;
+    check_err(
+        t,
+        &[
+            "Model validation error: 1 validation error for JobTemplate\n\
+           jobEnvironments[0] -> script -> actions -> onEnter -> timeout:\n\t\
+           Failed to parse interpolation expression at [0, 41]. Unknown function: \
+           'apply_path_mapping'",
+        ],
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // SESSION/TASK scope — apply_path_mapping must SUCCEED
 // ═══════════════════════════════════════════════════════════════
