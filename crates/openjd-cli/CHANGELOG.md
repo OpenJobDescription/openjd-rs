@@ -5,6 +5,23 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.7.2...openjd-cli-v0.7.3) - 2026-11-27
+
+### Bug fixes
+
+- Leave literal paths unresolved in host-context checks ([#611](https://github.com/OpenJobDescription/openjd-rs/pull/611)) ([#611](https://github.com/OpenJobDescription/openjd-rs/pull/611))
+
+
+### Documentation
+
+- Add quality criterion Q10, comments and specs describe the current code ([#577](https://github.com/OpenJobDescription/openjd-rs/pull/577)) ([#577](https://github.com/OpenJobDescription/openjd-rs/pull/577))
+
+
+### Miscellaneous
+
+- Update Rust dependencies (jiff 1.0 and the lockfile) ([#619](https://github.com/OpenJobDescription/openjd-rs/pull/619)) ([#619](https://github.com/OpenJobDescription/openjd-rs/pull/619))
+
+
 ## [0.7.2](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-cli-v0.7.1...openjd-cli-v0.7.2) - 2026-11-19
 
 ### Miscellaneous

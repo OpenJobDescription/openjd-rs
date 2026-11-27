@@ -5,6 +5,22 @@ All notable changes to this crate are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.11.1...openjd-sessions-v0.12.0) - 2026-11-27
+
+### Bug fixes
+
+- Fail closed when the session group cannot be set on a path ([#603](https://github.com/OpenJobDescription/openjd-rs/pull/603)) ([#603](https://github.com/OpenJobDescription/openjd-rs/pull/603))
+
+- [**breaking**] Bound ExprType nesting depth with fallible constructors ([#578](https://github.com/OpenJobDescription/openjd-rs/pull/578)) ([#578](https://github.com/OpenJobDescription/openjd-rs/pull/578))
+
+- Deliver cross-user cancels without a dup of the cancel pipe ([#575](https://github.com/OpenJobDescription/openjd-rs/pull/575)) ([#575](https://github.com/OpenJobDescription/openjd-rs/pull/575))
+
+
+### Documentation
+
+- Add quality criterion Q10, comments and specs describe the current code ([#577](https://github.com/OpenJobDescription/openjd-rs/pull/577)) ([#577](https://github.com/OpenJobDescription/openjd-rs/pull/577))
+
+
 ## [0.11.1](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-sessions-v0.11.0...openjd-sessions-v0.11.1) - 2026-11-19
 
 ### Bug fixes
