@@ -180,3 +180,17 @@ steps:
             .collect();
     assert_eq!(whole, ["3.10", "2.50"]);
 }
+
+/// The per-element cap on a FLOAT range element's text counts the text it
+/// renders as, after a leading `+` and redundant zeros are dropped: that is
+/// what lands on a command line. 1024 characters (the default
+/// `max_task_param_string_len`) are kept; 1025 keep only the value.
+#[test]
+fn the_range_element_text_cap_counts_the_rendered_text() {
+    let at_cap = format!("1.{}", "0".repeat(1022));
+    let over_cap = format!("1.{}", "0".repeat(1023));
+    assert_eq!(at_cap.len(), 1024);
+    let template = range_template(&format!("['+{at_cap}', '+{over_cap}']"));
+    let (_, tasks) = run(&template, &[]);
+    assert_eq!(tasks, [at_cap, "1.0".to_string()]);
+}

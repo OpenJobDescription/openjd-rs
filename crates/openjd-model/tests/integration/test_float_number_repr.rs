@@ -134,7 +134,8 @@ fn list_float_default_items_given_as_numbers_write_as_cpython_repr() {
 #[test]
 fn float_default_examples() {
     // The values from the original report, and a string default beside each:
-    // a FLOAT given as a string keeps its spelling.
+    // a FLOAT given as a string keeps its spelling, less a leading `+` and
+    // redundant leading zeros.
     let params: Vec<String> = [
         ("A", "2", "2.0"),
         ("B", "1e20", "1e+20"),

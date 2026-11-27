@@ -191,9 +191,12 @@ two input modes:
   Once it is an element of a FLOAT task parameter range, through a format string element
   (`['{{ Param.F }}']`) or a whole-field range expression (`{{ Param.LF }}`), it is rendered as
   a range element's `<floatstring>` is, so it renders `3.10` there. **Divergence from
-  openjd-model-for-python:** Python drops the `+` and the zeros of a FLOAT default, but keeps a
-  leading `+` on a FLOAT range element (`'+4.25'` renders `+4.25`), which this crate drops, as
-  openjd-specifications#180's §7.5 rule 1 asks.
+  openjd-model-for-python:** Python writes a FLOAT default given as a string in its `Decimal`
+  form, which drops the `+` and redundant zeros but also rewrites the notation the value was
+  written in: `'.5'` is `0.5`, `'5.'` is `5`, `'1e-07'` is `1E-7`, `'00e5'` is `0E+5` and
+  `'+1E+02'` is `1E+2`. This crate keeps that notation (`.5`, `5.`, `1e-07`, `0e5`, `1E+02`), as
+  §7.5 rule 2 asks. Python also keeps a leading `+` on a FLOAT range element (`'+4.25'` renders
+  `+4.25`), which this crate drops, as openjd-specifications#180's §7.5 rule 1 asks.
 
   The string the public `JobIntParameterDefinition::check_constraints` and
   `JobFloatParameterDefinition::check_constraints` parse is trimmed too (job creation itself

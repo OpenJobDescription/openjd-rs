@@ -2476,7 +2476,8 @@ mod context_aware_help {
     #[test]
     fn test_help_shows_a_list_default_as_its_json_text() {
         // A list default displays as the JSON text `-p` accepts. A LIST[FLOAT] item
-        // written as a numeric string keeps its spelling as a JSON string.
+        // written as a numeric string is a JSON string holding the text it renders
+        // as: its spelling, less a leading `+` and redundant leading zeros.
         let mut f = NamedTempFile::with_suffix(".json").unwrap();
         write!(
             f,
