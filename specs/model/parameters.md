@@ -217,25 +217,38 @@ an INT parameter's `default`, `minValue`, `maxValue`, `allowedValues` and `userI
 constraints, the elements of an `<IntRangeList>`, and the `CHUNK[INT]` chunk counts. A number
 outside `[-2^63, 2^63)` is a decode error in every one of them, whichever form it is written in:
 a YAML integer (`9223372036854775808`), a YAML float with no fractional part (`1.0e19`), or a
-numeric string (`'9223372036854775808'`). The message names the value
-(`Integer 9223372036854775808 is outside the 64-bit signed range`). The rules live in
-`src/numeric.rs`: `json_number_as_i64` for a number, `intstring_as_i64` for a string, and
-`float_as_exact_i64` for an integral float, which defers to openjd-expr's `float` to `int`
-conversion (2026-02 Expression Language §1.2.3). A value submitted for an INT parameter at job
-creation goes through the same `float_as_exact_i64` in `coerce_to_job_parameter_type`.
+numeric string (`'9223372036854775808'`). It is never rounded or saturated to another number.
+
+The rules live in `src/numeric.rs`:
+
+- `parse_intstring` reads an `<intstring>` through openjd-expr's `string` to `int` conversion
+  (`ExprValue::from_str_coerce`, the conversion a value submitted for an INT parameter goes
+  through), and says whether a refused string was an integer out of range or not an integer.
+  Template decode (`FlexInt`, `IntOrFormatString`), a resolved format string in an
+  `<IntRangeList>` or a chunk count, the static check of a resolved numeric field
+  (`validate_v2023_09/format_strings.rs`) and an action's literal `timeout` and
+  `notifyPeriodInSeconds` all read through it, each with its own located message.
+- `json_number_as_i64` reads a number, and `float_as_exact_i64` an integral float, through
+  openjd-expr's `float` to `int` conversion (2026-02 Expression Language §1.2.3). A native float
+  submitted for an INT parameter goes through `float_as_exact_i64` in
+  `coerce_to_job_parameter_type`.
+
+Decode messages: `Cannot convert '9223372036854775808' to int: number too large to fit in target
+type` for a string, which is openjd-expr's and openjd-model-for-python's message, and the same
+without quotes for a number. The YAML parser (serde-saphyr) reads an integer above `u64::MAX` or
+below `i64::MIN` as the nearest `f64`, so such a number is named as that `f64`
+(`Cannot convert 1e+20 to int: ...`). An integer just below `i64::MIN` rounds to exactly `-2^63`,
+which cannot be told apart from it, so an `f64` of `-2^63` is refused with a message that says to
+write `-9223372036854775808` as an integer; the integer itself is read as an `i64` and accepted.
 
 The 64-bit range is the Expression Language's `int` (2026-02 §1.2.1). Template Schemas 2023-09
-§2.3 states no bound for INT, and with the EXPR extension or without it this crate cannot hold a
-wider value, so it refuses one rather than storing a different number.
-
-The YAML parser (serde-saphyr) reads an integer outside both the `i64` and the `u64` range as an
-`f64`. An integer that rounds onto an in-range `f64` arrives as that float and is read as it: the
-only such integers are just below `-2^63` (for example `-9223372036854775809` rounds to
-`-2^63`). A numeric string has no such loss.
+§2.3 states no bound for INT, and this crate cannot hold a wider value with the EXPR extension or
+without it, so it refuses one rather than storing a different number.
 
 **Divergence from openjd-model-for-python:** Python accepts any integer when it validates the
-template, and refuses one outside the 64-bit range when it creates the job
-(`Cannot convert '9223372036854775808' to int: number too large to fit in target type`).
+template, and refuses one outside the 64-bit range when it creates the job, with the string
+message above. It refuses an integral float such as `4.0` for an INT field, which this crate
+accepts.
 
 ## Validation Context and Extension Effects
 

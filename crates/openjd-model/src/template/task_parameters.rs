@@ -290,8 +290,8 @@ pub struct ChunkIntTaskParameterDefinition {
 /// Accepts:
 /// - YAML integer, or integer-valued float such as `4.0` → `IntOrFormatString::Int(n)`
 /// - String that parses as i64, surrounding whitespace allowed → `IntOrFormatString::Int(n)`
-/// - Either form outside the 64-bit signed range is refused, as for [`FlexInt`]
-///   (see `crate::numeric`)
+/// - Either form outside the 64-bit signed range is refused, as for
+///   [`FlexInt`](super::FlexInt) (see `crate::numeric`)
 /// - String containing `{{` that parses as a format string →
 ///   `IntOrFormatString::FormatString(fs)`
 ///

@@ -324,7 +324,7 @@ fn resolve_task_parameter(
                     openjd_expr::ExprValue::Int(n) => Ok(n),
                     other => {
                         let s = other.to_display_string();
-                        s.trim().parse::<i64>().map_err(|_| {
+                        crate::numeric::parse_intstring(&s).map_err(|_| {
                             ModelError::Expression(ExpressionError::new(format!(
                                 "chunks.{field}: '{s}' is not a valid integer"
                             )))
@@ -380,7 +380,7 @@ fn resolve_task_parameter(
                             openjd_expr::ExprValue::Int(n) => n,
                             other => {
                                 let s = other.to_display_string();
-                                s.trim().parse::<i64>().map_err(|_| {
+                                crate::numeric::parse_intstring(&s).map_err(|_| {
                                     ModelError::Expression(ExpressionError::new(format!(
                                         "chunks.targetRuntimeSeconds: '{s}' is not a valid integer"
                                     )))
@@ -533,13 +533,12 @@ fn resolve_int_range_list_element(
             ExprValue::Int(i) => Ok(i),
             other => {
                 let text = list_item_text(other);
-                text.trim().parse::<i64>().map_err(|e| {
-                    let problem = match e.kind() {
-                        std::num::IntErrorKind::PosOverflow
-                        | std::num::IntErrorKind::NegOverflow => {
+                crate::numeric::parse_intstring(&text).map_err(|e| {
+                    let problem = match e {
+                        crate::numeric::IntStringError::OutOfRange => {
                             "is out of range for a 64-bit integer"
                         }
-                        _ => "is not an integer",
+                        crate::numeric::IntStringError::NotAnInteger => "is not an integer",
                     };
                     error(format_args!("value '{text}' {problem}"))
                 })

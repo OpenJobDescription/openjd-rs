@@ -497,8 +497,9 @@ by both `INT` and `CHUNK[INT]`) and the type of the two `ChunksDefinition`
 count fields. A JSON integer, an integer-valued float, or a string that
 parses as a base-10 integer (surrounding whitespace allowed) decodes to
 `Int`, when the number is inside the 64-bit signed range; one outside it
-fails to decode (`Integer 9223372036854775808 is outside the 64-bit signed
-range`), in both forms, rather than being saturated. A string containing `{{` decodes to `FormatString`, which is
+fails to decode, in both forms, rather than being saturated (`Cannot convert
+'9223372036854775808' to int: number too large to fit in target type`; see
+[parameters.md](parameters.md#integers-are-64-bit)). A string containing `{{` decodes to `FormatString`, which is
 resolved at job creation, or fails to decode when it is not a valid
 format string. Decoding also fails for any other string, a non-integral
 float, a boolean, `null`, an array or an object. `as_i64()` returns the integer of

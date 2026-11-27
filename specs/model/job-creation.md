@@ -259,8 +259,10 @@ budgets template validation and the session runtime apply.
      element's index in the list as written. (The STRING and PATH per-element length
      and empty-value checks in `resolve_string_range` count the resolved list
      instead, after flattening.)
-     - INT and CHUNK[INT]: trimmed, then parsed as an `i64` (Rust's integer syntax:
-       an optional sign and ASCII digits). Otherwise job creation fails with `Task
+     - INT and CHUNK[INT]: read as an `<intstring>` by `numeric::parse_intstring`, the
+       rule a template's own numeric strings follow (trimmed; an optional sign and ASCII
+       digits; see [parameters.md](parameters.md#integers-are-64-bit)). Otherwise job
+       creation fails with `Task
        parameter '<name>' range[<k>]: value '<resolved>' is not an integer`, or `...
        is out of range for a 64-bit integer` for an integer that does not fit.
      - FLOAT: trimmed, and must parse as a finite `f64`, or job creation fails with
