@@ -766,15 +766,17 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
   matching the first parameter of the library's `__getitem__` signatures of
   the call's arity (two for an index, four for a slice) with `int` indices and
   no coercion. A concrete receiver and an unresolved one of the same type
-  therefore get the same answer and the message a run gives: `Cannot
-  subscript type path` for a path, and the library's `No matching signature
-  for __getitem__(int, int)` for any other type, naming the arguments as they
-  are. So a host-context check refuses `path("/a/b")[0]`, a PATH parameter's
+  therefore get the same decision, and with the default library the message a
+  run gives: `Cannot subscript type path` for a path, and the library's `No
+  matching signature for __getitem__(int, int)` for any other type, naming the
+  arguments as they are. So a host-context check refuses `path("/a/b")[0]`, a PATH parameter's
   `Param.P[0]` and an INT parameter's `Param.I[0:1]` as a run does. A union
   receiver passes when one member does, and its result is typed from those
   members only, so `X[0]` with `X` an unresolved `path | list[int]` is `int`
   rather than `int | string`: `(Param.P if c else [1, 2])[0].upper()` is
-  refused at validation, as every run that reaches it fails. An `any`
+  refused at validation, as every run that reaches it fails. An error the
+  dispatch then reports names the narrowed receiver
+  (`__getitem__(list[int], string)` for `X['a']`). An `any`
   receiver passes because the signatures' type variables match it. A concrete
   `list`, `string` or `range_expr` is left to the dispatch, which decides it by
   the same signatures. The check runs after the index's and bounds' own checks

@@ -1689,7 +1689,10 @@ impl<'a> Evaluator<'a> {
     /// of the call's arity (`args`: the receiver, then the index or the three
     /// bounds), with `int` indices and without coercion. Deciding at the type
     /// gives a concrete receiver and an unresolved one of the same type the
-    /// same answer, so `openjd check` refuses what a run would. It runs after
+    /// same decision, so `openjd check` refuses what a run would. (A concrete
+    /// list, string or range_expr is left to the dispatch, so with a library
+    /// that lacks an arity its message can differ: `__getitem__() takes 2
+    /// argument(s), but 4 were given`.) It runs after
     /// the checks of the index and bounds themselves (an undefined name, a
     /// zero step, an index that cannot be an integer), so those come first,
     /// for every receiver. The index and bounds are then checked by the
@@ -1700,7 +1703,10 @@ impl<'a> Evaluator<'a> {
     /// A union receiver passes when one of its members does, and the result
     /// is then typed from those members only: the returned `Some` is the
     /// receiver narrowed to them, so `X[0]` with `X` a `path | list[int]` is
-    /// `int`, not the `int | string` a coerced `path` member would add. An
+    /// `int`, not the `int | string` a coerced `path` member would add. A
+    /// dispatch error after narrowing names the narrowed receiver
+    /// (`__getitem__(list[int], string)` for `X['a']`), the member whose
+    /// signature the index fails. An
     /// `any` receiver passes because the signatures' type variables match
     /// it. A concrete list, string or range_expr is not checked here: the
     /// dispatch decides it by the same signatures.

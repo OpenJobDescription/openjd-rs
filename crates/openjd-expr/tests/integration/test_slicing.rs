@@ -666,6 +666,39 @@ fn the_receiver_check_matches_signatures_of_the_calls_arity() {
         eval("X[0:1]").unwrap_err(),
         "No matching signature for __getitem__(string, int, int, nulltype)\n  X[0:1]\n  ~^~~~~"
     );
+    // A concrete string is left to the dispatch, which reports the arity.
+    let concrete = ParsedExpression::new("'abc'[0:1]")
+        .and_then(|p| p.with_library(&lib).evaluate(&[&SymbolTable::new()]))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        concrete,
+        "__getitem__() takes 2 argument(s), but 4 were given\n  'abc'[0:1]\n  ~~~~~^~~~~"
+    );
+}
+
+/// A union receiver is narrowed to its subscriptable members in both paths,
+/// so a bad index or bound is reported against the member that takes one.
+#[test]
+fn a_union_receiver_is_narrowed_for_an_index_and_a_slice() {
+    let x = ExprValue::unresolved(ExprType::parse("list[int] | path").unwrap());
+    for (expr, expected) in [
+        (
+            "X['a']",
+            "No matching signature for __getitem__(list[int], string)\n  X['a']\n  ~^~~~~",
+        ),
+        (
+            "X['a':]",
+            "No matching signature for __getitem__(list[int], string, nulltype, nulltype)\n  \
+             X['a':]\n  ~^~~~~~",
+        ),
+    ] {
+        assert_eq!(
+            eval_with(expr, "X", x.clone()).unwrap_err(),
+            expected,
+            "{expr}"
+        );
+    }
 }
 
 /// A `noreturn` receiver gets the library's message, the one every type that
