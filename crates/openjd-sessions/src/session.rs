@@ -1878,11 +1878,15 @@ impl Session {
     /// `ReadyEnding`, [`SessionError::UnknownEnvironment`], or
     /// [`SessionError::LifoViolation`]. These change nothing.
     ///
-    /// If the symbol table can't be built from `resolved_symtab` (for
-    /// example it can't be deserialized), it is built from the table the
-    /// environment was entered with instead, and the `onExit` runs with it;
-    /// the session log records the exit-time error as a warning, and the
-    /// call succeeds or fails on the `onExit` alone.
+    /// The symbol table is built from `resolved_symtab`, or, when it is
+    /// `None`, from the table the environment was entered with
+    /// ([`Environment::resolved_symtab`] as stored by the enter). If that
+    /// can't be built (for example it can't be deserialized), the exit falls
+    /// back, from `resolved_symtab` to the table the environment was entered
+    /// with, and from that table to the session's own values (job parameter
+    /// values and `Session.*`); the `onExit` runs with the fallback, the
+    /// session log records the first error as a warning, and the call
+    /// succeeds or fails on the `onExit` alone.
     ///
     /// Any other error fails the action and makes the session ending-only.
     /// The environment has already been removed, so the failed exit still

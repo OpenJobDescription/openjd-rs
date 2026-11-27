@@ -186,8 +186,8 @@ one of two kinds:
   (`Failed`, `Canceled` or `Timeout`); `run_task` instead returns `Ok` with that state.
   Either way the session is ending-only. One exception: `exit_environment` doesn't fail
   when only its exit-time input (its `resolved_symtab`, or the stored table when none is
-  given) can't build the symbol table. It falls back (to the stored table, or from
-  scratch), logs a warning, and runs the `onExit`
+  given) can't build the symbol table. It falls back (to the stored table, or to
+  the session's own values), logs a warning, and runs the `onExit`
   ([session.md § Exit](session.md#exit) step 5).
 
 The table in

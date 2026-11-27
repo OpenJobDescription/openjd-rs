@@ -261,7 +261,11 @@ scope — a wrap hook resolved against a step's symbol table could not otherwise
 the environment template's own parameters.
 
 Step environments receive the step's symbol table (`step_symtab`) for format string
-resolution. Job and template environments receive `None` for the step symbol table.
+resolution. Job and template environments receive `None` for the step symbol table; the
+session then builds from the table on the environment itself (`job::Environment::resolved_symtab`,
+which `create_job` fills for a job environment and `convert_environment_with_symtab` for a
+template), so a job environment resolves `{{Job.Name}}` and its other job-level symbols
+(specs/sessions/session.md § Enter).
 
 **Single-wrap-layer preflight (RFC 0008).** Before entering any environment,
 the CLI validates every session stack this run will build — external

@@ -679,6 +679,15 @@ async fn exit_without_a_table_uses_the_table_the_environment_was_entered_with() 
     });
 }
 
+/// The enter of an environment whose stored table can't be deserialized
+/// fails on that table, with its message.
+fn assert_bad_stored_table(result: Result<String, SessionError>) {
+    match result {
+        Err(e) => assert_eq!(e.to_string(), BAD_SYMTAB_MESSAGE),
+        Ok(id) => panic!("the enter must fail on the bad stored table, entered {id}"),
+    }
+}
+
 /// An environment whose enter failed on its stored table, exited with no
 /// table: the exit falls back to the session's own values, so the onExit
 /// still runs, and the warning names that fallback.
@@ -688,14 +697,15 @@ async fn exit_after_a_failed_enter_falls_back_to_the_sessions_own_values() {
     let root = TempDir::new().unwrap();
     let (mut s, _seen) = session(&root, JobParameterValues::new());
     let id = "env-1".to_string();
-    s.enter_environment(
-        &env_with_bad_stored_table(env("Env", None, Some(action("echo exited")))),
-        None,
-        Some(&id),
-        None,
-    )
-    .await
-    .expect_err("the enter builds from the bad stored table");
+    assert_bad_stored_table(
+        s.enter_environment(
+            &env_with_bad_stored_table(env("Env", None, Some(action("echo exited")))),
+            None,
+            Some(&id),
+            None,
+        )
+        .await,
+    );
     let out = s.exit_environment(&id, None, true, None).await.unwrap();
     assert!(out.contains("exited"), "onExit must run: {out:?}");
     let expected = format!(
@@ -743,14 +753,15 @@ async fn exit_with_no_usable_table_fails_the_action() {
             std::fs::write(&marker, b"").unwrap();
             let (mut s, seen) = session(&root, JobParameterValues::new());
             let id = "env-1".to_string();
-            s.enter_environment(
-                &env_with_bad_stored_table(marker_env("Env", &marker)),
-                None,
-                Some(&id),
-                None,
-            )
-            .await
-            .expect_err("the enter builds from the bad stored table");
+            assert_bad_stored_table(
+                s.enter_environment(
+                    &env_with_bad_stored_table(marker_env("Env", &marker)),
+                    None,
+                    Some(&id),
+                    None,
+                )
+                .await,
+            );
             let before = seen.lock().unwrap().len();
             let result = s
                 .exit_environment(&id, Some(exit_table), keep_session_running, None)
@@ -787,14 +798,15 @@ async fn exit_pre_start_failure_resets_status_and_logs_banner() {
     let root = TempDir::new().unwrap();
     let (mut s, _seen) = session(&root, JobParameterValues::new());
     let id = "env-1".to_string();
-    s.enter_environment(
-        &env_with_bad_stored_table(env("MyEnv", None, Some(action("echo exited")))),
-        None,
-        Some(&id),
-        None,
-    )
-    .await
-    .expect_err("the enter builds from the bad stored table");
+    assert_bad_stored_table(
+        s.enter_environment(
+            &env_with_bad_stored_table(env("MyEnv", None, Some(action("echo exited")))),
+            None,
+            Some(&id),
+            None,
+        )
+        .await,
+    );
     s.clear_ending_only().unwrap();
     // A task that reports progress and status, so a leak would be visible.
     let r = s
@@ -849,14 +861,15 @@ async fn exit_failure_leaves_the_outer_environment_exitable() {
         .await
         .unwrap();
     let inner = "inner".to_string();
-    s.enter_environment(
-        &env_with_bad_stored_table(env("Inner", None, None)),
-        None,
-        Some(&inner),
-        None,
-    )
-    .await
-    .expect_err("the enter builds from the bad stored table");
+    assert_bad_stored_table(
+        s.enter_environment(
+            &env_with_bad_stored_table(env("Inner", None, None)),
+            None,
+            Some(&inner),
+            None,
+        )
+        .await,
+    );
     let result = s
         .exit_environment(&inner, Some(&bad_symtab()), true, None)
         .await;

@@ -341,7 +341,8 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 3. Pushes the environment onto `environments_entered` (LIFO stack). From here on, a
    failure fails the action and leaves the environment on the stack
 4. Builds the symbol table (see [Symbol Table Construction](#symbol-table-construction))
-   from the stored table of step 2, so a table supplied on `Environment::resolved_symtab`
+   from the stored table of step 2 (from the session's own values when there is none),
+   so a table supplied on `Environment::resolved_symtab`
    reaches the environment's own `variables`, `onEnter` and `let` bindings exactly as one
    supplied through the argument does. A job environment from `create_job` carries its
    table on that field, so `{{Job.Name}}` and `{{Param.*}}` resolve in it with no argument
@@ -380,11 +381,12 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
    still counts as an exit
 5. Builds the symbol table from the `resolved_symtab` argument, or, when it is absent,
    from the table stored on the environment at enter (§ Enter step 2), as the enter did;
-   from scratch when neither exists. If that fails, for example because the table can't
-   be deserialized, it falls back and logs the first error as a warning after the
-   "Exiting Environment" banner: from the argument to the stored table, and from the
-   stored table (which the enter could not build either, so the enter failed) to
-   from scratch. The `onExit` then runs with the enter-time table,
+   from the session's own values (job parameter values and `Session.*`) when neither
+   exists. If that fails, for example because the table can't be deserialized, it falls
+   back and logs the first error as a warning after the "Exiting Environment" banner:
+   from the argument to the stored table, and from the stored table (which the enter
+   could not build either, so the enter failed) to the session's own values. The
+   `onExit` then runs with the fallback,
    so whatever the `onEnter` started is still stopped: How Jobs Are Run says a Session
    exits every Environment it entered. The action and the call's result are the
    `onExit`'s own; the warning is the only trace of the bad input. The stored table is
