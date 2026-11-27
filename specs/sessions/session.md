@@ -160,8 +160,8 @@ the environment is `environments_entered().last()`. A failed `exit_environment` 
 already removed the environment, so it still counts as an exit. When it failed before
 its action started, its `onExit` has not run. `exit_environment` doesn't fail when the
 symbol table can't be built from its exit-time input (its `resolved_symtab`, or the
-from-scratch table when none is given) while the table the environment was entered with
-still builds; it runs the `onExit` with that one (see [Exit](#exit) step 5).
+stored table when none is given) while its fallback still builds; it runs the `onExit`
+with that one (see [Exit](#exit) step 5).
 
 Which callbacks a pre-start failure fires depends on when it happens relative to the
 `Running` notification. `enter_environment` and `exit_environment` report only a `Failed`
@@ -341,6 +341,11 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 3. Pushes the environment onto `environments_entered` (LIFO stack). From here on, a
    failure fails the action and leaves the environment on the stack
 4. Builds the symbol table (see [Symbol Table Construction](#symbol-table-construction))
+   from the stored table of step 2 (from the session's own values when there is none),
+   so a table supplied on `Environment::resolved_symtab`
+   reaches the environment's own `variables`, `onEnter` and `let` bindings exactly as one
+   supplied through the argument does. A job environment from `create_job` carries its
+   table on that field, so `{{Job.Name}}` and `{{Param.*}}` resolve in it with no argument
 5. Resolves environment `variables` format strings against that symbol table,
    with target type `string` for whole-field expressions (Expression Language §1.3.2),
    and rejects a resolved value that contains a NUL byte or exceeds 2048 characters
@@ -374,11 +379,15 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
 4. Pops the environment from `environments_entered` and removes it, so its variable
    changes no longer apply. This happens before anything that can fail, so a failed exit
    still counts as an exit
-5. Builds the symbol table from the `resolved_symtab` argument (or from scratch when it
-   is absent). If that fails, for example because the table can't be deserialized, it
-   builds the table from the one stored on the environment at enter (§ Enter step 2, or
-   from scratch when none was stored) and logs the exit-time error as a warning after
-   the "Exiting Environment" banner. The `onExit` then runs with the enter-time table,
+5. Builds the symbol table from the `resolved_symtab` argument, or, when it is absent,
+   from the table stored on the environment at enter (§ Enter step 2), as the enter did;
+   from the session's own values (job parameter values and `Session.*`) when neither
+   exists. If that fails, for example because the table can't be deserialized, it falls
+   back one step and logs the first error as a warning after the "Exiting Environment"
+   banner: a bad argument falls back to the stored table, and, when no argument was given,
+   a bad stored table (which the enter could not build either, so the enter failed) falls
+   back to the session's own values. A bad argument and a bad stored table fail the exit.
+   The `onExit` then runs with the fallback,
    so whatever the `onEnter` started is still stopped: How Jobs Are Run says a Session
    exits every Environment it entered. The action and the call's result are the
    `onExit`'s own; the warning is the only trace of the bad input. The stored table is

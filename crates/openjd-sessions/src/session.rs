@@ -1463,8 +1463,9 @@ impl Session {
     ///
     /// `resolved_symtab` is optional, and supplying it here is equivalent to
     /// setting [`Environment::resolved_symtab`]: the argument is folded onto the
-    /// stored environment, so readers that run after this call returns — notably
-    /// the RFC 0008 wrap hooks — see it either way. If both are supplied, the
+    /// stored environment, and this call and readers that run after it returns —
+    /// notably the RFC 0008 wrap hooks and an exit given no table — build from
+    /// the stored one, so they see it either way. If both are supplied, the
     /// argument wins.
     ///
     /// # Errors
@@ -1560,6 +1561,10 @@ impl Session {
         if let Some(st) = resolved_symtab {
             stored_env.resolved_symtab = Some(st.clone());
         }
+        // The table this entry is built from is the stored one, so the two
+        // routes are equivalent here too, not only for later readers.
+        let resolved_symtab = stored_env.resolved_symtab.clone();
+        let resolved_symtab = resolved_symtab.as_ref();
         self.environments.insert(identifier.clone(), stored_env);
         self.environments_entered.push(identifier.clone());
         self.created_env_vars
@@ -1873,11 +1878,17 @@ impl Session {
     /// `ReadyEnding`, [`SessionError::UnknownEnvironment`], or
     /// [`SessionError::LifoViolation`]. These change nothing.
     ///
-    /// If the symbol table can't be built from `resolved_symtab` (for
-    /// example it can't be deserialized), it is built from the table the
-    /// environment was entered with instead, and the `onExit` runs with it;
-    /// the session log records the exit-time error as a warning, and the
-    /// call succeeds or fails on the `onExit` alone.
+    /// The symbol table is built from `resolved_symtab`, or, when it is
+    /// `None`, from the table the environment was entered with
+    /// ([`Environment::resolved_symtab`] as stored by the enter). If that
+    /// can't be built (for example it can't be deserialized), the exit falls
+    /// back one step: a bad `resolved_symtab` to the table the environment
+    /// was entered with, or, when no `resolved_symtab` was given, a bad
+    /// stored table to the session's own values (job parameter values and
+    /// `Session.*`). A bad `resolved_symtab` and a bad stored table fail the
+    /// exit. When the fallback builds, the `onExit` runs with it, the
+    /// session log records the first error as a warning, and the call
+    /// succeeds or fails on the `onExit` alone.
     ///
     /// Any other error fails the action and makes the session ending-only.
     /// The environment has already been removed, so the failed exit still
@@ -1965,14 +1976,22 @@ impl Session {
         // same way. Only when neither builds does the exit fail here, with
         // the exit-time error. The bad exit-time input is logged as a
         // warning after the banner; the action is the onExit's own.
-        let built = match self.build_symbol_table(None, resolved_symtab) {
+        //
+        // With no exit-time input, the exit builds from the table the
+        // environment was entered with, as the enter did. If that table is
+        // one the enter could not build either (the enter failed), the exit
+        // falls back to no table, so the onExit of an environment whose
+        // enter failed still runs.
+        let (first, fallback) = match resolved_symtab {
+            Some(st) => (Some(st), env.resolved_symtab.as_ref()),
+            None => (env.resolved_symtab.as_ref(), None),
+        };
+        let built = match self.build_symbol_table(None, first) {
             Ok(symtab) => Ok((symtab, None)),
-            Err(e) if env.resolved_symtab.as_ref() != resolved_symtab => {
-                match self.build_symbol_table(None, env.resolved_symtab.as_ref()) {
-                    Ok(symtab) => Ok((symtab, Some(e))),
-                    Err(_) => Err(e),
-                }
-            }
+            Err(e) if fallback != first => match self.build_symbol_table(None, fallback) {
+                Ok(symtab) => Ok((symtab, Some(e))),
+                Err(_) => Err(e),
+            },
             Err(e) => Err(e),
         };
         let (symtab, fallback_cause) = match built {
@@ -1982,6 +2001,14 @@ impl Session {
                 return Err(self.fail_action_before_start(&banner, e));
             }
         };
+        // What the fallback was: the table the environment was entered with
+        // when the exit-time input failed, or, when no input was given and
+        // the stored table failed, no table.
+        let fallback_name = if resolved_symtab.is_some() {
+            "the symbol table it was entered with"
+        } else {
+            "the session's own values"
+        };
         let log_exit_banner = |session_id: &str| {
             log_section_banner(session_id, &format!("Exiting Environment: {}", env.name));
             if let Some(e) = &fallback_cause {
@@ -1990,7 +2017,7 @@ impl Session {
                     session_id,
                     LogContent::EXCEPTION_INFO,
                     "The symbol table for exiting environment '{}' could not be built \
-                     ({e}); using the symbol table it was entered with.",
+                     ({e}); using {fallback_name}.",
                     env.name
                 );
             }

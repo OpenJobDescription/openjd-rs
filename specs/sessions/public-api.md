@@ -170,8 +170,9 @@ impl Session {
     /// `openjd_model::convert_environment_with_symtab`; it carries
     /// only the symbols this environment references. Passing it here is
     /// equivalent to setting `Environment::resolved_symtab` — the
-    /// argument is folded onto the stored environment, so later readers
-    /// (such as the RFC 0008 wrap hooks) see it either way. If both are
+    /// argument is folded onto the stored environment, and this call and
+    /// later readers (the RFC 0008 wrap hooks, an exit given no table)
+    /// build from the stored one, so they see it either way. If both are
     /// supplied, the argument wins.
     ///
     /// `os_env_vars` supplements the session-level env var map for
@@ -207,11 +208,12 @@ impl Session {
     /// the exit fails — either before its action starts (building the
     /// symbol table, path mapping, wrap-hook setup) or with an `onExit`
     /// that ends Failed, Canceled or Timeout — like any other action.
-    /// An exit-time input (`resolved_symtab`, or the from-scratch table
-    /// when it is `None`) that can't build the symbol table doesn't fail
-    /// the exit while the table the environment was entered with still
-    /// builds: the `onExit` runs with that one and the session log
-    /// records a warning (session.md § Exit).
+    /// With `resolved_symtab` `None`, the exit builds from the table the
+    /// environment was entered with, as the enter did. An exit-time input
+    /// that can't build the symbol table doesn't fail the exit while its
+    /// fallback (the stored table, or the session's own values when the
+    /// stored one is the input) still builds: the `onExit` runs with that one and the
+    /// session log records a warning (session.md § Exit).
     /// It never brings an ending-only session back to Ready, for example
     /// after an earlier action ended Failed, Canceled or Timeout;
     /// only `clear_ending_only` does that.

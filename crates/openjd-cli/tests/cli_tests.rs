@@ -1061,6 +1061,54 @@ mod run_command {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    /// A job environment resolves `{{Job.Name}}` in its variables, onEnter and
+    /// onExit: the session builds its symbol table from the table create_job
+    /// put on the environment, though the CLI passes none
+    /// (specs/sessions/session.md § Enter).
+    #[test]
+    fn test_run_job_environment_resolves_job_name() {
+        let mut f = NamedTempFile::with_suffix(".yaml").unwrap();
+        write!(
+            f,
+            r#"specificationVersion: "jobtemplate-2023-09"
+extensions: [EXPR]
+name: MyJobName
+jobEnvironments:
+  - name: E
+    variables:
+      JN: "{{{{Job.Name}}}}"
+    script:
+      actions:
+        onEnter:
+          command: python
+          args: ["-c", "import os; print('ENTER=' + os.environ['JN'] + ',{{{{Job.Name}}}}')"]
+        onExit:
+          command: python
+          args: ["-c", "print('EXIT={{{{Job.Name}}}}')"]
+steps:
+  - name: S
+    script:
+      actions:
+        onRun:
+          command: python
+          args: ["-c", "print('TASK={{{{Job.Name}}}}')"]
+"#
+        )
+        .unwrap();
+        let (code, stdout, stderr) = run_cli(&["run", f.path().to_str().unwrap()]);
+        assert_eq!(code, 0, "stdout: {stdout}\nstderr: {stderr}");
+        for line in [
+            "ENTER=MyJobName,MyJobName",
+            "TASK=MyJobName",
+            "EXIT=MyJobName",
+        ] {
+            assert!(
+                stdout.lines().any(|l| l.ends_with(&format!("\t{line}"))),
+                "missing {line:?} in stdout: {stdout}"
+            );
+        }
+    }
+
     /// The session's own errors reach stdout, not only command output: here
     /// the "Action failed to run" error for a command that cannot start.
     #[test]
