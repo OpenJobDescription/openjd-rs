@@ -528,3 +528,227 @@ fn slice_on_split_semicolon() {
         "[\"a\", \"b\", \"c\"]"
     );
 }
+
+// === A subscript's receiver is not coerced, concrete or unresolved ===
+//
+// 2026-02 §2.1.7 and §2.1.8 define `__getitem__` for `list`, `range_expr` and
+// `string` only, and §1.3.8 says a path takes neither. A `path`, `int`,
+// `float` or `bool` receiver is refused whether its value is known or only
+// its type is (`unresolved[T]`, as at template validation), with the same
+// message a run gives, so `openjd check` refuses what a run refuses.
+
+fn eval_with(expr: &str, name: &str, value: ExprValue) -> Result<ExprValue, String> {
+    let mut st = SymbolTable::new();
+    st.set(name, value).unwrap();
+    ParsedExpression::new(expr)
+        .and_then(|p| p.with_path_format(PathFormat::Posix).evaluate(&[&st]))
+        .map_err(|e| e.to_string())
+}
+
+fn not_subscriptable() -> Vec<(ExprValue, &'static str)> {
+    vec![
+        (ExprValue::new_path("/a/b", PathFormat::Posix), "path"),
+        (ExprValue::Int(5), "int"),
+        (
+            ExprValue::Float(openjd_expr::value::Float64::new(2.5).unwrap()),
+            "float",
+        ),
+        (ExprValue::Bool(true), "bool"),
+    ]
+}
+
+#[test]
+fn unresolved_receiver_is_refused_as_a_concrete_one_is() {
+    for (value, type_name) in not_subscriptable() {
+        let unresolved = ExprValue::unresolved(value.expr_type());
+        for (expr, args, caret) in [
+            ("X[0]", "int", "~^~~"),
+            ("X[0:1]", "int, int, nulltype", "~^~~~~"),
+            ("X[::-1]", "nulltype, nulltype, int", "~^~~~~~"),
+        ] {
+            let message = if type_name == "path" {
+                "Cannot subscript type path".to_string()
+            } else {
+                format!("No matching signature for __getitem__({type_name}, {args})")
+            };
+            let expected = format!("{message}\n  {expr}\n  {caret}");
+            for v in [value.clone(), unresolved.clone()] {
+                let unresolved = v.is_unresolved();
+                let err = eval_with(expr, "X", v).expect_err(&format!(
+                    "{expr} on a {type_name} (unresolved: {unresolved})"
+                ));
+                assert_eq!(
+                    err, expected,
+                    "{expr} on a {type_name} (unresolved: {unresolved})"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn literal_path_receiver_is_refused_in_a_host_context_check() {
+    use openjd_expr::{ExprProfile, FunctionLibrary, HostContext};
+    // A host-context check reads `path('/a/b')` as `unresolved[path]`
+    // (specs/expr/function-library.md § Host Context).
+    let lib = FunctionLibrary::for_profile(
+        &ExprProfile::current().with_host_context(HostContext::Unresolved),
+    );
+    for (expr, caret) in [
+        ("path('/a/b')[0]", "~~~~~~~~~~~~^~~"),
+        ("path('/a/b')[0:1]", "~~~~~~~~~~~~^~~~~"),
+    ] {
+        let err = ParsedExpression::new(expr)
+            .and_then(|p| p.with_library(&lib).evaluate(&[&SymbolTable::new()]))
+            .expect_err(expr)
+            .to_string();
+        assert_eq!(
+            err,
+            format!("Cannot subscript type path\n  {expr}\n  {caret}")
+        );
+    }
+}
+
+#[test]
+fn unresolved_subscriptable_receivers_are_typed() {
+    let unresolved = |t: &str| ExprValue::unresolved(ExprType::parse(t).unwrap());
+    for (t, expr, result) in [
+        ("string", "X[0]", "string"),
+        ("string", "X[0:1]", "string"),
+        ("list[int]", "X[0]", "int"),
+        ("list[int]", "X[1:]", "list[int]"),
+        ("range_expr", "X[0]", "int"),
+        // A slice of a range_expr is a range_expr for a positive step and a
+        // list[int] for a negative one, so the type is both.
+        ("range_expr", "X[::-1]", "list[int] | range_expr"),
+        // One member that takes a subscript is enough: a run may hold it.
+        // The result is typed from the members that take one, so a `path`
+        // member adds nothing.
+        ("path | string", "X[0]", "string"),
+        ("list[int] | path", "X[0]", "int"),
+        ("list[int] | path", "X[0:1]", "list[int]"),
+        ("int | list[string] | path", "X[-1]", "string"),
+        ("any", "X[0]", "any"),
+        ("any", "X[0:1]", "any"),
+    ] {
+        let v = eval_with(expr, "X", unresolved(t)).unwrap_or_else(|e| panic!("{t} {expr}: {e}"));
+        assert_eq!(
+            v.expr_type(),
+            ExprType::unresolved(ExprType::parse(result).unwrap()).unwrap(),
+            "{t} {expr}"
+        );
+    }
+}
+
+/// The check matches the signatures of the call's arity: a library whose
+/// only `__getitem__` takes an index refuses a slice of the same receiver.
+#[test]
+fn the_receiver_check_matches_signatures_of_the_calls_arity() {
+    use openjd_expr::FunctionLibrary;
+    let mut lib = FunctionLibrary::new();
+    lib.register_sig("__getitem__", "(string, int) -> string", |_, args| {
+        Ok(args[0].clone())
+    })
+    .unwrap();
+    let st = {
+        let mut st = SymbolTable::new();
+        st.set("X", ExprValue::unresolved(ExprType::STRING))
+            .unwrap();
+        st
+    };
+    let eval = |expr: &str| {
+        ParsedExpression::new(expr)
+            .and_then(|p| p.with_library(&lib).evaluate(&[&st]))
+            .map_err(|e| e.to_string())
+    };
+    eval("X[0]").unwrap();
+    assert_eq!(
+        eval("X[0:1]").unwrap_err(),
+        "No matching signature for __getitem__(string, int, int, nulltype)\n  X[0:1]\n  ~^~~~~"
+    );
+    // A concrete string is left to the dispatch, which reports the arity.
+    let concrete = ParsedExpression::new("'abc'[0:1]")
+        .and_then(|p| p.with_library(&lib).evaluate(&[&SymbolTable::new()]))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        concrete,
+        "__getitem__() takes 2 argument(s), but 4 were given\n  'abc'[0:1]\n  ~~~~~^~~~~"
+    );
+}
+
+/// A union receiver is narrowed to its subscriptable members in both paths,
+/// so a bad index or bound is reported against the member that takes one.
+#[test]
+fn a_union_receiver_is_narrowed_for_an_index_and_a_slice() {
+    let x = ExprValue::unresolved(ExprType::parse("list[int] | path").unwrap());
+    for (expr, expected) in [
+        (
+            "X['a']",
+            "No matching signature for __getitem__(list[int], string)\n  X['a']\n  ~^~~~~",
+        ),
+        (
+            "X['a':]",
+            "No matching signature for __getitem__(list[int], string, nulltype, nulltype)\n  \
+             X['a':]\n  ~^~~~~~",
+        ),
+    ] {
+        assert_eq!(
+            eval_with(expr, "X", x.clone()).unwrap_err(),
+            expected,
+            "{expr}"
+        );
+    }
+}
+
+/// A `noreturn` receiver gets the library's message, the one every type that
+/// takes no subscript gets except a path.
+#[test]
+fn a_noreturn_receiver_gets_the_librarys_message() {
+    let err = eval_with("fail(X)[0]", "X", ExprValue::unresolved(ExprType::STRING)).unwrap_err();
+    assert_eq!(
+        err,
+        "No matching signature for __getitem__(noreturn, int)\n  fail(X)[0]\n  ~~~~~~~^~~"
+    );
+}
+
+/// The index and bounds are checked before the receiver, so an undefined
+/// name, a zero step and an index that cannot be an integer keep their own
+/// messages, for a receiver that takes no subscript too.
+#[test]
+fn index_and_bound_errors_are_reported_before_the_receiver() {
+    let path = || ExprValue::new_path("/a/b", PathFormat::Posix);
+    for (expr, value, expected) in [
+        (
+            "X[Typo]",
+            ExprValue::Int(5),
+            "Undefined variable: 'Typo'. Did you mean: X\n  X[Typo]\n    ^~~~",
+        ),
+        (
+            "X[::0]",
+            ExprValue::Int(5),
+            "Slice step cannot be zero\n  X[::0]\n  ~^~~~~",
+        ),
+        (
+            "X[::0]",
+            ExprValue::unresolved(ExprType::PATH),
+            "Slice step cannot be zero\n  X[::0]\n  ~^~~~~",
+        ),
+        (
+            "X[::0]",
+            path(),
+            "Slice step cannot be zero\n  X[::0]\n  ~^~~~~",
+        ),
+    ] {
+        assert_eq!(eval_with(expr, "X", value).unwrap_err(), expected, "{expr}");
+    }
+    let mut st = SymbolTable::new();
+    st.set("X", ExprValue::unresolved(ExprType::INT)).unwrap();
+    st.set("S", ExprValue::unresolved(ExprType::STRING))
+        .unwrap();
+    let err = ParsedExpression::new("X[S]")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(err, "Index must be an integer\n  X[S]\n  ~^~~");
+}

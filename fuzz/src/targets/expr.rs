@@ -135,42 +135,6 @@ fn has_type_var(t: &ExprType) -> bool {
     ) || t.params().iter().any(has_type_var)
 }
 
-/// Does `code` (string literals blanked) slice with a step that may be
-/// negative: any step but a non-negative integer literal or `None`
-/// (`x[a:b:-1]`, `x[::Param.N]`, `x[::int('-1')]`)?
-pub fn has_negative_step_slice(code: &str) -> bool {
-    // Per open bracket: (colons at its own level, step text so far).
-    let mut stack: Vec<Option<(usize, String)>> = Vec::new();
-    for c in code.chars() {
-        match c {
-            '[' => stack.push(Some((0, String::new()))),
-            '(' | '{' => stack.push(None),
-            ']' | ')' | '}' => {
-                if let Some(Some((n, step))) = stack.pop() {
-                    let step = step.trim();
-                    let literal = step == "None" || step.bytes().all(|b| b.is_ascii_digit());
-                    if c == ']' && n >= 2 && !literal {
-                        return true;
-                    }
-                }
-            }
-            _ => {}
-        }
-        // Text inside nested brackets counts toward every enclosing step.
-        for (n, step) in stack.iter_mut().flatten() {
-            if *n >= 2 {
-                step.push(c);
-            }
-        }
-        if c == ':' {
-            if let Some(Some((n, _))) = stack.last_mut() {
-                *n += 1;
-            }
-        }
-    }
-    false
-}
-
 /// What the known-issue gates consult about one expression and the values
 /// one run reads.
 pub struct GateContext {
@@ -184,9 +148,6 @@ pub struct GateContext {
     /// A value the run reads is, or holds, an empty list, or the code has
     /// a `[]` literal (`expr-flatten-empty-element-type`).
     pub empty_list: bool,
-    /// A value the run reads is a `range_expr`, or the code calls
-    /// `range_expr` (`expr-range-slice-static-type`).
-    pub range: bool,
 }
 
 impl GateContext {
@@ -210,8 +171,6 @@ impl GateContext {
             well_typed: generated.is_some(),
             unbound_return: generated.unwrap_or_else(|| unbound_return_in_text(&code)),
             empty_list: code.contains("[]") || values.iter().any(|v| holds_empty_list(v)),
-            range: calls_fn(&code, "range_expr")
-                || values.iter().any(|v| matches!(v, ExprValue::RangeExpr(_))),
             code,
         }
     }
@@ -223,22 +182,10 @@ fn holds_empty_list(v: &ExprValue) -> bool {
         .is_some_and(|xs| xs.is_empty() || xs.iter().any(holds_empty_list))
 }
 
-/// Is `v` a `list[int]`, or a list that holds one?
-fn holds_list_int(v: &ExprValue) -> bool {
-    matches!(v, ExprValue::ListInt(_))
-        || v.list_elements()
-            .is_some_and(|xs| xs.iter().any(holds_list_int))
-}
-
 /// The known issue that can explain a run-time value `cv` outside its
 /// static type `st`, or `None` when none does. The gates are checked in
 /// order and the first that applies is reported.
 fn type_gap_known_issue(ctx: &GateContext, st: &ExprType, cv: &ExprValue) -> Option<&'static str> {
-    // A negative-step slice of a range gives a `list[int]` where the static
-    // type has a `range_expr`, or drops the branch that typed it.
-    if ctx.range && has_negative_step_slice(&ctx.code) && holds_list_int(cv) {
-        return Some("expr-range-slice-static-type");
-    }
     // The signature loses a list's element type, so only a list value in a
     // list type counts, or a number of the other kind after a reduction
     // (`sum`) of such a list.
@@ -300,10 +247,6 @@ fn rejection_known_issue(ctx: &GateContext, e: &ExpressionError) -> Option<&'sta
         // speculatively is never absorbed (specs/expr/evaluator.md), so one
         // no run evaluates can reject the expression.
         Some("expr-speculative-budget-rejection")
-    } else if ctx.range && has_negative_step_slice(&ctx.code) && message.contains("range_expr") {
-        // A negative-step range slice typed `range_expr`, refused where
-        // only its list fits.
-        Some("expr-range-slice-static-type")
     } else if calls_fn(&ctx.code, "flatten")
         && (ctx.empty_list
             || message.contains("element type")

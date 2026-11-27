@@ -119,16 +119,6 @@ pub mod known {
              of `Param.S`.",
         ),
         (
-            "expr-range-slice-static-type",
-            "A stepped slice of an unresolved `range_expr` is typed `range_expr` whatever the \
-             step (evaluator.rs, the unresolved slice path), but a negative step gives \
-             `list[int]` (specs/expr/function-library.md; the signature returns \
-             `range_expr | list[int]`), so `R[::-1]` gives a value outside its static type (also \
-             nested in a list, or where a branch that used it as a list was dropped), and an \
-             operation that needs the list is rejected though it runs: `sorted(R[::-1])` fails \
-             validation with `No matching signature for sorted(range_expr)`.",
-        ),
-        (
             "expr-flatten-empty-element-type",
             "`flatten` of a list of empty typed lists returns an untyped empty list \
              (`list[nulltype]`), so what follows loses the element type: \

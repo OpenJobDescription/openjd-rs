@@ -129,6 +129,44 @@ fn host_scope_literal_path_type_errors_are_still_reported() {
 }
 
 #[test]
+fn host_scope_literal_path_subscripts_are_still_reported() {
+    // A subscript of a path fails on every worker (2026-02 §1.3.8: a path
+    // takes no subscript or slice), and whether it does depends on no value,
+    // so it is refused at validation like the method call above, in every
+    // host field, for an index and for a slice.
+    for (expr, caret) in [
+        (r#"path("/a/b")[0]"#, "~~~~~~~~~~~~^~~"),
+        (r#"path("/a/b")[0:1]"#, "~~~~~~~~~~~~^~~~~"),
+    ] {
+        for field in HOST_FIELDS {
+            // A `let` binding's message shows the binding, `v = <expr>`.
+            let located = if *field == "let" || field.ends_with(" let") {
+                format!("Cannot subscript type path\n  v = {expr}\n      {caret}")
+            } else {
+                format!("Cannot subscript type path\n  {expr}\n  {caret}")
+            };
+            let err = decode(template(expr, field))
+                .err()
+                .unwrap_or_else(|| panic!("{field}: {expr} should be refused"))
+                .to_string();
+            let field_path = match *field {
+                "arg" => "steps[0] -> script -> actions -> onRun -> args[0]:",
+                "command" => "steps[0] -> script -> actions -> onRun -> command:",
+                "let" => "steps[0] -> script -> let[0]:",
+                "embedded file" => "steps[0] -> script -> embeddedFiles[0] -> data:",
+                "job env var" => "jobEnvironments[0] -> variables -> V:",
+                "step env script let" => "steps[0] -> stepEnvironments[0] -> script -> let[0]:",
+                other => panic!("no field path for {other}"),
+            };
+            assert!(
+                err.contains(&format!("{field_path}\n\t")) && err.contains(&located),
+                "{field}: {expr}\n{err}"
+            );
+        }
+    }
+}
+
+#[test]
 fn template_scope_paths_are_unresolved_in_host_scope() {
     // A path a step-level let builds is TEMPLATE scope (POSIX), but the
     // session converts it to the worker's format before host-scope fields

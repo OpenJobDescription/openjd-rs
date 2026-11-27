@@ -1678,6 +1678,98 @@ impl<'a> Evaluator<'a> {
         self.track(list)
     }
 
+    /// Refuse `value[...]` when no `__getitem__` signature takes the
+    /// receiver as it is. The receiver of a subscript or a slice is not
+    /// implicitly coerced (2026-02 Expression Language §2.1.7 and §2.1.8
+    /// define `__getitem__` for `list`, `range_expr` and `string`, and §1.3.8
+    /// says a `path` takes neither; a number or a `bool` does not become a
+    /// `string` to reach one), as the receiver of a method call is not
+    /// (§1.2.4). The decision is the library's: the receiver's type is
+    /// matched against the first parameter of its `__getitem__` signatures
+    /// of the call's arity (`args`: the receiver, then the index or the three
+    /// bounds), with `int` indices and without coercion. Deciding at the type
+    /// gives a concrete receiver and an unresolved one of the same type the
+    /// same decision, so `openjd check` refuses what a run would. (A concrete
+    /// list, string or range_expr is left to the dispatch, so with a library
+    /// that lacks an arity its message can differ: `__getitem__() takes 2
+    /// argument(s), but 4 were given`.) It runs after
+    /// the checks of the index and bounds themselves (an undefined name, a
+    /// zero step, an index that cannot be an integer), so those come first,
+    /// for every receiver. The index and bounds are then checked by the
+    /// dispatch itself, with their usual coercions. Only signatures are
+    /// matched; no return type is built, so this cannot fail on a type that
+    /// is too deep.
+    ///
+    /// A union receiver passes when one of its members does, and the result
+    /// is then typed from those members only: the returned `Some` is the
+    /// receiver narrowed to them, so `X[0]` with `X` a `path | list[int]` is
+    /// `int`, not the `int | string` a coerced `path` member would add. A
+    /// dispatch error after narrowing names the narrowed receiver
+    /// (`__getitem__(list[int], string)` for `X['a']`), the member whose
+    /// signature the index fails. An
+    /// `any` receiver passes because the signatures' type variables match
+    /// it. A concrete list, string or range_expr is not checked here: the
+    /// dispatch decides it by the same signatures.
+    ///
+    /// The message is the one a run gives: `Cannot subscript type path` for a
+    /// path, and otherwise the library's `No matching signature for
+    /// __getitem__(int, int)`, naming the arguments as they are. On refusal
+    /// the operands are released, as a failed dispatch releases them.
+    fn check_subscript_receiver(
+        &mut self,
+        args: &[&ExprValue],
+    ) -> Result<Option<ExprValue>, ExpressionError> {
+        let value = args[0];
+        if value.is_list() || matches!(value, ExprValue::String(_) | ExprValue::RangeExpr(_)) {
+            return Ok(None);
+        }
+        let receiver = unwrap_unresolved(&value.expr_type());
+        let members = if receiver.code() == crate::types::TypeCode::Union {
+            receiver.params().to_vec()
+        } else {
+            vec![receiver.clone()]
+        };
+        let signatures = self.library.get_signatures("__getitem__");
+        let subscriptable = |form: &ExprType| {
+            signatures.iter().any(|entry| {
+                let mut probe = Vec::with_capacity(args.len());
+                probe.push(form.clone());
+                probe.resize(args.len(), ExprType::INT);
+                entry.signature.sig_params().len() == args.len()
+                    && entry.signature.match_call(&probe).is_some()
+            })
+        };
+        let passing: Vec<ExprType> = members
+            .iter()
+            .filter(|m| subscriptable(m))
+            .cloned()
+            .collect();
+        if passing.len() == members.len() {
+            return Ok(None);
+        }
+        if !passing.is_empty() {
+            let narrowed = ExprValue::unresolved(ExprType::union(passing)?);
+            self.release(value);
+            return self.track(narrowed).map(Some);
+        }
+        let message = if receiver == ExprType::PATH {
+            "Cannot subscript type path".to_string()
+        } else {
+            let types: Vec<String> = args
+                .iter()
+                .map(|a| unwrap_unresolved(&a.expr_type()).to_string())
+                .collect();
+            format!(
+                "No matching signature for __getitem__({})",
+                types.join(", ")
+            )
+        };
+        for operand in args {
+            self.release(operand);
+        }
+        Err(ExpressionError::new(message))
+    }
+
     fn eval_subscript(&mut self, s: &ast::ExprSubscript) -> Result<ExprValue, ExpressionError> {
         self.count_op()?;
         // RFC 0005: the receiver and the index/slice bounds evaluate
@@ -1685,13 +1777,6 @@ impl<'a> Evaluator<'a> {
         // *result* (`[10, 20, 30][0]` with an `int` target must not try
         // to coerce the `list[int]` receiver or the index to int).
         let value = self.eval_node(&s.value, None)?;
-
-        // Reject subscript on path type
-        if matches!(&value, ExprValue::Path { .. }) {
-            return Err(ExpressionError::new(
-                "Cannot subscript type path".to_string(),
-            ));
-        }
 
         // Handle slice syntax: value[start:stop:step]
         if let ast::Expr::Slice(sl) = &*s.slice {
@@ -1716,27 +1801,30 @@ impl<'a> Evaluator<'a> {
             if let ExprValue::Int(0) = &step {
                 return Err(ExpressionError::new("Slice step cannot be zero"));
             }
+            let value = match self.check_subscript_receiver(&[&value, &start, &stop, &step])? {
+                Some(narrowed) => narrowed,
+                None => value,
+            };
 
-            // When the result is a type-only `Unresolved`, the operands
-            // are discarded. Release them before tracking the result;
-            // this is a success path, so nothing else would reset the
-            // memory tracking.
-            let unresolved_result = if value.is_unresolved() {
-                let inner = unwrap_unresolved(&value.expr_type());
-                Some(match inner.list_element_type() {
-                    Some(elem) => ExprValue::unresolved(ExprType::list(elem.clone())?),
-                    None => ExprValue::unresolved(inner),
-                })
-            } else if start.is_unresolved() || stop.is_unresolved() || step.is_unresolved() {
-                // Any unresolved bound makes the result unresolved.
-                if value.is_list() {
-                    let elem_type = value.list_elem_type().unwrap();
-                    Some(ExprValue::unresolved(ExprType::list(elem_type.clone())?))
-                } else if matches!(&value, ExprValue::String(_)) {
-                    Some(ExprValue::unresolved(ExprType::STRING))
-                } else {
-                    None
-                }
+            // An unresolved bound with a concrete list or string receiver
+            // gives the receiver's own type: a slice of a `list[T]` is a
+            // `list[T]` whichever bounds a run has. The operands are
+            // discarded, so they are released before the result is
+            // tracked; this is a success path, so nothing else would reset
+            // the memory tracking. An unresolved receiver, and a concrete
+            // `range_expr` with an unresolved bound, are typed by the
+            // library's `__getitem__` signatures below, as a single index
+            // is, so `r[::-1]` of an unresolved `range_expr` is
+            // `range_expr | list[int]`, as a run gives.
+            let bound_unresolved =
+                start.is_unresolved() || stop.is_unresolved() || step.is_unresolved();
+            let unresolved_result = if value.is_unresolved() || !bound_unresolved {
+                None
+            } else if value.is_list() {
+                let elem_type = value.list_elem_type().unwrap();
+                Some(ExprValue::unresolved(ExprType::list(elem_type.clone())?))
+            } else if matches!(&value, ExprValue::String(_)) {
+                Some(ExprValue::unresolved(ExprType::STRING))
             } else {
                 None
             };
@@ -1784,13 +1872,20 @@ impl<'a> Evaluator<'a> {
                 return Err(err);
             }
         }
-
-        // Single-index access: dispatch through library
+        // Decided on the receiver as written, before a union is narrowed to
+        // its subscriptable members: `int | list[nulltype]` is not always
+        // the empty list, though its only subscriptable member is.
         let empty_list = ExprType::fixed(ExprType::list(ExprType::NULLTYPE));
         let receiver_always_empty =
             crate::types::list_forms(&unwrap_unresolved(&value.expr_type()))?
                 .iter()
                 .all(|f| *f == empty_list);
+        let value = match self.check_subscript_receiver(&[&value, &slice])? {
+            Some(narrowed) => narrowed,
+            None => value,
+        };
+
+        // Single-index access: dispatch through library
         let result = self.dispatch_with_node(
             "__getitem__",
             vec![value, slice],

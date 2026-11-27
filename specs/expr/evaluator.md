@@ -758,8 +758,44 @@ Evaluates list comprehensions: `[expr for var in iterable if condition]`.
 ### Subscript (`eval_subscript`)
 Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 
+- The receiver is not implicitly coerced (2026-02 §2.1.7 and §2.1.8 define
+  `__getitem__` for `list`, `range_expr` and `string` only, and §1.3.8 says a
+  `path` takes neither; §1.2.4 states the same rule for a method call's
+  receiver). `check_subscript_receiver` decides it from the receiver's
+  *type*, after the index or bounds are evaluated and before dispatch, by
+  matching the first parameter of the library's `__getitem__` signatures of
+  the call's arity (two for an index, four for a slice) with `int` indices and
+  no coercion. A concrete receiver and an unresolved one of the same type
+  therefore get the same decision, and with the default library the message a
+  run gives: `Cannot subscript type path` for a path, and the library's `No
+  matching signature for __getitem__(int, int)` for any other type, naming the
+  arguments as they are. So a host-context check refuses `path("/a/b")[0]`, a PATH parameter's
+  `Param.P[0]` and an INT parameter's `Param.I[0:1]` as a run does. A union
+  receiver passes when one member does, and its result is typed from those
+  members only, so `X[0]` with `X` an unresolved `path | list[int]` is `int`
+  rather than `int | string`: `(Param.P if c else [1, 2])[0].upper()` is
+  refused at validation, as every run that reaches it fails. An error the
+  dispatch then reports names the narrowed receiver
+  (`__getitem__(list[int], string)` for `X['a']`). An `any`
+  receiver passes because the signatures' type variables match it. A concrete
+  `list`, `string` or `range_expr` is left to the dispatch, which decides it by
+  the same signatures. The check runs after the index's and bounds' own checks
+  (an undefined name, a zero step, an index that cannot be an integer), so a
+  subscript with two defects reports those first, for every receiver: a
+  concrete path with a zero step gets `Slice step cannot be zero`. It matches
+  signatures only and builds no return type, and on refusal it releases the
+  operands, as a failed dispatch does. In a comprehension typed over an
+  unresolved list, a body that subscripts such a receiver fails to type, so the
+  comprehension is `list[nulltype]` (see ListComp) and indexing it is refused
+  as always empty: `[x[0] for x in Param.LP][0]` for a `LIST[PATH]` parameter
+  is refused at validation, as every run fails.
 - Negative indices wrap around (Python semantics)
-- Slices return the same type as the input (string→string, list→list)
+- Slices return the same type as the input (string→string, list→list). A
+  slice with an unresolved receiver, or of a concrete `range_expr` with an
+  unresolved bound, is typed by the `__getitem__` signatures, as an index is:
+  a `range_expr` slice is `range_expr | list[int]`, since a negative step
+  gives a list. A concrete `list[T]` or `string` with an unresolved bound
+  keeps its own type.
 - Out-of-bounds index raises an error; out-of-bounds slice clamps silently
 - Indexing a receiver every form of which is the empty list
   (`list[nulltype]`, e.g. `[None for x in L]`, or `[]` with an unresolved
@@ -781,9 +817,9 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
 - A slice's four operands (receiver, start, stop, step) are tracked and
   released symmetrically. An omitted bound is passed to `__getitem__` as
   a `Null` placeholder, which is tracked when created so that dispatch's
-  release of every operand matches. When the result is a type-only
-  `Unresolved` (the receiver or any bound is unresolved), the operands
-  are released before the result is tracked. This is a success path, so
+  release of every operand matches. When a concrete list or string with an
+  unresolved bound gives its own type, the operands are released before the
+  result is tracked. This is a success path, so
   nothing else would reset the memory tracking.
 
 ## Dispatch Flow
