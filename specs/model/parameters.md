@@ -229,9 +229,12 @@ The rules live in `src/numeric.rs`:
   (`validate_v2023_09/format_strings.rs`) and an action's literal `timeout` and
   `notifyPeriodInSeconds` all read through it, each with its own located message.
 - `json_number_as_i64` reads a number, and `float_as_exact_i64` an integral float, through
-  openjd-expr's `float` to `int` conversion (2026-02 Expression Language §1.2.3). A native float
-  submitted for an INT parameter goes through `float_as_exact_i64` in
-  `coerce_to_job_parameter_type`.
+  openjd-expr's `float` to `int` conversion (2026-02 Expression Language §1.2.3). A number in a
+  submitted `LIST[INT]` or `LIST[LIST[INT]]` value given as JSON text goes through
+  `json_number_as_i64` (`coerce_json_to_job_parameter_type`), so `[-9223372036854775809]` is
+  refused (`Value '-9.223372036854776e+18' is not a valid integer or integer string.`, naming the
+  `f64` serde_json reads) rather than read as `-2^63`. A native float submitted for an INT
+  parameter goes through `float_as_exact_i64` in `coerce_to_job_parameter_type`.
 
 Decode messages: `Cannot convert '9223372036854775808' to int: number too large to fit in target
 type` for a string, which is openjd-expr's and openjd-model-for-python's message, and the same
@@ -240,6 +243,9 @@ below `i64::MIN` as the nearest `f64`, so such a number is named as that `f64`
 (`Cannot convert 1e+20 to int: ...`). An integer just below `i64::MIN` rounds to exactly `-2^63`,
 which cannot be told apart from it, so an `f64` of `-2^63` is refused with a message that says to
 write `-9223372036854775808` as an integer; the integer itself is read as an `i64` and accepted.
+A JSON template is read by serde_json, which does the same. A YAML hexadecimal, octal or binary
+integer wider than 64 bits reaches this crate as a string and is refused as
+`Cannot parse '0x...' as integer`, since an `<intstring>` is base 10.
 
 The 64-bit range is the Expression Language's `int` (2026-02 §1.2.1). Template Schemas 2023-09
 §2.3 states no bound for INT, and this crate cannot hold a wider value with the EXPR extension or

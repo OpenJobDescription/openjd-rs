@@ -97,8 +97,8 @@ steps:
 }
 
 const PREFIX: &str = "Validation error: 'jobtemplate-2023-09' failed checks: ";
-const TOO_SMALL_FLOAT: &str = "Cannot convert -9.223372036854776e+18 to int: a YAML integer \
-                               below -9223372036854775808 is read as this float; write \
+const TOO_SMALL_FLOAT: &str = "Cannot convert -9.223372036854776e+18 to int: an integer below \
+                               -9223372036854775808 is read as this float; write \
                                -9223372036854775808 as an integer";
 
 /// Every spelling of a number just outside the range, and the whole message
@@ -266,11 +266,80 @@ steps:
             }
             Some(problem) => {
                 let err = result.err().unwrap().to_string();
-                assert!(
-                    err.contains(&format!("range[0]: value '{value}' {problem}")),
-                    "{value:?}: {err}"
+                assert_eq!(
+                    err,
+                    format!(
+                        "Expression error: Task parameter 'Frame' range[0]: value '{value}' {problem}"
+                    ),
+                    "{value:?}"
                 );
             }
         }
+    }
+}
+
+/// A submitted `LIST[INT]` or `LIST[LIST[INT]]` value given as JSON text reads
+/// its numbers by the template's rule, so a number outside the range is
+/// refused rather than read as the `f64` serde_json gives for it.
+#[test]
+fn a_submitted_list_int_number_outside_the_range_is_refused() {
+    use openjd_model::{preprocess_job_parameters, JobParameterInputValues};
+    let template = "specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: T
+parameterDefinitions:
+- {name: L, type: 'LIST[INT]'}
+- {name: LL, type: 'LIST[LIST[INT]]'}
+steps:
+- name: S
+  script:
+    actions:
+      onRun: {command: foo}
+";
+    let jt = decode_job_template(
+        yaml_val(template),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let options = openjd_model::PathParameterOptions {
+        job_template_dir: "/tmp/template",
+        current_working_dir: "/tmp/cwd",
+        allow_template_dir_walk_up: true,
+        path_format: openjd_expr::PathFormat::Posix,
+        allow_uri_path_values: true,
+    };
+    let run = |l: &str, ll: &str| {
+        let mut input = JobParameterInputValues::new();
+        input.insert("L".into(), openjd_expr::ExprValue::String(l.into()));
+        input.insert("LL".into(), openjd_expr::ExprValue::String(ll.into()));
+        preprocess_job_parameters(&jt, &input, &[], &options).map_err(|e| e.to_string())
+    };
+    run("[-9223372036854775808, 4.0]", "[[9223372036854775807]]").unwrap();
+    // serde_json reads a number past u64::MAX or below i64::MIN as an f64,
+    // which the message names.
+    for (l, ll, message) in [
+        (
+            "[-9223372036854775809]",
+            "[[1]]",
+            "Parameter 'L': item[0]: Value '-9.223372036854776e+18' is not a valid integer",
+        ),
+        (
+            "[9223372036854775808]",
+            "[[1]]",
+            "Parameter 'L': item[0]: Value '9223372036854775808' is not a valid integer",
+        ),
+        (
+            "[1]",
+            "[[2, 1e20]]",
+            "Parameter 'LL': item[0][1]: Value '1e+20' is not a valid integer",
+        ),
+    ] {
+        let err = run(l, ll).unwrap_err();
+        assert_eq!(
+            err,
+            format!("Validation error: {message} or integer string."),
+            "{l} {ll}"
+        );
     }
 }

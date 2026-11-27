@@ -1350,6 +1350,15 @@ pub(super) fn coerce_json_to_job_parameter_type(
             param_type.as_spec_str(),
             json_type_name(other)
         )),
+        // An INT leaf given as a JSON number is read by the template's rule
+        // (`numeric::json_number_as_i64`), which refuses a number outside the
+        // 64-bit range rather than reading the `f64` serde_json gives for it:
+        // `-9223372036854775809` reads as exactly -2^63.
+        (serde_json::Value::Number(n), None) if param_type == JobParameterType::Int => {
+            crate::numeric::json_number_as_i64(n)
+                .map(openjd_expr::ExprValue::Int)
+                .map_err(|_| format!("Value '{n}' is not a valid integer or integer string."))
+        }
         // A leaf: convert by JSON type, then coerce to what the parameter declared.
         (other, None) => {
             let value = json_to_expr_value(other)?;

@@ -86,7 +86,7 @@ pub(crate) fn json_number_as_i64(n: &serde_json::Number) -> Result<i64, String> 
     let text = openjd_expr::value::format_float(f);
     if f == i64::MIN as f64 {
         return Err(format!(
-            "Cannot convert {text} to int: a YAML integer below -9223372036854775808 is read as \
+            "Cannot convert {text} to int: an integer below -9223372036854775808 is read as \
              this float; write -9223372036854775808 as an integer"
         ));
     }
@@ -167,7 +167,7 @@ mod tests {
         // reads as.
         assert_eq!(
             err("-9223372036854775808.0"),
-            "Cannot convert -9.223372036854776e+18 to int: a YAML integer below \
+            "Cannot convert -9.223372036854776e+18 to int: an integer below \
              -9223372036854775808 is read as this float; write -9223372036854775808 as an \
              integer"
         );
@@ -223,14 +223,23 @@ mod tests {
                     .to_string()
             )
         );
+        // The sign is read after the white space is trimmed.
+        assert_eq!(
+            intstring_as_i64(" -9223372036854775809 "),
+            Err(
+                "Cannot convert ' -9223372036854775809 ' to int: number too small to fit in \
+                 target type"
+                    .to_string()
+            )
+        );
         assert_eq!(
             intstring_as_i64("1 000"),
             Err("Cannot parse '1 000' as integer".to_string())
         );
     }
 
-    /// The overflow message is the one openjd-expr gives for the same string,
-    /// so a template field and a submitted value say the same thing.
+    /// The overflow message is the one openjd-expr gives for the same string
+    /// (and openjd-model-for-python gives at job creation).
     #[test]
     fn the_overflow_message_is_openjd_exprs() {
         for s in [
