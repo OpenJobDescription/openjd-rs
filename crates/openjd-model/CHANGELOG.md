@@ -4,6 +4,36 @@ All notable changes to this crate are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.17.0](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.16.2...openjd-model-v0.17.0) - 2026-11-27
+
+### Bug fixes
+
+- [**breaking**] Give a chunked task parameter one representation ([#612](https://github.com/OpenJobDescription/openjd-rs/pull/612)) ([#612](https://github.com/OpenJobDescription/openjd-rs/pull/612))
+
+- Count STRING/PATH minLength/maxLength in characters at preprocess ([#615](https://github.com/OpenJobDescription/openjd-rs/pull/615)) ([#615](https://github.com/OpenJobDescription/openjd-rs/pull/615))
+
+- Leave literal paths unresolved in host-context checks ([#611](https://github.com/OpenJobDescription/openjd-rs/pull/611)) ([#611](https://github.com/OpenJobDescription/openjd-rs/pull/611))
+
+- [**breaking**] Bound ExprType nesting depth with fallible constructors ([#578](https://github.com/OpenJobDescription/openjd-rs/pull/578)) ([#578](https://github.com/OpenJobDescription/openjd-rs/pull/578))
+
+- Remove command length cap ([#561](https://github.com/OpenJobDescription/openjd-rs/pull/561)) ([#561](https://github.com/OpenJobDescription/openjd-rs/pull/561))
+
+
+### Documentation
+
+- Add quality criterion Q10, comments and specs describe the current code ([#577](https://github.com/OpenJobDescription/openjd-rs/pull/577)) ([#577](https://github.com/OpenJobDescription/openjd-rs/pull/577))
+
+
+### Performance
+
+- Evaluate step-level let bindings once per step in pass 8 ([#572](https://github.com/OpenJobDescription/openjd-rs/pull/572)) ([#572](https://github.com/OpenJobDescription/openjd-rs/pull/572))
+
+
+### Refactor
+
+- Build format-string validation scopes from one context, and move host requirements into their own module ([#618](https://github.com/OpenJobDescription/openjd-rs/pull/618)) ([#618](https://github.com/OpenJobDescription/openjd-rs/pull/618))
+
+
 ## [0.16.2](https://github.com/OpenJobDescription/openjd-rs/compare/openjd-model-v0.16.1...openjd-model-v0.16.2) - 2026-11-19
 
 ### Miscellaneous
