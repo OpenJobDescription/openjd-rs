@@ -4,8 +4,6 @@
 
 //! Task parameter space and range resolution.
 
-use std::borrow::Cow;
-
 use indexmap::IndexMap;
 
 use openjd_expr::symbol_table::SymbolTable;
@@ -324,7 +322,7 @@ fn resolve_task_parameter(
                     openjd_expr::ExprValue::Int(n) => Ok(n),
                     other => {
                         let s = other.to_display_string();
-                        s.trim().parse::<i64>().map_err(|_| {
+                        crate::numeric::parse_intstring(&s).map_err(|_| {
                             ModelError::Expression(ExpressionError::new(format!(
                                 "chunks.{field}: '{s}' is not a valid integer"
                             )))
@@ -380,7 +378,7 @@ fn resolve_task_parameter(
                             openjd_expr::ExprValue::Int(n) => n,
                             other => {
                                 let s = other.to_display_string();
-                                s.trim().parse::<i64>().map_err(|_| {
+                                crate::numeric::parse_intstring(&s).map_err(|_| {
                                     ModelError::Expression(ExpressionError::new(format!(
                                         "chunks.targetRuntimeSeconds: '{s}' is not a valid integer"
                                     )))
@@ -533,13 +531,12 @@ fn resolve_int_range_list_element(
             ExprValue::Int(i) => Ok(i),
             other => {
                 let text = list_item_text(other);
-                text.trim().parse::<i64>().map_err(|e| {
-                    let problem = match e.kind() {
-                        std::num::IntErrorKind::PosOverflow
-                        | std::num::IntErrorKind::NegOverflow => {
+                crate::numeric::parse_intstring(&text).map_err(|e| {
+                    let problem = match e {
+                        crate::numeric::IntStringError::OutOfRange => {
                             "is out of range for a 64-bit integer"
                         }
-                        _ => "is not an integer",
+                        crate::numeric::IntStringError::NotAnInteger => "is not an integer",
                     };
                     error(format_args!("value '{text}' {problem}"))
                 })
@@ -579,29 +576,6 @@ fn float64(value: f64, param_name: &str) -> Result<Float64, ModelError> {
     })
 }
 
-/// Template Schemas §7.5 rule 1, keeping the sign and one digit: `'02.50'` ->
-/// `2.50`, `'007'` -> `7`, `'000'` -> `0`, `'0.50'` unchanged. Textual, so it
-/// cannot lose precision or change notation: `'01E+2'` -> `1E+2`.
-pub(crate) fn strip_redundant_leading_zeros(text: &str) -> Cow<'_, str> {
-    let sign_len = usize::from(text.starts_with(['+', '-']));
-    let digits = &text[sign_len..];
-    let zeros = digits.bytes().take_while(|b| *b == b'0').count();
-    // Redundant only when another digit follows. Otherwise the last zero is the
-    // integer part, as in '0.50' or '000'.
-    let strip = if digits.as_bytes().get(zeros).is_some_and(u8::is_ascii_digit) {
-        zeros
-    } else {
-        zeros.saturating_sub(1)
-    };
-    if strip == 0 {
-        return Cow::Borrowed(text);
-    }
-    let mut out = String::with_capacity(text.len() - strip);
-    out.push_str(&text[..sign_len]);
-    out.push_str(&digits[strip..]);
-    Cow::Owned(out)
-}
-
 /// One value a FLOAT range list's format string element contributed, or why
 /// it is not a valid one. A float member of a whole-field range expression's
 /// list goes through the same rule, so the two forms keep the same spellings.
@@ -634,7 +608,7 @@ fn float_range_value(value: ExprValue, limits: &EffectiveLimits) -> Result<Float
     }
     // §7.5 rule 2: the f64 cannot carry the decimal places, so
     // the text rides alongside it.
-    let text = strip_redundant_leading_zeros(trimmed);
+    let text = crate::numeric::floatstring_text(trimmed);
     // Same per-element cap resolve_string_range applies, for the
     // same reason: a <FormatString> resolves to arbitrary length,
     // and this text is what lands on a command line.
@@ -717,13 +691,15 @@ fn resolve_float_range(
                         .enumerate()
                         .map(|(k, e)| match e {
                             // A float copied unchanged keeps its spelling
-                            // (Expression Language §1.3.4), by the same rule as
-                            // a range list element, so `{{ Param.LF }}` and
-                            // `["{{ Param.LF }}"]` give the same tasks. A
-                            // template cannot give a float a spelling that is
-                            // not a number, but an API caller's value can, and
-                            // is rejected as in the list form. `k` indexes the
-                            // evaluated list, as there is no list as written.
+                            // (Expression Language §1.3.4), rendered by the
+                            // rule a range list element's `<floatstring>` is
+                            // (§7.5: no leading `+` or redundant zeros), so
+                            // `{{ Param.LF }}` and `["{{ Param.LF }}"]` give
+                            // the same tasks. A template cannot give a float a
+                            // spelling that is not a number, but an API
+                            // caller's value can, and is rejected as in the
+                            // list form. `k` indexes the evaluated list, as
+                            // there is no list as written.
                             ExprValue::Float(_) => float_range_value(e, limits)
                                 .map_err(|detail| member_error(k, detail)),
                             // A member of a `list[int]`, converted to float
@@ -842,56 +818,12 @@ fn resolve_string_range(
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
-
     thread_local! {
         /// The `room` the most recent `resolve_list_item` call on this
         /// thread received, so a test can check what each caller passes.
         /// The early stop's only observable effect is the memory it saves.
         pub(super) static LAST_ROOM: std::cell::Cell<Option<usize>> =
             const { std::cell::Cell::new(None) };
-    }
-
-    use super::strip_redundant_leading_zeros as strip;
-
-    /// §7.5 rule 1. openjd-model-for-python asserts the same cases against its
-    /// regex form, `^([+-]?)0+(?=[0-9])`.
-    #[test]
-    fn strips_only_the_redundant_leading_zeros() {
-        // Redundant: another digit follows.
-        assert_eq!(strip("02.50"), "2.50");
-        assert_eq!(strip("007"), "7");
-        assert_eq!(strip("0007"), "7");
-        assert_eq!(strip("01E+2"), "1E+2");
-        assert_eq!(strip("-02.50"), "-2.50");
-        assert_eq!(strip("+02.50"), "+2.50");
-
-        // Not redundant: the zero is the integer part, so one digit stays.
-        assert_eq!(strip("0.50"), "0.50");
-        assert_eq!(strip("00.50"), "0.50");
-        assert_eq!(strip("0"), "0");
-        assert_eq!(strip("000"), "0");
-        assert_eq!(strip("-0.0"), "-0.0");
-        assert_eq!(strip("0e5"), "0e5");
-        assert_eq!(strip("00e5"), "0e5");
-
-        // Nothing to do.
-        assert_eq!(strip("1.5"), "1.5");
-        assert_eq!(strip("100"), "100");
-        assert_eq!(strip("3.500"), "3.500");
-
-        // §7.5 rule 2 is not this function's job: it never touches the fraction.
-        assert_eq!(strip("2.50"), "2.50");
-        assert_eq!(strip("0.0000001"), "0.0000001");
-    }
-
-    /// Not just an optimization: evidence that an unchanged element is returned
-    /// untouched rather than rebuilt.
-    #[test]
-    fn borrows_when_there_is_nothing_to_strip() {
-        assert!(matches!(strip("2.50"), Cow::Borrowed(_)));
-        assert!(matches!(strip("0.50"), Cow::Borrowed(_)));
-        assert!(matches!(strip("02.50"), Cow::Owned(_)));
     }
 
     fn no_budgets() -> crate::job::create_job::EvalBudgets {

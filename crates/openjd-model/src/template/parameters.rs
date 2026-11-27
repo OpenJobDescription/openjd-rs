@@ -286,16 +286,18 @@ impl JobParameterDefinition {
     /// itself for a scalar, and JSON for a list.
     ///
     /// A `LIST[FLOAT]` default item written as a numeric string is a JSON string holding
-    /// its spelling without white space (`[1.5,"2.50"]` for `default: [1.5, " 2.50"]`),
-    /// so it keeps that spelling (Template Schemas §2.14); a number item is a JSON number.
+    /// the text it renders as: its spelling without white space, a leading `+` or redundant
+    /// leading zeros (`[1.5,"2.50"]` for `default: [1.5, " +02.50"]`; Template Schemas
+    /// §2.14, §7.5); a number item is a JSON number.
     /// A caller that reads the JSON back must accept both forms for each item.
     pub fn default_value(&self) -> Option<String> {
         match self {
             Self::STRING(p) => p.default.clone(),
             Self::INT(p) => p.default.as_ref().map(|v| v.to_string()),
-            // A default given as a string keeps its spelling (Template Schemas
-            // §7.5). One given as a number is written as a computed float is,
-            // CPython's `repr` (Expression Language §1.3.4): `2` is `2.0`.
+            // A default given as a string keeps its spelling, less the notation
+            // §7.5 rule 1 drops (Template Schemas §7.5). One given as a number
+            // is written as a computed float is, CPython's `repr` (Expression
+            // Language §1.3.4): `2` is `2.0`.
             Self::FLOAT(p) => p.default.as_ref().map(|v| {
                 v.1.clone()
                     .unwrap_or_else(|| openjd_expr::value::format_float(v.0))
@@ -315,10 +317,11 @@ impl JobParameterDefinition {
                 let ints: Vec<i64> = v.iter().map(|i| i.0).collect();
                 serde_json::to_string(&ints).unwrap_or_default()
             }),
-            // An item written as a numeric string keeps its spelling (without the
-            // white space around it, Template Schemas §7.5), so it is written back as
-            // a JSON string; job creation parses it as a `<floatstring>`, as it does a
-            // FLOAT default. A number item is written as the number.
+            // An item written as a numeric string keeps its spelling, less the white
+            // space around it and the notation §7.5 rule 1 drops (Template Schemas
+            // §7.5), so it is written back as a JSON string; job creation parses it as
+            // a `<floatstring>`, as it does a FLOAT default. A number item is written
+            // as the number.
             Self::LIST_FLOAT(p) => p.default.as_ref().map(|v| {
                 let items: Vec<serde_json::Value> = v
                     .iter()
@@ -967,7 +970,9 @@ impl JobStringParameterDefinition {
 }
 
 /// An `i64` that deserializes from YAML integers, integer-valued floats (e.g. `42.0`), or
-/// numeric strings (e.g. `"42"`). Rejects booleans, nulls, and non-integer floats.
+/// numeric strings (e.g. `"42"`). Rejects booleans, nulls, non-integer floats, and any
+/// number outside the 64-bit signed range rather than saturating it (see
+/// `crate::numeric::json_number_as_i64` and `crate::numeric::intstring_as_i64`).
 #[derive(Debug, Clone)]
 pub struct FlexInt(pub i64);
 
@@ -975,26 +980,12 @@ impl<'de> Deserialize<'de> for FlexInt {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let val = serde_json::Value::deserialize(deserializer)?;
         match &val {
-            serde_json::Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    Ok(FlexInt(i))
-                } else if let Some(f) = n.as_f64() {
-                    if f.fract() == 0.0 {
-                        Ok(FlexInt(f as i64))
-                    } else {
-                        Err(serde::de::Error::custom(format!(
-                            "Expected integer, got float: {f}"
-                        )))
-                    }
-                } else {
-                    Err(serde::de::Error::custom("Invalid number"))
-                }
-            }
-            serde_json::Value::String(s) => s
-                .trim()
-                .parse::<i64>()
+            serde_json::Value::Number(n) => crate::numeric::json_number_as_i64(n)
                 .map(FlexInt)
-                .map_err(|_| serde::de::Error::custom(format!("Cannot parse '{s}' as integer"))),
+                .map_err(serde::de::Error::custom),
+            serde_json::Value::String(s) => crate::numeric::intstring_as_i64(s)
+                .map(FlexInt)
+                .map_err(serde::de::Error::custom),
             serde_json::Value::Bool(_) => {
                 Err(serde::de::Error::custom("Expected integer, got boolean"))
             }
@@ -1011,8 +1002,10 @@ impl std::fmt::Display for FlexInt {
 }
 
 /// An `f64` that deserializes from YAML numbers or numeric strings (e.g. `"3.14"`).
-/// Preserves the original string representation when parsed from a string, which is needed
-/// for round-trip fidelity in constraint checking. Rejects NaN, Infinity, booleans, and nulls.
+/// When parsed from a string, keeps the text it is rendered as: the string without the white
+/// space around it and without redundant notation (a leading `+`, redundant leading zeros;
+/// `crate::numeric::floatstring_text`, Template Schemas §7.5). Rejects NaN, Infinity, booleans,
+/// and nulls.
 #[derive(Debug, Clone)]
 pub struct FlexFloat(pub f64, pub Option<String>);
 
@@ -1044,7 +1037,10 @@ impl<'de> Deserialize<'de> for FlexFloat {
                     serde::de::Error::custom(format!("Cannot parse '{s}' as float"))
                 })?;
                 reject_nan_inf(f).map_err(serde::de::Error::custom)?;
-                Ok(FlexFloat(f, Some(s.trim().to_string())))
+                Ok(FlexFloat(
+                    f,
+                    Some(crate::numeric::floatstring_text(s.trim()).into_owned()),
+                ))
             }
             serde_json::Value::Bool(_) => {
                 Err(serde::de::Error::custom("Expected number, got boolean"))

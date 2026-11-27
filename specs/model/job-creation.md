@@ -259,13 +259,16 @@ budgets template validation and the session runtime apply.
      element's index in the list as written. (The STRING and PATH per-element length
      and empty-value checks in `resolve_string_range` count the resolved list
      instead, after flattening.)
-     - INT and CHUNK[INT]: trimmed, then parsed as an `i64` (Rust's integer syntax:
-       an optional sign and ASCII digits). Otherwise job creation fails with `Task
+     - INT and CHUNK[INT]: read as an `<intstring>` by `numeric::parse_intstring`, the
+       rule a template's own numeric strings follow (trimmed; an optional sign and ASCII
+       digits; see [parameters.md](parameters.md#integers-are-64-bit)). Otherwise job
+       creation fails with `Task
        parameter '<name>' range[<k>]: value '<resolved>' is not an integer`, or `...
        is out of range for a 64-bit integer` for an integer that does not fit.
      - FLOAT: trimmed, and must parse as a finite `f64`, or job creation fails with
        `Task parameter '<name>' range[<k>]: value '<resolved>' is not a number` or
-       `... is not finite`. The text is kept as the `<floatstring>` spelling (§7.5).
+       `... is not finite`. The text, less a leading `+` and redundant leading zeros, is
+       kept as the `<floatstring>` spelling (§7.5).
 
      For a whole-field list-item expression the target's coercion applies
      (Expression Language §1.2.3), as for the chunks fields above: `{{ 3.0 }}` is 3
@@ -297,9 +300,12 @@ budgets template validation and the session runtime apply.
      integer list member converted to float, renders through `format_float`:
      `{{ Param.Ints }}` with `[3, 4]` gives `3.0` and `4.0`. A STRING value that is an integer coerces to `int`
      first (Expression Language §1.2.3 prefers `int` for a string), so it renders as
-     that integer: `"+5"` renders `5`, where the same text as a `<floatstring>`, or
-     as the element without EXPR, keeps its sign and renders `+5`. A decimal string
-     keeps its spelling either way (`"+2.5"` renders `+2.5`).
+     that integer: `"+5"` renders `5`, and so does the same text as a `<floatstring>`,
+     or as the element without EXPR, since §7.5 rule 1 drops a leading `+` and
+     redundant leading zeros (`numeric::floatstring_text`). A decimal string keeps
+     its decimal places either way (`"+02.50"` renders `2.50`). A float spelling a
+     value carries, such as a submitted `+3.10`, is rendered by the same rule when it
+     becomes an element (`3.10`).
 
      The §3.4.2 limit of 1024 characters after resolution is not applied to INT or
      FLOAT elements, only to STRING and PATH ones. An INT element only has to parse,

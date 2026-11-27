@@ -245,7 +245,8 @@ spelling of its own go through `Float64::new`, which renders via `format_float`.
 `<floatstring>`, a list-element value that is an integer or a float carrying a spelling other
 than its `format_float` rendering, and a range-expression float member carrying such a
 spelling, go through
-`Float64::with_str` after trimming, stripping redundant leading zeros (§7.5 rule 1) and
+`Float64::with_str` after trimming, dropping a leading `+` and redundant leading zeros
+(§7.5 rule 1, `numeric::floatstring_text`; `'+02.50'` renders `2.50`) and
 checking the text against `max_task_param_string_len`. Over that cap the element keeps only
 its value, which is how it rendered before the text was carried at all. See
 [job-creation.md](job-creation.md) for how list elements resolve.

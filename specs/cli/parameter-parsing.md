@@ -107,8 +107,10 @@ value itself, so the differences include:
 - Python reads a YAML parameter file as YAML 1.1, so `F: 1e20` is the string `1e20` there and
   the number `1e20` here.
 
-A value given as `Key=Value` is always a string: `-p F=2` is the `<floatstring>` `2`, which
-keeps its spelling (Template Schemas §7.5) and is written `2`.
+A value given as `Key=Value` is always a string: `-p F=2` is the string `2`, which a FLOAT
+parameter reads with the white space around it ignored (Template Schemas §7.5) and keeps in its
+original form as a submitted value (Expression Language §1.3.4), so it is written `2`, and
+`-p F=+02.50` is written `+02.50`.
 
 ## Task Parameters (`-t` / `--task-param`)
 

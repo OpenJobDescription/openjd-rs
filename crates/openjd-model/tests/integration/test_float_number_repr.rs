@@ -4,7 +4,8 @@
 
 //! A FLOAT given as a YAML or JSON number is written as CPython's `repr`
 //! writes it, the same text as a computed float (Expression Language §1.3.4).
-//! A FLOAT given as a string keeps its spelling (Template Schemas §7.5).
+//! A FLOAT given as a string keeps its spelling, less a leading `+` and
+//! redundant leading zeros (Template Schemas §7.5).
 //!
 //! The expected text comes from openjd-expr's CPython fixture
 //! (`data/float_repr_cpython.txt`, see `scripts/generate_float_repr_fixture.py`).
@@ -133,7 +134,8 @@ fn list_float_default_items_given_as_numbers_write_as_cpython_repr() {
 #[test]
 fn float_default_examples() {
     // The values from the original report, and a string default beside each:
-    // a FLOAT given as a string keeps its spelling.
+    // a FLOAT given as a string keeps its spelling, less a leading `+` and
+    // redundant leading zeros.
     let params: Vec<String> = [
         ("A", "2", "2.0"),
         ("B", "1e20", "1e+20"),

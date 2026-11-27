@@ -686,9 +686,8 @@ pub(super) fn coerce_to_job_parameter_type(
             ));
         }
         (ExprValue::Float(f), JobParameterType::Int) => {
-            let v = f.value();
-            if v.fract() == 0.0 && v >= i64::MIN as f64 && v < i64::MAX as f64 {
-                return Ok(ExprValue::Int(v as i64));
+            if let Some(i) = crate::numeric::float_as_exact_i64(f.value()) {
+                return Ok(ExprValue::Int(i));
             }
         }
         // Numeric to BOOL, decided on the number rather than on its text. The fallback
@@ -1329,7 +1328,11 @@ pub(super) fn list_element_type(param_type: JobParameterType) -> Option<JobParam
 /// So each leaf is coerced to the declared type through [`coerce_to_job_parameter_type`],
 /// the same path the scalar types take. `LIST[T]` therefore accepts exactly what `T`
 /// accepts, by construction rather than by a parallel table. A leaf that already matches
-/// its type is returned untouched.
+/// its type is returned untouched. The one exception is an INT leaf given as a JSON
+/// number, which is read by the template's rule, `numeric::json_number_as_i64`, because
+/// the `f64` serde_json gives for a number outside the 64-bit range can be in it: the JSON
+/// `-9223372036854775809` reads as exactly -2^63. So the JSON number
+/// `-9223372036854775808.0` is refused, while a native `Float` of -2^63 is accepted.
 ///
 /// A value that is not a list where a list type is declared is an error: the declared type
 /// is the only thing that can say so, and no later stage checks it.
@@ -1351,6 +1354,15 @@ pub(super) fn coerce_json_to_job_parameter_type(
             param_type.as_spec_str(),
             json_type_name(other)
         )),
+        // An INT leaf given as a JSON number is read by the template's rule
+        // (`numeric::json_number_as_i64`), which refuses a number outside the
+        // 64-bit range rather than reading the `f64` serde_json gives for it:
+        // `-9223372036854775809` reads as exactly -2^63.
+        (serde_json::Value::Number(n), None) if param_type == JobParameterType::Int => {
+            crate::numeric::json_number_as_i64(n)
+                .map(openjd_expr::ExprValue::Int)
+                .map_err(|_| format!("Value '{n}' is not a valid integer or integer string."))
+        }
         // A leaf: convert by JSON type, then coerce to what the parameter declared.
         (other, None) => {
             let value = json_to_expr_value(other)?;
@@ -1365,12 +1377,14 @@ pub(super) fn coerce_json_to_job_parameter_type(
 /// The one place list elements are coerced: a list given as JSON text passes
 /// [`coerce_json_to_job_parameter_type`], and a native list under `LIST[INT]`,
 /// `LIST[FLOAT]` or `LIST[LIST[INT]]` passes [`coerce_native_list_element`]. Both end
-/// at [`coerce_to_job_parameter_type`] for each leaf, so for those types a native list
-/// and the same list as JSON text give the same value. Two differences remain: a native
-/// path element is refused under an INT or FLOAT element type (`Cannot coerce path to
-/// INT`), while the same text as a JSON string is a number; and a JSON number is read
-/// as an `f64`, so a native float keeps a spelling (`1.50`) that the JSON number `1.50`
-/// does not. The values compare equal, but an error quotes each form's text (`'1.50'`
+/// at [`coerce_to_job_parameter_type`] for each leaf (an INT leaf given as a JSON number
+/// at `numeric::json_number_as_i64`), so for those types a native list and the same list
+/// as JSON text give the same value. Three differences remain: a native path element is
+/// refused under an INT or FLOAT element type (`Cannot coerce path to INT`), while the
+/// same text as a JSON string is a number; a JSON number is read as an `f64`, so a native
+/// float keeps a spelling (`1.50`) that the JSON number `1.50` does not; and the JSON
+/// number `-9223372036854775808.0` is refused under INT, while a native `Float` of -2^63 is
+/// read as `i64::MIN`. The values compare equal, but an error quotes each form's text (`'1.50'`
 /// against `'1.5'`).
 /// A numeric string element is a number with the white space around it ignored
 /// (Template Schemas §7.5), and a FLOAT string keeps its spelling.

@@ -64,12 +64,14 @@ Common methods on all variants:
 - `job_param_type() -> JobParameterType`
 - `default_value() -> Option<String>` — Returns the default as text job creation parses: the value
   for a scalar, JSON for a list. A `LIST[FLOAT]` item written as a numeric string is a JSON string
-  holding its spelling (`[1.5,"2.50"]`), so a reader of the JSON must accept a number or a string
-  for each item
+  holding the text it renders as (`[1.5,"2.50"]`), so a reader of the JSON must accept a number or
+  a string for each item
 - `check_constraints(&ExprValue) -> Result<(), String>` — Runtime value validation
 - `validate_definition(&EffectiveLimits) -> Result<(), Vec<String>>` — Template-level consistency (accumulates errors)
 
-A FLOAT default given as a string keeps its spelling in `default_value` (Template Schemas §7.5).
+A FLOAT default given as a string keeps its spelling in `default_value`, without the white space
+around it and without the notation §7.5 rule 1 drops, a leading `+` and redundant leading zeros
+(Template Schemas §7.5).
 One given as a YAML or JSON number is written by `openjd_expr::value::format_float`, CPython's
 `repr` (Expression Language §1.3.4), so `default: 2` is `"2.0"` and `default: 1e20` is `"1e+20"`.
 A `LIST[FLOAT]` default is JSON, and job creation reads a number item back as the same `f64`
@@ -180,9 +182,23 @@ two input modes:
   template's own numeric strings (`default`, `minValue`, `maxValue`, `allowedValues`, and a list
   parameter's `default` items and `item` constraints, Template Schemas §2.13, §2.14, §2.16) are
   trimmed the same way when they are decoded (`FlexInt`, `FlexFloat`). A FLOAT default, and a
-  `LIST[FLOAT]` default item, written as a string keeps its spelling without the white space:
-  `default: [1.50, " 2.50"]` is `[1.5, 2.50]` (`default_value` writes the string item back as a
-  JSON string). The string the public `JobIntParameterDefinition::check_constraints` and
+  `LIST[FLOAT]` default item, written as a string keeps its spelling without the white space and
+  without the notation that is redundant to its value, a leading `+` and redundant leading zeros
+  (§7.5 rule 1, `numeric::floatstring_text`, the rule a FLOAT range element follows):
+  `default: [1.50, " +02.50"]` is `[1.5, 2.50]` (`default_value` writes the string item back as
+  a JSON string). A value submitted for a FLOAT parameter keeps its original form where it is
+  used as a value (Expression Language §1.3.4): `" +03.10 "` is `+03.10` in `{{ Param.F }}`.
+  Once it is an element of a FLOAT task parameter range, through a format string element
+  (`['{{ Param.F }}']`) or a whole-field range expression (`{{ Param.LF }}`), it is rendered as
+  a range element's `<floatstring>` is, so it renders `3.10` there. **Divergence from
+  openjd-model-for-python:** Python writes a FLOAT default given as a string in its `Decimal`
+  form, which drops the `+` and redundant zeros but also rewrites the notation the value was
+  written in: `'.5'` is `0.5`, `'5.'` is `5`, `'1e-07'` is `1E-7`, `'00e5'` is `0E+5` and
+  `'+1E+02'` is `1E+2`. This crate keeps that notation (`.5`, `5.`, `1e-07`, `0e5`, `1E+02`), as
+  §7.5 rule 2 asks. Python also keeps a leading `+` on a FLOAT range element (`'+4.25'` renders
+  `+4.25`), which this crate drops, as openjd-specifications#180's §7.5 rule 1 asks.
+
+  The string the public `JobIntParameterDefinition::check_constraints` and
   `JobFloatParameterDefinition::check_constraints` parse is trimmed too (job creation itself
   checks the merged definition, which receives the coerced value). A string element of a `LIST[INT]`,
   `LIST[FLOAT]` or `LIST[LIST[INT]]` value goes through the same coercion, so
@@ -205,9 +221,59 @@ two input modes:
   (`LIST[INT]`, `LIST[FLOAT]`, or an inner list of `LIST[LIST[INT]]`) is refused
   (`item[0]: Cannot coerce path to INT`), while the same text in JSON is a number. A JSON number
   is read as an `f64`, so `'[1.50]'` is `[1.5]` while a native float keeps `1.50`; the values are
-  equal, but an error quotes each form's text (`'1.50'` against `'1.5'`). An element error names the element in either form
+  equal, but an error quotes each form's text (`'1.50'` against `'1.5'`). A JSON number under an
+  INT element type is read by `numeric::json_number_as_i64` (see
+  [Integers are 64-bit](#integers-are-64-bit)), so `'[-9223372036854775808.0]'` is refused while a
+  native `Float` of -2^63 is read as `i64::MIN`. An element error names the element in either form
   (`item[1]: Value '1 000' is not a valid integer or integer string.`, or `item[1][0]: ...` in a
   `LIST[LIST[INT]]`).
+
+### Integers are 64-bit
+
+Every integer a template writes in an `<integer>` or `<intstring>` field is stored as an `i64`:
+an INT parameter's `default`, `minValue`, `maxValue`, `allowedValues` and `userInterface`
+`singleStepDelta`, the same fields of a `LIST[INT]` or `LIST[LIST[INT]]` default and `item`
+constraints, the elements of an `<IntRangeList>`, and the `CHUNK[INT]` chunk counts. A number
+outside `[-2^63, 2^63)` is a decode error in every one of them, whichever form it is written in:
+a YAML integer (`9223372036854775808`), a YAML float with no fractional part (`1.0e19`), or a
+numeric string (`'9223372036854775808'`). It is never rounded or saturated to another number.
+
+The rules live in `src/numeric.rs`:
+
+- `parse_intstring` reads an `<intstring>` through openjd-expr's `string` to `int` conversion
+  (`ExprValue::from_str_coerce`, the conversion a value submitted for an INT parameter goes
+  through), and says whether a refused string was an integer out of range or not an integer.
+  Template decode (`FlexInt`, `IntOrFormatString`), a resolved format string in an
+  `<IntRangeList>` or a chunk count, the static check of a resolved numeric field
+  (`validate_v2023_09/format_strings.rs`) and an action's literal `timeout` and
+  `notifyPeriodInSeconds` all read through it, each with its own located message.
+- `json_number_as_i64` reads a number, and `float_as_exact_i64` an integral float, through
+  openjd-expr's `float` to `int` conversion (2026-02 Expression Language §1.2.3). A number in a
+  submitted `LIST[INT]` or `LIST[LIST[INT]]` value given as JSON text goes through
+  `json_number_as_i64` (`coerce_json_to_job_parameter_type`), so `[-9223372036854775809]` is
+  refused (`Value '-9.223372036854776e+18' is not a valid integer or integer string.`, naming the
+  `f64` serde_json reads) rather than read as `-2^63`. A native float submitted for an INT
+  parameter goes through `float_as_exact_i64` in `coerce_to_job_parameter_type`.
+
+Decode messages: `Cannot convert '9223372036854775808' to int: number too large to fit in target
+type` for a string, which is openjd-expr's and openjd-model-for-python's message, and the same
+without quotes for a number. The YAML parser (serde-saphyr) reads an integer above `u64::MAX` or
+below `i64::MIN` as the nearest `f64`, so such a number is named as that `f64`
+(`Cannot convert 1e+20 to int: ...`). An integer just below `i64::MIN` rounds to exactly `-2^63`,
+which cannot be told apart from it, so an `f64` of `-2^63` is refused with a message that says to
+write `-9223372036854775808` as an integer; the integer itself is read as an `i64` and accepted.
+A JSON template is read by serde_json, which does the same. A YAML hexadecimal, octal or binary
+integer wider than 64 bits reaches this crate as a string and is refused as
+`Cannot parse '0x...' as integer`, since an `<intstring>` is base 10.
+
+The 64-bit range is the Expression Language's `int` (2026-02 §1.2.1). Template Schemas 2023-09
+§2.3 states no bound for INT, and this crate cannot hold a wider value with the EXPR extension or
+without it, so it refuses one rather than storing a different number.
+
+**Divergence from openjd-model-for-python:** Python accepts any integer when it validates the
+template, and refuses one outside the 64-bit range when it creates the job, with the string
+message above. It refuses an integral float such as `4.0` for an INT field, which this crate
+accepts.
 
 ## Validation Context and Extension Effects
 

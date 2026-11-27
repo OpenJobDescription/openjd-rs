@@ -796,7 +796,7 @@ fn check_resolved_constraint(
                     // Multi-segment strings parse like Python's int():
                     // surrounding whitespace is tolerated, matching the
                     // downstream handling at job creation and in the session runtime.
-                    match s.trim().parse::<i64>() {
+                    match crate::numeric::parse_intstring(&s) {
                         Ok(v) => v,
                         Err(_) => {
                             errors.add(path, *parse_msg);
