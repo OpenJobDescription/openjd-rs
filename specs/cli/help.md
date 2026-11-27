@@ -103,13 +103,15 @@ try_context_aware_help(&args)
 | No default | `[required]` |
 | STRING/PATH with newlines | `[default: see below]` + multi-line block at end |
 | STRING/PATH without newlines | `[default: 'value']` (quoted) |
-| Other types | `[default: value]` (unquoted). A list default is its JSON text, which `-p` accepts; a `LIST[FLOAT]` item written as a numeric string shows as a JSON string, keeping its spelling (`[1.5,"2.50"]`) |
+| Other types | `[default: value]` (unquoted). A list default is its JSON text, which `-p` accepts; a `LIST[FLOAT]` item written as a numeric string shows as a JSON string holding the text it renders as (`[1.5,"2.50"]` for `[1.5, '+02.50']`) |
 
 Multi-line defaults (common for script content in PATH parameters) are shown after the
 description to avoid breaking the compact single-line format.
 
 A FLOAT default given as a number is written as a float value is, CPython's `repr`
-(`[default: 2.0]`, `[default: 1e+20]`), and one given as a string keeps its spelling.
+(`[default: 2.0]`, `[default: 1e+20]`), and one given as a string shows the text it renders as:
+its spelling, less a leading `+` and redundant leading zeros (Template Schemas §7.5), so
+`default: '+02.50'` shows `[default: 2.50]`.
 
 ### Constraint Display
 

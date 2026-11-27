@@ -694,12 +694,12 @@ fn resolve_float_range(
                             // (Expression Language §1.3.4), rendered by the
                             // rule a range list element's `<floatstring>` is
                             // (§7.5: no leading `+` or redundant zeros), so
-                            // `{{ Param.LF }}` and `["{{ Param.LF }}"]` give the
-                            // same tasks. A
-                            // template cannot give a float a spelling that is
-                            // not a number, but an API caller's value can, and
-                            // is rejected as in the list form. `k` indexes the
-                            // evaluated list, as there is no list as written.
+                            // `{{ Param.LF }}` and `["{{ Param.LF }}"]` give
+                            // the same tasks. A template cannot give a float a
+                            // spelling that is not a number, but an API
+                            // caller's value can, and is rejected as in the
+                            // list form. `k` indexes the evaluated list, as
+                            // there is no list as written.
                             ExprValue::Float(_) => float_range_value(e, limits)
                                 .map_err(|detail| member_error(k, detail)),
                             // A member of a `list[int]`, converted to float

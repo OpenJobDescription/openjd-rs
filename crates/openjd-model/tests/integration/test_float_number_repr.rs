@@ -4,7 +4,8 @@
 
 //! A FLOAT given as a YAML or JSON number is written as CPython's `repr`
 //! writes it, the same text as a computed float (Expression Language §1.3.4).
-//! A FLOAT given as a string keeps its spelling (Template Schemas §7.5).
+//! A FLOAT given as a string keeps its spelling, less a leading `+` and
+//! redundant leading zeros (Template Schemas §7.5).
 //!
 //! The expected text comes from openjd-expr's CPython fixture
 //! (`data/float_repr_cpython.txt`, see `scripts/generate_float_repr_fixture.py`).

@@ -294,10 +294,10 @@ impl JobParameterDefinition {
         match self {
             Self::STRING(p) => p.default.clone(),
             Self::INT(p) => p.default.as_ref().map(|v| v.to_string()),
-            // A default given as a string keeps its spelling, less the
-            // notation §7.5 rule 1 drops (Template Schemas §7.5). One given as
-            // a number is written as a computed float is,
-            // CPython's `repr` (Expression Language §1.3.4): `2` is `2.0`.
+            // A default given as a string keeps its spelling, less the notation
+            // §7.5 rule 1 drops (Template Schemas §7.5). One given as a number
+            // is written as a computed float is, CPython's `repr` (Expression
+            // Language §1.3.4): `2` is `2.0`.
             Self::FLOAT(p) => p.default.as_ref().map(|v| {
                 v.1.clone()
                     .unwrap_or_else(|| openjd_expr::value::format_float(v.0))
@@ -317,10 +317,11 @@ impl JobParameterDefinition {
                 let ints: Vec<i64> = v.iter().map(|i| i.0).collect();
                 serde_json::to_string(&ints).unwrap_or_default()
             }),
-            // An item written as a numeric string keeps its spelling (without the
-            // white space around it, Template Schemas §7.5), so it is written back as
-            // a JSON string; job creation parses it as a `<floatstring>`, as it does a
-            // FLOAT default. A number item is written as the number.
+            // An item written as a numeric string keeps its spelling, less the white
+            // space around it and the notation §7.5 rule 1 drops (Template Schemas
+            // §7.5), so it is written back as a JSON string; job creation parses it as
+            // a `<floatstring>`, as it does a FLOAT default. A number item is written
+            // as the number.
             Self::LIST_FLOAT(p) => p.default.as_ref().map(|v| {
                 let items: Vec<serde_json::Value> = v
                     .iter()
