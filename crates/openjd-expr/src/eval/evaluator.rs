@@ -1687,9 +1687,12 @@ impl<'a> Evaluator<'a> {
     /// (§1.2.4). The decision is the library's: the receiver's type is
     /// matched against the first parameter of its `__getitem__` signatures
     /// of the call's arity (`args`: the receiver, then the index or the three
-    /// bounds), with `int` indices and without coercion. Deciding at the type
-    /// gives a concrete receiver and an unresolved one of the same type the
-    /// same answer, so `openjd check` refuses what a run would. A union
+    /// bounds), with `int` indices and without coercion. Deciding at the type,
+    /// for every receiver, gives a concrete receiver and an unresolved one of
+    /// the same type the same answer, so `openjd check` refuses what a run
+    /// would. It runs after the checks of the index and bounds themselves (an
+    /// undefined name, a zero step, an index that cannot be an integer), so
+    /// those keep their messages. A union
     /// receiver passes when one of its members does, and an `any` one passes
     /// because the signatures' type variables match it. The index and bounds are
     /// then checked by the dispatch itself, with their usual coercions. Only
@@ -1701,11 +1704,7 @@ impl<'a> Evaluator<'a> {
     /// __getitem__(int, int)`, naming the arguments as they are. On refusal
     /// the operands are released, as a failed dispatch releases them.
     fn check_subscript_receiver(&mut self, args: &[&ExprValue]) -> Result<(), ExpressionError> {
-        let value = args[0];
-        if value.is_list() || matches!(value, ExprValue::String(_) | ExprValue::RangeExpr(_)) {
-            return Ok(());
-        }
-        let receiver = unwrap_unresolved(&value.expr_type());
+        let receiver = unwrap_unresolved(&args[0].expr_type());
         let members = if receiver.code() == crate::types::TypeCode::Union {
             receiver.params().to_vec()
         } else {
@@ -1770,10 +1769,10 @@ impl<'a> Evaluator<'a> {
                 None => self.track(ExprValue::Null)?,
             };
 
-            self.check_subscript_receiver(&[&value, &start, &stop, &step])?;
             if let ExprValue::Int(0) = &step {
                 return Err(ExpressionError::new("Slice step cannot be zero"));
             }
+            self.check_subscript_receiver(&[&value, &start, &stop, &step])?;
 
             // An unresolved bound with a concrete list or string receiver
             // gives the receiver's own type: a slice of a `list[T]` is a
@@ -1814,7 +1813,6 @@ impl<'a> Evaluator<'a> {
         }
 
         let slice = self.eval_node(&s.slice, None)?;
-        self.check_subscript_receiver(&[&value, &slice])?;
 
         // Check index type for unresolved values
         if slice.is_unresolved() {
@@ -1842,6 +1840,7 @@ impl<'a> Evaluator<'a> {
                 return Err(err);
             }
         }
+        self.check_subscript_receiver(&[&value, &slice])?;
 
         // Single-index access: dispatch through library
         let empty_list = ExprType::fixed(ExprType::list(ExprType::NULLTYPE));

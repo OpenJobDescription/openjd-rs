@@ -772,9 +772,15 @@ Handles indexing (`x[0]`) and slicing (`x[1:3]`, `x[::2]`).
   are. So a host-context check refuses `path("/a/b")[0]`, a PATH parameter's
   `Param.P[0]` and an INT parameter's `Param.I[0:1]` as a run does. A union
   receiver passes when one member does, and an `any` receiver passes because
-  the signatures' type variables match it. The check matches signatures only
-  and builds no return type, and on refusal it releases the operands, as a
-  failed dispatch does.
+  the signatures' type variables match it. The check runs for every receiver,
+  after the index's and bounds' own checks (an undefined name, a zero step, an
+  index that cannot be an integer), so those keep their messages. It matches
+  signatures only and builds no return type, and on refusal it releases the
+  operands, as a failed dispatch does. In a comprehension typed over an
+  unresolved list, a body that subscripts such a receiver fails to type, so the
+  comprehension is `list[nulltype]` (see ListComp) and indexing it is refused
+  as always empty: `[x[0] for x in Param.LP][0]` for a `LIST[PATH]` parameter
+  is refused at validation, as every run fails.
 - Negative indices wrap around (Python semantics)
 - Slices return the same type as the input (string→string, list→list). A
   slice with an unresolved receiver, or of a concrete `range_expr` with an
@@ -893,10 +899,3 @@ Key differences:
    `list[T | nulltype]` rather than `list[T]`, and a filter or body that fails to
    type gives `list[nulltype]` rather than an error. The Python mainline is moving
    to these Rust bindings rather than being changed.
-6. **Subscript of an unresolved receiver** — Template validation refuses a
-   subscript or slice whose receiver's type takes none (`Param.P[0]` for a PATH
-   parameter, `Param.I[0:1]` for an INT one, `Session.WorkingDirectory[0]`), with
-   the message a run gives. The Python `expr` branch accepts these at validation
-   (it coerces an unresolved `path` receiver to `string`, and types an unresolved
-   slice without its signatures), and every run fails. A literal
-   `path("/a/b")[0]` is refused by both.

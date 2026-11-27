@@ -663,8 +663,8 @@ fn the_receiver_check_matches_signatures_of_the_calls_arity() {
     );
 }
 
-/// A `noreturn` receiver gets the library's message, as it did when the
-/// dispatch alone decided, and as openjd-model-for-python gives.
+/// A `noreturn` receiver gets the library's message, the one every other
+/// type that takes no subscript gets.
 #[test]
 fn a_noreturn_receiver_gets_the_librarys_message() {
     let err = eval_with("fail(X)[0]", "X", ExprValue::unresolved(ExprType::STRING)).unwrap_err();
@@ -674,10 +674,43 @@ fn a_noreturn_receiver_gets_the_librarys_message() {
     );
 }
 
-/// The index is evaluated before the receiver is checked, so a name that
-/// resolves nowhere is still reported as such.
+/// The index and bounds are checked before the receiver, so an undefined
+/// name, a zero step and an index that cannot be an integer keep their own
+/// messages, for a receiver that takes no subscript too.
 #[test]
-fn an_undefined_index_is_reported_before_the_receiver() {
-    let err = eval_with("X[Typo]", "X", ExprValue::Int(5)).unwrap_err();
-    assert!(err.starts_with("Undefined variable: 'Typo'"), "{err}");
+fn index_and_bound_errors_are_reported_before_the_receiver() {
+    let path = || ExprValue::new_path("/a/b", PathFormat::Posix);
+    for (expr, value, expected) in [
+        (
+            "X[Typo]",
+            ExprValue::Int(5),
+            "Undefined variable: 'Typo'. Did you mean: X\n  X[Typo]\n    ^~~~",
+        ),
+        (
+            "X[::0]",
+            ExprValue::Int(5),
+            "Slice step cannot be zero\n  X[::0]\n  ~^~~~~",
+        ),
+        (
+            "X[::0]",
+            ExprValue::unresolved(ExprType::PATH),
+            "Slice step cannot be zero\n  X[::0]\n  ~^~~~~",
+        ),
+        (
+            "X[::0]",
+            path(),
+            "Slice step cannot be zero\n  X[::0]\n  ~^~~~~",
+        ),
+    ] {
+        assert_eq!(eval_with(expr, "X", value).unwrap_err(), expected, "{expr}");
+    }
+    let mut st = SymbolTable::new();
+    st.set("X", ExprValue::unresolved(ExprType::INT)).unwrap();
+    st.set("S", ExprValue::unresolved(ExprType::STRING))
+        .unwrap();
+    let err = ParsedExpression::new("X[S]")
+        .and_then(|p| p.evaluate(&st))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(err, "Index must be an integer\n  X[S]\n  ~^~~");
 }
