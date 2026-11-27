@@ -383,10 +383,11 @@ where `resolved_symtab`, `identifier` and `os_env_vars` are all optional:
    from the table stored on the environment at enter (§ Enter step 2), as the enter did;
    from the session's own values (job parameter values and `Session.*`) when neither
    exists. If that fails, for example because the table can't be deserialized, it falls
-   back and logs the first error as a warning after the "Exiting Environment" banner:
-   from the argument to the stored table, and from the stored table (which the enter
-   could not build either, so the enter failed) to the session's own values. The
-   `onExit` then runs with the fallback,
+   back one step and logs the first error as a warning after the "Exiting Environment"
+   banner: a bad argument falls back to the stored table, and, when no argument was given,
+   a bad stored table (which the enter could not build either, so the enter failed) falls
+   back to the session's own values. A bad argument and a bad stored table fail the exit.
+   The `onExit` then runs with the fallback,
    so whatever the `onEnter` started is still stopped: How Jobs Are Run says a Session
    exits every Environment it entered. The action and the call's result are the
    `onExit`'s own; the warning is the only trace of the bad input. The stored table is

@@ -1882,9 +1882,11 @@ impl Session {
     /// `None`, from the table the environment was entered with
     /// ([`Environment::resolved_symtab`] as stored by the enter). If that
     /// can't be built (for example it can't be deserialized), the exit falls
-    /// back, from `resolved_symtab` to the table the environment was entered
-    /// with, and from that table to the session's own values (job parameter
-    /// values and `Session.*`); the `onExit` runs with the fallback, the
+    /// back one step: a bad `resolved_symtab` to the table the environment
+    /// was entered with, or, when no `resolved_symtab` was given, a bad
+    /// stored table to the session's own values (job parameter values and
+    /// `Session.*`). A bad `resolved_symtab` and a bad stored table fail the
+    /// exit. When the fallback builds, the `onExit` runs with it, the
     /// session log records the first error as a warning, and the call
     /// succeeds or fails on the `onExit` alone.
     ///
