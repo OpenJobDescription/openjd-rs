@@ -686,9 +686,8 @@ pub(super) fn coerce_to_job_parameter_type(
             ));
         }
         (ExprValue::Float(f), JobParameterType::Int) => {
-            let v = f.value();
-            if v.fract() == 0.0 && v >= i64::MIN as f64 && v < i64::MAX as f64 {
-                return Ok(ExprValue::Int(v as i64));
+            if let Some(i) = crate::numeric::float_as_exact_i64(f.value()) {
+                return Ok(ExprValue::Int(i));
             }
         }
         // Numeric to BOOL, decided on the number rather than on its text. The fallback

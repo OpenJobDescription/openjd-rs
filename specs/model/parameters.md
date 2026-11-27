@@ -209,6 +209,34 @@ two input modes:
   (`item[1]: Value '1 000' is not a valid integer or integer string.`, or `item[1][0]: ...` in a
   `LIST[LIST[INT]]`).
 
+### Integers are 64-bit
+
+Every integer a template writes in an `<integer>` or `<intstring>` field is stored as an `i64`:
+an INT parameter's `default`, `minValue`, `maxValue`, `allowedValues` and `userInterface`
+`singleStepDelta`, the same fields of a `LIST[INT]` or `LIST[LIST[INT]]` default and `item`
+constraints, the elements of an `<IntRangeList>`, and the `CHUNK[INT]` chunk counts. A number
+outside `[-2^63, 2^63)` is a decode error in every one of them, whichever form it is written in:
+a YAML integer (`9223372036854775808`), a YAML float with no fractional part (`1.0e19`), or a
+numeric string (`'9223372036854775808'`). The message names the value
+(`Integer 9223372036854775808 is outside the 64-bit signed range`). The rules live in
+`src/numeric.rs`: `json_number_as_i64` for a number, `intstring_as_i64` for a string, and
+`float_as_exact_i64` for an integral float, which defers to openjd-expr's `float` to `int`
+conversion (2026-02 Expression Language §1.2.3). A value submitted for an INT parameter at job
+creation goes through the same `float_as_exact_i64` in `coerce_to_job_parameter_type`.
+
+The 64-bit range is the Expression Language's `int` (2026-02 §1.2.1). Template Schemas 2023-09
+§2.3 states no bound for INT, and with the EXPR extension or without it this crate cannot hold a
+wider value, so it refuses one rather than storing a different number.
+
+The YAML parser (serde-saphyr) reads an integer outside both the `i64` and the `u64` range as an
+`f64`. An integer that rounds onto an in-range `f64` arrives as that float and is read as it: the
+only such integers are just below `-2^63` (for example `-9223372036854775809` rounds to
+`-2^63`). A numeric string has no such loss.
+
+**Divergence from openjd-model-for-python:** Python accepts any integer when it validates the
+template, and refuses one outside the 64-bit range when it creates the job
+(`Cannot convert '9223372036854775808' to int: number too large to fit in target type`).
+
 ## Validation Context and Extension Effects
 
 ### ValidationContext

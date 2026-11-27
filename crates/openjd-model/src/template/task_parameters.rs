@@ -290,6 +290,8 @@ pub struct ChunkIntTaskParameterDefinition {
 /// Accepts:
 /// - YAML integer, or integer-valued float such as `4.0` → `IntOrFormatString::Int(n)`
 /// - String that parses as i64, surrounding whitespace allowed → `IntOrFormatString::Int(n)`
+/// - Either form outside the 64-bit signed range is refused, as for [`FlexInt`]
+///   (see `crate::numeric`)
 /// - String containing `{{` that parses as a format string →
 ///   `IntOrFormatString::FormatString(fs)`
 ///
@@ -319,21 +321,9 @@ impl<'de> Deserialize<'de> for IntOrFormatString {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let val = serde_json::Value::deserialize(deserializer)?;
         match &val {
-            serde_json::Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    Ok(Self::Int(i))
-                } else if let Some(f) = n.as_f64() {
-                    if f.fract() == 0.0 {
-                        Ok(Self::Int(f as i64))
-                    } else {
-                        Err(serde::de::Error::custom(format!(
-                            "Expected integer, got float: {f}"
-                        )))
-                    }
-                } else {
-                    Err(serde::de::Error::custom("Invalid number"))
-                }
-            }
+            serde_json::Value::Number(n) => crate::numeric::json_number_as_i64(n)
+                .map(Self::Int)
+                .map_err(serde::de::Error::custom),
             serde_json::Value::String(s) => {
                 // If it contains format string interpolation, treat as FormatString
                 if s.contains("{{") {
@@ -341,10 +331,9 @@ impl<'de> Deserialize<'de> for IntOrFormatString {
                         .map(Self::FormatString)
                         .map_err(serde::de::Error::custom)
                 } else {
-                    // Try parsing as integer
-                    s.trim().parse::<i64>().map(Self::Int).map_err(|_| {
-                        serde::de::Error::custom(format!("Cannot parse '{s}' as integer"))
-                    })
+                    crate::numeric::intstring_as_i64(s)
+                        .map(Self::Int)
+                        .map_err(serde::de::Error::custom)
                 }
             }
             serde_json::Value::Bool(_) => {

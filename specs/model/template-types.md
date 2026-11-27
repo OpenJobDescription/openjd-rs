@@ -343,7 +343,8 @@ pub enum FloatRange {
 
 `IntRange::List` holds `IntOrFormatString` elements (Template Schemas §3.4.1.1
 `<IntRangeList>`, shared by `CHUNK[INT]`): a YAML integer, an integer-valued float, or a
-string that parses as an integer becomes `Int`; a string containing `{{` becomes a
+string that parses as an integer becomes `Int`, unless it is outside the 64-bit signed range,
+which is a decode error (see [parameters.md](parameters.md#integers-are-64-bit)); a string containing `{{` becomes a
 `FormatString` (a `<TaskParameterStringValue>`), resolved at job creation, and a
 malformed one is a decode error. Any other string is a decode error
 (`Cannot parse 'abc' as integer`).

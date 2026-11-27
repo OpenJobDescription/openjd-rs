@@ -967,7 +967,9 @@ impl JobStringParameterDefinition {
 }
 
 /// An `i64` that deserializes from YAML integers, integer-valued floats (e.g. `42.0`), or
-/// numeric strings (e.g. `"42"`). Rejects booleans, nulls, and non-integer floats.
+/// numeric strings (e.g. `"42"`). Rejects booleans, nulls, non-integer floats, and any
+/// number outside the 64-bit signed range rather than saturating it (see
+/// `crate::numeric::json_number_as_i64` and `crate::numeric::intstring_as_i64`).
 #[derive(Debug, Clone)]
 pub struct FlexInt(pub i64);
 
@@ -975,26 +977,12 @@ impl<'de> Deserialize<'de> for FlexInt {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let val = serde_json::Value::deserialize(deserializer)?;
         match &val {
-            serde_json::Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    Ok(FlexInt(i))
-                } else if let Some(f) = n.as_f64() {
-                    if f.fract() == 0.0 {
-                        Ok(FlexInt(f as i64))
-                    } else {
-                        Err(serde::de::Error::custom(format!(
-                            "Expected integer, got float: {f}"
-                        )))
-                    }
-                } else {
-                    Err(serde::de::Error::custom("Invalid number"))
-                }
-            }
-            serde_json::Value::String(s) => s
-                .trim()
-                .parse::<i64>()
+            serde_json::Value::Number(n) => crate::numeric::json_number_as_i64(n)
                 .map(FlexInt)
-                .map_err(|_| serde::de::Error::custom(format!("Cannot parse '{s}' as integer"))),
+                .map_err(serde::de::Error::custom),
+            serde_json::Value::String(s) => crate::numeric::intstring_as_i64(s)
+                .map(FlexInt)
+                .map_err(serde::de::Error::custom),
             serde_json::Value::Bool(_) => {
                 Err(serde::de::Error::custom("Expected integer, got boolean"))
             }

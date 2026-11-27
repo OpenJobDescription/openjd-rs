@@ -37,6 +37,8 @@ mod test_float_number_repr;
 mod test_host_requirements;
 #[path = "integration/test_host_scope_literal_paths.rs"]
 mod test_host_scope_literal_paths;
+#[path = "integration/test_int_64bit_range.rs"]
+mod test_int_64bit_range;
 #[path = "integration/test_job_cancelation_serde.rs"]
 mod test_job_cancelation_serde;
 #[path = "integration/test_job_creation_resolved_values.rs"]
