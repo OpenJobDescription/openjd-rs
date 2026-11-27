@@ -205,7 +205,10 @@ two input modes:
   (`LIST[INT]`, `LIST[FLOAT]`, or an inner list of `LIST[LIST[INT]]`) is refused
   (`item[0]: Cannot coerce path to INT`), while the same text in JSON is a number. A JSON number
   is read as an `f64`, so `'[1.50]'` is `[1.5]` while a native float keeps `1.50`; the values are
-  equal, but an error quotes each form's text (`'1.50'` against `'1.5'`). An element error names the element in either form
+  equal, but an error quotes each form's text (`'1.50'` against `'1.5'`). A JSON number under an
+  INT element type is read by `numeric::json_number_as_i64` (see
+  [Integers are 64-bit](#integers-are-64-bit)), so `'[-9223372036854775808.0]'` is refused while a
+  native `Float` of -2^63 is read as `i64::MIN`. An element error names the element in either form
   (`item[1]: Value '1 000' is not a valid integer or integer string.`, or `item[1][0]: ...` in a
   `LIST[LIST[INT]]`).
 
