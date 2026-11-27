@@ -33,6 +33,8 @@ mod test_expr_parameters;
 mod test_feature_bundle_1;
 #[path = "integration/test_float_number_repr.rs"]
 mod test_float_number_repr;
+#[path = "integration/test_floatstring_spelling.rs"]
+mod test_floatstring_spelling;
 #[path = "integration/test_host_requirements.rs"]
 mod test_host_requirements;
 #[path = "integration/test_host_scope_literal_paths.rs"]

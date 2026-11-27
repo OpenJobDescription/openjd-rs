@@ -999,8 +999,10 @@ impl std::fmt::Display for FlexInt {
 }
 
 /// An `f64` that deserializes from YAML numbers or numeric strings (e.g. `"3.14"`).
-/// Preserves the original string representation when parsed from a string, which is needed
-/// for round-trip fidelity in constraint checking. Rejects NaN, Infinity, booleans, and nulls.
+/// When parsed from a string, keeps the text it is rendered as: the string without the white
+/// space around it and without redundant notation (a leading `+`, redundant leading zeros;
+/// `crate::numeric::floatstring_text`, Template Schemas §7.5). Rejects NaN, Infinity, booleans,
+/// and nulls.
 #[derive(Debug, Clone)]
 pub struct FlexFloat(pub f64, pub Option<String>);
 
@@ -1032,7 +1034,10 @@ impl<'de> Deserialize<'de> for FlexFloat {
                     serde::de::Error::custom(format!("Cannot parse '{s}' as float"))
                 })?;
                 reject_nan_inf(f).map_err(serde::de::Error::custom)?;
-                Ok(FlexFloat(f, Some(s.trim().to_string())))
+                Ok(FlexFloat(
+                    f,
+                    Some(crate::numeric::floatstring_text(s.trim()).into_owned()),
+                ))
             }
             serde_json::Value::Bool(_) => {
                 Err(serde::de::Error::custom("Expected number, got boolean"))

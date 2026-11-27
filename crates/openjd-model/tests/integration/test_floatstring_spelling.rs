@@ -1,0 +1,126 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// Copyright by contributors to this project.
+// SPDX-License-Identifier: (Apache-2.0 OR MIT)
+
+//! A `<floatstring>` a template writes keeps the decimal places and exponent
+//! it was written with, and loses the notation that is redundant to its value:
+//! redundant leading zeros and a leading `+` (Template Schemas §7.5 rules 1
+//! and 2, openjd-specifications#180). That holds for every place a template
+//! writes one whose text reaches a Task: a FLOAT range element, written
+//! directly or resolved from a format string, a FLOAT parameter's `default`,
+//! and a `LIST[FLOAT]` default item. A value submitted for a FLOAT parameter
+//! keeps its original form (2026-02 Expression Language §1.3.4).
+
+use openjd_expr::path_mapping::PathFormat;
+use openjd_model::{
+    create_job, decode_job_template, preprocess_job_parameters, CallerLimits,
+    JobParameterInputValues, StepParameterSpaceIterator,
+};
+
+fn yaml_val(s: &str) -> serde_json::Value {
+    serde_saphyr::from_str(s).unwrap()
+}
+
+fn options() -> openjd_model::PathParameterOptions<'static> {
+    openjd_model::PathParameterOptions {
+        job_template_dir: "/tmp/template",
+        current_working_dir: "/tmp/cwd",
+        allow_template_dir_walk_up: true,
+        path_format: PathFormat::host(),
+        allow_uri_path_values: true,
+    }
+}
+
+/// The job parameter values and the rendered values of task parameter `F`
+/// for `template` and the submitted `inputs`.
+fn run(template: &str, inputs: &[(&str, &str)]) -> (openjd_model::JobParameterValues, Vec<String>) {
+    let jt = decode_job_template(
+        yaml_val(template),
+        Some(&["EXPR"]),
+        &CallerLimits::default(),
+    )
+    .unwrap();
+    let mut input = JobParameterInputValues::new();
+    for (k, v) in inputs {
+        input.insert(k.to_string(), openjd_expr::ExprValue::String(v.to_string()));
+    }
+    let params = preprocess_job_parameters(&jt, &input, &[], &options()).unwrap();
+    let job = create_job(&jt, &params, &jt.default_validation_context()).unwrap();
+    let tasks: Vec<String> = match &job.steps[0].parameter_space {
+        Some(ps) => StepParameterSpaceIterator::new(ps)
+            .unwrap()
+            .map(|t| t["F"].value.to_display_string())
+            .collect(),
+        None => Vec::new(),
+    };
+    (params, tasks)
+}
+
+fn range_template(range: &str) -> String {
+    format!(
+        "specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: T
+parameterDefinitions:
+- {{name: S, type: STRING, default: '+04.25'}}
+steps:
+- name: Step
+  parameterSpace:
+    taskParameterDefinitions:
+    - {{name: F, type: FLOAT, range: {range}}}
+  script:
+    actions:
+      onRun: {{command: foo}}
+"
+    )
+}
+
+#[test]
+fn a_range_element_loses_a_leading_plus_and_redundant_zeros() {
+    let (_, tasks) = run(
+        &range_template(
+            "['+4.25', '+02.50', '-02.50', '+0.50', '2.50E+2', '+1.0e-3', '{{Param.S}}']",
+        ),
+        &[],
+    );
+    assert_eq!(
+        tasks,
+        ["4.25", "2.50", "-2.50", "0.50", "2.50E+2", "1.0e-3", "4.25"]
+    );
+}
+
+fn defaults_template() -> &'static str {
+    "specificationVersion: jobtemplate-2023-09
+extensions: [EXPR]
+name: T
+parameterDefinitions:
+- {name: Plus, type: FLOAT, default: '+4.25'}
+- {name: Zeros, type: FLOAT, default: ' 02.50 '}
+- {name: Both, type: FLOAT, default: '+00.50'}
+- {name: Neg, type: FLOAT, default: '-02.50'}
+- {name: List, type: 'LIST[FLOAT]', default: ['+02.50', 1.5, '3.500']}
+- {name: Submitted, type: FLOAT}
+steps:
+- name: Step
+  script:
+    actions:
+      onRun: {command: foo}
+"
+}
+
+#[test]
+fn a_default_loses_a_leading_plus_and_redundant_zeros() {
+    let (params, _) = run(defaults_template(), &[("Submitted", "1.0")]);
+    let shown = |name: &str| params[name].value.to_display_string();
+    assert_eq!(shown("Plus"), "4.25");
+    assert_eq!(shown("Zeros"), "2.50");
+    assert_eq!(shown("Both"), "0.50");
+    assert_eq!(shown("Neg"), "-2.50");
+    assert_eq!(shown("List"), "[2.50, 1.5, 3.500]");
+}
+
+#[test]
+fn a_submitted_value_keeps_its_original_form() {
+    let (params, _) = run(defaults_template(), &[("Submitted", " +03.10 ")]);
+    assert_eq!(params["Submitted"].value.to_display_string(), "+03.10");
+}

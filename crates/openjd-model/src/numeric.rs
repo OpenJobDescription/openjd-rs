@@ -4,7 +4,10 @@
 
 //! How a template's numbers are read: the one home for the rules that turn a
 //! YAML or JSON number, or a numeric string (Template Schemas §7.5), into the
-//! `i64` an `<integer>` field stores.
+//! `i64` an `<integer>` field stores, and for the text a `<floatstring>` is
+//! rendered as.
+
+use std::borrow::Cow;
 
 use openjd_expr::path_mapping::PathFormat;
 use openjd_expr::value::Float64;
@@ -118,6 +121,45 @@ pub(crate) fn intstring_as_i64(s: &str) -> Result<i64, String> {
     })
 }
 
+/// The text a `<floatstring>` the template wrote is rendered as (Template
+/// Schemas §7.5, openjd-specifications#180). Rule 1: notation redundant to the
+/// value goes, so a leading `+` is dropped and so are redundant leading zeros,
+/// keeping one digit before the point: `'+4.25'` -> `4.25`, `'02.50'` ->
+/// `2.50`, `'007'` -> `7`, `'000'` -> `0`, `'+00.50'` -> `0.50`. Rule 2: the
+/// notation the value was written in stays, so decimal places and an exponent
+/// (with its own sign) are untouched: `'2.50E+2'` is unchanged. A leading `-`
+/// stays. Textual, so it cannot lose precision. `text` is already trimmed of
+/// white space.
+///
+/// Every place a template writes a `<floatstring>` whose text reaches a Task
+/// goes through this: a FLOAT range element, written directly or resolved from
+/// a format string (`create_job::ranges`), and a FLOAT parameter's numeric
+/// strings, including a `LIST[FLOAT]` default item (`FlexFloat`). A value
+/// submitted for a FLOAT parameter does not: it keeps its original form
+/// (2026-02 Expression Language §1.3.4).
+pub(crate) fn floatstring_text(text: &str) -> Cow<'_, str> {
+    let (sign, digits) = match text.as_bytes().first() {
+        Some(b'+') => ("", &text[1..]),
+        Some(b'-') => ("-", &text[1..]),
+        _ => ("", text),
+    };
+    let zeros = digits.bytes().take_while(|b| *b == b'0').count();
+    // Redundant only when another digit follows. Otherwise the last zero is the
+    // integer part, as in '0.50' or '000'.
+    let strip = if digits.as_bytes().get(zeros).is_some_and(u8::is_ascii_digit) {
+        zeros
+    } else {
+        zeros.saturating_sub(1)
+    };
+    if strip == 0 && !text.starts_with('+') {
+        return Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len() - strip);
+    out.push_str(sign);
+    out.push_str(&digits[strip..]);
+    Cow::Owned(out)
+}
+
 fn too_large(text: &str) -> String {
     format!("Cannot convert {text} to int: number too large to fit in target type")
 }
@@ -125,6 +167,56 @@ fn too_large(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// §7.5 rule 1. openjd-model-for-python asserts the leading-zero cases
+    /// against its regex form, `^([+-]?)0+(?=[0-9])`, which keeps a `+`.
+    #[test]
+    fn floatstring_text_drops_only_redundant_notation() {
+        use floatstring_text as text;
+        // Redundant leading zeros: another digit follows.
+        assert_eq!(text("02.50"), "2.50");
+        assert_eq!(text("007"), "7");
+        assert_eq!(text("0007"), "7");
+        assert_eq!(text("01E+2"), "1E+2");
+        assert_eq!(text("-02.50"), "-2.50");
+        // A leading `+` is redundant too, alone or with zeros.
+        assert_eq!(text("+4.25"), "4.25");
+        assert_eq!(text("+02.50"), "2.50");
+        assert_eq!(text("+00.50"), "0.50");
+        assert_eq!(text("+0"), "0");
+
+        // Not redundant: the zero is the integer part, so one digit stays.
+        assert_eq!(text("0.50"), "0.50");
+        assert_eq!(text("00.50"), "0.50");
+        assert_eq!(text("0"), "0");
+        assert_eq!(text("000"), "0");
+        assert_eq!(text("-0.0"), "-0.0");
+        assert_eq!(text("0e5"), "0e5");
+        assert_eq!(text("00e5"), "0e5");
+
+        // Nothing to do.
+        assert_eq!(text("1.5"), "1.5");
+        assert_eq!(text("100"), "100");
+        assert_eq!(text("3.500"), "3.500");
+
+        // Rule 2 is kept: the fraction and the exponent, with its sign, are
+        // never touched.
+        assert_eq!(text("2.50"), "2.50");
+        assert_eq!(text("0.0000001"), "0.0000001");
+        assert_eq!(text("2.50E+2"), "2.50E+2");
+        assert_eq!(text("+1.0e-3"), "1.0e-3");
+    }
+
+    /// Not just an optimization: evidence that an unchanged element is returned
+    /// untouched rather than rebuilt.
+    #[test]
+    fn floatstring_text_borrows_when_there_is_nothing_to_drop() {
+        assert!(matches!(floatstring_text("2.50"), Cow::Borrowed(_)));
+        assert!(matches!(floatstring_text("0.50"), Cow::Borrowed(_)));
+        assert!(matches!(floatstring_text("-2.50"), Cow::Borrowed(_)));
+        assert!(matches!(floatstring_text("02.50"), Cow::Owned(_)));
+        assert!(matches!(floatstring_text("+2.50"), Cow::Owned(_)));
+    }
 
     #[test]
     fn float_as_exact_i64_takes_only_exact_in_range_integers() {

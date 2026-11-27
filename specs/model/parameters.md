@@ -180,9 +180,15 @@ two input modes:
   template's own numeric strings (`default`, `minValue`, `maxValue`, `allowedValues`, and a list
   parameter's `default` items and `item` constraints, Template Schemas §2.13, §2.14, §2.16) are
   trimmed the same way when they are decoded (`FlexInt`, `FlexFloat`). A FLOAT default, and a
-  `LIST[FLOAT]` default item, written as a string keeps its spelling without the white space:
-  `default: [1.50, " 2.50"]` is `[1.5, 2.50]` (`default_value` writes the string item back as a
-  JSON string). The string the public `JobIntParameterDefinition::check_constraints` and
+  `LIST[FLOAT]` default item, written as a string keeps its spelling without the white space and
+  without the notation that is redundant to its value, a leading `+` and redundant leading zeros
+  (§7.5 rule 1, `numeric::floatstring_text`, the rule a FLOAT range element follows):
+  `default: [1.50, " +02.50"]` is `[1.5, 2.50]` (`default_value` writes the string item back as
+  a JSON string). A value submitted for a FLOAT parameter keeps its original form instead
+  (Expression Language §1.3.4): `" +03.10 "` is `+03.10`. **Divergence from
+  openjd-model-for-python:** Python drops the `+` and the zeros of a FLOAT default, but keeps a
+  leading `+` on a FLOAT range element (`'+4.25'` renders `+4.25`), which this crate drops, as
+  openjd-specifications#180's §7.5 rule 1 asks. The string the public `JobIntParameterDefinition::check_constraints` and
   `JobFloatParameterDefinition::check_constraints` parse is trimmed too (job creation itself
   checks the merged definition, which receives the coerced value). A string element of a `LIST[INT]`,
   `LIST[FLOAT]` or `LIST[LIST[INT]]` value goes through the same coercion, so
